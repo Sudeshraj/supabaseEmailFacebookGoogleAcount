@@ -10,9 +10,7 @@ import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:universal_platform/universal_platform.dart';
-import '../../services/timezone_service.dart';
 
 final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
@@ -65,12 +63,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   bool _isLargeScreen = false;
   bool _isTablet = false;
   bool _isWeb = false;
-
-  // Timezone
-  String _currentTimezone = '';
-  String currentTimezoneFlag = '';
-  String currentTimezoneOffset = '';
-  String currentDate = '';
 
   // Onboarding steps
   int _completedSteps = 0;
@@ -545,73 +537,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ TIMEZONE SELECTOR (App Bar) — full dark-mode aware design
-  // ============================================================
-
-  Widget _buildTimezoneSelector() {
-    final isDSTActive = TimezoneService.isDST();
-    final flag = TimezoneService.getCurrentFlag();
-    final displayName = TimezoneService.getTimezoneDisplayName();
-    final isDark = context.isDarkMode;
-
-    return GestureDetector(
-      onTap: _changeTimezone,
-      child: Container(
-        margin: const EdgeInsets.only(right: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.08)
-              : Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(16),
-          border: isDSTActive
-              ? Border.all(color: Colors.amber, width: 1)
-              : Border.all(
-                  color: Colors.white.withValues(alpha: isDark ? 0.12 : 0.0),
-                  width: 1,
-                ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(flag, style: const TextStyle(fontSize: 12)),
-            const SizedBox(width: 4),
-            Text(
-              displayName,
-              style: const TextStyle(
-                fontSize: 10,
-                color: Colors.white,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            if (isDSTActive) ...[
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.amber.shade900 : Colors.amber.shade100,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  'DST',
-                  style: TextStyle(
-                    fontSize: 7,
-                    color: isDark
-                        ? Colors.amber.shade100
-                        : Colors.amber.shade800,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-            const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
   // ✅ SALON SELECTOR CHIP
   // ============================================================
 
@@ -658,79 +583,99 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
     await showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Select Salon',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
+      builder: (context) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.75,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Select Salon',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Choose a salon to view its data',
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white60 : Colors.grey,
+              const SizedBox(height: 8),
+              Text(
+                'Choose a salon to view its data',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white60 : Colors.grey,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            ..._ownerSalons.map((salon) {
-              final isSelected = salon['id'].toString() == _selectedSalonId;
-              return ListTile(
-                leading: CircleAvatar(
-                  radius: 20,
-                  backgroundColor: isSelected
-                      ? AppTheme.primary
-                      : Colors.grey[200],
-                  backgroundImage: salon['logo_url'] != null
-                      ? NetworkImage(salon['logo_url'])
-                      : null,
-                  child: salon['logo_url'] == null
-                      ? Icon(
-                          Icons.store,
-                          color: isSelected ? Colors.white : Colors.grey[600],
-                          size: 20,
-                        )
-                      : null,
+              const SizedBox(height: 16),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _ownerSalons.length,
+                  itemBuilder: (context, index) {
+                    final salon = _ownerSalons[index];
+                    final isSelected =
+                        salon['id'].toString() == _selectedSalonId;
+                    return ListTile(
+                      leading: CircleAvatar(
+                        radius: 20,
+                        backgroundColor: isSelected
+                            ? AppTheme.primary
+                            : Colors.grey[200],
+                        backgroundImage: salon['logo_url'] != null
+                            ? NetworkImage(salon['logo_url'])
+                            : null,
+                        child: salon['logo_url'] == null
+                            ? Icon(
+                                Icons.store,
+                                color: isSelected
+                                    ? Colors.white
+                                    : Colors.grey[600],
+                                size: 20,
+                              )
+                            : null,
+                      ),
+                      title: Text(
+                        salon['name'] ?? 'Unknown Salon',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: isSelected
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      subtitle: Text(
+                        salon['address'] ?? '',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? const Icon(
+                              Icons.check_circle,
+                              color: AppTheme.primary,
+                            )
+                          : null,
+                      onTap: () {
+                        Navigator.pop(context);
+                        _switchSalon(salon['id'].toString());
+                      },
+                    );
+                  },
                 ),
-                title: Text(
-                  salon['name'] ?? 'Unknown Salon',
-                  style: TextStyle(
-                    fontWeight: isSelected
-                        ? FontWeight.bold
-                        : FontWeight.normal,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                subtitle: Text(
-                  salon['address'] ?? '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isDark ? Colors.white60 : Colors.grey[600],
-                  ),
-                ),
-                trailing: isSelected
-                    ? const Icon(Icons.check_circle, color: AppTheme.primary)
-                    : null,
-                onTap: () {
-                  Navigator.pop(context);
-                  _switchSalon(salon['id'].toString());
-                },
-              );
-            }),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1251,815 +1196,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ TIMEZONE METHODS
-  // ============================================================
-
-  void _updateCurrentDate() {
-    final now = DateTime.now();
-    const weekdays = [
-      'Sunday',
-      'Monday',
-      'Tuesday',
-      'Wednesday',
-      'Thursday',
-      'Friday',
-      'Saturday',
-    ];
-    const months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-
-    final weekdayIndex = now.weekday % 7;
-    currentDate =
-        '${weekdays[weekdayIndex]}, ${months[now.month - 1]} ${now.day}, ${now.year}';
-  }
-
-  Future<void> _loadTimezone() async {
-    await TimezoneService.initialize();
-    final prefs = await SharedPreferences.getInstance();
-
-    final cachedTimezone = prefs.getString('cached_timezone');
-    if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
-      _currentTimezone = cachedTimezone;
-    } else {
-      _currentTimezone = TimezoneService.getCurrentTimezone();
-      await prefs.setString('cached_timezone', _currentTimezone);
-    }
-
-    currentTimezoneFlag = TimezoneService.getCurrentFlag();
-    currentTimezoneOffset = TimezoneService.getUtcOffsetString();
-    _updateCurrentDate();
-  }
-
-  Future<void> _changeTimezone() async {
-    final allTimezones = TimezoneService.getAllAvailableTimezones();
-    final continentGroups = _groupTimezonesByContinent(allTimezones);
-    final isDark = context.isDarkMode;
-
-    final List<Map<String, dynamic>> searchableList = [];
-    for (var entry in continentGroups.entries) {
-      final continent = entry.key;
-      for (final tz in entry.value) {
-        final displayName = tz.split('/').last.replaceAll('_', ' ');
-        final countryCode = _extractCountryCode(tz);
-        final flag = _getFlagByCountryCode(countryCode);
-        final countryName = _getCountryNameByCode(countryCode);
-
-        final searchText = [
-          continent.toLowerCase(),
-          displayName.toLowerCase(),
-          tz.toLowerCase(),
-          countryCode.toLowerCase(),
-          countryName.toLowerCase(),
-        ].join(' ');
-
-        searchableList.add({
-          'timezone': tz,
-          'displayName': displayName,
-          'continent': continent,
-          'flag': flag,
-          'countryName': countryName,
-          'searchText': searchText,
-        });
-      }
-    }
-
-    TextEditingController searchController = TextEditingController();
-
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) {
-        String searchQuery = '';
-
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            // ✅ Search query එක අනුව filter කරන්න
-            List<Map<String, dynamic>> filteredList = searchableList;
-            bool hasSearchQuery = searchQuery.isNotEmpty;
-
-            if (hasSearchQuery) {
-              final query = searchQuery.toLowerCase().trim();
-              filteredList =
-                  searchableList
-                      .where(
-                        (item) =>
-                            (item['searchText'] as String).contains(query),
-                      )
-                      .toList()
-                    ..sort((a, b) {
-                      int score(Map<String, dynamic> item) {
-                        final country = (item['countryName'] as String)
-                            .toLowerCase();
-                        final display = (item['displayName'] as String)
-                            .toLowerCase();
-                        if (country == query) return 0;
-                        if (country.startsWith(query)) return 1;
-                        if (display.startsWith(query)) return 2;
-                        if (country.contains(query)) return 3;
-                        return 4;
-                      }
-
-                      return score(a).compareTo(score(b));
-                    });
-            }
-
-            // ✅ Search results group කරන්න
-            Map<String, List<Map<String, dynamic>>> filteredGroups = {};
-            if (hasSearchQuery && filteredList.isNotEmpty) {
-              for (var item in filteredList) {
-                final continent = item['continent'];
-                if (!filteredGroups.containsKey(continent)) {
-                  filteredGroups[continent] = [];
-                }
-                filteredGroups[continent]!.add(item);
-              }
-            }
-
-            return Dialog(
-              backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Container(
-                width: MediaQuery.of(context).size.width * 0.9,
-                height: MediaQuery.of(context).size.height * 0.85,
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    _buildDialogHeader(),
-                    Divider(color: isDark ? Colors.white12 : null),
-                    Container(
-                      margin: const EdgeInsets.symmetric(vertical: 12),
-                      child: TextField(
-                        controller: searchController,
-                        autofocus: false,
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                        onChanged: (value) {
-                          setDialogState(() {
-                            searchQuery = value;
-                          });
-                        },
-                        decoration: InputDecoration(
-                          hintText:
-                              '🔍 Search by country, city, or timezone...',
-                          hintStyle: TextStyle(
-                            color: isDark ? Colors.white38 : Colors.grey[400],
-                          ),
-                          prefixIcon: Icon(
-                            Icons.search,
-                            color: isDark ? Colors.white38 : Colors.grey,
-                          ),
-                          suffixIcon: searchQuery.isNotEmpty
-                              ? IconButton(
-                                  icon: Icon(
-                                    Icons.clear,
-                                    color: isDark
-                                        ? Colors.white38
-                                        : Colors.grey,
-                                  ),
-                                  onPressed: () {
-                                    searchController.clear();
-                                    setDialogState(() {
-                                      searchQuery = '';
-                                    });
-                                  },
-                                )
-                              : null,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            borderSide: BorderSide.none,
-                          ),
-                          filled: true,
-                          fillColor: isDark
-                              ? Colors.white.withValues(alpha: 0.06)
-                              : Colors.grey[100],
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                        ),
-                      ),
-                    ),
-                    // ✅ Search results count
-                    if (searchQuery.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Found ${filteredList.length} timezone${filteredList.length != 1 ? 's' : ''}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark ? Colors.white54 : Colors.grey[600],
-                            ),
-                          ),
-                        ),
-                      ),
-                    Expanded(
-                      child: hasSearchQuery
-                          ? filteredList.isNotEmpty
-                                ? ListView.builder(
-                                    itemCount: filteredGroups.keys.length,
-                                    itemBuilder: (context, index) {
-                                      final continent = filteredGroups.keys
-                                          .elementAt(index);
-                                      final items = filteredGroups[continent]!;
-                                      return Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Padding(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 12,
-                                            ),
-                                            child: Row(
-                                              mainAxisSize: MainAxisSize.min,
-                                              children: [
-                                                Text(
-                                                  _getContinentEmoji(continent),
-                                                  style: const TextStyle(
-                                                    fontSize: 18,
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 8),
-                                                Text(
-                                                  continent,
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 14,
-                                                    color: isDark
-                                                        ? Colors.white
-                                                        : Colors.black87,
-                                                  ),
-                                                ),
-                                                Container(
-                                                  margin: const EdgeInsets.only(
-                                                    left: 8,
-                                                  ),
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        horizontal: 6,
-                                                        vertical: 2,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: isDark
-                                                        ? Colors.white12
-                                                        : Colors.grey[200],
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          10,
-                                                        ),
-                                                  ),
-                                                  child: Text(
-                                                    '${items.length}',
-                                                    style: TextStyle(
-                                                      fontSize: 10,
-                                                      color: isDark
-                                                          ? Colors.white60
-                                                          : Colors.grey[600],
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          ...items.map(
-                                            (item) => _buildTimezoneTile(
-                                              item['timezone'],
-                                              item['displayName'],
-                                              item['flag'],
-                                              isDark,
-                                            ),
-                                          ),
-                                          if (index !=
-                                              filteredGroups.keys.length - 1)
-                                            Divider(
-                                              color: isDark
-                                                  ? Colors.white12
-                                                  : null,
-                                            ),
-                                        ],
-                                      );
-                                    },
-                                  )
-                                : Center(
-                                    child: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.search_off,
-                                          size: 64,
-                                          color: isDark
-                                              ? Colors.white24
-                                              : Colors.grey[400],
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Text(
-                                          'No timezones found',
-                                          style: TextStyle(
-                                            fontSize: 16,
-                                            color: isDark
-                                                ? Colors.white60
-                                                : Colors.grey[600],
-                                          ),
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          'Try "Sri Lanka", "Tokyo", "London", or "New York"',
-                                          style: TextStyle(
-                                            fontSize: 12,
-                                            color: isDark
-                                                ? Colors.white38
-                                                : Colors.grey[500],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                          // ✅ Search query නැති විට TabBar එක පෙන්වන්න
-                          : DefaultTabController(
-                              length: continentGroups.keys.length,
-                              child: Column(
-                                children: [
-                                  SizedBox(
-                                    height: 45,
-                                    child: TabBar(
-                                      isScrollable: true,
-                                      labelColor: AppTheme.primary,
-                                      unselectedLabelColor: isDark
-                                          ? Colors.white54
-                                          : Colors.grey,
-                                      indicatorColor: AppTheme.primary,
-                                      labelStyle: const TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13,
-                                      ),
-                                      tabs: continentGroups.keys
-                                          .map(
-                                            (continent) => Tab(text: continent),
-                                          )
-                                          .toList(),
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Expanded(
-                                    child: TabBarView(
-                                      children: continentGroups.values.map((
-                                        timezones,
-                                      ) {
-                                        return ListView.builder(
-                                          itemCount: timezones.length,
-                                          itemBuilder: (context, index) {
-                                            final tz = timezones[index];
-                                            final displayName = tz
-                                                .split('/')
-                                                .last
-                                                .replaceAll('_', ' ');
-                                            final countryCode =
-                                                _extractCountryCode(tz);
-                                            final flag = _getFlagByCountryCode(
-                                              countryCode,
-                                            );
-                                            return _buildTimezoneTile(
-                                              tz,
-                                              displayName,
-                                              flag,
-                                              isDark,
-                                            );
-                                          },
-                                        );
-                                      }).toList(),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                    ),
-                    const SizedBox(height: 8),
-                    _buildCurrentTimezoneInfo(),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    if (result != null && result != _currentTimezone) {
-      await _applyTimezoneChange(result);
-    }
-  }
-
-  Future<void> _applyTimezoneChange(String newTimezone) async {
-    setState(() => _isLoading = true);
-
-    try {
-      await TimezoneService.setTimezone(newTimezone);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('cached_timezone', newTimezone);
-
-      _currentTimezone = newTimezone;
-      currentTimezoneFlag = TimezoneService.getCurrentFlag();
-      currentTimezoneOffset = TimezoneService.getUtcOffsetString();
-
-      await _loadAllData();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Timezone changed to ${newTimezone.split('/').last.replaceAll('_', ' ')}',
-            ),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } catch (e) {
-      debugPrint('Error changing timezone: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error changing timezone: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  String _extractCountryCode(String timezone) {
-    final countryMap = {
-      'Asia/Colombo': 'LK',
-      'Asia/Tokyo': 'JP',
-      'Asia/Seoul': 'KR',
-      'Asia/Shanghai': 'CN',
-      'Asia/Hong_Kong': 'HK',
-      'Asia/Taipei': 'TW',
-      'Asia/Kolkata': 'IN',
-      'Asia/Dubai': 'AE',
-      'Asia/Singapore': 'SG',
-      'Asia/Kuala_Lumpur': 'MY',
-      'Asia/Bangkok': 'TH',
-      'Asia/Jakarta': 'ID',
-      'Asia/Manila': 'PH',
-      'Asia/Ho_Chi_Minh': 'VN',
-      'Asia/Dhaka': 'BD',
-      'Asia/Karachi': 'PK',
-      'Asia/Kathmandu': 'NP',
-      'Asia/Riyadh': 'SA',
-      'Asia/Kuwait': 'KW',
-      'Asia/Doha': 'QA',
-      'Europe/London': 'GB',
-      'Europe/Paris': 'FR',
-      'Europe/Berlin': 'DE',
-      'Europe/Rome': 'IT',
-      'Europe/Madrid': 'ES',
-      'Europe/Amsterdam': 'NL',
-      'Europe/Zurich': 'CH',
-      'Europe/Moscow': 'RU',
-      'America/New_York': 'US',
-      'America/Chicago': 'US',
-      'America/Denver': 'US',
-      'America/Los_Angeles': 'US',
-      'America/Toronto': 'CA',
-      'America/Vancouver': 'CA',
-      'America/Mexico_City': 'MX',
-      'America/Sao_Paulo': 'BR',
-      'Australia/Sydney': 'AU',
-      'Australia/Melbourne': 'AU',
-      'Australia/Perth': 'AU',
-      'Australia/Adelaide': 'AU',
-      'Pacific/Auckland': 'NZ',
-      'Africa/Johannesburg': 'ZA',
-      'Africa/Cairo': 'EG',
-      'Africa/Lagos': 'NG',
-      'Africa/Nairobi': 'KE',
-      'America/Argentina/Buenos_Aires': 'AR',
-      'America/Santiago': 'CL',
-      'America/Bogota': 'CO',
-      'America/Lima': 'PE',
-    };
-    if (countryMap.containsKey(timezone)) return countryMap[timezone]!;
-    for (var entry in countryMap.entries) {
-      if (timezone.contains(entry.key) || entry.key.contains(timezone)) {
-        return entry.value;
-      }
-    }
-    return '';
-  }
-
-  // ✅ Full country names so searching "Sri Lanka" (not just "LK")
-  // correctly matches Asia/Colombo and keeps it visible & tappable.
-  String _getCountryNameByCode(String countryCode) {
-    final names = {
-      'LK': 'Sri Lanka',
-      'JP': 'Japan',
-      'KR': 'South Korea Korea',
-      'CN': 'China',
-      'HK': 'Hong Kong',
-      'TW': 'Taiwan',
-      'IN': 'India',
-      'AE': 'United Arab Emirates Dubai UAE',
-      'SG': 'Singapore',
-      'MY': 'Malaysia',
-      'TH': 'Thailand',
-      'ID': 'Indonesia',
-      'PH': 'Philippines',
-      'VN': 'Vietnam',
-      'BD': 'Bangladesh',
-      'PK': 'Pakistan',
-      'NP': 'Nepal',
-      'SA': 'Saudi Arabia',
-      'KW': 'Kuwait',
-      'QA': 'Qatar',
-      'GB': 'United Kingdom England Britain UK',
-      'FR': 'France',
-      'DE': 'Germany',
-      'IT': 'Italy',
-      'ES': 'Spain',
-      'NL': 'Netherlands Holland',
-      'CH': 'Switzerland',
-      'RU': 'Russia',
-      'US': 'United States America USA',
-      'CA': 'Canada',
-      'MX': 'Mexico',
-      'BR': 'Brazil',
-      'AU': 'Australia',
-      'NZ': 'New Zealand',
-      'ZA': 'South Africa',
-      'EG': 'Egypt',
-      'NG': 'Nigeria',
-      'KE': 'Kenya',
-      'AR': 'Argentina',
-      'CL': 'Chile',
-      'CO': 'Colombia',
-      'PE': 'Peru',
-    };
-    return names[countryCode] ?? '';
-  }
-
-  String _getFlagByCountryCode(String countryCode) {
-    final flags = {
-      'LK': '🇱🇰',
-      'JP': '🇯🇵',
-      'KR': '🇰🇷',
-      'CN': '🇨🇳',
-      'HK': '🇭🇰',
-      'TW': '🇹🇼',
-      'IN': '🇮🇳',
-      'AE': '🇦🇪',
-      'SG': '🇸🇬',
-      'MY': '🇲🇾',
-      'TH': '🇹🇭',
-      'ID': '🇮🇩',
-      'PH': '🇵🇭',
-      'VN': '🇻🇳',
-      'BD': '🇧🇩',
-      'PK': '🇵🇰',
-      'NP': '🇳🇵',
-      'SA': '🇸🇦',
-      'KW': '🇰🇼',
-      'QA': '🇶🇦',
-      'GB': '🇬🇧',
-      'FR': '🇫🇷',
-      'DE': '🇩🇪',
-      'IT': '🇮🇹',
-      'ES': '🇪🇸',
-      'NL': '🇳🇱',
-      'CH': '🇨🇭',
-      'RU': '🇷🇺',
-      'US': '🇺🇸',
-      'CA': '🇨🇦',
-      'MX': '🇲🇽',
-      'BR': '🇧🇷',
-      'AU': '🇦🇺',
-      'NZ': '🇳🇿',
-      'ZA': '🇿🇦',
-      'EG': '🇪🇬',
-      'NG': '🇳🇬',
-      'KE': '🇰🇪',
-      'AR': '🇦🇷',
-      'CL': '🇨🇱',
-      'CO': '🇨🇴',
-      'PE': '🇵🇪',
-    };
-    return flags[countryCode] ?? '🌐';
-  }
-
-  Map<String, List<String>> _groupTimezonesByContinent(List<String> timezones) {
-    final groups = <String, List<String>>{};
-    for (final tz in timezones) {
-      final parts = tz.split('/');
-      if (parts.length >= 2) {
-        final continent = parts[0];
-        if (!groups.containsKey(continent)) groups[continent] = [];
-        groups[continent]!.add(tz);
-      } else {
-        if (!groups.containsKey('UTC')) groups['UTC'] = [];
-        groups['UTC']!.add(tz);
-      }
-    }
-    for (final key in groups.keys) {
-      groups[key]!.sort();
-    }
-    return groups;
-  }
-
-  Widget _buildTimezoneTile(
-    String tz,
-    String displayName,
-    String flag, [
-    bool isDark = false,
-  ]) {
-    final isSelected = tz == _currentTimezone;
-
-    // ✅ හරි විදිය - Material wrapper එක ඇතුළේ ListTile එක දාන්න
-    // Container එකේ decoration color එක ඉවත් කරලා Material එකේ color එක use කරන්න
-    return Material(
-      color: isSelected
-          ? AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.1)
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        leading: CircleAvatar(
-          radius: 20,
-          backgroundColor: isSelected
-              ? AppTheme.primary
-              : (isDark ? Colors.white12 : Colors.grey[200]),
-          child: Text(flag, style: const TextStyle(fontSize: 16)),
-        ),
-        title: Text(
-          displayName,
-          style: TextStyle(
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            color: isSelected
-                ? AppTheme.primary
-                : (isDark ? Colors.white : Colors.black87),
-          ),
-        ),
-        subtitle: Text(
-          tz,
-          style: TextStyle(
-            fontSize: 11,
-            color: isDark ? Colors.white54 : Colors.grey[600],
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        trailing: isSelected
-            ? const Icon(Icons.check_circle, color: AppTheme.primary)
-            : null,
-        onTap: () => Navigator.of(context).pop(tz),
-        splashColor: AppTheme.primary.withValues(alpha: 0.15),
-        hoverColor: AppTheme.primary.withValues(alpha: 0.05),
-        // ✅ margin එක add කරන්න
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ),
-    );
-  }
-
-  // Dialog Header
-  Widget _buildDialogHeader() {
-    final isDark = context.isDarkMode;
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.access_time,
-              color: AppTheme.primary,
-              size: 28,
-            ),
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Select Your Timezone',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.primary,
-              ),
-            ),
-          ),
-          IconButton(
-            icon: Icon(
-              Icons.close,
-              color: isDark ? Colors.white70 : Colors.black87,
-            ),
-            onPressed: () => Navigator.pop(context),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Current Timezone Info
-  Widget _buildCurrentTimezoneInfo() {
-    final displayName = _currentTimezone.split('/').last.replaceAll('_', ' ');
-    final offset = TimezoneService.getUtcOffsetString();
-    final flag = TimezoneService.getCurrentFlag();
-    final isDark = context.isDarkMode;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isDark ? Colors.white12 : Colors.grey[200]!),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(flag, style: const TextStyle(fontSize: 24)),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Current: $displayName',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 13,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                Text(
-                  _currentTimezone,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: isDark ? Colors.white54 : Colors.grey,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              offset,
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 11,
-                color: AppTheme.primary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Continent Emoji
-  String _getContinentEmoji(String continent) {
-    final emojis = {
-      'Asia': '🌏',
-      'Europe': '🌍',
-      'Africa': '🌍',
-      'America': '🌎',
-      'Australia': '🇦🇺',
-      'Pacific': '🌏',
-      'UTC': '🌐',
-    };
-    return emojis[continent] ?? '🌐';
-  }
-
-  // ============================================================
   // ✅ LOAD DATA - MAIN
   // ============================================================
 
@@ -2067,9 +1203,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     setState(() => _isLoading = true);
     try {
       debugPrint('🔄 _loadAllData() started');
-
-      await _loadTimezone();
-      debugPrint('✅ Timezone loaded');
 
       await _loadUserProfile();
       debugPrint('✅ User profile loaded');
@@ -2244,10 +1377,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           if (_ownerSalons.isNotEmpty) {
             _hasSalon = true;
             if (_selectedSalonId == null) {
-              _selectedSalonId = _ownerSalons.first['id'].toString();
-              _selectedSalonName = _ownerSalons.first['name']?.toString();
+              final firstCreatedSalon = _ownerSalons.last;
+              _selectedSalonId = firstCreatedSalon['id'].toString();
+              _selectedSalonName = firstCreatedSalon['name']?.toString();
               debugPrint(
-                '✅ Selected first salon: $_selectedSalonName (ID: $_selectedSalonId)',
+                '✅ Selected first-created salon: $_selectedSalonName (ID: $_selectedSalonId)',
               );
             } else {
               final selected = _ownerSalons.firstWhere(
@@ -2632,128 +1766,118 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ✅ Android 16: Responsive Stat Cards
-  Widget _buildResponsiveStatCards() {
-    if (_isTablet) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: GridView.count(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisCount: _isLargeScreen ? 4 : 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 1.2,
-          children: [
-            DashboardStatCard(
-              title: "Today's Appointments",
-              value: '$_todayAppointments',
-              icon: Icons.calendar_today,
-              color: Colors.blue,
-              subtitle: '$_completedToday completed',
-              onTap: _viewBookings,
-            ),
-            DashboardStatCard(
-              title: 'Pending',
-              value: '$_pendingBookings',
-              icon: Icons.pending_actions,
-              color: Colors.orange,
-              onTap: _viewBookings,
-            ),
-            DashboardStatCard(
-              title: 'Customers',
-              value: '$_totalCustomers',
-              icon: Icons.people,
-              color: Colors.purple,
-              subtitle: 'Active followers',
-              onTap: _viewAllCustomers,
-            ),
-            DashboardStatCard(
-              title: 'Barbers',
-              value: '$_activeBarbers',
-              icon: Icons.content_cut,
-              color: Colors.green,
-              onTap: _navigateToBarberList,
-            ),
-          ],
-        ),
-      );
-    }
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: DashboardStatCard(
-                  title: "Today's",
-                  value: '$_todayAppointments',
-                  icon: Icons.calendar_today,
-                  color: Colors.blue,
-                  subtitle: '$_completedToday completed',
-                  onTap: _viewBookings,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: DashboardStatCard(
-                  title: 'Pending',
-                  value: '$_pendingBookings',
-                  icon: Icons.pending_actions,
-                  color: Colors.orange,
-                  onTap: _viewBookings,
-                ),
-              ),
-            ],
+// ✅ Android 16: Responsive Stat Cards
+Widget _buildResponsiveStatCards() {
+  if (_isTablet) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: GridView.count(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        crossAxisCount: _isLargeScreen ? 4 : 2,
+        crossAxisSpacing: 12,
+        mainAxisSpacing: 12,
+        childAspectRatio: 1.2,
+        children: [
+          DashboardStatCard(
+            title: "Today's",
+            value: '$_todayAppointments',
+            icon: Icons.calendar_today,
+            color: Colors.blue,
+            subtitle: '$_completedToday completed, $_pendingBookings pending',
+            onTap: _viewBookings,
           ),
-        ),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Expanded(
-                child: DashboardStatCard(
-                  title: 'Customers',
-                  value: '$_totalCustomers',
-                  icon: Icons.people,
-                  color: Colors.purple,
-                  subtitle: 'Active followers',
-                  onTap: _viewAllCustomers,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: DashboardStatCard(
-                  title: 'Barbers',
-                  value: '$_activeBarbers',
-                  icon: Icons.content_cut,
-                  color: Colors.green,
-                  onTap: _navigateToBarberList,
-                ),
-              ),
-            ],
+          DashboardStatCard(
+            title: 'Customers',
+            value: '$_totalCustomers',
+            icon: Icons.people,
+            color: Colors.purple,
+            subtitle: 'Active followers',
+            onTap: _viewAllCustomers,
           ),
-        ),
-        const SizedBox(height: 12),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: DashboardStatCard(
+          DashboardStatCard(
+            title: 'Barbers',
+            value: '$_activeBarbers',
+            icon: Icons.content_cut,
+            color: Colors.green,
+            onTap: _navigateToBarberList,
+          ),
+          DashboardStatCard(
             title: 'Revenue',
             value: 'Rs. $_totalRevenue',
             icon: Icons.currency_rupee,
-            color: Colors.green,
-            fullWidth: true,
+            color: Colors.orange,
             onTap: _viewRevenue,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
+
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Expanded(
+              child: DashboardStatCard(
+                title: "Today's",
+                value: '$_todayAppointments',
+                icon: Icons.calendar_today,
+                color: Colors.blue,
+                subtitle: '$_completedToday completed, $_pendingBookings pending',
+                onTap: _viewBookings,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DashboardStatCard(
+                title: 'Customers',
+                value: '$_totalCustomers',
+                icon: Icons.people,
+                color: Colors.purple,
+                subtitle: 'Active followers',
+                onTap: _viewAllCustomers,
+              ),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Expanded(
+              child: DashboardStatCard(
+                title: 'Barbers',
+                value: '$_activeBarbers',
+                icon: Icons.content_cut,
+                color: Colors.green,
+                onTap: _navigateToBarberList,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DashboardStatCard(
+                title: 'Revenue',
+                value: 'Rs. $_totalRevenue',
+                icon: Icons.currency_rupee,
+                color: Colors.orange,
+                fullWidth: true,
+                onTap: _viewRevenue,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+}
 
   // ============================================================
   // ✅ BUILD METHOD - WITH EDGE-TO-EDGE SUPPORT
@@ -2799,10 +1923,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ),
               ),
             const Spacer(),
-            // ✅ Only show this chip on mobile — on web the salon selector
-            // already appears in the AppBar actions, so showing both was
-            // producing two salon selectors in the app bar.
-            if (!isWeb && _ownerSalons.length > 1) _buildSalonSelectorChip(),
+            if (!isWeb && _ownerSalons.length > 1)
+              Flexible(child: _buildSalonSelectorChip()),
           ],
         ),
         actions: [
@@ -2811,47 +1933,49 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               _selectedSalonName!.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: GestureDetector(
-                onTap: _ownerSalons.length > 1
-                    ? _showSalonSelectorDialog
-                    : null,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.store, size: 14, color: Colors.white),
-                      const SizedBox(width: 6),
-                      Flexible(
-                        child: Text(
-                          _selectedSalonName!,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 200),
+                child: GestureDetector(
+                  onTap: _ownerSalons.length > 1
+                      ? _showSalonSelectorDialog
+                      : null,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.store, size: 14, color: Colors.white),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: Text(
+                            _selectedSalonName!,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      if (_ownerSalons.length > 1)
-                        const Icon(
-                          Icons.arrow_drop_down,
-                          size: 16,
-                          color: Colors.white,
-                        ),
-                    ],
+                        if (_ownerSalons.length > 1)
+                          const Icon(
+                            Icons.arrow_drop_down,
+                            size: 16,
+                            color: Colors.white,
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
             ),
-          _buildTimezoneSelector(),
           _buildNotificationIcon(),
           _buildProfileImage(),
         ],
@@ -2864,10 +1988,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         selectedSalonId: _selectedSalonId,
         onMenuItemSelected: () => _refreshAllData(),
         onSalonChanged: (String salonId) {
-          _switchSalon(salonId); // Public method එක call කරන්න
+          _switchSalon(salonId);
         },
       ),
-      // ✅ EDGE-TO-EDGE: SafeArea with responsive body
       body: SafeArea(
         child: isDark
             ? Container(
@@ -3185,14 +2308,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               ),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            'Everything you need to run your salon, organised by category.',
-            style: TextStyle(
-              fontSize: 12.5,
-              color: isDark ? Colors.white54 : Colors.grey[600],
-            ),
-          ),
           const SizedBox(height: 18),
           ...categories.map(
             (category) => Padding(
@@ -3255,19 +2370,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ],
           ),
           const SizedBox(height: 12),
-          // ✅ Fully responsive grid — item width adapts to available
-          // content width instead of a fixed column count, so it looks
-          // right from a narrow phone up to a wide desktop screen.
           LayoutBuilder(
             builder: (context, constraints) {
               final maxWidth = constraints.maxWidth;
               final minTileWidth = isDesktop ? 128.0 : 96.0;
-              // ✅ Column count depends ONLY on available width — never on
-              // how many actions a category has. This is what previously
-              // threw `Invalid argument: 2` (clamp(2, 1) is invalid when a
-              // category like "Offers & Promotions" has just 1 action), and
-              // it's also why tile sizes looked different from category to
-              // category. Now every tile is the same size everywhere.
               int columns = (maxWidth / minTileWidth).floor();
               if (columns < 1) columns = 1;
               if (columns > 6) columns = 6;
@@ -3452,6 +2558,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     const pink = AppTheme.primary;
     const green = Color(0xFF22C55E);
     final pct = _totalSteps == 0 ? 0.0 : _completedSteps / _totalSteps;
+    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isDesktop = screenWidth > 800;
     final isDark = context.isDarkMode;
 
     return Container(
@@ -3561,52 +2670,56 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ),
           ),
           const SizedBox(height: 22),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              const arrowSlot = 16.0;
-              final availableWidth = constraints.maxWidth - (arrowSlot * 4);
-              final cardWidth = availableWidth > 0 ? availableWidth / 5 : 60.0;
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(steps.length, (i) {
-                  final step = steps[i];
-                  final isCompleted = step['isCompleted'] as bool;
-                  final isLocked = step['locked'] as bool? ?? false;
-                  final isActive = !isCompleted && !isLocked;
-                  final isNext = i == nextIdx;
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _buildStepCard(
-                        label: step['label'] as String,
-                        subtitle: step['subtitle'] as String,
-                        icon: step['icon'] as IconData,
-                        isCompleted: isCompleted,
-                        isLocked: isLocked,
-                        isActive: isActive,
-                        isNext: isNext,
-                        cardWidth: cardWidth,
-                        onTap: isActive ? step['onTap'] as VoidCallback? : null,
-                      ),
-                      if (i < steps.length - 1)
-                        SizedBox(
-                          width: arrowSlot,
-                          child: Center(
-                            child: Icon(
-                              Icons.arrow_forward_ios_rounded,
-                              size: 10,
-                              color: isCompleted
-                                  ? green.withValues(alpha: 0.7)
-                                  : const Color(0xFFE0E0E0),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Builder(
+              builder: (context) {
+                const arrowSlot = 16.0;
+                final cardWidth = isDesktop ? 96.0 : 80.0;
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(steps.length, (i) {
+                    final step = steps[i];
+                    final isCompleted = step['isCompleted'] as bool;
+                    final isLocked = step['locked'] as bool? ?? false;
+                    final isActive = !isCompleted && !isLocked;
+                    final isNext = i == nextIdx;
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildStepCard(
+                          label: step['label'] as String,
+                          subtitle: step['subtitle'] as String,
+                          icon: step['icon'] as IconData,
+                          isCompleted: isCompleted,
+                          isLocked: isLocked,
+                          isActive: isActive,
+                          isNext: isNext,
+                          cardWidth: cardWidth,
+                          onTap: isActive
+                              ? step['onTap'] as VoidCallback?
+                              : null,
+                        ),
+                        if (i < steps.length - 1)
+                          SizedBox(
+                            width: arrowSlot,
+                            child: Center(
+                              child: Icon(
+                                Icons.arrow_forward_ios_rounded,
+                                size: 10,
+                                color: isCompleted
+                                    ? green.withValues(alpha: 0.7)
+                                    : const Color(0xFFE0E0E0),
+                              ),
                             ),
                           ),
-                        ),
-                    ],
-                  );
-                }),
-              );
-            },
+                      ],
+                    );
+                  }),
+                );
+              },
+            ),
           ),
           if (_completedSteps > 0 &&
               _completedSteps < _totalSteps &&
