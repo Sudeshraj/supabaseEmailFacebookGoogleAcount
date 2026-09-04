@@ -114,60 +114,85 @@ class _ClearDataScreenState extends State<ClearDataScreen>
     }
   }
 
-  void _showConfirmDialog() {
-    final isDark = context.isDarkMode;
-    final textColor = context.textColor;
-    final secondaryTextColor = context.secondaryTextColor;
-    final errorColor = context.errorColor;
+void _showConfirmDialog() {
+  final isDark = context.isDarkMode;
+  final textColor = context.textColor;
+  final secondaryTextColor = context.secondaryTextColor;
+  final errorColor = context.errorColor;
 
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+  final screenWidth = MediaQuery.of(context).size.width;
+  final isWeb = screenWidth > 700;
+  final dialogWidth = isWeb ? 420.0 : screenWidth * 0.9;
+
+  showDialog(
+    context: context,
+    builder: (context) => Dialog(
+      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: dialogWidth,
+          maxHeight: MediaQuery.of(context).size.height * 0.8, // ✅ give it real room
         ),
-        title: Text(
-          'Confirm Clear Data',
-          style: TextStyle(
-            color: textColor,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        content: Text(
-          'This will remove all saved accounts, preferences, and login information from this device. This action cannot be undone.',
-          style: TextStyle(
-            color: secondaryTextColor,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: secondaryTextColor,
+        child: SingleChildScrollView( // ✅ scroll instead of overflow
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Confirm Clear Data',
+                style: TextStyle(
+                  color: textColor,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
               ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _clearAllData();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: errorColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+              const SizedBox(height: 12),
+              Text(
+                'This will remove all saved accounts, preferences, and login information from this device. This action cannot be undone.',
+                style: TextStyle(
+                  color: secondaryTextColor,
+                  fontSize: 14,
+                  height: 1.4,
+                ),
               ),
-            ),
-            child: const Text('Clear All'),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(color: secondaryTextColor),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      _clearAllData();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: errorColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Text('Clear All'),
+                  ),
+                ],
+              ),
+            ],
           ),
-        ],
+        ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
@@ -259,7 +284,7 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                               ),
                               SizedBox(height: isMobile ? 12.0 : 16.0),
 
-                              // Data Collection Info
+                              // ✅ FIXED: Data Collection Info - Added mainAxisSize: MainAxisSize.min
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
@@ -271,6 +296,7 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min, // ✅ FIX: Prevents overflow
                                   children: [
                                     Text(
                                       'What Data We Store:',
@@ -347,41 +373,6 @@ class _ClearDataScreenState extends State<ClearDataScreen>
                                             fontSize: isMobile ? 15.0 : 16.0,
                                           ),
                                         ),
-                                ),
-                              ),
-
-                              SizedBox(height: isMobile ? 16.0 : 20.0),
-
-                              // Manage Preferences Button
-                              SizedBox(
-                                width: double.infinity,
-                                child: OutlinedButton(
-                                  onPressed: _isLoading
-                                      ? null
-                                      : () {
-                                          context.pop();
-                                        },
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 16.0,
-                                    ),
-                                    side: BorderSide(
-                                      color: isDark
-                                          ? Colors.white24
-                                          : Colors.grey.shade300,
-                                    ),
-                                    foregroundColor: textColor,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    'Manage Preferences',
-                                    style: TextStyle(
-                                      color: textColor,
-                                      fontSize: isMobile ? 15.0 : 16.0,
-                                    ),
-                                  ),
                                 ),
                               ),
 

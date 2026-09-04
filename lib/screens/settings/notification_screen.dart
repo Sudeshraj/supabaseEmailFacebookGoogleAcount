@@ -95,13 +95,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
   Future<void> _checkPermission() async {
     _hasPermission = await _notificationService.hasPermission();
-    
+
     if (!_hasPermission) {
       _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
         screen: 'notifications',
         action: 'notification',
       );
-      
+
       if (UniversalPlatform.isWeb && _showPermissionCard) {
         final status = await _notificationService.getWebPermissionStatus();
         if (status == 'denied') {
@@ -114,7 +114,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
     } else {
       _showPermissionCard = false;
     }
-    
+
     if (mounted) setState(() {});
   }
 
@@ -367,15 +367,15 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
-    
+
     final prefs = await SharedPreferences.getInstance();
     final userTimezone = prefs.getString('cached_timezone') ?? TimezoneService.getCurrentTimezone();
     await TimezoneService.setTimezone(userTimezone);
-    
+
     setState(() {
       _isTimezoneLoaded = true;
     });
-    
+
     await _loadNotifications();
   }
 
@@ -393,12 +393,12 @@ class _NotificationScreenState extends State<NotificationScreen> {
   String _formatTime(String createdAt) {
     try {
       final utcDateTime = DateTime.parse(createdAt);
-      
+
       final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
         '${utcDateTime.hour.toString().padLeft(2, '0')}:${utcDateTime.minute.toString().padLeft(2, '0')}:00',
         utcDateTime,
       );
-      
+
       final now = DateTime.now();
       final difference = now.difference(localDateTime);
 
@@ -878,6 +878,35 @@ class _NotificationScreenState extends State<NotificationScreen> {
   }
 
   // ============================================
+  // ✅ SAFE CENTERED CONTENT (fixes RenderFlex overflow)
+  // ============================================
+  // ⚠️ FIX: Loading / error / empty states used a plain Center(child:
+  // Column(...)) with fixed-size content (icons + spacing + text). When
+  // the available height shrinks (e.g. narrow browser window, small
+  // Expanded region on web), that fixed content no longer fits and
+  // Flutter throws "A RenderFlex overflowed by N pixels on the bottom."
+  // This wrapper makes that content scrollable instead: if there's
+  // enough room it still looks perfectly centered, but if there isn't,
+  // it scrolls rather than overflowing.
+  Widget _safeCenteredContent(Widget child) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const ClampingScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight.isFinite
+                  ? constraints.maxHeight
+                  : 0,
+            ),
+            child: Center(child: child),
+          ),
+        );
+      },
+    );
+  }
+
+  // ============================================
   // ✅ MAIN BUILD
   // ============================================
 
@@ -905,8 +934,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
             tooltip: 'Back',
           ),
         ),
-        body: const Center(
-          child: Column(
+        body: _safeCenteredContent(
+          const Column(
+            mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               CircularProgressIndicator(color: AppTheme.primary),
@@ -1028,7 +1058,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 compact: true,
                 iconEmoji: _permissionManager.getPermissionCardIcon(action: 'notification'),
               ),
-            
+
             // Filter Bar
             Container(
               padding: const EdgeInsets.symmetric(
@@ -1116,7 +1146,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
             compact: true,
             iconEmoji: _permissionManager.getPermissionCardIcon(action: 'notification'),
           ),
-        
+
         // Filter Bar
         Container(
           padding: const EdgeInsets.symmetric(
@@ -1177,8 +1207,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
     required ScrollController controller,  // ✅ REQUIRED
   }) {
     if (_isLoading) {
-      return const Center(
-        child: Column(
+      return _safeCenteredContent(
+        const Column(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             CircularProgressIndicator(color: AppTheme.primary),
@@ -1190,8 +1221,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
 
     if (_hasError) {
-      return Center(
-        child: Column(
+      return _safeCenteredContent(
+        Column(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.error_outline, size: 64, color: isDark ? Colors.white70 : Colors.grey[400]),
@@ -1223,8 +1255,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
 
     if (_notifications.isEmpty) {
-      return Center(
-        child: Column(
+      return _safeCenteredContent(
+        Column(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
@@ -1266,8 +1299,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
     }
 
     if (_filteredNotifications.isEmpty) {
-      return Center(
-        child: Column(
+      return _safeCenteredContent(
+        Column(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
