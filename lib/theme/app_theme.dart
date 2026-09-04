@@ -33,9 +33,13 @@ class AppTheme {
   // ✅ 4. DARK MODE COLORS
   // ============================================================
 
-  static const Color darkBackground = Color(0xFF121212);
-  static const Color darkSurface = Color(0xFF1E1E1E);
-  static const Color darkCard = Color(0xFF2A2A2A);
+  // static const Color darkBackground = Color(0xFF121212);
+  // static const Color darkBackground = Color(0xFF1C1F26);
+  static const Color darkBackground = Color(0xFF0F1820);
+  // static const Color darkSurface = Color(0xFF1E1E1E);
+  static const Color darkSurface = Color(0xFF1C1F26);
+  // static const Color darkCard = Color(0xFF2A2A2A);
+  static const Color darkCard = Color(0xFF0F1820);
   static const Color darkText = Color(0xFFFFFFFF);
   static const Color darkTextSecondary = Color(0xFF9CA3AF);
   static const Color darkDivider = Color(0xFF374151);
