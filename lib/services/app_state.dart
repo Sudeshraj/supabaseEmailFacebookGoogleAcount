@@ -16,7 +16,7 @@ class AppState extends ChangeNotifier {
   bool _profileCompleted = false;
   bool _hasLocalProfile = false;
   bool _continueSc = false;
-
+  bool _pendingQuickLogout = false;
   // FIXED: Multiple roles support
   List<String> _roles = []; // All user roles
   String? _currentRole; // Currently selected role
@@ -53,7 +53,7 @@ class AppState extends ChangeNotifier {
   bool get profileCompleted => _profileCompleted;
   bool get hasLocalProfile => _hasLocalProfile;
   bool get continueSc => _continueSc;
-
+  bool get pendingQuickLogout => _pendingQuickLogout;
   // FIXED: Role getters
   List<String> get roles => List.unmodifiable(_roles);
   String? get role => _currentRole; // Keep for backward compatibility
@@ -169,6 +169,17 @@ class AppState extends ChangeNotifier {
       _currentUser = value;
       notifyListeners();
     }
+  }
+
+    void _setPendingQuickLogout(bool value) {
+    if (_pendingQuickLogout != value) {
+      _pendingQuickLogout = value;
+      notifyListeners();
+    }
+  }
+
+    void clearPendingQuickLogout() {
+    _setPendingQuickLogout(false);
   }
 
   // ✅ NEW: Set pending deletion-restore state (does not touch DB)
@@ -293,7 +304,7 @@ class AppState extends ChangeNotifier {
       _setLoginProvider(null);
       _setPendingDeletionRestore(pending: false);
       _setPendingReactivation(false);
-
+      _setPendingQuickLogout(false);
       developer.log('User logged out', name: 'AppState');
     } catch (e, stackTrace) {
       developer.log(
@@ -328,7 +339,7 @@ class AppState extends ChangeNotifier {
       _setLoginProvider(null);
       _setPendingDeletionRestore(pending: false);
       _setPendingReactivation(false);
-
+      _setPendingQuickLogout(true);
       developer.log('Quick-switch logout complete', name: 'AppState');
     } catch (e, stackTrace) {
       developer.log(
@@ -525,6 +536,7 @@ class AppState extends ChangeNotifier {
 
         if (success) {
           debugPrint('AppState: Auto-login successful for $email');
+          _setPendingQuickLogout(false);
           await refreshState();
           return;
         }
@@ -590,6 +602,13 @@ class AppState extends ChangeNotifier {
 
   Future<void> _checkAuthenticationState() async {
     final supabase = Supabase.instance.client;
+
+    if (_pendingQuickLogout) {
+      _setLoggedIn(false);
+      _setEmailVerified(false);
+      return;
+    }
+
     final session = supabase.auth.currentSession;
     final user = supabase.auth.currentUser;
 

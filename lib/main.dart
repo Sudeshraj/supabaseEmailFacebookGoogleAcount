@@ -418,6 +418,7 @@ void _setupAuthStateListener() {
     }
 
     if (event == AuthChangeEvent.signedIn) {
+      appState.clearPendingQuickLogout();
       appState.refreshState();
       await NotificationService().syncPendingToken();
     }

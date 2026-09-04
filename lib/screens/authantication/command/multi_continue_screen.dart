@@ -726,6 +726,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           debugPrint('📝 Updated user metadata with role: $role');
         }
 
+        appState.clearPendingQuickLogout();
         await appState.refreshState();
         if (!mounted) return;
         context.go('/');
@@ -1809,6 +1810,22 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
   // ============================================================
   // ✅ UI BUILD - AppTheme based, Edge-to-Edge, API 36
+  // 🔧 OVERFLOW FIX: the card's inner Column (logo + list + footer)
+  // used to get an UNBOUNDED height (ConstrainedBox only capped
+  // maxWidth), so on any screen where the fixed-size logo + footer
+  // widgets needed slightly more room than was actually available,
+  // Flutter had nowhere to "give" — hence the 2px (or 55/19/27px on
+  // other screens) RenderFlex overflow.
+  //
+  // Fix: (1) LayoutBuilder now gives the card a REAL, finite max
+  // height. (2) That whole card is wrapped in SingleChildScrollView
+  // as a safety net — if content still doesn't fit (tiny window /
+  // large text scale / many profiles), it scrolls instead of
+  // overflowing. (3) The profile-list's `Expanded` (which required a
+  // bounded ancestor to work) is replaced with a `ConstrainedBox` +
+  // internal `ListView.builder(shrinkWrap: true)`, so it caps its own
+  // height and scrolls internally instead of fighting its siblings
+  // for space.
   // ============================================================
 
   @override
@@ -1829,208 +1846,241 @@ class _ContinueScreenState extends State<ContinueScreen> {
         child: Center(
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxWidth),
-            child: Container(
-              height: screenSize.height,
-              margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: cardColor,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isDark ? Colors.white12 : Colors.grey.shade200,
-                ),
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    cardColor,
-                    isDark ? Colors.white.withValues(alpha: 0.03) : Colors.grey.shade50,
-                  ],
-                ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 20,
               ),
-              child: Column(
-                children: [
-                  // Logo
-                  Stack(
-                    children: [
-                      Container(
-                        margin: const EdgeInsets.only(top: 10, bottom: 25),
-                        child: Center(
-                          child: Container(
-                            width: 80,
-                            height: 80,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: isDark ? Colors.white24 : Colors.grey.shade300,
-                                width: 2,
-                              ),
-                              gradient: LinearGradient(
-                                colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: primaryColor.withValues(alpha: 0.4),
-                                  blurRadius: 20,
-                                  spreadRadius: 5,
-                                ),
-                              ],
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(40),
-                              child: Image.asset(
-                                'assets/images/logo.png',
-                                fit: BoxFit.cover,
-                                errorBuilder: (context, error, stackTrace) {
-                                  return Center(
-                                    child: Icon(
-                                      Icons.account_circle,
-                                      color: Colors.white,
-                                      size: 40,
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (profiles.isNotEmpty && !_selectionMode)
-                        Positioned(
-                          top: 0,
-                          right: 0,
-                          child: Container(
-                            width: 40,
-                            height: 40,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200,
-                            ),
-                            child: PopupMenuButton<String>(
-                              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                                side: BorderSide(
-                                  color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade300,
-                                ),
-                              ),
-                              icon: Icon(
-                                Icons.more_vert,
-                                color: textColor,
-                                size: 20,
-                              ),
-                              tooltip: 'Manage Profiles',
-                              itemBuilder: (context) => [
-                                PopupMenuItem<String>(
-                                  value: 'select',
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.delete_outline,
-                                        color: Colors.redAccent,
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Text(
-                                        'Remove Selected',
-                                        style: TextStyle(
-                                          color: isDark ? Colors.white : Colors.black87,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                PopupMenuItem<String>(
-                                  value: 'remove',
-                                  child: Row(
-                                    children: [
-                                      const Icon(
-                                        Icons.manage_accounts,
-                                        color: Colors.blueAccent,
-                                        size: 20,
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Text(
-                                        'Manage Account Data',
-                                        style: TextStyle(
-                                          color: isDark ? Colors.white : Colors.black87,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              onSelected: (value) {
-                                if (value == 'select') {
-                                  _startSelectionMode();
-                                } else if (value == 'remove') {
-                                  context.go('/clear-data');
-                                }
-                              },
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // ✅ A real, finite height for the card — this is the
+                  // actual fix. Falls back to 85% of screen height if the
+                  // parent somehow still hands us an unbounded height.
+                  final double maxCardHeight = constraints.maxHeight.isFinite
+                      ? constraints.maxHeight
+                      : screenSize.height * 0.85;
 
-                  // Profiles list - Using cardColor
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: isDark ? cardColor.withValues(alpha: 0.5) : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: isDark ? Colors.white10 : Colors.grey.shade200,
+                  // Reserve rough space for logo (~140) + footer (~230)
+                  // so the profile-list section gets a sane cap instead
+                  // of trying to consume 100% and overflowing by a few px.
+                  final double listMaxHeight =
+                      (maxCardHeight - 370).clamp(140.0, 480.0);
+
+                  return ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxCardHeight),
+                    child: SingleChildScrollView(
+                      // ✅ Safety net: absorbs any remaining overflow
+                      // instead of showing the yellow/black stripes.
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isDark ? Colors.white12 : Colors.grey.shade200,
+                          ),
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              cardColor,
+                              isDark
+                                  ? const Color.fromARGB(255, 25, 25, 25).withValues(alpha: 0.03)
+                                  : const Color.fromARGB(255, 32, 31, 31),
+                            ],
+                          ),
                         ),
-                      ),
-                      child: Column(
-                        children: [
-                          if (_selectionMode)
-                            Container(
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.grey.shade100,
-                                borderRadius: const BorderRadius.only(
-                                  topLeft: Radius.circular(16),
-                                  topRight: Radius.circular(16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min, // ✅ size to content, not force-fill
+                          children: [
+                            // Logo
+                            Stack(
+                              children: [
+                                Container(
+                                  margin: const EdgeInsets.only(top: 10, bottom: 25),
+                                  child: Center(
+                                    child: Container(
+                                      width: 80,
+                                      height: 80,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: isDark ? Colors.white24 : Colors.grey.shade300,
+                                          width: 2,
+                                        ),
+                                        gradient: LinearGradient(
+                                          colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: primaryColor.withValues(alpha: 0.4),
+                                            blurRadius: 20,
+                                            spreadRadius: 5,
+                                          ),
+                                        ],
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(40),
+                                        child: Image.asset(
+                                          'assets/images/logo.png',
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) {
+                                            return Center(
+                                              child: Icon(
+                                                Icons.account_circle,
+                                                color: Colors.white,
+                                                size: 40,
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                                border: Border(
-                                  bottom: BorderSide(
+                                if (profiles.isNotEmpty && !_selectionMode)
+                                  Positioned(
+                                    top: 0,
+                                    right: 0,
+                                    child: Container(
+                                      width: 40,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200,
+                                      ),
+                                      child: PopupMenuButton<String>(
+                                        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(12),
+                                          side: BorderSide(
+                                            color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade300,
+                                          ),
+                                        ),
+                                        icon: Icon(
+                                          Icons.more_vert,
+                                          color: textColor,
+                                          size: 20,
+                                        ),
+                                        tooltip: 'Manage Profiles',
+                                        itemBuilder: (context) => [
+                                          PopupMenuItem<String>(
+                                            value: 'select',
+                                            child: Row(
+                                              children: [
+                                                const Icon(
+                                                  Icons.delete_outline,
+                                                  color: Colors.redAccent,
+                                                  size: 20,
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Text(
+                                                  'Remove Selected',
+                                                  style: TextStyle(
+                                                    color: isDark ? Colors.white : Colors.black87,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          PopupMenuItem<String>(
+                                            value: 'remove',
+                                            child: Row(
+                                              children: [
+                                                const Icon(
+                                                  Icons.manage_accounts,
+                                                  color: Colors.blueAccent,
+                                                  size: 20,
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Text(
+                                                  'Manage Account Data',
+                                                  style: TextStyle(
+                                                    color: isDark ? Colors.white : Colors.black87,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                        onSelected: (value) {
+                                          if (value == 'select') {
+                                            _startSelectionMode();
+                                          } else if (value == 'remove') {
+                                            context.go('/clear-data');
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+
+                            // Profiles list — bounded height, internal scroll.
+                            ConstrainedBox(
+                              constraints: BoxConstraints(maxHeight: listMaxHeight),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: isDark ? cardColor.withValues(alpha: 0.5) : Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
                                     color: isDark ? Colors.white10 : Colors.grey.shade200,
                                   ),
                                 ),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (_selectionMode)
+                                      Container(
+                                        padding: const EdgeInsets.all(16),
+                                        decoration: BoxDecoration(
+                                          color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.grey.shade100,
+                                          borderRadius: const BorderRadius.only(
+                                            topLeft: Radius.circular(16),
+                                            topRight: Radius.circular(16),
+                                          ),
+                                          border: Border(
+                                            bottom: BorderSide(
+                                              color: isDark ? Colors.white10 : Colors.grey.shade200,
+                                            ),
+                                          ),
+                                        ),
+                                        child: _buildSelectionModeHeader(),
+                                      ),
+                                    Flexible(
+                                      child: _loading && _selectedEmail != null
+                                          ? _buildLoadingState()
+                                          : profiles.isEmpty
+                                          ? _buildEmptyState()
+                                          : ListView.builder(
+                                              shrinkWrap: true,
+                                              itemCount: profiles.length,
+                                              itemBuilder: (context, index) {
+                                                return Padding(
+                                                  padding: const EdgeInsets.symmetric(
+                                                    horizontal: 12,
+                                                    vertical: 8,
+                                                  ),
+                                                  child: _buildProfileCard(
+                                                    profiles[index],
+                                                    index,
+                                                  ),
+                                                );
+                                              },
+                                            ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                              child: _buildSelectionModeHeader(),
                             ),
-                          Expanded(
-                            child: _loading && _selectedEmail != null
-                                ? _buildLoadingState()
-                                : profiles.isEmpty
-                                ? _buildEmptyState()
-                                : ListView.builder(
-                                    shrinkWrap: true,
-                                    itemCount: profiles.length,
-                                    itemBuilder: (context, index) {
-                                      return Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 8,
-                                        ),
-                                        child: _buildProfileCard(
-                                          profiles[index],
-                                          index,
-                                        ),
-                                      );
-                                    },
-                                  ),
-                          ),
-                        ],
+
+                            if (!_selectionMode) _buildFooter(),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-
-                  if (!_selectionMode) _buildFooter(),
-                ],
+                  );
+                },
               ),
             ),
           ),
@@ -2192,6 +2242,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
     return Container(
       margin: const EdgeInsets.only(top: 20),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
             width: double.infinity,
@@ -2368,193 +2419,158 @@ class _SecurityCompliantPasswordDialogState
           color: isDark ? backgroundColor : backgroundColor,
           borderRadius: BorderRadius.circular(16),
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Enter Password',
-                        style: TextStyle(
-                          color: textColor,
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        widget.email,
-                        style: TextStyle(
-                          color: primaryColor,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                if (_controller.text.isNotEmpty && !_isSubmitting)
-                  IconButton(
-                    icon: Icon(
-                      Icons.clear,
-                      size: 18,
-                      color: isDark ? Colors.white70 : Colors.grey.shade600,
-                    ),
-                    onPressed: _clearPassword,
-                    tooltip: 'Clear',
-                  ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Stack(
-                  children: [
-                    TextField(
-                      controller: _controller,
-                      obscureText: _obscurePassword,
-                      autofocus: true,
-                      enabled: !_isSubmitting,
-                      style: TextStyle(color: textColor, fontSize: 16),
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        labelStyle: TextStyle(
-                          color: isDark ? Colors.white70 : Colors.grey.shade600,
-                        ),
-                        hintText: 'Type at least 6 characters',
-                        hintStyle: TextStyle(
-                          color: isDark ? Colors.white.withValues(alpha: 0.4) : Colors.grey.shade400,
-                        ),
-                        filled: true,
-                        fillColor: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.grey.shade50,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide.none,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 14,
-                        ),
-                        suffixIcon: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (_controller.text.isNotEmpty)
-                              IconButton(
-                                icon: Icon(
-                                  _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                                  color: isDark ? Colors.white70 : Colors.grey.shade600,
-                                  size: 20,
-                                ),
-                                onPressed: _isSubmitting
-                                    ? null
-                                    : () => setState(
-                                        () => _obscurePassword = !_obscurePassword,
-                                      ),
-                              ),
-                            if (_isValid && !_isSubmitting)
-                              Container(
-                                margin: const EdgeInsets.only(right: 8),
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: Colors.greenAccent,
-                                ),
-                                child: const Icon(
-                                  Icons.check,
-                                  color: Colors.black,
-                                  size: 12,
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (value) => _submitPassword(),
-                    ),
-                    if (_isSubmitting)
-                      Positioned.fill(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.5),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: const Center(
-                            child: CircularProgressIndicator(
-                              color: Colors.blueAccent,
-                              strokeWidth: 2,
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                if (_controller.text.isNotEmpty)
-                  Container(
-                    margin: const EdgeInsets.only(top: 8),
-                    child: Row(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: LinearProgressIndicator(
-                            value: _controller.text.length / 6,
-                            backgroundColor: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              _controller.text.length >= 6
-                                  ? Colors.greenAccent
-                                  : Colors.orangeAccent,
-                            ),
-                            borderRadius: BorderRadius.circular(4),
+                        Text(
+                          'Enter Password',
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(height: 4),
                         Text(
-                          '${_controller.text.length}/6',
+                          widget.email,
                           style: TextStyle(
-                            color: _controller.text.length >= 6
-                                ? Colors.greenAccent
-                                : isDark ? Colors.white70 : Colors.grey.shade600,
-                            fontSize: 12,
+                            color: primaryColor,
+                            fontSize: 14,
                             fontWeight: FontWeight.w500,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
                   ),
-              ],
-            ),
-            if (_isValid && !_isSubmitting)
-              Container(
-                margin: const EdgeInsets.only(top: 12),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: Colors.greenAccent.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.flash_auto,
-                      color: Colors.greenAccent,
-                      size: 16,
+                  if (_controller.text.isNotEmpty && !_isSubmitting)
+                    IconButton(
+                      icon: Icon(
+                        Icons.clear,
+                        size: 18,
+                        color: isDark ? Colors.white70 : Colors.grey.shade600,
+                      ),
+                      onPressed: _clearPassword,
+                      tooltip: 'Clear',
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                ],
+              ),
+              const SizedBox(height: 20),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Stack(
+                    children: [
+                      TextField(
+                        controller: _controller,
+                        obscureText: _obscurePassword,
+                        autofocus: true,
+                        enabled: !_isSubmitting,
+                        style: TextStyle(color: textColor, fontSize: 16),
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          labelStyle: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey.shade600,
+                          ),
+                          hintText: 'Type at least 6 characters',
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white.withValues(alpha: 0.4) : Colors.grey.shade400,
+                          ),
+                          filled: true,
+                          fillColor: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.grey.shade50,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          suffixIcon: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_controller.text.isNotEmpty)
+                                IconButton(
+                                  icon: Icon(
+                                    _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                                    color: isDark ? Colors.white70 : Colors.grey.shade600,
+                                    size: 20,
+                                  ),
+                                  onPressed: _isSubmitting
+                                      ? null
+                                      : () => setState(
+                                          () => _obscurePassword = !_obscurePassword,
+                                        ),
+                                ),
+                              if (_isValid && !_isSubmitting)
+                                Container(
+                                  margin: const EdgeInsets.only(right: 8),
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.greenAccent,
+                                  ),
+                                  child: const Icon(
+                                    Icons.check,
+                                    color: Colors.black,
+                                    size: 12,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (value) => _submitPassword(),
+                      ),
+                      if (_isSubmitting)
+                        Positioned.fill(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Center(
+                              child: CircularProgressIndicator(
+                                color: Colors.blueAccent,
+                                strokeWidth: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (_controller.text.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.only(top: 8),
+                      child: Row(
                         children: [
-                          const Text(
-                            'Auto-login enabled',
+                          Expanded(
+                            child: LinearProgressIndicator(
+                              value: _controller.text.length / 6,
+                              backgroundColor: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                _controller.text.length >= 6
+                                    ? Colors.greenAccent
+                                    : Colors.orangeAccent,
+                              ),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            '${_controller.text.length}/6',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: _controller.text.length >= 6
+                                  ? Colors.greenAccent
+                                  : isDark ? Colors.white70 : Colors.grey.shade600,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
@@ -2562,50 +2578,87 @@ class _SecurityCompliantPasswordDialogState
                         ],
                       ),
                     ),
-                  ],
-                ),
+                ],
               ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: _isSubmitting ? null : () => Navigator.pop(context, null),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
+              if (_isValid && !_isSubmitting)
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.greenAccent.withValues(alpha: 0.3),
                     ),
-                    foregroundColor: isDark ? Colors.white70 : Colors.grey.shade600,
                   ),
-                  child: const Text(
-                    'Cancel',
-                    style: TextStyle(color: Colors.white70),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.flash_auto,
+                        color: Colors.greenAccent,
+                        size: 16,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Auto-login enabled',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 10),
-                ElevatedButton(
-                  onPressed: _isValid && !_isSubmitting ? _submitPassword : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blueAccent,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.blueAccent.withValues(alpha: 0.5),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 12,
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton(
+                    onPressed: _isSubmitting ? null : () => Navigator.pop(context, null),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      foregroundColor: isDark ? Colors.white70 : Colors.grey.shade600,
                     ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.white70),
                     ),
                   ),
-                  child: const Text(
-                    'Login',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                  const SizedBox(width: 10),
+                  ElevatedButton(
+                    onPressed: _isValid && !_isSubmitting ? _submitPassword : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.blueAccent.withValues(alpha: 0.5),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 12,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    child: const Text(
+                      'Login',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

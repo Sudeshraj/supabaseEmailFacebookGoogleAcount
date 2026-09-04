@@ -1744,6 +1744,7 @@ class _SignInScreenState extends State<SignInScreen>
     if (!mounted) return;
 
     try {
+      appState.clearPendingQuickLogout();
       await appState.refreshState();
     } catch (e) {
       debugPrint('❌ Error refreshing app state after login: $e');
