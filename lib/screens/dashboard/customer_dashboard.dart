@@ -179,7 +179,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           .from('user_roles')
           .select('status')
           .eq('user_id', user.id)
-          .eq('role_id', 3)
+          .eq('role_id', 1)
           .maybeSingle();
 
       if (roleCheck == null || roleCheck['status'] != 'active') {
@@ -375,7 +375,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
     final result = await context.push('/customer/booking-flow');
     if (result == true && mounted) {
-      debugPrint('✅ Returned from booking flow with success - refreshing dashboard');
+      debugPrint(
+        '✅ Returned from booking flow with success - refreshing dashboard',
+      );
       _loadDashboardData();
     }
   }
@@ -390,7 +392,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
     final result = await context.push('/customer/vip-booking');
     if (result == true && mounted) {
-      debugPrint('✅ Returned from VIP booking with success - refreshing dashboard');
+      debugPrint(
+        '✅ Returned from VIP booking with success - refreshing dashboard',
+      );
       _loadDashboardData();
     }
   }
@@ -1114,7 +1118,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           .from('user_roles')
           .select('status')
           .eq('user_id', user.id)
-          .eq('role_id', 3)
+          .eq('role_id', 1)
           .maybeSingle();
 
       if (customerCheck == null || customerCheck['status'] != 'active') {
@@ -1844,9 +1848,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(vertical: 14),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         elevation: 0,
       ),
     );
@@ -1867,9 +1869,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       style: OutlinedButton.styleFrom(
         side: const BorderSide(color: Colors.amber, width: 1.5),
         padding: const EdgeInsets.symmetric(vertical: 14),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
     );
   }
@@ -2409,9 +2409,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           ],
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: 0.1),
-        ),
+        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.1)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -2611,9 +2609,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(
-              alpha: isDark ? 0.2 : 0.1,
-            ),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.1),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -2878,6 +2874,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           ),
           title: null,
           actions: [_buildProfilePhoto()],
+        ),      
+        drawer: SideMenu(
+          userRole: 'customer',
+          userName: _customerName,
+          userEmail: _customerEmail,
+          profileImageUrl: _customerImage,
+          onMenuItemSelected: () {},
         ),
         body: Center(
           child: Column(
@@ -2958,9 +2961,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         // _navigateToSalonProfile / _viewAllOffers above).
         onMenuItemSelected: () {},
       ),
-      body: SafeArea(
-        child: isWeb ? _buildWebLayout() : _buildMobileLayout(),
-      ),
+      body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
     );
   }
 
@@ -3122,7 +3123,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
 
   Widget _buildDashboardContent() {
-  final isDark = context.isDarkMode; 
+    final isDark = context.isDarkMode;
     return Column(
       children: [
         if (_showPermissionCard && !_hasPermission)
@@ -3176,9 +3177,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 )
               : Row(
                   children: [
-                    Expanded(
-                      child: _buildResponsiveBookButton(),
-                    ),
+                    Expanded(child: _buildResponsiveBookButton()),
                     const SizedBox(width: 12),
                     Expanded(child: _buildResponsiveVipButton()),
                   ],
@@ -3372,7 +3371,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     children: [
                       CircleAvatar(
                         radius: _isTablet ? 40 : 35,
-                        backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                        backgroundColor: AppTheme.primary.withValues(
+                          alpha: 0.1,
+                        ),
                         backgroundImage: barber['avatar'] != null
                             ? NetworkImage(barber['avatar'])
                             : null,
