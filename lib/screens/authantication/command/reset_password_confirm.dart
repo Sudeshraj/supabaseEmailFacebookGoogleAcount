@@ -22,6 +22,8 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
     final double maxWidth = isWeb ? 400 : double.infinity;
+    // FIX: minWidth eka maxWidth eken vada wadi wenna denna epa
+    final double minWidth = isWeb ? maxWidth * 0.9 : size.width * 0.9;
 
     return Scaffold(
       backgroundColor: backgroundColor,
@@ -33,7 +35,7 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
             child: ConstrainedBox(
               constraints: BoxConstraints(
                 maxWidth: maxWidth,
-                minWidth: size.width * 0.9,
+                minWidth: minWidth,
               ),
               child: Container(
                 padding: const EdgeInsets.all(24),
@@ -67,9 +69,9 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
                         size: 60,
                       ),
                     ),
-                    
+
                     const SizedBox(height: 20),
-                    
+
                     // Title
                     Text(
                       'Check Your Email',
@@ -79,9 +81,9 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    
+
                     const SizedBox(height: 16),
-                    
+
                     // Subtitle
                     Text(
                       'We sent a password reset link to:',
@@ -91,9 +93,9 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
                         fontSize: 14,
                       ),
                     ),
-                    
+
                     const SizedBox(height: 8),
-                    
+
                     // Email
                     Text(
                       email,
@@ -104,9 +106,9 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    
+
                     const SizedBox(height: 24),
-                    
+
                     // Instruction
                     Text(
                       'Click the link in the email to reset your password.\n\n'
@@ -118,9 +120,9 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
                         height: 1.5,
                       ),
                     ),
-                    
+
                     const SizedBox(height: 32),
-                    
+
                     // Back to Login Button
                     SizedBox(
                       width: double.infinity,
@@ -143,13 +145,12 @@ class ResetPasswordConfirmScreen extends StatelessWidget {
                         ),
                       ),
                     ),
-                    
+
                     const SizedBox(height: 12),
-                    
+
                     // Resend Link (Optional)
                     TextButton(
                       onPressed: () {
-                        // Navigate to reset password request
                         context.go('/reset-password');
                       },
                       child: Text(
