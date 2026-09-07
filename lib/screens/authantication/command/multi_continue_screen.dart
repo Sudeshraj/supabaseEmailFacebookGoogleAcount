@@ -139,7 +139,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (roles.isEmpty) return false;
 
       final availableProfiles = await SessionManager.getAvailableProfiles();
-      debugPrint('📊 Available profiles from SessionManager: $availableProfiles');
+      debugPrint(
+        '📊 Available profiles from SessionManager: $availableProfiles',
+      );
 
       for (String role in roles) {
         final exists = availableProfiles.any(
@@ -241,7 +243,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
             }
 
             if (sessionValid) {
-              debugPrint('🔄 Valid session found, checking DB for latest status...');
+              debugPrint(
+                '🔄 Valid session found, checking DB for latest status...',
+              );
               try {
                 final response = await supabase.rpc(
                   'get_role_status',
@@ -274,7 +278,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
       final allProfiles = await SessionManager.getProfiles();
       for (var profile in allProfiles) {
         if (profile['email'] == email) {
-          final extraData = profile['extra_data'] as Map<String, dynamic>? ?? {};
+          final extraData =
+              profile['extra_data'] as Map<String, dynamic>? ?? {};
           final roleKey = 'profile_$role';
 
           if (extraData.containsKey(roleKey)) {
@@ -403,7 +408,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
             hasActiveRoles = true;
           }
         } else {
-          debugPrint('⏭️ Skipping _hasActiveRoles (no valid session) for $email');
+          debugPrint(
+            '⏭️ Skipping _hasActiveRoles (no valid session) for $email',
+          );
         }
 
         if (!hasActiveRoles) {
@@ -441,7 +448,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
               statusInfo = {'status': 'active'};
             }
           } else {
-            debugPrint('⏭️ Skipping _getProfileStatus (no valid session) for $email');
+            debugPrint(
+              '⏭️ Skipping _getProfileStatus (no valid session) for $email',
+            );
             statusInfo = {'status': 'active'};
           }
 
@@ -494,7 +503,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
             if (statusInfo != null) {
               roleProfile['status'] = statusInfo['status'] ?? 'active';
               roleProfile['days_remaining'] = statusInfo['days_remaining'];
-              roleProfile['deletion_due_date'] = statusInfo['deletion_due_date'];
+              roleProfile['deletion_due_date'] =
+                  statusInfo['deletion_due_date'];
             } else {
               roleProfile['status'] = 'active';
             }
@@ -566,7 +576,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
     try {
       if (photoUrl.startsWith('//')) photoUrl = 'https:$photoUrl';
-      final hasSizeParam = photoUrl.contains('=s96') ||
+      final hasSizeParam =
+          photoUrl.contains('=s96') ||
           photoUrl.contains('=s') ||
           photoUrl.contains('?sz=') ||
           photoUrl.contains('/s96-c/');
@@ -685,7 +696,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 await SessionManager.saveUserProfile(
                   email: email,
                   userId: response.user!.id,
-                  name: response.user!.userMetadata?['full_name'] ??
+                  name:
+                      response.user!.userMetadata?['full_name'] ??
                       email.split('@').first,
                   photo: response.user!.userMetadata?['avatar_url'],
                   roles: [role],
@@ -697,7 +709,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
               }
             }
           } else {
-            debugPrint('🔐 OAuth login flow started for $provider (popup will show)');
+            debugPrint(
+              '🔐 OAuth login flow started for $provider (popup will show)',
+            );
             final oauthResult = await _handleOAuthLoginForProfile(profile);
             loginSuccess = oauthResult == _OAuthAttemptResult.success;
             userCancelled = oauthResult == _OAuthAttemptResult.cancelled;
@@ -710,7 +724,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
         debugPrint('✅ Login successful for role: $role');
 
         final savedToken = await SessionManager.getRefreshToken(email);
-        debugPrint('🔑 Refresh token saved: ${savedToken != null ? "✅ YES" : "❌ NO"}');
+        debugPrint(
+          '🔑 Refresh token saved: ${savedToken != null ? "✅ YES" : "❌ NO"}',
+        );
 
         await SessionManager.setCurrentUser(email);
         await SessionManager.saveCurrentRole(role);
@@ -795,9 +811,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
         case 'google':
           if (defaultTargetPlatform == TargetPlatform.android ||
               defaultTargetPlatform == TargetPlatform.iOS) {
-            debugPrint('🔐 Continue screen - using native Google Sign-In (MOBILE)');
+            debugPrint(
+              '🔐 Continue screen - using native Google Sign-In (MOBILE)',
+            );
 
-            final authData = await _googleSignInService.authenticateAndGetDetails();
+            final authData = await _googleSignInService
+                .authenticateAndGetDetails();
 
             if (authData != null && authData['idToken'] != null) {
               try {
@@ -808,15 +827,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 );
 
                 if (response.user != null) {
-                  debugPrint('✅ Native Google sign-in successful (Continue screen)');
+                  debugPrint(
+                    '✅ Native Google sign-in successful (Continue screen)',
+                  );
 
                   await SessionManager.saveUserProfile(
                     email: email,
                     userId: response.user!.id,
-                    name: response.user!.userMetadata?['full_name'] ??
+                    name:
+                        response.user!.userMetadata?['full_name'] ??
                         authData['displayName'] ??
                         email.split('@').first,
-                    photo: response.user!.userMetadata?['avatar_url'] ??
+                    photo:
+                        response.user!.userMetadata?['avatar_url'] ??
                         authData['photoUrl'],
                     roles: [role],
                     rememberMe: true,
@@ -835,11 +858,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   await SessionManager.setCurrentUser(email);
                   await SessionManager.saveCurrentRole(role);
 
-                  debugPrint('✅ Continue screen: Profile saved with refresh token');
+                  debugPrint(
+                    '✅ Continue screen: Profile saved with refresh token',
+                  );
                   return _OAuthAttemptResult.success;
                 }
               } catch (e) {
-                debugPrint('❌ Native Google sign-in failed (Continue screen): $e');
+                debugPrint(
+                  '❌ Native Google sign-in failed (Continue screen): $e',
+                );
                 return _OAuthAttemptResult.failed;
               }
             }
@@ -860,7 +887,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
         case 'facebook':
           if (defaultTargetPlatform == TargetPlatform.android ||
               defaultTargetPlatform == TargetPlatform.iOS) {
-            debugPrint('🔐 Continue screen - using native Facebook Sign-In (MOBILE)');
+            debugPrint(
+              '🔐 Continue screen - using native Facebook Sign-In (MOBILE)',
+            );
 
             try {
               final fbResult = await _facebookAuth.login(
@@ -875,12 +904,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 );
 
                 if (response.user != null) {
-                  debugPrint('✅ Native Facebook sign-in successful (Continue screen)');
+                  debugPrint(
+                    '✅ Native Facebook sign-in successful (Continue screen)',
+                  );
 
                   await SessionManager.saveUserProfile(
                     email: email,
                     userId: response.user!.id,
-                    name: response.user!.userMetadata?['full_name'] ??
+                    name:
+                        response.user!.userMetadata?['full_name'] ??
                         email.split('@').first,
                     photo: response.user!.userMetadata?['avatar_url'],
                     roles: [role],
@@ -942,7 +974,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 );
 
                 if (response.user != null) {
-                  debugPrint('✅ Native Apple sign-in successful (Continue screen)');
+                  debugPrint(
+                    '✅ Native Apple sign-in successful (Continue screen)',
+                  );
 
                   if (credential.authorizationCode.isNotEmpty) {
                     try {
@@ -953,14 +987,17 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         },
                       );
                     } catch (e) {
-                      debugPrint('⚠️ Failed to save Apple authorization code: $e');
+                      debugPrint(
+                        '⚠️ Failed to save Apple authorization code: $e',
+                      );
                     }
                   }
 
                   await SessionManager.saveUserProfile(
                     email: email,
                     userId: response.user!.id,
-                    name: response.user!.userMetadata?['full_name'] ??
+                    name:
+                        response.user!.userMetadata?['full_name'] ??
                         email.split('@').first,
                     photo: response.user!.userMetadata?['avatar_url'],
                     roles: [role],
@@ -1203,7 +1240,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final isLoading = _profileLoadingStates[uniqueId] == true;
     final isSelected = _selectedProfiles.contains(uniqueId);
     final photoUrl = profile['photo'] as String?;
-    final displayName = profile['display_name'] as String? ?? email.split('@').first;
+    final displayName =
+        profile['display_name'] as String? ?? email.split('@').first;
 
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
     final lastLogin = profile['lastLogin'] as String?;
@@ -1220,8 +1258,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
     final cardBgColor = isDark
         ? (isSelected
-            ? roleColor.withValues(alpha: 0.2)
-            : backgroundColor.withValues(alpha: 0.05))
+              ? roleColor.withValues(alpha: 0.2)
+              : backgroundColor.withValues(alpha: 0.05))
         : (isSelected ? roleColor.withValues(alpha: 0.1) : Colors.grey.shade50);
 
     final borderColor = isSelected
@@ -1283,12 +1321,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: (isScheduledForDeletion
-                                    ? Colors.orange
-                                    : isInactive
-                                    ? Colors.grey
-                                    : roleColor)
-                                .withValues(alpha: 0.2),
+                            color:
+                                (isScheduledForDeletion
+                                        ? Colors.orange
+                                        : isInactive
+                                        ? Colors.grey
+                                        : roleColor)
+                                    .withValues(alpha: 0.2),
                             blurRadius: 8,
                             spreadRadius: 0,
                           ),
@@ -1314,7 +1353,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             shape: BoxShape.circle,
                             color: providerColor,
                             border: Border.all(
-                              color: isDark ? Colors.grey[800]! : backgroundColor,
+                              color: isDark
+                                  ? Colors.grey[800]!
+                                  : backgroundColor,
                               width: 2.5,
                             ),
                             boxShadow: [
@@ -1345,17 +1386,20 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                 ? Colors.grey
                                 : roleColor,
                             border: Border.all(
-                              color: isDark ? Colors.grey[800]! : backgroundColor,
+                              color: isDark
+                                  ? Colors.grey[800]!
+                                  : backgroundColor,
                               width: 2.5,
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: (isScheduledForDeletion
-                                        ? Colors.orange
-                                        : isInactive
-                                        ? Colors.grey
-                                        : roleColor)
-                                    .withValues(alpha: 0.5),
+                                color:
+                                    (isScheduledForDeletion
+                                            ? Colors.orange
+                                            : isInactive
+                                            ? Colors.grey
+                                            : roleColor)
+                                        .withValues(alpha: 0.5),
                                 blurRadius: 4,
                                 spreadRadius: 0,
                               ),
@@ -1383,7 +1427,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             shape: BoxShape.circle,
                             color: primaryColor,
                             border: Border.all(
-                              color: isDark ? Colors.grey[800]! : backgroundColor,
+                              color: isDark
+                                  ? Colors.grey[800]!
+                                  : backgroundColor,
                               width: 2,
                             ),
                           ),
@@ -1490,12 +1536,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: (isScheduledForDeletion
-                                    ? Colors.orange
-                                    : isInactive
-                                    ? Colors.grey
-                                    : roleColor)
-                                .withValues(alpha: 0.15),
+                            color:
+                                (isScheduledForDeletion
+                                        ? Colors.orange
+                                        : isInactive
+                                        ? Colors.grey
+                                        : roleColor)
+                                    .withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
@@ -1542,22 +1589,24 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: (isScheduledForDeletion
-                            ? Colors.orange
-                            : isInactive
-                            ? Colors.grey
-                            : roleColor)
-                        .withValues(alpha: 0.1),
+                    color:
+                        (isScheduledForDeletion
+                                ? Colors.orange
+                                : isInactive
+                                ? Colors.grey
+                                : roleColor)
+                            .withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
                     Icons.arrow_forward_ios,
-                    color: (isScheduledForDeletion
-                            ? Colors.orange
-                            : isInactive
-                            ? Colors.grey
-                            : primaryColor)
-                        .withValues(alpha: 0.7),
+                    color:
+                        (isScheduledForDeletion
+                                ? Colors.orange
+                                : isInactive
+                                ? Colors.grey
+                                : primaryColor)
+                            .withValues(alpha: 0.7),
                     size: 14,
                   ),
                 ),
@@ -1632,7 +1681,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
   Widget _getFallbackAvatar(Map<String, dynamic> profile, String? provider) {
     final email = profile['email'] as String? ?? 'Unknown';
-    final displayName = profile['display_name'] as String? ?? email.split('@').first;
+    final displayName =
+        profile['display_name'] as String? ?? email.split('@').first;
     final isOAuth = provider != 'email';
     final isDark = context.isDarkMode;
 
@@ -1675,7 +1725,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
       height: 70,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: isDark ? Colors.grey[800] : Colors.blueAccent.withValues(alpha: 0.2),
+        color: isDark
+            ? Colors.grey[800]
+            : Colors.blueAccent.withValues(alpha: 0.2),
       ),
       child: Center(
         child: Text(
@@ -1736,7 +1788,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: context.isDarkMode ? const Color(0xFF1E1E1E) : const Color(0xFF1C1F26),
+        backgroundColor: context.isDarkMode
+            ? const Color(0xFF1E1E1E)
+            : const Color(0xFF1C1F26),
         title: Text(
           "Remove Selected Profiles?",
           style: TextStyle(color: context.textColor),
@@ -1847,10 +1901,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxWidth),
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 20,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   // ✅ A real, finite height for the card — this is the
@@ -1863,8 +1914,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   // Reserve rough space for logo (~140) + footer (~230)
                   // so the profile-list section gets a sane cap instead
                   // of trying to consume 100% and overflowing by a few px.
-                  final double listMaxHeight =
-                      (maxCardHeight - 370).clamp(140.0, 480.0);
+                  final double listMaxHeight = (maxCardHeight - 370).clamp(
+                    140.0,
+                    480.0,
+                  );
 
                   return ConstrainedBox(
                     constraints: BoxConstraints(maxHeight: maxCardHeight),
@@ -1877,7 +1930,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           color: cardColor,
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: isDark ? Colors.white12 : Colors.grey.shade200,
+                            color: isDark
+                                ? Colors.white12
+                                : Colors.grey.shade200,
                           ),
                           gradient: LinearGradient(
                             begin: Alignment.topLeft,
@@ -1885,19 +1940,28 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             colors: [
                               cardColor,
                               isDark
-                                  ? const Color.fromARGB(255, 25, 25, 25).withValues(alpha: 0.03)
+                                  ? const Color.fromARGB(
+                                      255,
+                                      25,
+                                      25,
+                                      25,
+                                    ).withValues(alpha: 0.03)
                                   : const Color.fromARGB(255, 32, 31, 31),
                             ],
                           ),
                         ),
                         child: Column(
-                          mainAxisSize: MainAxisSize.min, // ✅ size to content, not force-fill
+                          mainAxisSize: MainAxisSize
+                              .min, // ✅ size to content, not force-fill
                           children: [
                             // Logo
                             Stack(
                               children: [
                                 Container(
-                                  margin: const EdgeInsets.only(top: 10, bottom: 25),
+                                  margin: const EdgeInsets.only(
+                                    top: 10,
+                                    bottom: 25,
+                                  ),
                                   child: Center(
                                     child: Container(
                                       width: 80,
@@ -1905,15 +1969,22 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
                                         border: Border.all(
-                                          color: isDark ? Colors.white24 : Colors.grey.shade300,
+                                          color: isDark
+                                              ? Colors.white24
+                                              : Colors.grey.shade300,
                                           width: 2,
                                         ),
                                         gradient: LinearGradient(
-                                          colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
+                                          colors: [
+                                            primaryColor,
+                                            primaryColor.withValues(alpha: 0.7),
+                                          ],
                                         ),
                                         boxShadow: [
                                           BoxShadow(
-                                            color: primaryColor.withValues(alpha: 0.4),
+                                            color: primaryColor.withValues(
+                                              alpha: 0.4,
+                                            ),
                                             blurRadius: 20,
                                             spreadRadius: 5,
                                           ),
@@ -1924,15 +1995,16 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                         child: Image.asset(
                                           'assets/images/logo.png',
                                           fit: BoxFit.cover,
-                                          errorBuilder: (context, error, stackTrace) {
-                                            return Center(
-                                              child: Icon(
-                                                Icons.account_circle,
-                                                color: Colors.white,
-                                                size: 40,
-                                              ),
-                                            );
-                                          },
+                                          errorBuilder:
+                                              (context, error, stackTrace) {
+                                                return Center(
+                                                  child: Icon(
+                                                    Icons.account_circle,
+                                                    color: Colors.white,
+                                                    size: 40,
+                                                  ),
+                                                );
+                                              },
                                         ),
                                       ),
                                     ),
@@ -1947,14 +2019,26 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                       height: 40,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200,
+                                        color: isDark
+                                            ? Colors.white.withValues(
+                                                alpha: 0.1,
+                                              )
+                                            : Colors.grey.shade200,
                                       ),
                                       child: PopupMenuButton<String>(
-                                        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                                        color: isDark
+                                            ? const Color(0xFF1E1E1E)
+                                            : Colors.white,
                                         shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(12),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                           side: BorderSide(
-                                            color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade300,
+                                            color: isDark
+                                                ? Colors.white.withValues(
+                                                    alpha: 0.1,
+                                                  )
+                                                : Colors.grey.shade300,
                                           ),
                                         ),
                                         icon: Icon(
@@ -1977,7 +2061,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                                 Text(
                                                   'Remove Selected',
                                                   style: TextStyle(
-                                                    color: isDark ? Colors.white : Colors.black87,
+                                                    color: isDark
+                                                        ? Colors.white
+                                                        : Colors.black87,
                                                   ),
                                                 ),
                                               ],
@@ -1996,7 +2082,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                                 Text(
                                                   'Manage Account Data',
                                                   style: TextStyle(
-                                                    color: isDark ? Colors.white : Colors.black87,
+                                                    color: isDark
+                                                        ? Colors.white
+                                                        : Colors.black87,
                                                   ),
                                                 ),
                                               ],
@@ -2018,13 +2106,19 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
                             // Profiles list — bounded height, internal scroll.
                             ConstrainedBox(
-                              constraints: BoxConstraints(maxHeight: listMaxHeight),
+                              constraints: BoxConstraints(
+                                maxHeight: listMaxHeight,
+                              ),
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: isDark ? cardColor.withValues(alpha: 0.5) : Colors.grey.shade100,
+                                  color: isDark
+                                      ? cardColor.withValues(alpha: 0.5)
+                                      : Colors.grey.shade100,
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
-                                    color: isDark ? Colors.white10 : Colors.grey.shade200,
+                                    color: isDark
+                                        ? Colors.white10
+                                        : Colors.grey.shade200,
                                   ),
                                 ),
                                 child: Column(
@@ -2034,14 +2128,20 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                       Container(
                                         padding: const EdgeInsets.all(16),
                                         decoration: BoxDecoration(
-                                          color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.grey.shade100,
+                                          color: isDark
+                                              ? Colors.white.withValues(
+                                                  alpha: 0.03,
+                                                )
+                                              : Colors.grey.shade100,
                                           borderRadius: const BorderRadius.only(
                                             topLeft: Radius.circular(16),
                                             topRight: Radius.circular(16),
                                           ),
                                           border: Border(
                                             bottom: BorderSide(
-                                              color: isDark ? Colors.white10 : Colors.grey.shade200,
+                                              color: isDark
+                                                  ? Colors.white10
+                                                  : Colors.grey.shade200,
                                             ),
                                           ),
                                         ),
@@ -2057,10 +2157,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                               itemCount: profiles.length,
                                               itemBuilder: (context, index) {
                                                 return Padding(
-                                                  padding: const EdgeInsets.symmetric(
-                                                    horizontal: 12,
-                                                    vertical: 8,
-                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 8,
+                                                      ),
                                                   child: _buildProfileCard(
                                                     profiles[index],
                                                     index,
@@ -2089,83 +2190,93 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  Widget _buildLoadingState() {
-    final textColor = context.textColor;
-
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
-          ),
-          const SizedBox(height: 15),
-          Text(
-            'Logging in...',
-            style: TextStyle(
-              color: textColor.withValues(alpha: 0.7),
-              fontSize: 14,
-            ),
-          ),
-          if (_selectedEmail != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                _selectedEmail!,
-                style: TextStyle(
-                  color: textColor.withValues(alpha: 0.6),
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildEmptyState() {
     final isDark = context.isDarkMode;
     final textColor = context.textColor;
     final primaryColor = context.primaryColor;
 
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.person_add_disabled,
-            size: 60,
-            color: isDark ? Colors.white.withValues(alpha: 0.3) : Colors.grey.shade400,
-          ),
-          const SizedBox(height: 15),
-          Text(
-            'No Saved Profiles',
-            style: TextStyle(
-              color: textColor,
-              fontSize: 16,
-              fontWeight: FontWeight.w500,
+    return SingleChildScrollView(
+      physics: const ClampingScrollPhysics(),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.person_add_disabled,
+              size: 60, // ✅ original size retained
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.3)
+                  : Colors.grey.shade400,
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Enable "Remember Me" during login\nto save your profile',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: isDark ? Colors.white.withValues(alpha: 0.6) : Colors.grey.shade600,
-              fontSize: 14,
+            const SizedBox(height: 15),
+            Text(
+              'No Saved Profiles',
+              style: TextStyle(
+                color: textColor,
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
             ),
-          ),
-          const SizedBox(height: 20),
-          OutlinedButton(
-            onPressed: () => context.go('/login'),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: primaryColor),
-              foregroundColor: primaryColor,
+            const SizedBox(height: 8),
+            Text(
+              'Enable "Remember Me" during login\nto save your profile',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.6)
+                    : Colors.grey.shade600,
+                fontSize: 14,
+              ),
             ),
-            child: const Text('Go to Login'),
-          ),
-        ],
+            const SizedBox(height: 20),
+            OutlinedButton(
+              onPressed: () => context.go('/login'),
+              style: OutlinedButton.styleFrom(
+                side: BorderSide(color: primaryColor),
+                foregroundColor: primaryColor,
+              ),
+              child: const Text('Go to Login'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    final textColor = context.textColor;
+
+    return SingleChildScrollView(
+      physics: const ClampingScrollPhysics(),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+            ),
+            const SizedBox(height: 15),
+            Text(
+              'Logging in...',
+              style: TextStyle(
+                color: textColor.withValues(alpha: 0.7),
+                fontSize: 14,
+              ),
+            ),
+            if (_selectedEmail != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _selectedEmail!,
+                  style: TextStyle(
+                    color: textColor.withValues(alpha: 0.6),
+                    fontSize: 12,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -2197,7 +2308,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
             Text(
               'Tap to select/deselect',
               style: TextStyle(
-                color: isDark ? Colors.white.withValues(alpha: 0.7) : Colors.grey.shade600,
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.7)
+                    : Colors.grey.shade600,
                 fontSize: 12,
               ),
             ),
@@ -2207,7 +2320,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
           children: [
             IconButton(
               icon: Icon(
-                _selectedCount == profiles.length ? Icons.deselect : Icons.select_all,
+                _selectedCount == profiles.length
+                    ? Icons.deselect
+                    : Icons.select_all,
                 color: primaryColor,
                 size: 24,
               ),
@@ -2402,7 +2517,9 @@ class _SecurityCompliantPasswordDialogState
 
     final Size screenSize = MediaQuery.of(context).size;
     final bool isWeb = screenSize.width > 700;
-    double dialogWidth = isWeb ? screenSize.width * 0.25 : screenSize.width * 0.85;
+    double dialogWidth = isWeb
+        ? screenSize.width * 0.25
+        : screenSize.width * 0.85;
     final double calculatedWidth = dialogWidth.clamp(300.0, 400.0).toDouble();
 
     return Dialog(
@@ -2478,14 +2595,20 @@ class _SecurityCompliantPasswordDialogState
                         decoration: InputDecoration(
                           labelText: 'Password',
                           labelStyle: TextStyle(
-                            color: isDark ? Colors.white70 : Colors.grey.shade600,
+                            color: isDark
+                                ? Colors.white70
+                                : Colors.grey.shade600,
                           ),
                           hintText: 'Type at least 6 characters',
                           hintStyle: TextStyle(
-                            color: isDark ? Colors.white.withValues(alpha: 0.4) : Colors.grey.shade400,
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.4)
+                                : Colors.grey.shade400,
                           ),
                           filled: true,
-                          fillColor: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.grey.shade50,
+                          fillColor: isDark
+                              ? Colors.white.withValues(alpha: 0.08)
+                              : Colors.grey.shade50,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(10),
                             borderSide: BorderSide.none,
@@ -2500,14 +2623,19 @@ class _SecurityCompliantPasswordDialogState
                               if (_controller.text.isNotEmpty)
                                 IconButton(
                                   icon: Icon(
-                                    _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                                    color: isDark ? Colors.white70 : Colors.grey.shade600,
+                                    _obscurePassword
+                                        ? Icons.visibility_off
+                                        : Icons.visibility,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.grey.shade600,
                                     size: 20,
                                   ),
                                   onPressed: _isSubmitting
                                       ? null
                                       : () => setState(
-                                          () => _obscurePassword = !_obscurePassword,
+                                          () => _obscurePassword =
+                                              !_obscurePassword,
                                         ),
                                 ),
                               if (_isValid && !_isSubmitting)
@@ -2555,7 +2683,9 @@ class _SecurityCompliantPasswordDialogState
                           Expanded(
                             child: LinearProgressIndicator(
                               value: _controller.text.length / 6,
-                              backgroundColor: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade200,
+                              backgroundColor: isDark
+                                  ? Colors.white.withValues(alpha: 0.1)
+                                  : Colors.grey.shade200,
                               valueColor: AlwaysStoppedAnimation<Color>(
                                 _controller.text.length >= 6
                                     ? Colors.greenAccent
@@ -2570,7 +2700,9 @@ class _SecurityCompliantPasswordDialogState
                             style: TextStyle(
                               color: _controller.text.length >= 6
                                   ? Colors.greenAccent
-                                  : isDark ? Colors.white70 : Colors.grey.shade600,
+                                  : isDark
+                                  ? Colors.white70
+                                  : Colors.grey.shade600,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
@@ -2622,13 +2754,17 @@ class _SecurityCompliantPasswordDialogState
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: _isSubmitting ? null : () => Navigator.pop(context, null),
+                    onPressed: _isSubmitting
+                        ? null
+                        : () => Navigator.pop(context, null),
                     style: TextButton.styleFrom(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 10,
                       ),
-                      foregroundColor: isDark ? Colors.white70 : Colors.grey.shade600,
+                      foregroundColor: isDark
+                          ? Colors.white70
+                          : Colors.grey.shade600,
                     ),
                     child: const Text(
                       'Cancel',
@@ -2637,11 +2773,15 @@ class _SecurityCompliantPasswordDialogState
                   ),
                   const SizedBox(width: 10),
                   ElevatedButton(
-                    onPressed: _isValid && !_isSubmitting ? _submitPassword : null,
+                    onPressed: _isValid && !_isSubmitting
+                        ? _submitPassword
+                        : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blueAccent,
                       foregroundColor: Colors.white,
-                      disabledBackgroundColor: Colors.blueAccent.withValues(alpha: 0.5),
+                      disabledBackgroundColor: Colors.blueAccent.withValues(
+                        alpha: 0.5,
+                      ),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 20,
                         vertical: 12,
