@@ -13,6 +13,7 @@ class SessionManager {
   static const String _showContinueKey = 'show_continue_screen';
   static const String _rememberMeKey = 'remember_me_enabled';
   static const String _locationcontinuesc = '_location_continue_sc';
+  static const String _pendingQuickLogoutKey = 'pending_quick_logout';
 
   // Keys for profile switching
   static const String _keyUserRoles = '_all_roles';
@@ -76,6 +77,20 @@ class SessionManager {
     }
     return null;
   }
+
+  /// ✅ NEW: Persists the "quick-switch logout is in effect" flag to
+/// disk (not just in-memory AppState), so it survives a full app
+/// kill + restart. Without this, closing the app after a
+/// quick-switch logout and reopening it would let Supabase's own
+/// (never-revoked, by design) persisted session silently take over
+/// again and skip the Continue screen entirely.
+static Future<void> setPendingQuickLogout(bool value) async {
+  await _prefs.setBool(_pendingQuickLogoutKey, value);
+}
+
+static Future<bool> isPendingQuickLogout() async {
+  return _prefs.getBool(_pendingQuickLogoutKey) ?? false;
+}
 
   // =====================================================
   // ✅ CONSENT MANAGEMENT FUNCTIONS
@@ -1674,86 +1689,89 @@ class SessionManager {
   /// No password is ever stored (only a revocable refresh token in
   /// encrypted secure storage), and a full, permanent, token-revoking
   /// logout is always available via logoutUser() (Settings screen).
-  static Future<void> logoutForContinue() async {
-    try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
-      final email = await getCurrentUserEmail();
-      final rememberMe = await isRememberMeEnabled();
+static Future<void> logoutForContinue() async {
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
+    final email = await getCurrentUserEmail();
+    final rememberMe = await isRememberMeEnabled();
 
-      if (user != null && email != null && email == user.email) {
-        final refreshToken = supabase.auth.currentSession?.refreshToken;
+    if (user != null && email != null && email == user.email) {
+      final refreshToken = supabase.auth.currentSession?.refreshToken;
 
-        if (rememberMe && refreshToken != null) {
-          await saveUserProfile(
-            email: email,
-            userId: user.id,
-            name: user.userMetadata?['full_name'] ?? email.split('@').first,
-            rememberMe: rememberMe,
-            refreshToken: refreshToken,
-            provider: await _getUserProvider(email),
-          );
-          debugPrint('✅ Refresh token saved before quick-switch logout');
-        }
+      if (rememberMe && refreshToken != null) {
+        await saveUserProfile(
+          email: email,
+          userId: user.id,
+          name: user.userMetadata?['full_name'] ?? email.split('@').first,
+          rememberMe: rememberMe,
+          refreshToken: refreshToken,
+          provider: await _getUserProvider(email),
+        );
+        debugPrint('✅ Refresh token saved before quick-switch logout');
       }
-
-      // ═══════════════════════════════════════════════════════════
-      // 🔥 FIX: signOut() කිසිසේත් call කරන්නේ නෑ - web/mobile
-      // දෙකෙටම. (කලින් තිබ්බ kIsWeb-based platform check එකම
-      // අයින් කළා - web එකෙත් local scope එකෙන්ම token invalidate
-      // වෙනවා කියලා testing එකෙන්ම confirm උනා.)
-      // ═══════════════════════════════════════════════════════════
-      // await supabase.auth.signOut(scope: SignOutScope.local);  ← REMOVED (all platforms)
-
-      await _prefs.remove(_keyCurrentRole);
-
-      if (email != null && rememberMe) {
-        await setCurrentUser(email);
-        await _prefs.setBool(_showContinueKey, true);
-      } else {
-        await _prefs.remove(_currentUserKey);
-        await clearContinueScreen();
-      }
-
-      debugPrint('✅ Quick-switch logout complete for: $email');
-    } catch (e) {
-      debugPrint('❌ Error during quick-switch logout: $e');
     }
+
+    // signOut() කිසිසේත් call කරන්නේ නෑ (existing fix - unchanged)
+
+    // ✅ NEW: persistent flag එක set කරනවා - app kill+restart
+    // එකකින්ම survive වෙන්න.
+    await setPendingQuickLogout(true);
+
+    await _prefs.remove(_keyCurrentRole);
+
+    if (email != null && rememberMe) {
+      await setCurrentUser(email);
+      await _prefs.setBool(_showContinueKey, true);
+    } else {
+      await _prefs.remove(_currentUserKey);
+      await clearContinueScreen();
+    }
+
+    debugPrint('✅ Quick-switch logout complete for: $email');
+  } catch (e) {
+    debugPrint('❌ Error during quick-switch logout: $e');
   }
+}
 
   /// ✅ Full, permanent logout (Settings screen). Actually revokes
   /// the refresh token server-side (default global scope) - this
   /// is the correct, secure behavior for an explicit "log out of
   /// this account" action.
-  static Future<void> logoutUser() async {
-    try {
-      final supabase = Supabase.instance.client;
-      final user = supabase.auth.currentUser;
+static Future<void> logoutUser() async {
+  try {
+    final supabase = Supabase.instance.client;
+    final user = supabase.auth.currentUser;
 
-      if (user != null) {
-        await supabase
-            .from('profiles')
-            .update({
-              'last_logout': DateTime.now().toIso8601String(),
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('id', user.id);
-      }
-
-      await supabase.auth.signOut(); // default global scope - revokes token
-
-      final email = await getCurrentUserEmail();
-      if (email != null) {
-        await _prefs.remove(_keyCurrentRole);
-        await clearContinueScreen();
-      }
-
-      debugPrint('✅ User logged out (full, token revoked)');
-    } catch (e) {
-      debugPrint('❌ Error during logout: $e');
-      rethrow;
+    if (user != null) {
+      await supabase
+          .from('profiles')
+          .update({
+            'last_logout': DateTime.now().toIso8601String(),
+            'updated_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', user.id);
     }
+
+    await supabase.auth.signOut(); // full logout - token DOES get revoked here
+
+    // ✅ NEW: full logout එකේදී flag එකෙන් prescribed state එකක්
+    // තියෙන්න අවශ්‍ය නෑ (token දැනටමත් revoked), ඒත් clean state
+    // එකක් ඉතුරු කරන්න clear කරනවා.
+    await setPendingQuickLogout(false);
+
+    final email = await getCurrentUserEmail();
+    if (email != null) {
+      await _prefs.remove(_keyCurrentRole);
+      await clearContinueScreen();
+    }
+
+    debugPrint('✅ User logged out successfully');
+  } catch (e) {
+    debugPrint('❌ Error during logout: $e');
+    rethrow;
   }
+}
 
   // =====================================================
   // ✅ CLEAR ALL

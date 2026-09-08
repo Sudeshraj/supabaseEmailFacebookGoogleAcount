@@ -1032,10 +1032,7 @@ class _SignInScreenState extends State<SignInScreen>
                   Center(
                     child: Text(
                       "App v${AppVersion.version}",
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: secondaryTextColor,
-                      ),
+                      style: TextStyle(fontSize: 10, color: secondaryTextColor),
                     ),
                   ),
                 ],
@@ -1046,9 +1043,7 @@ class _SignInScreenState extends State<SignInScreen>
                 onPressed: () => Navigator.pop(context, null),
                 child: Text(
                   "Cancel",
-                  style: TextStyle(
-                    color: secondaryTextColor,
-                  ),
+                  style: TextStyle(color: secondaryTextColor),
                 ),
               ),
               ElevatedButton(
@@ -1744,7 +1739,7 @@ class _SignInScreenState extends State<SignInScreen>
     if (!mounted) return;
 
     try {
-      appState.clearPendingQuickLogout();
+      await SessionManager.setPendingQuickLogout(false);
       await appState.refreshState();
     } catch (e) {
       debugPrint('❌ Error refreshing app state after login: $e');
@@ -1814,10 +1809,7 @@ $provider OAuth Configuration Required:
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Text(
                   'or',
-                  style: TextStyle(
-                    color: secondaryTextColor,
-                    fontSize: 12,
-                  ),
+                  style: TextStyle(color: secondaryTextColor, fontSize: 12),
                 ),
               ),
               Expanded(

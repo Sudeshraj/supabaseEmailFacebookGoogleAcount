@@ -742,7 +742,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           debugPrint('📝 Updated user metadata with role: $role');
         }
 
-        appState.clearPendingQuickLogout();
+        await SessionManager.setPendingQuickLogout(false);
         await appState.refreshState();
         if (!mounted) return;
         context.go('/');
