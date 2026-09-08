@@ -188,18 +188,12 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('lastVerificationSent');
-
-      await SessionManager.logoutForContinue();
-
+      await appState.logoutForContinue();
       if (!mounted) return;
-
-      appState.refreshState();
       context.go('/');
     } catch (e) {
       debugPrint('Logout error: $e');
-
       if (!mounted) return;
-
       context.go('/');
     }
   }
@@ -310,156 +304,161 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     return Scaffold(
       backgroundColor: backgroundColor,
       body: SafeArea(
-        child: Center(
-          child: FadeTransition(
-            opacity: _fadeAnim,
-            child: ScaleTransition(
-              scale: _scaleAnim,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: maxWidth),
-                child: Container(
-                  height: size.height - 40,
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 20,
-                  ),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.03)
-                        : Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isDark ? Colors.white12 : Colors.grey.shade200,
+        child: SingleChildScrollView(
+          child: Center(
+            child: FadeTransition(
+              opacity: _fadeAnim,
+              child: ScaleTransition(
+                scale: _scaleAnim,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: maxWidth),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: size.height - 40,
                     ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // 🔙 Back Button
-                      Align(
-                        alignment: Alignment.topLeft,
-                        child: IconButton(
-                          icon: Icon(
-                            Icons.arrow_back_ios_new_rounded,
-                            color: textColor,
-                            size: 22,
-                          ),
-                          onPressed: () {
-                            if (mounted) {
-                              context.go('/');
-                            }
-                          },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(
+                        horizontal: 24,
+                        vertical: 20,
+                      ),
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.03)
+                            : Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: isDark ? Colors.white12 : Colors.grey.shade200,
                         ),
                       ),
-
-                      Expanded(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.mark_email_read_rounded,
-                              size: 70,
-                              color: primaryColor,
-                            ),
-                            const SizedBox(height: 24),
-                            Text(
-                              "Verify your email",
-                              style: TextStyle(
+                      child: Column(
+                        children: [
+                          // 🔙 Back Button
+                          Align(
+                            alignment: Alignment.topLeft,
+                            child: IconButton(
+                              icon: Icon(
+                                Icons.arrow_back_ios_new_rounded,
                                 color: textColor,
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
+                                size: 22,
                               ),
-                            ),
-                            const SizedBox(height: 12),
-                            FutureBuilder<String?>(
-                              future: _resolveEmail(),
-                              builder: (context, snapshot) {
-                                String emailText = 'your email';
-                                if (snapshot.hasData && snapshot.data != null) {
-                                  emailText = snapshot.data!;
+                              onPressed: () {
+                                if (mounted) {
+                                  context.go('/');
                                 }
-
-                                return Column(
-                                  children: [
-                                    Text(
-                                      "We've sent a verification link to:",
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: secondaryTextColor,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      emailText,
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: primaryColor,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      "Open it to continue.",
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: secondaryTextColor,
-                                      ),
-                                    ),
-                                  ],
-                                );
                               },
                             ),
-                            const SizedBox(height: 24),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: primaryColor,
-                                  ),
+                          ),
+
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const SizedBox(height: 12),
+                              Icon(
+                                Icons.mark_email_read_rounded,
+                                size: 70,
+                                color: primaryColor,
+                              ),
+                              const SizedBox(height: 24),
+                              Text(
+                                "Verify your email",
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
                                 ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  "Waiting for verification…",
-                                  style: TextStyle(
-                                    color: secondaryTextColor,
+                              ),
+                              const SizedBox(height: 12),
+                              FutureBuilder<String?>(
+                                future: _resolveEmail(),
+                                builder: (context, snapshot) {
+                                  String emailText = 'your email';
+                                  if (snapshot.hasData && snapshot.data != null) {
+                                    emailText = snapshot.data!;
+                                  }
+
+                                  return Column(
+                                    children: [
+                                      Text(
+                                        "We've sent a verification link to:",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: secondaryTextColor,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        emailText,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: primaryColor,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        "Open it to continue.",
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          color: secondaryTextColor,
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                },
+                              ),
+                              const SizedBox(height: 24),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: primaryColor,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 30),
+                                  const SizedBox(width: 12),
+                                  Text(
+                                    "Waiting for verification…",
+                                    style: TextStyle(
+                                      color: secondaryTextColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 30),
 
-                            _primaryButton(
-                              text: canResend
-                                  ? "Resend Verification Email"
-                                  : "Wait $remainingSeconds s",
-                              icon: Icons.refresh,
-                              enabled: canResend,
-                              onPressed: canResend ? resendVerification : null,
-                            ),
-                            const SizedBox(height: 12),
+                              _primaryButton(
+                                text: canResend
+                                    ? "Resend Verification Email"
+                                    : "Wait $remainingSeconds s",
+                                icon: Icons.refresh,
+                                enabled: canResend,
+                                onPressed: canResend ? resendVerification : null,
+                              ),
+                              const SizedBox(height: 12),
 
-                            _outlineButton(
-                              text: "Open Email App",
-                              icon: Icons.open_in_new,
-                              onPressed: () => _openEmailApp(),
-                            ),
-                            const SizedBox(height: 12),
+                              _outlineButton(
+                                text: "Open Email App",
+                                icon: Icons.open_in_new,
+                                onPressed: () => _openEmailApp(),
+                              ),
+                              const SizedBox(height: 12),
 
-                            _outlineButton(
-                              text: "Logout",
-                              icon: Icons.logout,
-                              color: Colors.redAccent,
-                              onPressed: () => logout(),
-                            ),
-                          ],
-                        ),
+                              _outlineButton(
+                                text: "Logout",
+                                icon: Icons.logout,
+                                color: Colors.redAccent,
+                                onPressed: () => logout(),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
