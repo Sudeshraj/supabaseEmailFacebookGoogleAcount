@@ -39,6 +39,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   bool _showPermissionCard = false;
   bool _isLoading = true;
 
+  //  NEW: Status check state (CustomerDashboard pattern)
+  bool _isActive = true;
+  bool _isCheckingStatus = true;
+  String _inactiveReason = 'Your barber profile is not active.';
+
   // Employee Dashboard Data
   int _todaysAppointments = 0;
   int _completedToday = 0;
@@ -85,9 +90,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   Future<void> _initialize() async {
     await _initializeTimezone();
-    await _loadEmployeeData();
-    await _loadData();
-    _setupNotificationListeners();
+    await _checkEmployeeStatus();
+
+    // ✅ Only load dashboard data + salons if the account is active
+    if (_isActive) {
+      await _loadAssignedSalons();
+      await _loadData();
+      _setupNotificationListeners();
+    }
+
     debugPrint('🔄 EmployeeDashboard initState completed');
   }
 
@@ -437,21 +448,22 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // ==================== LOAD EMPLOYEE DATA ====================
 
-  Future<void> _loadEmployeeData() async {
+  // ============================================================
+  // ✅ NEW: STATUS CHECK (CustomerDashboard pattern)
+  // Only decides _isActive - never loads dashboard data itself.
+  // ============================================================
+  Future<void> _checkEmployeeStatus() async {
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) {
-        debugPrint('❌ No user logged in');
+        setState(() => _isActive = false);
         return;
       }
 
       _employeeId = currentUser.id;
       _employeeEmail = currentUser.email ?? '';
-      debugPrint(
-        '📋 Loading employee data for user: $_employeeId, email: $_employeeEmail',
-      );
 
-      // STEP 1: Check if user has ACTIVE barber role
+      // STEP 1: Check ACTIVE barber role
       final userRolesResponse = await supabase
           .from('user_roles')
           .select('''
@@ -479,39 +491,29 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       }
 
       if (!isActiveBarber && roleStatus != null) {
-        if (mounted) {
-          String message = 'Your barber account is ';
-          switch (roleStatus) {
-            case 'inactive':
-              message += 'deactivated';
-              break;
-            case 'scheduled_for_deletion':
-              message += 'scheduled for deletion';
-              break;
-            case 'deleted':
-              message += 'deleted';
-              break;
-            default:
-              message += 'not active';
-          }
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('⚠️ $message. Please contact support.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) {
-              context.go('/');
-            }
-          });
-          return;
+        String message = 'Your barber account is ';
+        switch (roleStatus) {
+          case 'inactive':
+            message += 'deactivated.';
+            break;
+          case 'scheduled_for_deletion':
+            message += 'scheduled for deletion.';
+            break;
+          case 'deleted':
+            message += 'deleted.';
+            break;
+          default:
+            message += 'not active.';
         }
+        setState(() {
+          _isActive = false;
+          _inactiveReason = '$message Please contact support.';
+        });
+        return;
       }
 
       if (!isActiveBarber) {
+        // Fallback: check SessionManager cache
         final profile = await SessionManager.getProfileByEmail(_employeeEmail);
         if (profile != null) {
           final roles = profile['roles'] as List? ?? [];
@@ -525,22 +527,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
         if (!isActiveBarber) {
           debugPrint('❌ User does not have barber role');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'You do not have a barber role. Please contact support.',
-                ),
-                backgroundColor: Colors.red,
-              ),
-            );
-            context.go('/');
-          }
+          setState(() {
+            _isActive = false;
+            _inactiveReason =
+                'You do not have a barber role. Please contact support.';
+          });
           return;
         }
       }
 
-      // Load profile
+      // STEP 2: Check profile status
       final profileResponse = await supabase
           .from('profiles')
           .select('full_name, email, avatar_url, is_active, is_blocked')
@@ -549,37 +545,24 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       if (profileResponse != null) {
         if (profileResponse['is_blocked'] == true) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Your account has been blocked. Please contact support.',
-                ),
-                backgroundColor: Colors.red,
-              ),
-            );
-            context.go('/');
-          }
+          setState(() {
+            _isActive = false;
+            _inactiveReason =
+                'Your account has been blocked. Please contact support.';
+          });
           return;
         }
 
         if (profileResponse['is_active'] == false) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Your profile is inactive. Please contact support.',
-                ),
-                backgroundColor: Colors.orange,
-              ),
-            );
-            context.go('/');
-          }
+          setState(() {
+            _isActive = false;
+            _inactiveReason =
+                'Your profile is inactive. Please contact support.';
+          });
           return;
         }
-      }
 
-      if (profileResponse != null) {
+        // ✅ Load profile fields while we're here
         setState(() {
           _employeeName =
               profileResponse['full_name'] ??
@@ -591,9 +574,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           }
           _employeeAvatar = profileResponse['avatar_url'] ?? '';
         });
-        debugPrint(
-          '✅ Profile loaded: name=$_employeeName, email=$_employeeEmail',
-        );
       } else {
         final profile = await SessionManager.getProfileByEmail(_employeeEmail);
         if (profile != null) {
@@ -601,17 +581,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             _employeeName = profile['name'] ?? _employeeEmail.split('@').first;
             _employeeAvatar = profile['avatar'] ?? '';
           });
-          debugPrint(
-            '✅ Profile loaded from SessionManager: name=$_employeeName',
-          );
         }
       }
 
-      // Load assigned salons
-      await _loadAssignedSalons();
+      // ✅ All checks passed
+      setState(() => _isActive = true);
     } catch (e) {
-      debugPrint('❌ Error loading employee data: $e');
+      debugPrint('❌ Error checking employee status: $e');
 
+      // Fallback to SessionManager cache, treat as active if we can't verify
       try {
         final email = await SessionManager.getCurrentUserEmail();
         if (email != null) {
@@ -621,14 +599,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               _employeeEmail = email;
               _employeeName = profile['name'] ?? email.split('@').first;
               _employeeAvatar = profile['avatar'] ?? '';
+              _isActive = true;
             });
-            debugPrint(
-              '✅ Fallback profile loaded: name=$_employeeName, email=$_employeeEmail',
-            );
+            return;
           }
         }
       } catch (fallbackError) {
         debugPrint('❌ Fallback also failed: $fallbackError');
+      }
+      setState(() => _isActive = true); // don't hard-block on network errors
+    } finally {
+      if (mounted && _isCheckingStatus) {
+        setState(() => _isCheckingStatus = false);
       }
     }
   }
@@ -921,7 +903,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         if (isToday) {
           todayTotal++;
           totalAppointmentsToday++;
-          
+
           if (status == 'completed') {
             todayCompleted++;
             todayEarnings += price.toInt();
@@ -954,7 +936,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       // ✅ Calculate On Time Percentage
       int onTimePercentage = 0;
       if (totalAppointmentsToday > 0) {
-        onTimePercentage = ((todayCompleted / totalAppointmentsToday) * 100).round();
+        onTimePercentage = ((todayCompleted / totalAppointmentsToday) * 100)
+            .round();
       }
 
       setState(() {
@@ -1560,6 +1543,122 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
     _checkScreenSize();
 
+    // ✅ STATE 1: Loading (timezone OR status check still in progress)
+    if (!_isTimezoneLoaded || _isCheckingStatus) {
+      return Scaffold(
+        key: _scaffoldKey,
+        appBar: AppBar(
+          title: const Text('Employee Dashboard'),
+          backgroundColor: AppTheme.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu, color: Colors.white),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+              tooltip: 'Menu',
+              iconSize: 28,
+            ),
+          ),
+        ),
+        drawer: SideMenu(
+          userRole: 'barber',
+          userName: _employeeName,
+          userEmail: _employeeEmail,
+          profileImageUrl: _employeeAvatar.isNotEmpty ? _employeeAvatar : null,
+          onMenuItemSelected: () {},
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: AppTheme.primary),
+              SizedBox(height: 16),
+              Text('Loading your dashboard...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ✅ STATE 2: Inactive / blocked / no role
+    if (!_isActive) {
+      return Scaffold(
+        key: _scaffoldKey,
+        appBar: AppBar(
+          backgroundColor: AppTheme.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu, color: Colors.white),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+              tooltip: 'Menu',
+              iconSize: 28,
+            ),
+          ),
+          title: null,
+          actions: [_buildProfileImage()],
+        ),
+        drawer: SideMenu(
+          userRole: 'barber',
+          userName: _employeeName,
+          userEmail: _employeeEmail,
+          profileImageUrl: _employeeAvatar.isNotEmpty ? _employeeAvatar : null,
+          onMenuItemSelected: () {},
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.person_off_outlined,
+                  size: 64,
+                  color: Colors.grey[400],
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Profile Inactive',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _inactiveReason,
+                  style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () async {
+                    setState(() => _isCheckingStatus = true);
+                    await _checkEmployeeStatus();
+                    if (_isActive) {
+                      await _loadAssignedSalons();
+                      await _loadData();
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text('Check Status'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     if (!_isTimezoneLoaded) {
       return Scaffold(
         key: _scaffoldKey,
@@ -2042,10 +2141,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               padding: EdgeInsets.symmetric(horizontal: 16),
               child: Text(
                 "Today's Schedule",
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
             ),
             Padding(

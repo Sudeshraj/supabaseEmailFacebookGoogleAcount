@@ -38,6 +38,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   bool _isLoading = true;
   bool _isSwitchingSalon = false;
 
+  bool _isActive = true;
+  bool _isCheckingStatus = true;
   // Dashboard data
   int _completedToday = 0;
   int _pendingBookings = 0;
@@ -152,14 +154,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .from('user_roles')
           .select('id, status')
           .eq('user_id', userId)
-          .eq('role_id', 1)
+          .eq('role_id', 3)
           .maybeSingle();
 
       if (ownerCheck == null) {
         debugPrint('🔄 Creating owner role...');
         await supabase.from('user_roles').insert({
           'user_id': userId,
-          'role_id': 1,
+          'role_id': 3,
           'status': 'active',
         });
         debugPrint('✅ Owner role created');
@@ -172,39 +174,39 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('user_id', userId)
-            .eq('role_id', 1);
+            .eq('role_id', 3);
         debugPrint('✅ Owner role activated');
       } else {
         debugPrint('✅ Owner role already active');
       }
 
-      for (var roleId in [2, 3]) {
-        final check = await supabase
-            .from('user_roles')
-            .select('id, status')
-            .eq('user_id', userId)
-            .eq('role_id', roleId)
-            .maybeSingle();
+      // for (var roleId in [2, 3]) {
+      //   final check = await supabase
+      //       .from('user_roles')
+      //       .select('id, status')
+      //       .eq('user_id', userId)
+      //       .eq('role_id', roleId)
+      //       .maybeSingle();
 
-        if (check == null) {
-          await supabase.from('user_roles').insert({
-            'user_id': userId,
-            'role_id': roleId,
-            'status': 'active',
-          });
-          debugPrint('✅ Role $roleId created');
-        } else if (check['status'] != 'active') {
-          await supabase
-              .from('user_roles')
-              .update({
-                'status': 'active',
-                'updated_at': DateTime.now().toIso8601String(),
-              })
-              .eq('user_id', userId)
-              .eq('role_id', roleId);
-          debugPrint('✅ Role $roleId activated');
-        }
-      }
+      //   if (check == null) {
+      //     await supabase.from('user_roles').insert({
+      //       'user_id': userId,
+      //       'role_id': roleId,
+      //       'status': 'active',
+      //     });
+      //     debugPrint('✅ Role $roleId created');
+      //   } else if (check['status'] != 'active') {
+      //     await supabase
+      //         .from('user_roles')
+      //         .update({
+      //           'status': 'active',
+      //           'updated_at': DateTime.now().toIso8601String(),
+      //         })
+      //         .eq('user_id', userId)
+      //         .eq('role_id', roleId);
+      //     debugPrint('✅ Role $roleId activated');
+      //   }
+      // }
 
       await supabase.auth.refreshSession();
       debugPrint('✅ Session refreshed');
@@ -1278,7 +1280,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   Future<void> _loadUserProfile() async {
     try {
       final currentUser = supabase.auth.currentUser;
-      if (currentUser == null) return;
+      if (currentUser == null) {
+        if (mounted) setState(() => _isActive = false);
+        return;
+      }
 
       final profileCheck = await supabase
           .from('profiles')
@@ -1290,6 +1295,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         if (profileCheck['is_blocked'] == true) {
           debugPrint('⚠️ User account is blocked');
           if (mounted) {
+            setState(() => _isActive = false);
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text(
@@ -1304,6 +1310,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         if (profileCheck['is_active'] == false) {
           debugPrint('⚠️ User profile is inactive');
           if (mounted) {
+            setState(() => _isActive = false);
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text(
@@ -1316,6 +1323,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           return;
         }
       }
+
+      // ✅ active බව confirm උනා
+      if (mounted) setState(() => _isActive = true);
 
       final profileResponse = await supabase
           .from('profiles')
@@ -1335,6 +1345,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       }
     } catch (e) {
       debugPrint('Error loading user profile: $e');
+    } finally {
+      // ✅ first check එක complete උනා කියලා mark කරන්න
+      if (mounted && _isCheckingStatus) {
+        setState(() => _isCheckingStatus = false);
+      }
     }
   }
 
@@ -1766,118 +1781,119 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ✅ Android 16: Responsive Stat Cards
-// ✅ Android 16: Responsive Stat Cards
-Widget _buildResponsiveStatCards() {
-  if (_isTablet) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: GridView.count(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        crossAxisCount: _isLargeScreen ? 4 : 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.2,
-        children: [
-          DashboardStatCard(
-            title: "Today's",
-            value: '$_todayAppointments',
-            icon: Icons.calendar_today,
-            color: Colors.blue,
-            subtitle: '$_completedToday completed, $_pendingBookings pending',
-            onTap: _viewBookings,
+  // ✅ Android 16: Responsive Stat Cards
+  Widget _buildResponsiveStatCards() {
+    if (_isTablet) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: GridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: _isLargeScreen ? 4 : 2,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+          childAspectRatio: 1.2,
+          children: [
+            DashboardStatCard(
+              title: "Today's",
+              value: '$_todayAppointments',
+              icon: Icons.calendar_today,
+              color: Colors.blue,
+              subtitle: '$_completedToday completed, $_pendingBookings pending',
+              onTap: _viewBookings,
+            ),
+            DashboardStatCard(
+              title: 'Customers',
+              value: '$_totalCustomers',
+              icon: Icons.people,
+              color: Colors.purple,
+              subtitle: 'Active followers',
+              onTap: _viewAllCustomers,
+            ),
+            DashboardStatCard(
+              title: 'Barbers',
+              value: '$_activeBarbers',
+              icon: Icons.content_cut,
+              color: Colors.green,
+              onTap: _navigateToBarberList,
+            ),
+            DashboardStatCard(
+              title: 'Revenue',
+              value: 'Rs. $_totalRevenue',
+              icon: Icons.currency_rupee,
+              color: Colors.orange,
+              onTap: _viewRevenue,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: DashboardStatCard(
+                  title: "Today's",
+                  value: '$_todayAppointments',
+                  icon: Icons.calendar_today,
+                  color: Colors.blue,
+                  subtitle:
+                      '$_completedToday completed, $_pendingBookings pending',
+                  onTap: _viewBookings,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DashboardStatCard(
+                  title: 'Customers',
+                  value: '$_totalCustomers',
+                  icon: Icons.people,
+                  color: Colors.purple,
+                  subtitle: 'Active followers',
+                  onTap: _viewAllCustomers,
+                ),
+              ),
+            ],
           ),
-          DashboardStatCard(
-            title: 'Customers',
-            value: '$_totalCustomers',
-            icon: Icons.people,
-            color: Colors.purple,
-            subtitle: 'Active followers',
-            onTap: _viewAllCustomers,
+        ),
+        const SizedBox(height: 12),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: DashboardStatCard(
+                  title: 'Barbers',
+                  value: '$_activeBarbers',
+                  icon: Icons.content_cut,
+                  color: Colors.green,
+                  onTap: _navigateToBarberList,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DashboardStatCard(
+                  title: 'Revenue',
+                  value: 'Rs. $_totalRevenue',
+                  icon: Icons.currency_rupee,
+                  color: Colors.orange,
+                  fullWidth: true,
+                  onTap: _viewRevenue,
+                ),
+              ),
+            ],
           ),
-          DashboardStatCard(
-            title: 'Barbers',
-            value: '$_activeBarbers',
-            icon: Icons.content_cut,
-            color: Colors.green,
-            onTap: _navigateToBarberList,
-          ),
-          DashboardStatCard(
-            title: 'Revenue',
-            value: 'Rs. $_totalRevenue',
-            icon: Icons.currency_rupee,
-            color: Colors.orange,
-            onTap: _viewRevenue,
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
-
-  return Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Expanded(
-              child: DashboardStatCard(
-                title: "Today's",
-                value: '$_todayAppointments',
-                icon: Icons.calendar_today,
-                color: Colors.blue,
-                subtitle: '$_completedToday completed, $_pendingBookings pending',
-                onTap: _viewBookings,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: DashboardStatCard(
-                title: 'Customers',
-                value: '$_totalCustomers',
-                icon: Icons.people,
-                color: Colors.purple,
-                subtitle: 'Active followers',
-                onTap: _viewAllCustomers,
-              ),
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 12),
-      Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Expanded(
-              child: DashboardStatCard(
-                title: 'Barbers',
-                value: '$_activeBarbers',
-                icon: Icons.content_cut,
-                color: Colors.green,
-                onTap: _navigateToBarberList,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: DashboardStatCard(
-                title: 'Revenue',
-                value: 'Rs. $_totalRevenue',
-                icon: Icons.currency_rupee,
-                color: Colors.orange,
-                fullWidth: true,
-                onTap: _viewRevenue,
-              ),
-            ),
-          ],
-        ),
-      ),
-    ],
-  );
-}
 
   // ============================================================
   // ✅ BUILD METHOD - WITH EDGE-TO-EDGE SUPPORT
@@ -1891,6 +1907,112 @@ Widget _buildResponsiveStatCards() {
 
     _checkScreenSize();
 
+    // ✅ loading screen - first status check complete වෙනකම්
+    if (_isCheckingStatus) {
+      return Scaffold(
+        key: _scaffoldKey,
+        appBar: AppBar(
+          backgroundColor: AppTheme.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu, color: Colors.white),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+              tooltip: 'Menu',
+              iconSize: 28,
+            ),
+          ),
+          title: null,
+          actions: [_buildProfileImage()],
+        ),
+        drawer: SideMenu(
+          userRole: 'owner',
+          userName: _userName,
+          userEmail: _userEmail,
+          profileImageUrl: _profileImageUrl,
+          onMenuItemSelected: () {},
+        ),
+        body: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: AppTheme.primary),
+              SizedBox(height: 16),
+              Text('Loading your dashboard...'),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // ✅ inactive/blocked screen
+    if (!_isActive) {
+      return Scaffold(
+        key: _scaffoldKey,
+        appBar: AppBar(
+          backgroundColor: AppTheme.primary,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          leading: Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu, color: Colors.white),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+              tooltip: 'Menu',
+              iconSize: 28,
+            ),
+          ),
+          title: null,
+          actions: [_buildProfileImage()],
+        ),
+        drawer: SideMenu(
+          userRole: 'owner',
+          userName: _userName,
+          userEmail: _userEmail,
+          profileImageUrl: _profileImageUrl,
+          onMenuItemSelected: () {},
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.person_off_outlined,
+                size: 64,
+                color: Colors.grey[400],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Profile Inactive',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey[700],
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Your owner profile is not active.\nPlease contact support for assistance.',
+                style: TextStyle(fontSize: 14, color: Colors.grey[500]),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _loadAllData,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Check Status'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
@@ -2558,7 +2680,7 @@ Widget _buildResponsiveStatCards() {
     const pink = AppTheme.primary;
     const green = Color(0xFF22C55E);
     final pct = _totalSteps == 0 ? 0.0 : _completedSteps / _totalSteps;
-    
+
     final screenWidth = MediaQuery.of(context).size.width;
     final isDesktop = screenWidth > 800;
     final isDark = context.isDarkMode;
