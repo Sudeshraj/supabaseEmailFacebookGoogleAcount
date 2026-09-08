@@ -2,6 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
@@ -965,11 +967,17 @@ class _HelpScreenState extends State<HelpScreen> {
         titleSpacing: 0,
         leading: IconButton(
           icon: Icon(Icons.arrow_back, color: textColor),
-          onPressed: () {
+          onPressed: () async {
             if (context.canPop()) {
               context.pop();
             } else {
-              context.go('/');
+              if (appState.loggedIn) {
+                context.go('/');
+              } else {
+                final hasProfile = await SessionManager.hasProfile();
+                if (!context.mounted) return;
+                context.go(hasProfile ? '/continue' : '/login');
+              }
             }
           },
         ),
