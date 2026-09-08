@@ -394,8 +394,48 @@ class _ContinueScreenState extends State<ContinueScreen> {
         final displayName = _getDisplayName(profile);
         profile['display_name'] = displayName;
 
+        // ═══════════════════════════════════════════════════════════
+        // 🔥 FIX: Roles empty කියලා profile එකම skip කරන්නේ නෑ.
+        // Previously: `continue` දාලා profile එකම expandedProfiles
+        // list එකට add වෙන්නෙම නැති නිසා, "role select කරලා නැති"
+        // (reg flow එක complete කරලා නැති) user කෙනෙක්ගේ profile එකම
+        // Continue screen එකේ පේන්නෙම නෑ - "No Saved Profiles"
+        // කියලා පෙන්නනවා, ඒත් SharedPreferences එකේ profile එකම
+        // තියෙනවා.
+        //
+        // Fix: role-less profile එකක් විදිහටම (empty roles: [])
+        // list එකට add කරනවා. _buildProfileCard() එකේදී මේකට
+        // special UI badge එකක් (roles-select-ම කරලා නෑ) පෙන්නනවා,
+        // සහ _handleProfileLogin() එකේදී login success උනාට පස්සේ
+        // verify-email/reg screen එකට redirect කරනවා.
+        // ═══════════════════════════════════════════════════════════
         if (roles.isEmpty) {
-          debugPrint('  → Skipping profile with no roles: $email');
+          debugPrint(
+            '  → Profile has NO roles (registration incomplete): $email - adding as role-less card',
+          );
+
+          final newProfile = Map<String, dynamic>.from(profile);
+          newProfile['lastLogin'] = profileLastLogin;
+          newProfile['display_name'] = displayName;
+          newProfile['roles'] = <String>[];
+
+          String? syncedPhoto = photoMap[email];
+          if (syncedPhoto == null || syncedPhoto.isEmpty) {
+            syncedPhoto = savedPhotoMap[email];
+          }
+          if (syncedPhoto == null || syncedPhoto.isEmpty) {
+            syncedPhoto = newProfile['photo'] as String?;
+          }
+          if (syncedPhoto != null && syncedPhoto.isNotEmpty) {
+            newProfile['photo'] = syncedPhoto;
+          }
+
+          // Role නැති නිසා DB role-status check කරන්න දෙයක් නෑ -
+          // status එකම 'active' විදිහටම තියාගන්නවා, card එකේ
+          // "Complete Registration" badge එකෙන් වෙනස කියනවා.
+          newProfile['status'] = 'active';
+
+          expandedProfiles.add(newProfile);
           continue;
         }
 
@@ -662,7 +702,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (loginSuccess) {
         debugPrint('✅ Auto login successful! (NO POPUP)');
         await SessionManager.setCurrentUser(email);
-        await SessionManager.saveCurrentRole(role);
+        // role empty (role-less profile) නම් null/empty save කරන්නේ නෑ
+        if (role.isNotEmpty) {
+          await SessionManager.saveCurrentRole(role);
+        }
       } else {
         debugPrint('❌ Auto-login failed');
 
@@ -672,7 +715,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
         if (loginSuccess) {
           debugPrint('✅ Direct session restore successful! (NO POPUP)');
           await SessionManager.setCurrentUser(email);
-          await SessionManager.saveCurrentRole(role);
+          if (role.isNotEmpty) {
+            await SessionManager.saveCurrentRole(role);
+          }
         } else {
           debugPrint('❌ Direct session restore failed');
 
@@ -700,7 +745,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       response.user!.userMetadata?['full_name'] ??
                       email.split('@').first,
                   photo: response.user!.userMetadata?['avatar_url'],
-                  roles: [role],
+                  roles: role.isNotEmpty ? [role] : [],
                   rememberMe: true,
                   provider: 'email',
                   refreshToken: response.session?.refreshToken,
@@ -721,7 +766,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
       }
 
       if (loginSuccess && mounted) {
-        debugPrint('✅ Login successful for role: $role');
+        debugPrint('✅ Login successful for role: ${role.isEmpty ? "(none)" : role}');
 
         final savedToken = await SessionManager.getRefreshToken(email);
         debugPrint(
@@ -729,23 +774,64 @@ class _ContinueScreenState extends State<ContinueScreen> {
         );
 
         await SessionManager.setCurrentUser(email);
-        await SessionManager.saveCurrentRole(role);
-        debugPrint('💾 Saved role: $role to SessionManager');
+        if (role.isNotEmpty) {
+          await SessionManager.saveCurrentRole(role);
+          debugPrint('💾 Saved role: $role to SessionManager');
 
-        final currentUser = supabase.auth.currentUser;
-        if (currentUser != null) {
-          await supabase.auth.updateUser(
-            UserAttributes(
-              data: {...currentUser.userMetadata ?? {}, 'current_role': role},
-            ),
-          );
-          debugPrint('📝 Updated user metadata with role: $role');
+          final currentUser = supabase.auth.currentUser;
+          if (currentUser != null) {
+            await supabase.auth.updateUser(
+              UserAttributes(
+                data: {
+                  ...currentUser.userMetadata ?? {},
+                  'current_role': role,
+                },
+              ),
+            );
+            debugPrint('📝 Updated user metadata with role: $role');
+          }
         }
 
         await SessionManager.setPendingQuickLogout(false);
         await appState.refreshState();
         if (!mounted) return;
-        context.go('/');
+
+        // ═══════════════════════════════════════════════════════════
+        // 🔥 FIX: role.isEmpty (role select කරලා නෑ / reg flow එක
+        // complete කරලා නෑ) නම්, කෙලින්ම '/' route එකට යනවා වෙනුවට
+        // explicit විදිහටම නිවැරදි screen එකට redirect කරනවා:
+        //   - Email/Password account, email verify කරලා නෑ නම්
+        //     → /verify-email
+        //   - Email/Password account, email verify කරලා තියෙනවා නම්
+        //     → /reg
+        //   - OAuth account (google/facebook/apple) නම් කෙලින්ම
+        //     → /reg  (Supabase OAuth accounts auto-verified නිසා
+        //       verify-email screen එකක් අවශ්‍ය නෑ)
+        //
+        // role.isNotEmpty නම් (සාමාන්‍ය case), '/' route එකට යනවා -
+        // router redirect logic එකෙන්ම (main.dart) නිවැරදි
+        // dashboard එකට යනවා.
+        // ═══════════════════════════════════════════════════════════
+        if (role.isEmpty) {
+          final currentUser = supabase.auth.currentUser;
+          final isOAuth = provider != null && provider != 'email';
+
+          if (!isOAuth) {
+            final isVerified = currentUser?.emailConfirmedAt != null;
+            if (!isVerified) {
+              debugPrint('📧 Role-less email account, not verified → /verify-email');
+              context.go('/verify-email');
+              return;
+            }
+          }
+
+          debugPrint(
+            '📝 Role-less ${isOAuth ? "OAuth" : "email"} account, verified/OAuth → /reg',
+          );
+          context.go('/reg');
+        } else {
+          context.go('/');
+        }
       } else if (userCancelled) {
         debugPrint('⏭️ Login cancelled by user - no error shown');
       } else {
@@ -787,7 +873,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final provider = profile['provider'] as String?;
     if (email == null || provider == null) return _OAuthAttemptResult.failed;
     final roles = profile['roles'] as List? ?? [];
-    final role = roles.isNotEmpty ? roles.first.toString() : 'customer';
+    // role-less profile (roles empty) නම් pending role selection එකක්
+    // save කරන්නේ නෑ - 'customer' කියලා hardcode කරලා default දාන්නෙත්
+    // නෑ, ඒක වැරදියි (role select කරලාම නෑ නම් customer කියලා assume
+    // කරන්න බෑ).
+    final role = roles.isNotEmpty ? roles.first.toString() : '';
 
     try {
       final currentUser = supabase.auth.currentUser;
@@ -805,7 +895,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
         return _OAuthAttemptResult.success;
       }
 
-      await SessionManager.setPendingRoleSelection(email: email, role: role);
+      if (role.isNotEmpty) {
+        await SessionManager.setPendingRoleSelection(email: email, role: role);
+      }
 
       switch (provider) {
         case 'google':
@@ -841,22 +933,26 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     photo:
                         response.user!.userMetadata?['avatar_url'] ??
                         authData['photoUrl'],
-                    roles: [role],
+                    roles: role.isNotEmpty ? [role] : [],
                     rememberMe: true,
                     provider: 'google',
                     refreshToken: response.session?.refreshToken,
                     accessToken: response.session?.accessToken,
                   );
 
-                  await _addToAvailableProfiles(
-                    email: email,
-                    role: role,
-                    userId: response.user!.id,
-                    photo: authData['photoUrl'],
-                  );
+                  if (role.isNotEmpty) {
+                    await _addToAvailableProfiles(
+                      email: email,
+                      role: role,
+                      userId: response.user!.id,
+                      photo: authData['photoUrl'],
+                    );
+                  }
 
                   await SessionManager.setCurrentUser(email);
-                  await SessionManager.saveCurrentRole(role);
+                  if (role.isNotEmpty) {
+                    await SessionManager.saveCurrentRole(role);
+                  }
 
                   debugPrint(
                     '✅ Continue screen: Profile saved with refresh token',
@@ -915,22 +1011,26 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         response.user!.userMetadata?['full_name'] ??
                         email.split('@').first,
                     photo: response.user!.userMetadata?['avatar_url'],
-                    roles: [role],
+                    roles: role.isNotEmpty ? [role] : [],
                     rememberMe: true,
                     provider: 'facebook',
                     refreshToken: response.session?.refreshToken,
                     accessToken: response.session?.accessToken,
                   );
 
-                  await _addToAvailableProfiles(
-                    email: email,
-                    role: role,
-                    userId: response.user!.id,
-                    photo: response.user!.userMetadata?['avatar_url'],
-                  );
+                  if (role.isNotEmpty) {
+                    await _addToAvailableProfiles(
+                      email: email,
+                      role: role,
+                      userId: response.user!.id,
+                      photo: response.user!.userMetadata?['avatar_url'],
+                    );
+                  }
 
                   await SessionManager.setCurrentUser(email);
-                  await SessionManager.saveCurrentRole(role);
+                  if (role.isNotEmpty) {
+                    await SessionManager.saveCurrentRole(role);
+                  }
 
                   return _OAuthAttemptResult.success;
                 }
@@ -1000,22 +1100,26 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         response.user!.userMetadata?['full_name'] ??
                         email.split('@').first,
                     photo: response.user!.userMetadata?['avatar_url'],
-                    roles: [role],
+                    roles: role.isNotEmpty ? [role] : [],
                     rememberMe: true,
                     provider: 'apple',
                     refreshToken: response.session?.refreshToken,
                     accessToken: response.session?.accessToken,
                   );
 
-                  await _addToAvailableProfiles(
-                    email: email,
-                    role: role,
-                    userId: response.user!.id,
-                    photo: response.user!.userMetadata?['avatar_url'],
-                  );
+                  if (role.isNotEmpty) {
+                    await _addToAvailableProfiles(
+                      email: email,
+                      role: role,
+                      userId: response.user!.id,
+                      photo: response.user!.userMetadata?['avatar_url'],
+                    );
+                  }
 
                   await SessionManager.setCurrentUser(email);
-                  await SessionManager.saveCurrentRole(role);
+                  if (role.isNotEmpty) {
+                    await SessionManager.saveCurrentRole(role);
+                  }
 
                   return _OAuthAttemptResult.success;
                 }
@@ -1057,7 +1161,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
               userId: user!.id,
               name: user.userMetadata?['full_name'] ?? email.split('@').first,
               photo: user.userMetadata?['avatar_url'],
-              roles: [role],
+              roles: role.isNotEmpty ? [role] : [],
               rememberMe: true,
               provider: provider,
               refreshToken: session.refreshToken,
@@ -1065,7 +1169,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
             );
           }
           await SessionManager.setCurrentUser(email);
-          await SessionManager.saveCurrentRole(role);
+          if (role.isNotEmpty) {
+            await SessionManager.saveCurrentRole(role);
+          }
           return _OAuthAttemptResult.success;
         }
       }
@@ -1235,7 +1341,15 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final email = profile['email'] as String? ?? 'Unknown';
     final provider = profile['provider'] as String? ?? 'email';
     final roles = profile['roles'] as List? ?? [];
-    final profileRole = roles.isNotEmpty ? roles.first.toString() : 'customer';
+
+    // ═══════════════════════════════════════════════════════════
+    // 🔥 FIX: role empty (role select කරලා නෑ) profile එකකට 'customer'
+    // කියලා default දාන්නේ නෑ - ඒක වැරදියි. hasRole = false විදිහටම
+    // තියාගෙන, UI එකට වෙනස් "Complete Registration" badge එකක්
+    // පෙන්නනවා.
+    // ═══════════════════════════════════════════════════════════
+    final bool hasRole = roles.isNotEmpty;
+    final profileRole = hasRole ? roles.first.toString() : '';
     final uniqueId = '$email-$index-$profileRole';
     final isLoading = _profileLoadingStates[uniqueId] == true;
     final isSelected = _selectedProfiles.contains(uniqueId);
@@ -1245,9 +1359,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
     final lastLogin = profile['lastLogin'] as String?;
-    final roleColor = _getRoleColor(profileRole);
-    final roleIcon = _getRoleIcon(profileRole);
-    final roleDisplayName = _getRoleDisplayName(profileRole);
+    final roleColor = hasRole ? _getRoleColor(profileRole) : Colors.orange;
+    final roleIcon = hasRole ? _getRoleIcon(profileRole) : Icons.person_add_alt_1;
+    final roleDisplayName =
+        hasRole ? _getRoleDisplayName(profileRole) : 'Complete Registration';
     final providerColor = _getProviderColor(provider);
 
     final status = profile['status'] as String? ?? 'active';
@@ -1264,6 +1379,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
 
     final borderColor = isSelected
         ? primaryColor.withValues(alpha: 0.3)
+        : !hasRole
+        ? Colors.orange.withValues(alpha: 0.35)
         : isScheduledForDeletion
         ? Colors.orange.withValues(alpha: 0.3)
         : isInactive
@@ -1312,7 +1429,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isScheduledForDeletion
+                          color: !hasRole
+                              ? Colors.orange.withValues(alpha: 0.5)
+                              : isScheduledForDeletion
                               ? Colors.orange.withValues(alpha: 0.5)
                               : isInactive
                               ? Colors.grey.withValues(alpha: 0.3)
@@ -1322,7 +1441,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                         boxShadow: [
                           BoxShadow(
                             color:
-                                (isScheduledForDeletion
+                                (!hasRole
+                                        ? Colors.orange
+                                        : isScheduledForDeletion
                                         ? Colors.orange
                                         : isInactive
                                         ? Colors.grey
@@ -1380,7 +1501,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           height: 28,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isScheduledForDeletion
+                            color: !hasRole
+                                ? Colors.orange
+                                : isScheduledForDeletion
                                 ? Colors.orange
                                 : isInactive
                                 ? Colors.grey
@@ -1394,7 +1517,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             boxShadow: [
                               BoxShadow(
                                 color:
-                                    (isScheduledForDeletion
+                                    (!hasRole
+                                            ? Colors.orange
+                                            : isScheduledForDeletion
                                             ? Colors.orange
                                             : isInactive
                                             ? Colors.grey
@@ -1492,7 +1617,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           ),
                         ),
                         // Status Badge (informational only)
-                        if (!isActive)
+                        if (!isActive && hasRole)
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 6,
@@ -1537,7 +1662,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           ),
                           decoration: BoxDecoration(
                             color:
-                                (isScheduledForDeletion
+                                (!hasRole
+                                        ? Colors.orange
+                                        : isScheduledForDeletion
                                         ? Colors.orange
                                         : isInactive
                                         ? Colors.grey
@@ -1548,7 +1675,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           child: Text(
                             roleDisplayName,
                             style: TextStyle(
-                              color: isScheduledForDeletion
+                              color: !hasRole
+                                  ? Colors.orange
+                                  : isScheduledForDeletion
                                   ? Colors.orange
                                   : isInactive
                                   ? Colors.grey
@@ -1590,7 +1719,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   height: 32,
                   decoration: BoxDecoration(
                     color:
-                        (isScheduledForDeletion
+                        (!hasRole
+                                ? Colors.orange
+                                : isScheduledForDeletion
                                 ? Colors.orange
                                 : isInactive
                                 ? Colors.grey
@@ -1601,7 +1732,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                   child: Icon(
                     Icons.arrow_forward_ios,
                     color:
-                        (isScheduledForDeletion
+                        (!hasRole
+                                ? Colors.orange
+                                : isScheduledForDeletion
                                 ? Colors.orange
                                 : isInactive
                                 ? Colors.grey
@@ -1765,7 +1898,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         final email = profiles[i]['email'] as String? ?? '';
         final role = profiles[i]['roles']?.isNotEmpty == true
             ? profiles[i]['roles'].first
-            : 'customer';
+            : '';
         if (email.isNotEmpty) {
           _selectedProfiles.add('$email-$i-$role');
         }
