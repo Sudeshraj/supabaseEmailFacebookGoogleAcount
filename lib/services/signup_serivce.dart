@@ -10,6 +10,19 @@ import 'package:flutter_application_1/screens/authantication/functions/loading_o
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 
+// ============================================================
+// ✅ NEW: result type so callers (DataConsentScreen) know exactly
+// what happened instead of the error being swallowed silently.
+// ============================================================
+enum RegisterStatus { success, userExists, rateLimited, failure }
+
+class RegisterResult {
+  final RegisterStatus status;
+  final String? message;
+
+  const RegisterResult(this.status, [this.message]);
+}
+
 class AuthService {
   static final AuthService _instance = AuthService._internal();
   factory AuthService() => _instance;
@@ -22,51 +35,65 @@ class AuthService {
   // REGISTER NEW USER
   // =========================================================================================
 
-  Future<void> registerUser({
+  Future<RegisterResult> registerUser({
     required BuildContext context,
     required String email,
     required String password,
     bool rememberMe = true,
     bool marketingConsent = false,
   }) async {
+    // ✅ FIX: tracks whether LoadingOverlay.show() was actually called,
+    // so the `finally` block below only tries to hide it when it was
+    // shown in the first place.
+    bool overlayShown = false;
     try {
       // ✅ Validate inputs
       if (!_isValidEmail(email)) {
         _showErrorAlert(context, 'Invalid email format');
-        return;
+        return const RegisterResult(
+          RegisterStatus.failure,
+          'Invalid email format',
+        );
       }
 
       if (!_isValidPassword(password)) {
         _showErrorAlert(context, 'Password must be at least 6 characters');
-        return;
+        return const RegisterResult(
+          RegisterStatus.failure,
+          'Password must be at least 6 characters',
+        );
       }
 
       // Show loading overlay
       LoadingOverlay.show(context, message: "Creating account...");
+      overlayShown = true;
 
       final now = DateTime.now().toIso8601String();
 
-      // ✅ FIRST: Check if user already exists BEFORE trying to register
-      try {
-        await _supabase.auth.signInWithPassword(
-          email: email.trim(),
-          password: password.trim(),
-        );
+      // ============================================================
+      // ❌ REMOVED: the old code called signInWithPassword() FIRST
+      // just to "check" if the user already existed, and then called
+      // signUp() right after. That meant every single registration
+      // attempt fired TWO auth API requests, which is what was
+      // tripping Supabase's rate limiter (429 Too Many Requests)
+      // during testing.
+      //
+      // signUp() already tells us if the user exists via
+      // `user?.identities?.isEmpty`, so the extra signIn call was
+      // pure waste. Removed entirely.
+      // ============================================================
 
-        // If sign in succeeds, user exists
-        LoadingOverlay.hide();
-        if (!context.mounted) return;
-        await _handleExistingUser(context, email);
-        return;
-      } on AuthException catch (e) {
-        // Expected - user doesn't exist or wrong password
-        debugPrint('🔍 User check: ${e.message}');
-      } catch (e) {
-        // Other errors, continue with registration
-        debugPrint('🔍 User check error: $e');
-      }
-
-      // ✅ Perform registration
+      // ✅ Perform registration directly
+      // ============================================================
+      // ✅ FIX: added .timeout(...). On web, a 429 (Too Many Requests)
+      // response can sometimes leave this Future neither completing
+      // nor throwing in Dart — the browser network tab shows the 429,
+      // but no exception ever reaches our try/catch, so the loading
+      // overlay and the button spinner were stuck forever waiting for
+      // a Future that was never going to resolve. A client-side
+      // timeout guarantees this call always settles one way or the
+      // other, regardless of the underlying cause.
+      // ============================================================
       final response = await _supabase.auth.signUp(
         email: email.trim(),
         password: password.trim(),
@@ -85,6 +112,14 @@ class AuthService {
           'profile_status': 'active',
           'profile_created': false,
         },
+      ).timeout(
+        const Duration(seconds: 20),
+        onTimeout: () {
+          throw TimeoutException(
+            'Registration request timed out. This usually means too many '
+            'attempts were made recently — please wait a minute and try again.',
+          );
+        },
       );
 
       final user = response.user;
@@ -92,9 +127,9 @@ class AuthService {
       // ✅ Check if user already exists (identities empty)
       if (user?.identities?.isEmpty ?? true) {
         LoadingOverlay.hide();
-        if (!context.mounted) return;
+        if (!context.mounted) return const RegisterResult(RegisterStatus.userExists);
         await _handleExistingUser(context, email);
-        return;
+        return const RegisterResult(RegisterStatus.userExists);
       }
 
       // ✅ If user is null, throw error
@@ -104,7 +139,8 @@ class AuthService {
 
       debugPrint('✅ User created: ${user.id}');
       debugPrint('📝 Initial metadata: ${user.userMetadata}');
-      if (!context.mounted) return;
+      if (!context.mounted) return const RegisterResult(RegisterStatus.success);
+
       // ✅ Create initial profile with default status
       await _createInitialProfile(
         context: context,
@@ -118,9 +154,22 @@ class AuthService {
       // ✅ Navigate to verify email
       LoadingOverlay.hide();
 
-      if (!context.mounted) return;
+      if (!context.mounted) return const RegisterResult(RegisterStatus.success);
 
-      await _handleSuccessfulRegistration(
+      // ============================================================
+      // ✅ FIX: _handleSuccessfulRegistration() used to be "fire and
+      // forget" here — if it failed internally (its own try/catch
+      // just shows an alert and does NOT navigate), registerUser()
+      // still unconditionally returned RegisterStatus.success. The
+      // caller (DataConsentScreen) does nothing on success other
+      // than expect navigation to dispose the screen — so when
+      // navigation silently never happened, the "Create Account"
+      // button's loading spinner was stuck forever behind the error
+      // alert. Now we capture whether it actually navigated and
+      // return a real failure status when it didn't, so the caller
+      // can reset its loading state.
+      // ============================================================
+      final navigated = await _handleSuccessfulRegistration(
         context,
         user,
         email,
@@ -128,19 +177,125 @@ class AuthService {
         response.session?.refreshToken,
         marketingConsent,
       );
+
+      if (!navigated) {
+        return const RegisterResult(
+          RegisterStatus.failure,
+          'Account created, but we couldn\'t continue automatically. Please try again.',
+        );
+      }
+
+      return const RegisterResult(RegisterStatus.success);
     } on AuthException catch (e) {
       LoadingOverlay.hide();
-      if (!context.mounted) return;
-      await _handleAuthException(context, e, 'Registration');
+
+      // ============================================================
+      // ✅ NEW: detect rate limiting explicitly (HTTP 429) so the UI
+      // can show a specific "please wait" message instead of a
+      // generic failure.
+      // ============================================================
+      final isRateLimited = e.statusCode == '429' ||
+          e.message.toLowerCase().contains('too many requests') ||
+          e.message.toLowerCase().contains('rate limit') ||
+          e.message.toLowerCase().contains('over_email_send_rate_limit');
+
+      // ============================================================
+      // ✅ FIX: this used to `await _handleAuthException(...)`, which
+      // shows a modal alert dialog and BLOCKS this function from
+      // returning until the user dismisses it. That meant the caller
+      // (DataConsentScreen) couldn't reset its own loading spinner
+      // until the dialog was dismissed — so the button kept spinning
+      // the whole time the error dialog was up, making it look like
+      // "the loading never stops when the error appears".
+      //
+      // DataConsentScreen already renders result.message in its own
+      // inline error banner, so the popup dialog was redundant too.
+      // Removed entirely — we just compute the friendly message and
+      // return immediately so the caller's UI updates the instant the
+      // error is known, with no dialog to dismiss first.
+      // ============================================================
+      final friendlyMessage = _getUserFriendlyErrorMessage(e);
+
+      return RegisterResult(
+        isRateLimited ? RegisterStatus.rateLimited : RegisterStatus.failure,
+        friendlyMessage,
+      );
+    } on TimeoutException catch (e) {
+      // ============================================================
+      // ✅ NEW: the request never resolved within our client-side
+      // timeout (see the .timeout(...) added to signUp() above).
+      // Treated the same as a rate-limit failure — it's the most
+      // common real-world cause on web — so the UI shows a "please
+      // wait and try again" message rather than a generic error.
+      //
+      // ✅ FIX: no longer awaits showCustomAlert(...) — same reasoning
+      // as the AuthException branch above: returns immediately so the
+      // caller's loading state resets instantly instead of waiting on
+      // a dialog dismissal.
+      // ============================================================
+      LoadingOverlay.hide();
+      return RegisterResult(
+        RegisterStatus.rateLimited,
+        e.message ?? 'The request took too long. Please try again.',
+      );
     } catch (e, stackTrace) {
       LoadingOverlay.hide();
-      if (!context.mounted) return;
-      await _handleGenericException(context, e, stackTrace, 'Registration');
+      developer.log(
+        'Registration error: $e',
+        name: _tag,
+        error: e,
+        stackTrace: stackTrace,
+      );
+      // ✅ FIX: same reasoning — return immediately instead of
+      // awaiting _handleGenericException's dialog, so the caller's
+      // loading spinner resets right away.
+      return const RegisterResult(
+        RegisterStatus.failure,
+        'An unexpected error occurred. Please try again.',
+      );
+    } finally {
+      // ✅ FIX: guaranteed safety net. Every branch above already calls
+      // LoadingOverlay.hide() explicitly at the right moment, but this
+      // finally block ensures it NEVER stays stuck on screen even if a
+      // future code path forgets to hide it, or an exception occurs
+      // somewhere hide() wasn't yet called.
+      //
+      // Deliberately does NOT go through _safeHideOverlay(context) —
+      // passing a BuildContext across this async gap trips the
+      // use_build_context_synchronously lint, and the context argument
+      // was never actually used by that helper anyway (LoadingOverlay
+      // is a global overlay, not tied to this context). Hiding it here
+      // is intentionally context-free.
+      if (overlayShown) {
+        try {
+          LoadingOverlay.hide();
+        } catch (e) {
+          developer.log('Error hiding overlay in finally: $e', name: _tag);
+        }
+      }
     }
   }
 
   // ============================================================
   // ✅ CREATE INITIAL PROFILE WITH DEFAULT STATUS
+  // ------------------------------------------------------------
+  // ✅ FIX: this used to INSERT the profiles row from the client,
+  // right after signUp(). When "Confirm email" is enabled in
+  // Supabase Auth, signUp() returns response.session = null until
+  // the user verifies their email — so the client is still
+  // unauthenticated (auth.uid() is null) at this point, and the
+  // profiles_insert RLS policy (auth.uid() = id) rejects the
+  // insert with 403 / 42501.
+  //
+  // The profiles row is now created server-side by a Postgres
+  // trigger on auth.users (see fix_profile_trigger.sql — it runs
+  // SECURITY DEFINER and bypasses RLS, firing regardless of
+  // email-confirmation state). So by the time this function runs,
+  // the row already exists — this now just UPDATEs it with the
+  // consent-related fields the trigger doesn't know about.
+  // If for some reason the row genuinely isn't there yet (e.g.
+  // trigger not yet applied), this fails silently and login-time
+  // profile checks will create it as a fallback.
   // ============================================================
   Future<void> _createInitialProfile({
     required BuildContext context,
@@ -151,27 +306,17 @@ class AuthService {
     required bool marketingConsent,
   }) async {
     try {
-      debugPrint('📝 Creating initial profile for user: ${user.id}');
+      debugPrint('📝 Updating initial profile for user: ${user.id}');
 
-      // ✅ Create profile with default status
-      await _supabase.from('profiles').insert({
-        'id': user.id,
+      // ✅ Row already exists (created by the auth.users trigger) —
+      // just update it, don't insert.
+      await _supabase.from('profiles').update({
         'email': email,
         'full_name': email.split('@').first,
-        'extra_data': {
-          'profile_status': {
-            'status': 'active',
-            'created_at': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-          },
-        },
-        'is_active': true,
-        'is_blocked': false,
-        'created_at': DateTime.now().toIso8601String(),
         'updated_at': DateTime.now().toIso8601String(),
-      });
+      }).eq('id', user.id);
 
-      debugPrint('✅ Initial profile created for user: ${user.id}');
+      debugPrint('✅ Initial profile updated for user: ${user.id}');
 
       // ✅ Save to SessionManager
       await SessionManager.saveUserProfile(
@@ -202,15 +347,24 @@ class AuthService {
 
       debugPrint('✅ Initial profile setup complete for: $email');
     } catch (e) {
-      debugPrint('❌ Error creating initial profile: $e');
-      rethrow;
+      // ✅ Non-fatal: the profiles row already exists (created by
+      // the auth.users trigger). Failing to update it with these
+      // extra fields shouldn't block the whole registration flow —
+      // log it and continue.
+      debugPrint('⚠️ Could not update initial profile (non-fatal): $e');
     }
   }
 
   // ============================================================
   // ✅ REGISTRATION SUCCESS HANDLER
+  // ------------------------------------------------------------
+  // ✅ FIX: now returns bool — true only if navigation to
+  // /verify-email actually happened. The caller (registerUser())
+  // uses this to decide the real RegisterResult instead of always
+  // assuming success, which used to leave the caller's loading
+  // spinner stuck on-screen whenever this failed silently.
   // ============================================================
-  Future<void> _handleSuccessfulRegistration(
+  Future<bool> _handleSuccessfulRegistration(
     BuildContext context,
     User user,
     String email,
@@ -256,29 +410,35 @@ class AuthService {
         context.go('/verify-email');
 
         // Show success message
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  rememberMe
-                      ? 'Account created! Check your email for verification.'
-                      : 'Account created! Please verify your email.',
-                ),
-                duration: const Duration(seconds: 4),
-                backgroundColor: Colors.green,
-                action: SnackBarAction(
-                  label: 'OK',
-                  textColor: Colors.white,
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                  },
-                ),
-              ),
-            );
-          }
-        });
+        // WidgetsBinding.instance.addPostFrameCallback((_) {
+        //   if (context.mounted) {
+        //     ScaffoldMessenger.of(context).showSnackBar(
+        //       SnackBar(
+        //         content: Text(
+        //           rememberMe
+        //               ? 'Account created! Check your email for verification.'
+        //               : 'Account created! Please verify your email.',
+        //         ),
+        //         duration: const Duration(seconds: 4),
+        //         backgroundColor: Colors.green,
+        //         action: SnackBarAction(
+        //           label: 'OK',
+        //           textColor: Colors.white,
+        //           onPressed: () {
+        //             ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        //           },
+        //         ),
+        //       ),
+        //     );
+        //   }
+        // });
+
+        return true; // ✅ navigation happened
       }
+
+      // context wasn't mounted — nothing we can do, treat as failure
+      // so the caller resets its loading state instead of hanging.
+      return false;
     } catch (e) {
       developer.log('❌ Error in registration handler: $e', name: _tag);
       if (context.mounted) {
@@ -289,6 +449,7 @@ class AuthService {
           isError: true,
         );
       }
+      return false; // ✅ navigation did NOT happen — caller must reset loading state
     }
   }
 
@@ -1040,7 +1201,9 @@ class AuthService {
       return 'Invalid email or password. Please check your credentials and try again.';
     } else if (message.contains('email not confirmed')) {
       return 'Please verify your email address before signing in. Check your inbox for the verification email.';
-    } else if (message.contains('too many requests')) {
+    } else if (message.contains('too many requests') ||
+        message.contains('rate limit') ||
+        e.statusCode == '429') {
       return 'Too many attempts. Please wait a few minutes and try again.';
     } else if (message.contains('network') || message.contains('connection')) {
       return 'Network error. Please check your internet connection.';

@@ -89,6 +89,12 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     return _acceptedTerms && _acceptedPrivacy && !_isLoading;
   }
 
+  // ============================================================
+  // ✅ FIXED: registration errors are no longer swallowed.
+  // AuthService.registerUser now returns a RegisterResult so this
+  // screen can show the real error (including rate-limit / 429)
+  // instead of silently resetting isLoading with no feedback.
+  // ============================================================
   Future<void> _handleContinue() async {
     if (!_isContinueEnabled || _isLoading) return;
 
@@ -100,7 +106,7 @@ class _DataConsentScreenState extends State<DataConsentScreen>
     try {
       debugPrint('Starting registration for: ${widget.email}');
 
-      await _authService.registerUser(
+      final result = await _authService.registerUser(
         context: context,
         email: widget.email,
         password: widget.password,
@@ -108,13 +114,57 @@ class _DataConsentScreenState extends State<DataConsentScreen>
         marketingConsent: _acceptedMarketing,
       );
 
-      debugPrint('Registration completed');
+      debugPrint('Registration result: ${result.status}');
+
+      if (!mounted) return;
+
+      switch (result.status) {
+        case RegisterStatus.success:
+          // Navigation to /verify-email is handled inside AuthService,
+          // which disposes this screen — so this setState normally
+          // never actually renders. It's here purely as a safety net:
+          // if navigation didn't happen for some reason, the button
+          // won't be left stuck spinning forever.
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+            });
+          }
+          break;
+
+        case RegisterStatus.userExists:
+          // AuthService already redirected to /login with a message.
+          // Same safety net as above.
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+            });
+          }
+          break;
+
+        case RegisterStatus.rateLimited:
+          setState(() {
+            _isLoading = false;
+            _errorMessage = result.message ??
+                'Too many attempts. Please wait a minute and try again.';
+          });
+          break;
+
+        case RegisterStatus.failure:
+          setState(() {
+            _isLoading = false;
+            _errorMessage =
+                result.message ?? 'Registration failed. Please try again.';
+          });
+          break;
+      }
     } catch (e) {
       debugPrint('Registration error: $e');
 
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _errorMessage = 'Something went wrong. Please try again.';
         });
       }
     }
@@ -169,16 +219,12 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
     return Scaffold(
       backgroundColor: backgroundColor,
-      // ✅ FIX: LayoutBuilder + SingleChildScrollView so the whole card can
-      // scroll and never overflow, regardless of screen height or content size.
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
             return SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
               child: ConstrainedBox(
-                // keeps the card vertically centered when content is shorter
-                // than the screen, but allows it to grow + scroll when taller.
                 constraints: BoxConstraints(minHeight: constraints.maxHeight),
                 child: Center(
                   child: FadeTransition(
@@ -188,10 +234,6 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                       child: ConstrainedBox(
                         constraints: BoxConstraints(maxWidth: maxWidth),
                         child: Container(
-                          // ❌ REMOVED: fixed `height: size.height - 40`
-                          // That forced an exact height, and once padding +
-                          // header + banner + buttons were added, there
-                          // wasn't enough room left → overflow.
                           margin: const EdgeInsets.symmetric(
                             horizontal: 24,
                             vertical: 20,
@@ -287,9 +329,6 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
                               const SizedBox(height: 20),
 
-                              // Main scrollable content
-                              // ❌ REMOVED: Expanded(SingleChildScrollView(...))
-                              // Not needed anymore since the whole card scrolls.
                               Text(
                                 'Final Step: Review & Accept',
                                 style: TextStyle(
