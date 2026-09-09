@@ -758,39 +758,81 @@ class _SideMenuState extends State<SideMenu> {
 
     final selectedRole = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        backgroundColor:
-            Theme.of(context).dialogTheme.backgroundColor ?? Colors.white,
-        title: const Text('Create New Profile'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('What type of profile would you like to create?'),
-              const SizedBox(height: 20),
-              ...availableRoles.map(
-                (role) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _buildProfileTypeOption(
-                    icon: _getRoleIcon(role),
-                    color: _getRoleColor(role),
-                    title: _getRoleDisplayName(role),
-                    description: _getRoleDescription(role),
-                    role: role,
+      builder: (context) {
+        // ✅ FINAL FIX: everything — title, description AND the
+        // "Cancel" button — now lives inside ONE single
+        // SingleChildScrollView. Previously the title/Cancel button
+        // sat OUTSIDE the scrollable area as "fixed" Column children;
+        // on a very short screen (e.g. a small preview/emulator
+        // window where the dialog only gets ~70-100px of height)
+        // those fixed pieces alone were already taller than the
+        // space available, so even a Flexible + scrollable content
+        // area couldn't prevent the RenderFlex overflow.
+        //
+        // By putting the ENTIRE dialog body in one scroll view, no
+        // matter how small maxHeight ends up being, the dialog will
+        // simply become scrollable instead of overflowing — it can
+        // never throw a "RenderFlex overflowed" error again,
+        // regardless of screen size, font scaling, or keyboard height.
+        final dialogMaxHeight = MediaQuery.of(context).size.height * 0.9;
+
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          backgroundColor:
+              Theme.of(context).dialogTheme.backgroundColor ?? Colors.white,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 400,
+              maxHeight: dialogMaxHeight,
+            ),
+            // ✅ Single scroll view wraps title + content + actions.
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Create New Profile',
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'What type of profile would you like to create?',
+                  ),
+                  const SizedBox(height: 20),
+                  ...availableRoles.map(
+                    (role) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: _buildProfileTypeOption(
+                        icon: _getRoleIcon(role),
+                        color: _getRoleColor(role),
+                        title: _getRoleDisplayName(role),
+                        description: _getRoleDescription(role),
+                        role: role,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
     if (selectedRole == null || !mounted) return;
