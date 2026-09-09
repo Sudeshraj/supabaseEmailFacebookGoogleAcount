@@ -128,42 +128,7 @@ void callbackDispatcher() {
 
     if (task == "supabaseDataSyncTask") {
       try {
-        // Initialize Firebase for background
-        // await Firebase.initializeApp(
-        //   options: DefaultFirebaseOptions.currentPlatform,
-        // );
-
-        // Initialize Supabase
-        // await Supabase.initialize(
-        //   url: environment.supabaseUrl,
-        //   publishableKey: environment.supabaseAnonKey,
-        // );
-
         debugPrint("📥 Syncing data with Supabase...");
-
-        // 🔌 YOUR SYNC LOGIC HERE
-        // Example:
-        // final supabase = Supabase.instance.client;
-        //
-        // // 1. Get pending sync items
-        // final pendingItems = await supabase
-        //     .from('pending_sync')
-        //     .select()
-        //     .eq('synced', false);
-        //
-        // // 2. Process each item
-        // for (var item in pendingItems) {
-        //   // Sync logic
-        //   await supabase
-        //       .from('pending_sync')
-        //       .update({'synced': true})
-        //       .eq('id', item['id']);
-        // }
-        //
-        // // 3. Update local storage
-        // final prefs = await SharedPreferences.getInstance();
-        // await prefs.setString('last_sync', DateTime.now().toIso8601String());
-
         return Future.value(true);
       } catch (e) {
         debugPrint("❌ Sync error: $e");
@@ -171,10 +136,8 @@ void callbackDispatcher() {
       }
     }
 
-    // ✅ Other task types
     if (task == "periodic_sync") {
       debugPrint("📅 Periodic sync task executed");
-      // Periodic sync logic
       return Future.value(true);
     }
 
@@ -226,16 +189,6 @@ Future<void> _validateSessionOnResume() async {
 
     final currentUser = Supabase.instance.client.auth.currentUser;
     if (currentUser == null) {
-      // ═══════════════════════════════════════════════════════════
-      // 🔥 FIX: User දැනටමත් Continue/Login screen එකේ ඉන්නවා නම්
-      // (e.g. profile card එකක් click කරලා native OAuth picker
-      // එකක් pending තියෙද්දී app එක brief moment එකකට
-      // pause/resume වුනොත්), background auto-login එකක් inject
-      // කරන්නේ නෑ. attemptAutoLogin() "most recent profile" එකටම
-      // silently login කරන්න පුළුවන් - user manually login වෙන්න
-      // try කරගෙන ඉන්නවනම් වෙනත් profile එකකට - router redirect
-      // එකෙන් user ව wrong dashboard එකකට ඇදගෙන යා හැක.
-      // ═══════════════════════════════════════════════════════════
       String? currentPath;
       try {
         currentPath =
@@ -267,18 +220,16 @@ Future<void> _validateSessionOnResume() async {
 // ====================
 
 String getFlavor() {
-  // 1. Command එකෙන් එකක් ආවොත්
   if (cmdFlavor.isNotEmpty) {
     return cmdFlavor;
   }
 
-  // 2. නැත්නම් mode එක අනුව(main mode 3i)
   if (kDebugMode) {
-    return 'development'; //development
+    return 'development';
   } else if (kProfileMode) {
-    return 'staging'; //profile
+    return 'staging';
   } else {
-    return 'production'; //release
+    return 'production';
   }
 }
 
@@ -300,7 +251,7 @@ Future<void> main() async {
     // ========== PHASE 2: SUPABASE ==========
     await Supabase.initialize(
       url: environment.supabaseUrl,
-      publishableKey: environment.supabaseAnonKey, // ✅ Use publishableKey
+      publishableKey: environment.supabaseAnonKey,
       debug: kDebugMode,
     );
 
@@ -309,17 +260,12 @@ Future<void> main() async {
       options: DefaultFirebaseOptions.currentPlatform,
     );
 
-    // ✅ Web vs Mobile separation
     if (!kIsWeb) {
-      // ✅ Background message handler - Android/iOS only
       FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-      // 3. NEW PHASE: WORKMANAGER INITIALIZATION (Android 16 Safe)
-      // Android 16 wala background restrictions walin berenna workmanager initialize kireema
       await Workmanager().initialize(callbackDispatcher);
       debugPrint('💼 Workmanager initialized successfully');
 
-      // ✅ Periodic task - Android/iOS only
       await Workmanager().registerPeriodicTask(
         "periodic_sync",
         "supabaseDataSyncTask",
@@ -338,7 +284,6 @@ Future<void> main() async {
     // ========== PHASE 4: NOTIFICATION SERVICE ==========
     final notificationService = NotificationService();
 
-    // ✅ Web සහ Mobile දෙකටම - Permission ඉල්ලන්නේ නැහැ
     await notificationService.initWithoutPermission();
     debugPrint(
       '🔔 Notification service initialized WITHOUT permission (Web + Mobile)',
@@ -356,7 +301,6 @@ Future<void> main() async {
     appState = AppState();
     await appState.initializeApp();
 
-    // Initialize timezone
     await TimezoneService.initialize();
 
     // ========== PHASE 8: AUTH LISTENER ==========
@@ -366,17 +310,6 @@ Future<void> main() async {
     router = _createRouter();
 
     // ========== PHASE 9B: PLATFORM CONFIG (deep links) ==========
-    // ✅ FIX: Moved here, AFTER router creation. Previously this ran
-    // in PHASE 5 (before the router existed). On a cold start via a
-    // deep link (e.g. Facebook/Apple browser-fallback OAuth on
-    // Android), _setupMobileDeepLinks() -> getInitialLink() ->
-    // _handleDeepLink() would call router.go(), but `router` was
-    // still an uninitialized `late` variable at that point - this
-    // threw a LateInitializationError that was silently swallowed
-    // by a try-catch, so the OAuth callback was silently dropped
-    // and the user appeared "stuck" after completing sign-in.
-    // Router is now guaranteed to exist before any deep link is
-    // processed.
     await _setupPlatformSpecificConfig();
 
     // ========== PHASE 10: LIFECYCLE ==========
@@ -403,9 +336,6 @@ void _setupAuthStateListener() {
   supabase.auth.onAuthStateChange.listen((data) async {
     final event = data.event;
 
-    // Keeps secure storage in sync the instant Supabase rotates
-    // the refresh token in the background, so a logout that
-    // happens moments later never saves an already-dead token.
     if (event == AuthChangeEvent.tokenRefreshed) {
       final session = data.session;
       final user = supabase.auth.currentUser;
@@ -469,18 +399,8 @@ void _navigateTo(String location, {Object? extra}) {
 }
 
 // ====================
-// PLATFORM CONFIG
-// ====================
-// ====================
 // ROLE RECOVERY CHECK
 // ====================
-/// ✅ NEW: Used by the router redirect logic. When a user has
-/// zero *active* roles (appState.roles.isEmpty), this checks
-/// whether they actually have role(s) that are simply
-/// deactivated or scheduled for deletion, rather than having
-/// no roles at all. If so, they should be sent to
-/// Profile Management to reactivate/cancel instead of being
-/// funneled into the "new user" registration flow.
 Future<bool> _hasRecoverableRoles() async {
   try {
     final userId = Supabase.instance.client.auth.currentUser?.id;
@@ -500,12 +420,112 @@ Future<bool> _hasRecoverableRoles() async {
   }
 }
 
+// ============================================================
+// ✅ NEW: SHARED SESSION-FROM-URL PROCESSOR
+// ------------------------------------------------------------
+// Single source of truth for turning a raw auth redirect URI
+// (from either a mobile deep link OR the web's initial page URL)
+// into an established Supabase session, using Supabase's own
+// getSessionFromUrl() — which correctly reads BOTH query params
+// (?code=...) AND the URL fragment (#access_token=...), unlike
+// manual uri.queryParameters checks which silently miss fragment
+// tokens.
+//
+// Previously this logic was duplicated (and each copy was
+// incomplete) in two places:
+//   1. main.dart's old _handleDeepLink() — only checked
+//      queryParameters, so it NEVER caught fragment-based tokens
+//      (which is how Supabase actually sends them for email
+//      confirmation / magic link / recovery).
+//   2. AuthCallbackHandlerScreen's old _processAuthCallback() —
+//      used Uri.base, which is a WEB-ONLY concept. On mobile,
+//      Uri.base is meaningless, so session processing there
+//      silently no-op'd every time.
+//
+// Now there is exactly one place this happens. Callers just get
+// back a clean, already-classified result map and never touch
+// raw URIs again.
+// ============================================================
+Future<Map<String, dynamic>> _establishSessionFromUri(Uri uri) async {
+  final fragParams =
+      uri.fragment.isNotEmpty ? Uri.splitQueryString(uri.fragment) : <String, String>{};
+
+  final hasQueryToken = uri.queryParameters.containsKey('code') ||
+      uri.queryParameters.containsKey('access_token');
+  final hasFragmentToken = fragParams.containsKey('access_token');
+
+  final error = uri.queryParameters['error'] ?? fragParams['error'];
+  final errorCode = uri.queryParameters['error_code'] ?? fragParams['error_code'];
+  final errorDescription =
+      uri.queryParameters['error_description'] ?? fragParams['error_description'];
+
+  // ✅ An explicit error in the URL (e.g. expired link) always wins,
+  // regardless of whether a token is also present.
+  if (error != null || errorCode != null) {
+    debugPrint('⚠️ Auth URL contains an error: $error / $errorCode');
+    return {
+      'status': 'error',
+      'error': error,
+      'errorCode': errorCode,
+      'errorDescription': errorDescription,
+    };
+  }
+
+  if (!hasQueryToken && !hasFragmentToken) {
+    debugPrint('ℹ️ Auth URL has no recognizable token, skipping');
+    return {'status': 'none'};
+  }
+
+  try {
+    debugPrint('🔐 Establishing session from URL: $uri');
+    final response = await Supabase.instance.client.auth.getSessionFromUrl(uri);
+    final user = response.session.user;
+
+    debugPrint('✅ Session established for: ${user.email}');
+
+    // ✅ Refresh global app state immediately so router redirect
+    // logic (emailVerified, loggedIn, roles, etc.) reflects the new
+    // session right away, without waiting for the next auth event.
+    appState.refreshState();
+
+    final type = uri.queryParameters['type'] ?? fragParams['type'];
+
+    return {
+      'status': 'success',
+      'type': type,
+      'userId': user.id,
+      'email': user.email,
+    };
+  } catch (e) {
+    debugPrint('❌ Error establishing session from URL: $e');
+    return {
+      'status': 'error',
+      'error': e.toString(),
+      'errorCode': null,
+      'errorDescription': null,
+    };
+  }
+}
+
 Future<void> _setupPlatformSpecificConfig() async {
   if (kIsWeb) {
     debugPrint('Configuring for Web');
     final uri = Uri.base;
-    if (uri.toString().contains('/auth/callback')) {
-      debugPrint('Web auth callback detected');
+    final uriString = uri.toString();
+
+    final looksLikeAuthCallback = uriString.contains('/auth/callback') ||
+        uri.fragment.contains('access_token') ||
+        uri.queryParameters.containsKey('code') ||
+        uri.queryParameters.containsKey('error');
+
+    if (looksLikeAuthCallback) {
+      debugPrint('Web auth callback detected, establishing session...');
+      final result = await _establishSessionFromUri(uri);
+      try {
+        router.go('/auth/callback', extra: result);
+      } catch (e) {
+        debugPrint('❌ Error navigating to auth callback on web: $e');
+      }
     }
   } else {
     debugPrint('Configuring for Mobile');
@@ -517,7 +537,6 @@ Future<void> _setupPlatformSpecificConfig() async {
 // deep link handling (Uri.base වෙනුවට)
 Future<void> _setupMobileDeepLinks() async {
   try {
-    // App එක closed state එකේදී, deep link එකකින් open වුනානම්
     final initialUri = await _appLinks.getInitialLink();
     if (initialUri != null) {
       debugPrint('📱 Initial deep link: $initialUri');
@@ -525,7 +544,6 @@ Future<void> _setupMobileDeepLinks() async {
       _handleDeepLink(initialUri);
     }
 
-    // App එක foreground/background තියෙද්දී, deep link එකක් click කළොත්
     _linkSubscription = _appLinks.uriLinkStream.listen(
       (uri) {
         debugPrint('📱 Deep link received: $uri');
@@ -541,53 +559,36 @@ Future<void> _setupMobileDeepLinks() async {
   }
 }
 
+// ============================================================
+// ✅ FIX: previously only checked uri.queryParameters, which is
+// always empty for Supabase's fragment-based redirects
+// (myapp://auth/callback#access_token=...) — so this handler
+// silently never fired for email verification / magic link /
+// recovery links, only for OAuth-code-style links.
+//
+// Now delegates entirely to _establishSessionFromUri(), which
+// checks both query AND fragment, then forwards a clean status
+// result to the /auth/callback route via `extra`.
+// ============================================================
 void _handleDeepLink(Uri uri) async {
   final uriString = uri.toString();
 
   if (uriString.contains('myapp://') || uriString.contains('/auth/callback')) {
     debugPrint('🔗 Auth deep link detected: $uriString');
 
-    // ✅ FIX: Supabase confirmation/OAuth redirects put the tokens in
-    // the URL FRAGMENT (after #), not the query string (after ?).
-    // The old code only checked uri.queryParameters, which is always
-    // empty for these links — so this deep link handler never fired
-    // for email verification links, silently dropping them.
-    final hasQueryToken = uri.queryParameters.containsKey('code') ||
-        uri.queryParameters.containsKey('access_token');
-    final hasFragmentToken = uri.fragment.contains('access_token') ||
-        uri.fragment.contains('error');
+    final result = await _establishSessionFromUri(uri);
 
-    if (!hasQueryToken && !hasFragmentToken) {
-      debugPrint('⚠️ Deep link matched but no token found, ignoring');
+    if (result['status'] == 'none') {
+      // No recognizable auth token in this link at all — nothing to
+      // navigate for (e.g. some other custom-scheme deep link).
+      debugPrint('ℹ️ Deep link had no auth token, ignoring');
       return;
     }
 
     try {
-      // ✅ Let Supabase's own SDK parse and establish the session from
-      // the URL directly — it knows how to read both query and
-      // fragment formats correctly, unlike our manual queryParameters
-      // check.
-      final response = await Supabase.instance.client.auth.getSessionFromUrl(uri);
-      debugPrint('✅ Session established from deep link: ${response.session.user.id}');
-
-      // ✅ Refresh appState so router redirect logic (emailVerified,
-      // loggedIn, etc.) picks up the new session immediately.
-      appState.refreshState();
-
-      if (uriString.contains('/auth/callback')) {
-        router.go('/auth/callback', extra: uri.queryParameters);
-      }
+      router.go('/auth/callback', extra: result);
     } catch (e) {
-      debugPrint('❌ Error establishing session from deep link: $e');
-      // Fall back to the old behavior for error-only callbacks
-      // (e.g. link expired) so AuthCallbackHandlerScreen can show
-      // the error message.
-      if (uri.queryParameters.containsKey('error') ||
-          uri.fragment.contains('error')) {
-        try {
-          router.go('/auth/callback', extra: uri.queryParameters);
-        } catch (_) {}
-      }
+      debugPrint('❌ Error navigating to auth callback: $e');
     }
   }
 }
@@ -632,12 +633,7 @@ GoRouter _createRouter() {
       }
 
       // ============================================
-      // 2B. PENDING DELETION-RESTORE / REACTIVATION - Park on a
-      // safe screen until the user explicitly confirms restore,
-      // reactivate, or logout (see the confirmation dialogs
-      // shown from MyApp). This prevents reaching any dashboard
-      // while their account is still technically
-      // scheduled-for-deletion OR self-deactivated.
+      // 2B. PENDING DELETION-RESTORE / REACTIVATION
       // ============================================
       if (appState.loggedIn &&
           (appState.pendingDeletionRestore || appState.pendingReactivation) &&
@@ -682,7 +678,6 @@ GoRouter _createRouter() {
         '/role-selector',
       ];
 
-      // Role selector route
       if (path == '/role-selector') {
         if (!appState.loggedIn) {
           debugPrint('❌ Not logged in → /login');
@@ -692,23 +687,14 @@ GoRouter _createRouter() {
         return null;
       }
 
-      // Handle public routes
       if (publicRoutes.contains(path)) {
-        // SPLASH SCREEN LOGIC
         if (path == '/') {
           if (appState.loggedIn) {
-            // User logged in
             if (!appState.emailVerified) {
               debugPrint('📧 Email not verified → /verify-email');
               return '/verify-email';
             }
             if (!appState.profileCompleted) {
-              // ✅ FIX: Before assuming this is a brand-new/
-              // incomplete registration, check whether the user
-              // actually has role(s) that are simply deactivated
-              // or scheduled for deletion - if so, send them to
-              // Profile Management to reactivate/cancel instead
-              // of the registration flow.
               if (appState.roles.isEmpty) {
                 final recoverable = await _hasRecoverableRoles();
                 if (recoverable) {
@@ -733,7 +719,6 @@ GoRouter _createRouter() {
               return '/reg';
             }
 
-            // Has current role
             if (appState.currentRole != null) {
               final targetRoute = '/${appState.currentRole}';
               debugPrint(
@@ -742,13 +727,11 @@ GoRouter _createRouter() {
               return targetRoute;
             }
 
-            // Multiple roles
             if (appState.roles.length > 1) {
               debugPrint('🔄 Multiple roles, no current role → /role-selector');
               return '/role-selector';
             }
 
-            // Single role
             if (appState.roles.length == 1) {
               final role = appState.roles.first;
               debugPrint('✅ Single role: $role → /$role');
@@ -756,7 +739,6 @@ GoRouter _createRouter() {
               return '/$role';
             }
           } else {
-            // Not logged in
             final hasProfile = await SessionManager.hasProfile();
             if (hasProfile) {
               debugPrint('💾 Has saved profiles → /continue');
@@ -768,7 +750,6 @@ GoRouter _createRouter() {
           }
         }
 
-        // Registration route
         if (path == '/reg') {
           if (!appState.loggedIn) {
             debugPrint('⚠️ /reg requires login → /login');
@@ -778,7 +759,6 @@ GoRouter _createRouter() {
           return null;
         }
 
-        // Other public routes
         debugPrint('✅ Public route: $path');
         return null;
       }
@@ -796,17 +776,11 @@ GoRouter _createRouter() {
         return '/login';
       }
 
-      // Email verification check
       if (!appState.emailVerified && path != '/verify-email') {
         debugPrint('❌ Email not verified → /verify-email');
         return '/verify-email';
       }
 
-      // Profile completion check
-      // ✅ FIX: '/settings/profiles' is exempted alongside '/reg'
-      // so a user redirected there for role recovery (see the
-      // splash screen logic above) isn't immediately bounced
-      // back to '/reg' by this later, more general check.
       if (!appState.profileCompleted &&
           path != '/reg' &&
           path != '/settings/profiles') {
@@ -814,7 +788,6 @@ GoRouter _createRouter() {
         return '/reg';
       }
 
-      // Role selection check
       if (appState.currentRole == null && appState.roles.isNotEmpty) {
         debugPrint('⚠️ No current role but has roles → /role-selector');
         return '/role-selector';
@@ -839,8 +812,6 @@ GoRouter _createRouter() {
       if (isCustomerRoute) {
         debugPrint('🛍️ Customer route accessed: $path');
 
-        // Must be logged in (already checked above)
-        // Must have customer role
         if (appState.currentRole != 'customer' &&
             !appState.roles.contains('customer')) {
           debugPrint('❌ Not a customer role, redirecting...');
@@ -853,7 +824,6 @@ GoRouter _createRouter() {
           return '/reg';
         }
 
-        // If current role is not customer but has customer role, go to role selector
         if (appState.currentRole != 'customer' &&
             appState.roles.contains('customer')) {
           debugPrint(
@@ -1015,8 +985,6 @@ GoRouter _createRouter() {
         builder: (_, _) => const VerifyInvalidScreen(),
       ),
       GoRoute(path: '/continue', builder: (_, _) => const ContinueScreen()),
-      // ✅ Parked here while the deletion-restore confirmation
-      // dialog (shown from MyApp) is awaiting the user's choice.
       GoRoute(
         path: '/account-restore-pending',
         builder: (_, _) => const _PendingRestoreScreen(),
@@ -1099,16 +1067,32 @@ GoRouter _createRouter() {
           );
         },
       ),
+      // ============================================================
+      // ✅ FIX: this route now also reads `state.extra`, which is
+      // where main.dart's _establishSessionFromUri() result lands
+      // (status/type/userId/email). Query params are still read as
+      // a fallback for direct-link cases (e.g. an error-only link
+      // opened with no prior processing).
+      // ============================================================
       GoRoute(
         path: '/auth/callback',
         pageBuilder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+
           return MaterialPage(
             key: state.pageKey,
             child: AuthCallbackHandlerScreen(
               code: state.uri.queryParameters['code'],
-              error: state.uri.queryParameters['error'],
-              errorCode: state.uri.queryParameters['error_code'],
-              errorDescription: state.uri.queryParameters['error_description'],
+              error: extra?['error'] as String? ??
+                  state.uri.queryParameters['error'],
+              errorCode: extra?['errorCode'] as String? ??
+                  state.uri.queryParameters['error_code'],
+              errorDescription: extra?['errorDescription'] as String? ??
+                  state.uri.queryParameters['error_description'],
+              preProcessedStatus: extra?['status'] as String?,
+              preProcessedType: extra?['type'] as String?,
+              preProcessedUserId: extra?['userId'] as String?,
+              preProcessedEmail: extra?['email'] as String?,
             ),
           );
         },
@@ -1157,7 +1141,6 @@ GoRouter _createRouter() {
         path: '/settings/change-password',
         builder: (context, state) => const ChangePasswordScreen(),
       ),
-      // GoRoute list එකට add කරන්න (settings routes ළඟට):
       GoRoute(
         path: '/settings/delete-account',
         builder: (context, state) => const DeleteAccountScreen(),
@@ -1173,7 +1156,6 @@ GoRouter _createRouter() {
           return CustomerListScreen(salonId: salonId, role: 'owner');
         },
       ),
-      // Add Barber
       GoRoute(
         path: '/owner/add-barber',
         name: 'addBarber',
@@ -1182,8 +1164,6 @@ GoRouter _createRouter() {
           return AddBarberScreen(refresh: refresh);
         },
       ),
-
-      // Add Service - FIXED ROUTE
       GoRoute(
         path: '/owner/services/add',
         name: 'addService',
@@ -1194,13 +1174,11 @@ GoRouter _createRouter() {
           final isEditing = state.uri.queryParameters['isEditing'] == 'true';
           final serviceId = state.uri.queryParameters['serviceId'];
 
-          // Validate required parameter
           if (salonId == null || salonId.isEmpty) {
             debugPrint('❌ Error: salonId is required for adding service');
             return const OwnerDashboard();
           }
 
-          // Parse salonId safely
           int? parsedSalonId;
           try {
             parsedSalonId = int.parse(salonId);
@@ -1209,7 +1187,6 @@ GoRouter _createRouter() {
             return const OwnerDashboard();
           }
 
-          // Parse optional parameters
           int? parsedSalonBarberId;
           if (salonBarberId != null && salonBarberId.isNotEmpty) {
             try {
@@ -1245,8 +1222,6 @@ GoRouter _createRouter() {
           );
         },
       ),
-
-      // Service Management Edite service list eka meken karanne
       GoRoute(
         path: '/owner/services',
         builder: (context, state) {
@@ -1280,8 +1255,6 @@ GoRouter _createRouter() {
           );
         },
       ),
-
-      // Add Barber Service (for specific barber)
       GoRoute(
         path: '/owner/salon/:salonId/barber/:barberId/add-service',
         name: 'addBarberService',
@@ -1301,15 +1274,11 @@ GoRouter _createRouter() {
           );
         },
       ),
-
-      // Create Salon
       GoRoute(
         path: '/owner/salon/create',
         name: 'createSalon',
         builder: (context, state) => const CreateSalonScreen(),
       ),
-
-      // Edit Salon
       GoRoute(
         path: '/owner/salon/edit',
         builder: (context, state) {
@@ -1321,8 +1290,6 @@ GoRouter _createRouter() {
           return EditSalonScreen(salonId: salonId);
         },
       ),
-
-      // Barber Schedule
       GoRoute(
         path: '/owner/barber-schedule',
         builder: (context, state) {
@@ -1330,8 +1297,6 @@ GoRouter _createRouter() {
           return BarberScheduleScreen(salonId: salonId);
         },
       ),
-
-      // Barber Leaves
       GoRoute(
         path: '/owner/barber-leaves',
         builder: (context, state) {
@@ -1339,8 +1304,6 @@ GoRouter _createRouter() {
           return BarberLeavesScreen(salonId: salonId);
         },
       ),
-
-      // Barber List
       GoRoute(
         path: '/owner/barbers',
         builder: (context, state) {
@@ -1348,7 +1311,6 @@ GoRouter _createRouter() {
           return BarberListScreen(salonId: salonId);
         },
       ),
-      // Edit Barber Services - baber list eken service button ekata
       GoRoute(
         path: '/owner/edit-barber-services',
         builder: (context, state) {
@@ -1357,7 +1319,6 @@ GoRouter _createRouter() {
           return EditBarberServicesScreen(barberId: barberId, salonId: salonId);
         },
       ),
-      // Salon Holidays
       GoRoute(
         path: '/owner/salon/holidays',
         builder: (context, state) {
@@ -1370,7 +1331,6 @@ GoRouter _createRouter() {
           );
         },
       ),
-      // With salonId parameter (from dashboard)
       GoRoute(
         path: '/owner/offers/:salonId',
         name: 'owner-offers',
@@ -1431,10 +1391,6 @@ GoRouter _createRouter() {
         path: '/customer/vip-booking',
         builder: (context, state) => const VIPBookingScreen(),
       ),
-      // GoRoute(
-      //   path: '/customer/vip-booking',
-      //   builder: (context, state) => const VIPBookingRequestScreen(),
-      // ),
       GoRoute(
         path: '/customer/salon-profile',
         name: 'salon-profile',
@@ -1512,7 +1468,7 @@ GoRouter _createRouter() {
           final salonId = state.uri.queryParameters['salonId'];
           return BarberReviewsScreen(
             salonId: salonId,
-            barberId: null, // Will use current user
+            barberId: null,
           );
         },
       ),
@@ -1535,11 +1491,8 @@ class _MyAppState extends State<MyApp> {
   StreamSubscription<bool>? _networkSub;
   bool _offline = false;
 
-  // ✅ Guards against showing the restore-confirmation dialog
-  // more than once at a time (appState can notify listeners
-  // several times while pendingDeletionRestore stays true).
   bool _restoreDialogShowing = false;
-  // ThemeMode themeMode = ThemeMode.system;
+
   @override
   void initState() {
     super.initState();
@@ -1549,7 +1502,6 @@ class _MyAppState extends State<MyApp> {
   }
 
   void _onThemeChanged() {
-    // Theme change වුනාම rebuild වෙන්න
     setState(() {});
   }
 
@@ -1562,8 +1514,6 @@ class _MyAppState extends State<MyApp> {
 
   void _onAppStateChanged() {
     if (appState.pendingDeletionRestore && !_restoreDialogShowing) {
-      // Defer to after the current frame so the router has
-      // already navigated to /account-restore-pending.
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _showRestoreDialog();
       });
@@ -1639,10 +1589,6 @@ class _MyAppState extends State<MyApp> {
     _restoreDialogShowing = false;
   }
 
-  /// ✅ NEW: Symmetric with _showRestoreDialog, but for the
-  /// "Deactivate All" (self-deactivated) case rather than
-  /// scheduled-for-deletion. No due-date/grace-period wording
-  /// since a plain deactivation doesn't expire.
   Future<void> _showReactivateDialog() async {
     final context = navigatorKey.currentContext;
     if (context == null || _restoreDialogShowing) return;
@@ -1727,10 +1673,8 @@ class _MyAppState extends State<MyApp> {
       builder: (context, child) {
         return Stack(
           children: [
-            // 💡 1. හැම screen එකක්ම automatic SafeArea එකක් ඇතුලට දාලා Android 16 system bars වලින් බේරගන්නවා
             SafeArea(
-              bottom:
-                  false, // 👈 Bottom sheet/navigation bars ලස්සනට පේන්න bottom එක false කරන්න
+              bottom: false,
               child: AbsorbPointer(
                 absorbing: _offline,
                 child: child ?? const SizedBox(),
@@ -1741,9 +1685,8 @@ class _MyAppState extends State<MyApp> {
                 bottom: 0,
                 left: 0,
                 right: 0,
-                // 💡 2. NetworkBanner එක Android 15/16 වල gesture bar එක උඩට නොවී ආරක්ෂා වෙනවා
                 child: SafeArea(
-                  top: false, // උඩ පැත්ත ඕන නැති නිසා top false කරන්න
+                  top: false,
                   child: NetworkBanner(offline: _offline),
                 ),
               ),
@@ -1757,9 +1700,6 @@ class _MyAppState extends State<MyApp> {
 // ====================
 // PENDING RESTORE SCREEN
 // ====================
-// Neutral placeholder shown while the restore-confirmation
-// dialog (triggered from _MyAppState) is awaiting the user's
-// choice. The dialog itself carries the actual UI/decision.
 class _PendingRestoreScreen extends StatelessWidget {
   const _PendingRestoreScreen();
 
