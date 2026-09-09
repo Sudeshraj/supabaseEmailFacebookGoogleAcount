@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:developer' as developer;
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:go_router/go_router.dart';
@@ -97,7 +96,7 @@ class AuthService {
       final response = await _supabase.auth.signUp(
         email: email.trim(),
         password: password.trim(),
-        emailRedirectTo: _getRedirectUrl(),
+        emailRedirectTo: _env.getRedirectUrl(),
         data: {
           'display_name': email.split('@').first,
           'remember_me_enabled': rememberMe,
@@ -1089,18 +1088,7 @@ class AuthService {
     return password.trim().length >= 6;
   }
 
-  String _getRedirectUrl() {
-    if (kIsWeb) {
-      final currentOrigin = Uri.base.origin;
-      if (currentOrigin.contains('localhost')) {
-        return '${Uri.base.origin}/auth/callback';
-      } else {
-        return 'https://yourdomain.com/auth/callback';
-      }
-    } else {
-      return 'myapp://auth/callback';
-    }
-  }
+
 
   Future<void> _handleAuthException(
     BuildContext context,

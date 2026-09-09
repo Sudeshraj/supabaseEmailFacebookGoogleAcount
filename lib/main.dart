@@ -541,19 +541,52 @@ Future<void> _setupMobileDeepLinks() async {
   }
 }
 
-void _handleDeepLink(Uri uri) {
+void _handleDeepLink(Uri uri) async {
   final uriString = uri.toString();
 
   if (uriString.contains('myapp://') || uriString.contains('/auth/callback')) {
     debugPrint('🔗 Auth deep link detected: $uriString');
 
-    final queryParams = uri.queryParameters;
-    if (queryParams.containsKey('code') ||
-        queryParams.containsKey('access_token')) {
-      try {
-        router.go('/auth/callback', extra: queryParams);
-      } catch (e) {
-        debugPrint('❌ Error navigating to auth callback: $e');
+    // ✅ FIX: Supabase confirmation/OAuth redirects put the tokens in
+    // the URL FRAGMENT (after #), not the query string (after ?).
+    // The old code only checked uri.queryParameters, which is always
+    // empty for these links — so this deep link handler never fired
+    // for email verification links, silently dropping them.
+    final hasQueryToken = uri.queryParameters.containsKey('code') ||
+        uri.queryParameters.containsKey('access_token');
+    final hasFragmentToken = uri.fragment.contains('access_token') ||
+        uri.fragment.contains('error');
+
+    if (!hasQueryToken && !hasFragmentToken) {
+      debugPrint('⚠️ Deep link matched but no token found, ignoring');
+      return;
+    }
+
+    try {
+      // ✅ Let Supabase's own SDK parse and establish the session from
+      // the URL directly — it knows how to read both query and
+      // fragment formats correctly, unlike our manual queryParameters
+      // check.
+      final response = await Supabase.instance.client.auth.getSessionFromUrl(uri);
+      debugPrint('✅ Session established from deep link: ${response.session.user.id}');
+
+      // ✅ Refresh appState so router redirect logic (emailVerified,
+      // loggedIn, etc.) picks up the new session immediately.
+      appState.refreshState();
+
+      if (uriString.contains('/auth/callback')) {
+        router.go('/auth/callback', extra: uri.queryParameters);
+      }
+    } catch (e) {
+      debugPrint('❌ Error establishing session from deep link: $e');
+      // Fall back to the old behavior for error-only callbacks
+      // (e.g. link expired) so AuthCallbackHandlerScreen can show
+      // the error message.
+      if (uri.queryParameters.containsKey('error') ||
+          uri.fragment.contains('error')) {
+        try {
+          router.go('/auth/callback', extra: uri.queryParameters);
+        } catch (_) {}
       }
     }
   }

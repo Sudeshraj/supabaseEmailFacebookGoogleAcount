@@ -172,6 +172,19 @@ class EnvironmentManager {
   //   return 'com.yourcompany.mysalon.staging://auth-callback';
   // }
 
+  //   String _getRedirectUrl() { // singup service eke eka
+  //   if (kIsWeb) {
+  //     final currentOrigin = Uri.base.origin;
+  //     if (currentOrigin.contains('localhost')) {
+  //       return '${Uri.base.origin}/auth/callback';
+  //     } else {
+  //       return 'https://yourdomain.com/auth/callback';
+  //     }
+  //   } else {
+  //     return 'myapp://auth/callback';
+  //   }
+  // }
+
   // Get all required redirect URLs for OAuth providers
   List<String> getRequiredRedirectUrls() {
     final urls = <String>{

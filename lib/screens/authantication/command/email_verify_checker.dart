@@ -17,7 +17,7 @@ class EmailVerifyChecker extends StatefulWidget {
 }
 
 class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final supabase = Supabase.instance.client;
 
   bool canResend = true;
@@ -30,6 +30,34 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
 
   StreamSubscription<AuthState>? _authSub;
 
+  // ============================================================
+  // ✅ FIX: this screen previously never actually checked whether
+  // the email got verified. `_authSub` was declared but never
+  // assigned, so nothing was listening for auth changes at all.
+  //
+  // Email confirmation happens in the BROWSER (Supabase's hosted
+  // confirm page), not inside the app, so Supabase's in-app auth
+  // client has no way of knowing the email was confirmed unless:
+  //   (a) a deep link brings the new session back into the app, OR
+  //   (b) we explicitly ask the server "has this user verified yet?"
+  //
+  // Deep links can silently fail to fire (wrong scheme registration,
+  // platform quirks, user manually switching back to the app instead
+  // of tapping a link), so we can't rely on that alone. This adds:
+  //   1. A real onAuthStateChange listener (in case a deep link OR
+  //      background token refresh DOES bring in a fresh session).
+  //   2. A lifecycle observer — the moment the user comes back to
+  //      the app after tapping the email link (app resumed), we
+  //      immediately ask the server for a fresh session.
+  //   3. A periodic poll (every 4s) as a last-resort safety net for
+  //      platforms/situations where lifecycle resume doesn't fire
+  //      reliably (e.g. some web/desktop flows).
+  // Whichever path detects verification first wins; the others are
+  // cancelled once verified.
+  // ============================================================
+  Timer? _pollTimer;
+  bool _verifiedHandled = false;
+
   // ✅ API 36: Responsive variables
   bool _isTablet = false;
   bool _isWeb = false;
@@ -40,11 +68,19 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
     _setupAnimation();
     _restoreCooldown();
+    _startAuthListener();
+    _startPolling();
 
+    // Check once immediately too, in case the user already
+    // verified before this screen even finished building
+    // (e.g. re-entering the app after a while).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkScreenSize();
+      _checkEmailVerified();
     });
   }
 
@@ -85,6 +121,82 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
     ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
 
     _controller.forward();
+  }
+
+  // ------------------------------------------------------------
+  // ✅ NEW: LIFECYCLE — check the moment the app comes back to
+  // foreground (user just tapped the email link in their mail
+  // app / browser, then switched back).
+  // ------------------------------------------------------------
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('📲 App resumed — checking email verification status');
+      _checkEmailVerified();
+    }
+  }
+
+  // ------------------------------------------------------------
+  // ✅ NEW: AUTH STATE LISTENER — catches the case where a deep
+  // link (or a background token refresh) brings a fresh, already-
+  // verified session into the app directly.
+  // ------------------------------------------------------------
+  void _startAuthListener() {
+    _authSub = supabase.auth.onAuthStateChange.listen((data) {
+      debugPrint('🔔 Auth event on verify screen: ${data.event}');
+
+      if (data.event == AuthChangeEvent.userUpdated ||
+          data.event == AuthChangeEvent.tokenRefreshed ||
+          data.event == AuthChangeEvent.signedIn) {
+        _checkEmailVerified();
+      }
+    });
+  }
+
+  // ------------------------------------------------------------
+  // ✅ NEW: PERIODIC POLL — last-resort safety net. Runs every 4s
+  // while this screen is visible, stops itself once verified or
+  // once the screen is disposed.
+  // ------------------------------------------------------------
+  void _startPolling() {
+    _pollTimer = Timer.periodic(const Duration(seconds: 4), (_) {
+      _checkEmailVerified();
+    });
+  }
+
+  // ------------------------------------------------------------
+  // ✅ NEW: THE ACTUAL CHECK
+  // ------------------------------------------------------------
+  Future<void> _checkEmailVerified() async {
+    if (_verifiedHandled || !mounted) return;
+
+    try {
+      // Ask the server directly rather than trusting the locally
+      // cached user object, since that cache won't reflect a
+      // confirmation that happened in the browser.
+      final response = await supabase.auth.refreshSession();
+      final user = response.user ?? supabase.auth.currentUser;
+
+      if (user?.emailConfirmedAt != null) {
+        debugPrint('✅ Email verified! Redirecting to /reg');
+        _verifiedHandled = true;
+
+        _pollTimer?.cancel();
+        _authSub?.cancel();
+
+        // ✅ Refresh global app state so router's redirect logic
+        // (which reads appState.emailVerified) picks this up too.
+        appState.refreshState();
+
+        if (!mounted) return;
+        context.go('/reg');
+      }
+    } catch (e) {
+      // No active session yet / network hiccup / not verified yet —
+      // this is expected while the user hasn't clicked the link,
+      // so we just silently retry on the next poll/resume.
+      debugPrint('ℹ️ Verification check: not verified yet ($e)');
+    }
   }
 
   // ------------------------------------------------------------
@@ -471,7 +583,9 @@ class _EmailVerifyCheckerState extends State<EmailVerifyChecker>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     resendTimer?.cancel();
+    _pollTimer?.cancel();
     _authSub?.cancel();
     _controller.dispose();
     super.dispose();
