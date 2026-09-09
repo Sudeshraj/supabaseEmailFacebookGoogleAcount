@@ -42,7 +42,7 @@ Future<bool?> showCustomAlert({
       );
     },
   );
-  
+
   return result;
 }
 
@@ -91,6 +91,7 @@ class _CustomAlertDialog extends StatelessWidget {
     final dividerColor = context.dividerColor;
 
     final screenWidth = MediaQuery.of(context).size.width;
+    final screenHeight = MediaQuery.of(context).size.height;
     final isLargeScreen = screenWidth > 600;
     final isWeb = screenWidth > 800;
 
@@ -104,200 +105,154 @@ class _CustomAlertDialog extends StatelessWidget {
       child: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: isLargeScreen ? 420 : screenWidth * 0.9,
+          maxHeight: screenHeight * 0.8,
         ),
         child: Material(
           color: Colors.transparent,
-          child: IntrinsicWidth(
-            child: IntrinsicHeight(
-              child: Container(
-                decoration: BoxDecoration(
-                  // ✅ backgroundColor used
-                  color: dialogBackgroundColor,
-                  borderRadius: BorderRadius.circular(16),
-                  // ✅ surfaceColor used in gradient
-                  gradient: isDark ? null : LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white,
-                      surfaceColor.withValues(alpha: 0.3),
-                    ],
-                  ),
-                  // ✅ cardColor used in border
-                  border: Border.all(
-                    color: isDark 
-                        ? dividerColor.withValues(alpha: 0.3)
-                        : dividerColor,
-                    width: isWeb ? 1.5 : 1,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.2),
-                      blurRadius: 20,
-                      offset: const Offset(0, 8),
+          child: Container(
+            decoration: BoxDecoration(
+              // ✅ backgroundColor used
+              color: dialogBackgroundColor,
+              borderRadius: BorderRadius.circular(16),
+              // ✅ surfaceColor used in gradient
+              gradient: isDark
+                  ? null
+                  : LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white,
+                        surfaceColor.withValues(alpha: 0.3),
+                      ],
                     ),
-                  ],
+              // ✅ cardColor used in border
+              border: Border.all(
+                color: isDark
+                    ? dividerColor.withValues(alpha: 0.3)
+                    : dividerColor,
+                width: isWeb ? 1.5 : 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.2),
+                  blurRadius: 20,
+                  offset: const Offset(0, 8),
                 ),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    // Main content
-                    Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        isWeb ? 32 : 24, 
-                        32, 
-                        isWeb ? 32 : 24, 
-                        20
+              ],
+            ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                // Main content
+                Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    isWeb ? 32 : 24,
+                    32,
+                    isWeb ? 32 : 24,
+                    20,
+                  ),
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // Icon
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: dialogPrimaryColor.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                          // ✅ surfaceColor used in border
+                          border: Border.all(
+                            color: surfaceColor.withValues(alpha: 0.1),
+                          ),
+                        ),
+                        child: Icon(
+                          isError
+                              ? Icons.error_outline
+                              : Icons.check_circle_outline,
+                          color: dialogPrimaryColor,
+                          size: 36,
+                        ),
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          // Icon
-                          Container(
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: dialogPrimaryColor.withValues(alpha: 0.1),
-                              shape: BoxShape.circle,
-                              // ✅ surfaceColor used in border
-                              border: Border.all(
-                                color: surfaceColor.withValues(alpha: 0.1),
-                              ),
-                            ),
-                            child: Icon(
-                              isError 
-                                  ? Icons.error_outline 
-                                  : Icons.check_circle_outline,
-                              color: dialogPrimaryColor,
-                              size: 36,
-                            ),
-                          ),
-                          const SizedBox(height: 20),
+                      const SizedBox(height: 20),
 
-                          // Title - ✅ textColor used
-                          Text(
-                            title,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              fontSize: isWeb ? 20 : 18,
-                              fontWeight: FontWeight.w600,
-                              color: titleColor,
-                            ),
-                          ),
-                          const SizedBox(height: 12),
+                      // Title - ✅ textColor used
+                      Text(
+                        title,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: isWeb ? 20 : 18,
+                          fontWeight: FontWeight.w600,
+                          color: titleColor,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
 
-                          // Message - ✅ secondaryTextColor used
-                          Flexible(
-                            child: SingleChildScrollView(
-                              physics: const BouncingScrollPhysics(),
-                              child: Text(
-                                message,
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: isWeb ? 16 : 15,
-                                  color: messageColor,
-                                  height: 1.5,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 24),
+                      // Message - ✅ secondaryTextColor used
+                      Text(
+                        message,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: isWeb ? 16 : 15,
+                          color: messageColor,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
 
-                          // Actions
-                          if (customActions != null) ...[
-                            ...customActions!,
-                          ] else ...[
-                            if (showCancelButton) ...[
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: TextButton(
-                                      style: TextButton.styleFrom(
-                                        // ✅ secondaryTextColor used
-                                        foregroundColor: secondaryTextColor,
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 14,
-                                          horizontal: 16,
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                      ),
-                                      onPressed: () {
-                                        Navigator.of(context).pop(false);
-                                        onCancel?.call();
-                                      },
-                                      child: Text(
-                                        cancelButtonText,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 15,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: ElevatedButton(
-                                      style: ElevatedButton.styleFrom(
-                                        // ✅ primaryColor or errorColor used
-                                        backgroundColor: dialogPrimaryColor,
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 14,
-                                          horizontal: 16,
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(12),
-                                        ),
-                                        elevation: 0,
-                                      ),
-                                      onPressed: () {
-                                        Navigator.of(context).pop(true);
-                                        onOk?.call();
-                                      },
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          if (buttonIcon != null) ...[
-                                            Icon(
-                                              buttonIcon,
-                                              size: 18,
-                                              color: Colors.white,
-                                            ),
-                                            const SizedBox(width: 8),
-                                          ],
-                                          Text(
-                                            buttonText,
-                                            style: const TextStyle(
-                                              fontWeight: FontWeight.w600,
-                                              fontSize: 15,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ] else ...[
-                              // Default single button
-                              SizedBox(
-                                width: double.infinity,
+                      // Actions
+                      if (customActions != null) ...[
+                        ...customActions!,
+                      ] else ...[
+                        if (showCancelButton) ...[
+                          Row(
+                            children: [
+                              Expanded(
                                 child: TextButton(
                                   style: TextButton.styleFrom(
-                                    // ✅ dialogPrimaryColor used
-                                    foregroundColor: dialogPrimaryColor,
+                                    // ✅ secondaryTextColor used
+                                    foregroundColor: secondaryTextColor,
                                     padding: const EdgeInsets.symmetric(
                                       vertical: 14,
-                                      horizontal: 32,
+                                      horizontal: 16,
                                     ),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                   ),
                                   onPressed: () {
-                                    Navigator.of(context).pop(null);
+                                    Navigator.of(context).pop(false);
+                                    onCancel?.call();
+                                  },
+                                  child: Text(
+                                    cancelButtonText,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 15,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    // ✅ primaryColor or errorColor used
+                                    backgroundColor: dialogPrimaryColor,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 14,
+                                      horizontal: 16,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    elevation: 0,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.of(context).pop(true);
                                     onOk?.call();
                                   },
                                   child: Row(
@@ -306,17 +261,16 @@ class _CustomAlertDialog extends StatelessWidget {
                                       if (buttonIcon != null) ...[
                                         Icon(
                                           buttonIcon,
-                                          size: 20,
-                                          color: dialogPrimaryColor,
+                                          size: 18,
+                                          color: Colors.white,
                                         ),
                                         const SizedBox(width: 8),
                                       ],
                                       Text(
                                         buttonText,
-                                        style: TextStyle(
+                                        style: const TextStyle(
                                           fontWeight: FontWeight.w600,
-                                          fontSize: isWeb ? 16 : 15,
-                                          color: dialogPrimaryColor,
+                                          fontSize: 15,
                                         ),
                                       ),
                                     ],
@@ -324,44 +278,88 @@ class _CustomAlertDialog extends StatelessWidget {
                                 ),
                               ),
                             ],
-                          ],
-                        ],
-                      ),
-                    ),
-
-                    // Close button
-                    if (customActions == null && !showCancelButton)
-                      Positioned(
-                        right: 12,
-                        top: 12,
-                        child: GestureDetector(
-                          onTap: () {
-                            Navigator.of(context).pop(null);
-                            onClose?.call();
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: BoxDecoration(
-                              color: isDark 
-                                  ? secondaryTextColor.withValues(alpha: 0.1)
-                                  : Colors.black12,
-                              shape: BoxShape.circle,
-                              // ✅ cardColor used in border
-                              border: Border.all(
-                                color: cardColor.withValues(alpha: 0.1),
+                          ),
+                        ] else ...[
+                          // Default single button
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextButton(
+                              style: TextButton.styleFrom(
+                                // ✅ dialogPrimaryColor used
+                                foregroundColor: dialogPrimaryColor,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                  horizontal: 32,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                              ),
+                              onPressed: () {
+                                Navigator.of(context).pop(null);
+                                onOk?.call();
+                              },
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (buttonIcon != null) ...[
+                                    Icon(
+                                      buttonIcon,
+                                      size: 20,
+                                      color: dialogPrimaryColor,
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  Text(
+                                    buttonText,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: isWeb ? 16 : 15,
+                                      color: dialogPrimaryColor,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                            child: Icon(
-                              Icons.close,
-                              size: 18,
-                              color: titleColor.withValues(alpha: 0.6),
-                            ),
+                          ),
+                        ],
+                      ],
+                    ],
+                    ),
+                  ),
+                ),
+
+                // Close button
+                if (customActions == null && !showCancelButton)
+                  Positioned(
+                    right: 12,
+                    top: 12,
+                    child: GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).pop(null);
+                        onClose?.call();
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? secondaryTextColor.withValues(alpha: 0.1)
+                              : Colors.black12,
+                          shape: BoxShape.circle,
+                          // ✅ cardColor used in border
+                          border: Border.all(
+                            color: cardColor.withValues(alpha: 0.1),
                           ),
                         ),
+                        child: Icon(
+                          Icons.close,
+                          size: 18,
+                          color: titleColor.withValues(alpha: 0.6),
+                        ),
                       ),
-                  ],
-                ),
-              ),
+                    ),
+                  ),
+              ],
             ),
           ),
         ),
