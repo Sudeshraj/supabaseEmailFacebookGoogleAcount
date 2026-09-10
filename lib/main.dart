@@ -52,6 +52,7 @@ import 'package:flutter_application_1/screens/settings/profile_management_screen
 import 'package:flutter_application_1/screens/settings/profile_screen.dart';
 import 'package:flutter_application_1/screens/settings/settings_screen.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
@@ -447,17 +448,21 @@ Future<bool> _hasRecoverableRoles() async {
 // raw URIs again.
 // ============================================================
 Future<Map<String, dynamic>> _establishSessionFromUri(Uri uri) async {
-  final fragParams =
-      uri.fragment.isNotEmpty ? Uri.splitQueryString(uri.fragment) : <String, String>{};
+  final fragParams = uri.fragment.isNotEmpty
+      ? Uri.splitQueryString(uri.fragment)
+      : <String, String>{};
 
-  final hasQueryToken = uri.queryParameters.containsKey('code') ||
+  final hasQueryToken =
+      uri.queryParameters.containsKey('code') ||
       uri.queryParameters.containsKey('access_token');
   final hasFragmentToken = fragParams.containsKey('access_token');
 
   final error = uri.queryParameters['error'] ?? fragParams['error'];
-  final errorCode = uri.queryParameters['error_code'] ?? fragParams['error_code'];
+  final errorCode =
+      uri.queryParameters['error_code'] ?? fragParams['error_code'];
   final errorDescription =
-      uri.queryParameters['error_description'] ?? fragParams['error_description'];
+      uri.queryParameters['error_description'] ??
+      fragParams['error_description'];
 
   // ✅ An explicit error in the URL (e.g. expired link) always wins,
   // regardless of whether a token is also present.
@@ -513,7 +518,8 @@ Future<void> _setupPlatformSpecificConfig() async {
     final uri = Uri.base;
     final uriString = uri.toString();
 
-    final looksLikeAuthCallback = uriString.contains('/auth/callback') ||
+    final looksLikeAuthCallback =
+        uriString.contains('/auth/callback') ||
         uri.fragment.contains('access_token') ||
         uri.queryParameters.containsKey('code') ||
         uri.queryParameters.containsKey('error');
@@ -1083,11 +1089,14 @@ GoRouter _createRouter() {
             key: state.pageKey,
             child: AuthCallbackHandlerScreen(
               code: state.uri.queryParameters['code'],
-              error: extra?['error'] as String? ??
+              error:
+                  extra?['error'] as String? ??
                   state.uri.queryParameters['error'],
-              errorCode: extra?['errorCode'] as String? ??
+              errorCode:
+                  extra?['errorCode'] as String? ??
                   state.uri.queryParameters['error_code'],
-              errorDescription: extra?['errorDescription'] as String? ??
+              errorDescription:
+                  extra?['errorDescription'] as String? ??
                   state.uri.queryParameters['error_description'],
               preProcessedStatus: extra?['status'] as String?,
               preProcessedType: extra?['type'] as String?,
@@ -1466,10 +1475,7 @@ GoRouter _createRouter() {
         path: '/barber/reviews',
         builder: (context, state) {
           final salonId = state.uri.queryParameters['salonId'];
-          return BarberReviewsScreen(
-            salonId: salonId,
-            barberId: null,
-          );
+          return BarberReviewsScreen(salonId: salonId, barberId: null);
         },
       ),
     ],
@@ -1477,7 +1483,7 @@ GoRouter _createRouter() {
 }
 
 // ====================
-// MAIN APP
+// MAIN APP - UPDATED WITH CONTEXT EXTENSIONS
 // ====================
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
@@ -1524,28 +1530,37 @@ class _MyAppState extends State<MyApp> {
     }
   }
 
+  // ============================================================
+  // ✅ RESTORE DIALOG - AppTheme based
+  // ============================================================
   Future<void> _showRestoreDialog() async {
-    final context = navigatorKey.currentContext;
-    if (context == null || _restoreDialogShowing) return;
+    final dialogContext = navigatorKey.currentContext;
+    if (dialogContext == null || _restoreDialogShowing) return;
 
     _restoreDialogShowing = true;
 
     final daysRemaining = appState.deletionRestoreDaysRemaining;
+    final isDark = dialogContext.isDarkMode;
+    final primaryColor = dialogContext.primaryColor;
+    final textColor = dialogContext.textColor;
+    final secondaryTextColor = dialogContext.secondaryTextColor;
 
     await showDialog<void>(
-      context: context,
+      context: dialogContext,
       barrierDismissible: false,
-      builder: (dialogContext) => PopScope(
+      builder: (context) => PopScope(
         canPop: false,
         child: AlertDialog(
+          // ✅ Use isDark for theme-aware dialog
+          backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Row(
+          title: Row(
             children: [
-              Icon(Icons.restore, color: Color(0xFFFF6B8B)),
-              SizedBox(width: 8),
-              Text('Restore Your Account?'),
+              Icon(Icons.restore, color: primaryColor),
+              const SizedBox(width: 8),
+              Text('Restore Your Account?', style: TextStyle(color: textColor)),
             ],
           ),
           content: Text(
@@ -1556,27 +1571,31 @@ class _MyAppState extends State<MyApp> {
                 : 'Your account is scheduled for deletion. Would you like '
                       'to restore it and continue using the app, or log out '
                       'and let the deletion proceed?',
+            style: TextStyle(color: secondaryTextColor),
           ),
           actions: [
             TextButton(
               onPressed: () async {
-                Navigator.pop(dialogContext);
+                Navigator.pop(context);
                 _restoreDialogShowing = false;
                 await appState.declineRestoreAndLogout();
                 if (navigatorKey.currentContext != null) {
                   router.go('/login');
                 }
               },
+              style: TextButton.styleFrom(
+                foregroundColor: isDark ? Colors.white70 : Colors.grey[700],
+              ),
               child: const Text('Log Out'),
             ),
             ElevatedButton(
               onPressed: () async {
-                Navigator.pop(dialogContext);
+                Navigator.pop(context);
                 _restoreDialogShowing = false;
                 await appState.confirmRestoreScheduledProfile();
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B8B),
+                backgroundColor: primaryColor,
                 foregroundColor: Colors.white,
               ),
               child: const Text('Restore My Account'),
@@ -1589,26 +1608,30 @@ class _MyAppState extends State<MyApp> {
     _restoreDialogShowing = false;
   }
 
+  // ============================================================
+  // ✅ REACTIVATE DIALOG - AppTheme based
+  // ============================================================
   Future<void> _showReactivateDialog() async {
-    final context = navigatorKey.currentContext;
-    if (context == null || _restoreDialogShowing) return;
+    final dialogContext = navigatorKey.currentContext;
+    if (dialogContext == null || _restoreDialogShowing) return;
 
     _restoreDialogShowing = true;
+    final primaryColor = dialogContext.primaryColor;
 
     await showDialog<void>(
-      context: context,
+      context: dialogContext,
       barrierDismissible: false,
-      builder: (dialogContext) => PopScope(
+      builder: (context) => PopScope(
         canPop: false,
         child: AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
-          title: const Row(
+          title: Row(
             children: [
-              Icon(Icons.restore, color: Color(0xFFFF6B8B)),
-              SizedBox(width: 8),
-              Text('Reactivate Your Account?'),
+              Icon(Icons.restore, color: primaryColor),
+              const SizedBox(width: 8),
+              const Text('Reactivate Your Account?'),
             ],
           ),
           content: const Text(
@@ -1619,7 +1642,7 @@ class _MyAppState extends State<MyApp> {
           actions: [
             TextButton(
               onPressed: () async {
-                Navigator.pop(dialogContext);
+                Navigator.pop(context);
                 _restoreDialogShowing = false;
                 await appState.declineReactivationAndLogout();
                 if (navigatorKey.currentContext != null) {
@@ -1630,12 +1653,12 @@ class _MyAppState extends State<MyApp> {
             ),
             ElevatedButton(
               onPressed: () async {
-                Navigator.pop(dialogContext);
+                Navigator.pop(context);
                 _restoreDialogShowing = false;
                 await appState.confirmReactivateProfile();
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFF6B8B),
+                backgroundColor: primaryColor,
                 foregroundColor: Colors.white,
               ),
               child: const Text('Reactivate My Account'),
@@ -1673,6 +1696,7 @@ class _MyAppState extends State<MyApp> {
       builder: (context, child) {
         return Stack(
           children: [
+            // ✅ EDGE-TO-EDGE: SafeArea for Android 16
             SafeArea(
               bottom: false,
               child: AbsorbPointer(
@@ -1698,21 +1722,24 @@ class _MyAppState extends State<MyApp> {
 }
 
 // ====================
-// PENDING RESTORE SCREEN
+// PENDING RESTORE SCREEN - AppTheme based
 // ====================
 class _PendingRestoreScreen extends StatelessWidget {
   const _PendingRestoreScreen();
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(child: CircularProgressIndicator(color: Color(0xFFFF6B8B))),
+    return Scaffold(
+      backgroundColor: context.backgroundColor,
+      body: Center(
+        child: CircularProgressIndicator(color: context.primaryColor),
+      ),
     );
   }
 }
 
 // ====================
-// ERROR APP
+// ERROR APP - AppTheme based
 // ====================
 class _ErrorApp extends StatelessWidget {
   final String error;
@@ -1721,28 +1748,38 @@ class _ErrorApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      theme: AppTheme.lightTheme,
       home: Scaffold(
+        backgroundColor: context.backgroundColor,
         body: Center(
           child: Padding(
-            padding: const EdgeInsets.all(20),
+            padding: EdgeInsets.all(context.responsivePadding),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.error_outline, size: 64, color: Colors.red),
+                Icon(Icons.error_outline, size: 64, color: context.errorColor),
                 const SizedBox(height: 20),
-                const Text(
+                Text(
                   'Unable to Start App',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  style: context.headlineSmall.copyWith(
+                    color: context.textColor,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 Text(
                   error,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.grey),
+                  style: context.bodyMedium.copyWith(
+                    color: context.secondaryTextColor,
+                  ),
                 ),
                 const SizedBox(height: 30),
                 ElevatedButton(
                   onPressed: () => main(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: context.primaryColor,
+                    foregroundColor: Colors.white,
+                  ),
                   child: const Text('Restart App'),
                 ),
               ],
