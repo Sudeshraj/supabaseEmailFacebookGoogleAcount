@@ -1332,20 +1332,24 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           elevation: 0,
         ),
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(
-                color: AppTheme.primary,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Loading timezone...',
-                style: TextStyle(
-                  color: isDark ? Colors.white : Colors.black87,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(
+                  color: AppTheme.primary,
                 ),
-              ),
-            ],
+                const SizedBox(height: 16),
+                Text(
+                  'Loading timezone...',
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       );
@@ -1398,23 +1402,48 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         ],
       ),
       body: SafeArea(
-        child: _isWeb
-            ? _buildWebLayout()
-            : Column(
-                children: [
-                  _buildStepIndicatorRow(
-                    isMobile,
-                    stepSize,
-                    iconSize,
-                    stepFontSize,
-                    connectorWidth,
-                    showLabels,
-                  ),
-                  Expanded(
-                    child: _buildContent(),
-                  ),
-                ],
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // ✅ Same guard as _buildContent(): the step-indicator row plus
+            // an Expanded content area (used by both the web and mobile
+            // branches below) can be handed a transient near-zero height
+            // during a window/metrics resize. Even a 1px shortfall there
+            // throws a RenderFlex overflow, so we give this Column a safe
+            // minimum height via OverflowBox (a SizedBox alone can't help,
+            // since it can only ever be clamped DOWN to what SafeArea
+            // offers, never up).
+            final double safeHeight =
+                (constraints.maxHeight.isFinite && constraints.maxHeight >= 200)
+                    ? constraints.maxHeight
+                    : 600.0;
+
+            return OverflowBox(
+              alignment: Alignment.topCenter,
+              minHeight: 0,
+              maxHeight: safeHeight,
+              child: SizedBox(
+                height: safeHeight,
+                child: _isWeb
+                    ? _buildWebLayout()
+                    : Column(
+                        children: [
+                          _buildStepIndicatorRow(
+                            isMobile,
+                            stepSize,
+                            iconSize,
+                            stepFontSize,
+                            connectorWidth,
+                            showLabels,
+                          ),
+                          Expanded(
+                            child: _buildContent(),
+                          ),
+                        ],
+                      ),
               ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -1644,17 +1673,50 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   Widget _buildContent() {
-    return IndexedStack(
-      index: _currentStep,
-      children: [
-        _buildSalonSearchStep(),
-        _buildDateSelectionStep(),
-        _buildServiceSelectionStep(),
-        _buildBarberSelectionStep(),
-        _buildPersonSelectionStep(),
-        _buildTimeSlotStep(),
-        _buildConfirmationStep(),
-      ],
+    // ✅ Guards against transient near-zero height constraints that Flutter
+    // Web can hand down to IndexedStack during a window/metrics resize
+    // (e.g. browser resize, mobile address-bar show/hide, keyboard open).
+    // Without this, whichever step is active can get squeezed to a few
+    // pixels tall for a single frame and its fixed-height header/content
+    // overflows.
+    //
+    // NOTE: a plain SizedBox can only ever come out SMALLER than what its
+    // own parent allows (it can never force extra height), so if the
+    // ambient parent constraint is only e.g. 69px, SizedBox(height: 600)
+    // just gets clamped straight back down to 69px and the overflow still
+    // happens. OverflowBox is the widget that actually lets a child be
+    // laid out with more room than the parent is offering - the excess is
+    // simply allowed to extend past the parent's bounds (harmlessly, for
+    // a single transient frame) instead of throwing a RenderFlex overflow
+    // assertion.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final double safeHeight =
+            (constraints.maxHeight.isFinite && constraints.maxHeight >= 200)
+                ? constraints.maxHeight
+                : 600.0;
+
+        return OverflowBox(
+          alignment: Alignment.topCenter,
+          minHeight: 0,
+          maxHeight: safeHeight,
+          child: SizedBox(
+            height: safeHeight,
+            child: IndexedStack(
+              index: _currentStep,
+              children: [
+                _buildSalonSearchStep(),
+                _buildDateSelectionStep(),
+                _buildServiceSelectionStep(),
+                _buildBarberSelectionStep(),
+                _buildPersonSelectionStep(),
+                _buildTimeSlotStep(),
+                _buildConfirmationStep(),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1735,20 +1797,24 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         Expanded(
           child: _isLoadingFollowedSalons
               ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      CircularProgressIndicator(
-                        color: AppTheme.primary,
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Loading your followed salons...',
-                        style: TextStyle(
-                          color: isDark ? Colors.white60 : Colors.black87,
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(
+                          color: AppTheme.primary,
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 16),
+                        Text(
+                          'Loading your followed salons...',
+                          style: TextStyle(
+                            color: isDark ? Colors.white60 : Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 )
               : _searchResults.isEmpty && !_isSearching && _followedSalons.isEmpty
@@ -1770,79 +1836,87 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   Widget _buildEmptyState(bool isDark) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.store_mall_directory,
-            size: 80,
-            color: isDark ? Colors.white30 : Colors.grey[300],
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'No salons followed yet',
-            style: TextStyle(
-              fontSize: 18,
-              color: isDark ? Colors.white60 : Colors.grey[500],
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.store_mall_directory,
+              size: 80,
+              color: isDark ? Colors.white30 : Colors.grey[300],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Follow salons to book appointments',
-            style: TextStyle(
-              fontSize: 14,
-              color: isDark ? Colors.white70 : Colors.grey[400],
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () => context.push('/customer/search-salons'),
-            icon: const Icon(Icons.search),
-            label: const Text('Find Salons to Follow'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+            const SizedBox(height: 20),
+            Text(
+              'No salons followed yet',
+              style: TextStyle(
+                fontSize: 18,
+                color: isDark ? Colors.white60 : Colors.grey[500],
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            Text(
+              'Follow salons to book appointments',
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white70 : Colors.grey[400],
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => context.push('/customer/search-salons'),
+              icon: const Icon(Icons.search),
+              label: const Text('Find Salons to Follow'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildNoResultsState(bool isDark) {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.search_off,
-            size: 80,
-            color: isDark ? Colors.white30 : Colors.grey[300],
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'No salons found matching "${_searchController.text}"',
-            style: TextStyle(
-              fontSize: 16,
-              color: isDark ? Colors.white60 : Colors.grey[500],
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.search_off,
+              size: 80,
+              color: isDark ? Colors.white30 : Colors.grey[300],
             ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          TextButton.icon(
-            onPressed: () {
-              _searchController.clear();
-              setState(() {
-                _searchResults = List.from(_followedSalons);
-              });
-            },
-            icon: const Icon(Icons.clear),
-            label: const Text('Clear Search'),
-          ),
-        ],
+            const SizedBox(height: 20),
+            Text(
+              'No salons found matching "${_searchController.text}"',
+              style: TextStyle(
+                fontSize: 16,
+                color: isDark ? Colors.white60 : Colors.grey[500],
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            TextButton.icon(
+              onPressed: () {
+                _searchController.clear();
+                setState(() {
+                  _searchResults = List.from(_followedSalons);
+                });
+              },
+              icon: const Icon(Icons.clear),
+              label: const Text('Clear Search'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2632,23 +2706,27 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 )
               : servicesToShow.isEmpty
               ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.content_cut,
-                        size: 80,
-                        color: isDark ? Colors.white30 : Colors.grey[300],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No services available',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: isDark ? Colors.white60 : Colors.grey[500],
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.content_cut,
+                          size: 80,
+                          color: isDark ? Colors.white30 : Colors.grey[300],
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 16),
+                        Text(
+                          'No services available',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: isDark ? Colors.white60 : Colors.grey[500],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 )
               : ListView.builder(
@@ -3241,31 +3319,35 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 Expanded(
                   child: _selectedServices.isEmpty
                       ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.shopping_cart_outlined,
-                                size: 64,
-                                color: isDark ? Colors.white30 : Colors.grey[300],
-                              ),
-                              const SizedBox(height: 12),
-                              Text(
-                                'No services selected',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  color: isDark ? Colors.white60 : Colors.grey[500],
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(24),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.shopping_cart_outlined,
+                                  size: 64,
+                                  color: isDark ? Colors.white30 : Colors.grey[300],
                                 ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Tap on service variants to add',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: isDark ? Colors.white70 : Colors.grey[400],
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No services selected',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: isDark ? Colors.white60 : Colors.grey[500],
+                                  ),
                                 ),
-                              ),
-                            ],
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Tap on service variants to add',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: isDark ? Colors.white70 : Colors.grey[400],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         )
                       : ListView.separated(
@@ -3543,42 +3625,46 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 )
               : _availableBarbers.isEmpty
               ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.person_off,
-                        size: 80,
-                        color: isDark ? Colors.white30 : Colors.grey[300],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No barbers available',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.person_off,
+                          size: 80,
+                          color: isDark ? Colors.white30 : Colors.grey[300],
                         ),
-                      ),
-                      const SizedBox(height: 20),
-                      ElevatedButton(
-                        onPressed: () {
-                          setState(() {
-                            _barbersLoaded = false;
-                            _isLoadingBarbers = false;
-                            _availableBarbers = [];
-                            _selectedBarber = null;
-                          });
-                          _loadAvailableBarbers();
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No barbers available',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
-                        child: const Text('Refresh'),
-                      ),
-                    ],
+                        const SizedBox(height: 20),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              _barbersLoaded = false;
+                              _isLoadingBarbers = false;
+                              _availableBarbers = [];
+                              _selectedBarber = null;
+                            });
+                            _loadAvailableBarbers();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text('Refresh'),
+                        ),
+                      ],
+                    ),
                   ),
                 )
               : ListView.builder(
@@ -4503,6 +4589,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               Icons.event_busy,
@@ -4534,8 +4621,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ),
             ),
             const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 16,
+              runSpacing: 12,
               children: [
                 OutlinedButton.icon(
                   onPressed: () {
@@ -4552,7 +4641,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ),
                   label: const Text('Change Date'),
                 ),
-                const SizedBox(width: 16),
                 ElevatedButton.icon(
                   onPressed: () async {
                     if (_selectedDate == null) return;
@@ -4912,41 +5000,45 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         _selectedSlot == null ||
         _selectedDate == null) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: isDark ? Colors.white70 : Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Missing information. Please go back and complete all steps.',
-              style: TextStyle(
-                color: isDark ? Colors.white60 : Colors.grey[600],
-                fontSize: 16,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 64,
+                color: isDark ? Colors.white70 : Colors.grey[400],
               ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () {
-                setState(() {
-                  _currentStep = 0;
-                  _resetBooking();
-                });
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+              const SizedBox(height: 16),
+              Text(
+                'Missing information. Please go back and complete all steps.',
+                style: TextStyle(
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                  fontSize: 16,
                 ),
+                textAlign: TextAlign.center,
               ),
-              child: const Text('Start Over'),
-            ),
-          ],
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: () {
+                  setState(() {
+                    _currentStep = 0;
+                    _resetBooking();
+                  });
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: const Text('Start Over'),
+              ),
+            ],
+          ),
         ),
       );
     }
