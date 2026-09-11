@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:app_links/app_links.dart';
@@ -95,7 +96,24 @@ String? pendingDeepLink;
 
 // Deep link handling (mobile)
 final AppLinks _appLinks = AppLinks();
-StreamSubscription<Uri>? _linkSubscription;
+StreamSubscription<Uri>? linkSubscription;
+
+// ✅ Stored so the auth-state listener can be cancelled/replaced safely
+// instead of leaking a subscription that nothing ever references.
+StreamSubscription<AuthState>? _authStateSub;
+
+// ✅ Lightweight cache for _hasRecoverableRoles() so rapid, repeated
+// GoRouter redirect evaluations for the same user don't all hit
+// Supabase. Invalidated below whenever appState changes at all (not
+// just on sign-in/out), so it can never go stale after a role
+// restore/reactivation/registration flow completes.
+bool? _cachedRecoverableRoles;
+String? _cachedRecoverableRolesUserId;
+
+void _invalidateRecoverableRolesCache() {
+  _cachedRecoverableRoles = null;
+  _cachedRecoverableRolesUserId = null;
+}
 
 //command eken flavor eka ganima
 const String cmdFlavor = String.fromEnvironment('flavor', defaultValue: '');
@@ -161,6 +179,50 @@ void setupErrorHandling() {
     }
     return true;
   };
+}
+
+// ====================
+// SYSTEM UI OVERLAY STYLE (Status Bar / Nav Bar)
+// ====================
+// ✅ FIX: Previously there was NO call to SystemChrome anywhere in the
+// app, so the OS kept whatever default overlay style it started with.
+// On a dark background (this app's dark theme uses a very dark navy,
+// 0xFF0F1820) with dark status bar icons, the battery/signal/clock
+// icons became invisible even though they were technically still
+// drawn. This helper explicitly sets icon brightness based on the
+// active theme, and is called from main() at startup and from
+// _MyAppState whenever the theme changes.
+void applySystemUIOverlayStyle(bool isDark) {
+  SystemChrome.setSystemUIOverlayStyle(
+    SystemUiOverlayStyle(
+      // Status bar
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+      statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
+
+      // Navigation bar
+      systemNavigationBarColor:
+          isDark ? AppTheme.darkSurface : AppTheme.lightBackground,
+      systemNavigationBarIconBrightness:
+          isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarDividerColor: Colors.transparent,
+    ),
+  );
+}
+
+// Resolves the effective brightness from the ThemeNotifier, falling
+// back to the platform's brightness when the user has chosen
+// ThemeMode.system.
+bool _resolveIsDark() {
+  switch (themeNotifier.currentTheme) {
+    case ThemeMode.dark:
+      return true;
+    case ThemeMode.light:
+      return false;
+    case ThemeMode.system:
+      return WidgetsBinding.instance.platformDispatcher.platformBrightness ==
+          Brightness.dark;
+  }
 }
 
 // ====================
@@ -241,6 +303,12 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   setupErrorHandling();
 
+  // ✅ FIX: Enable true edge-to-edge rendering explicitly. Android 15+
+  // enforces edge-to-edge regardless of what we do, so we opt in on
+  // purpose and pair it with applySystemUIOverlayStyle() below so the
+  // status bar icons stay visible instead of blending into content.
+  await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
   debugPrint('${DateTime.now()}: Starting application...');
 
   try {
@@ -307,6 +375,12 @@ Future<void> main() async {
     // ========== PHASE 8: AUTH LISTENER ==========
     _setupAuthStateListener();
 
+    // ✅ Also invalidate the recoverable-roles cache whenever appState
+    // changes at all (role restore, reactivation, registration
+    // completing, etc.) — broader than just auth events, so the cache
+    // can never cause a stale redirect loop.
+    appState.addListener(_invalidateRecoverableRolesCache);
+
     // ========== PHASE 9: ROUTER ==========
     router = _createRouter();
 
@@ -318,6 +392,13 @@ Future<void> main() async {
 
     // ========== PHASE 11: APP VERSION ==========
     await AppVersion.init();
+
+    // ========== PHASE 12: INITIAL STATUS BAR STYLE ==========
+    // ✅ FIX: apply a best-effort overlay style right away (before the
+    // first frame), using whatever ThemeNotifier has loaded so far
+    // (it may still be loading asynchronously - _MyAppState re-applies
+    // this again once the saved theme preference finishes loading).
+    applySystemUIOverlayStyle(_resolveIsDark());
 
     debugPrint('${DateTime.now()}: Initialization complete');
     runApp(MyApp());
@@ -334,8 +415,22 @@ Future<void> main() async {
 void _setupAuthStateListener() {
   final supabase = Supabase.instance.client;
 
-  supabase.auth.onAuthStateChange.listen((data) async {
+  // ✅ FIX: previously the subscription returned by .listen() was
+  // discarded, so it could never be cancelled and calling this
+  // function twice would silently stack duplicate listeners. Now it's
+  // stored globally, and any previous subscription is cancelled first.
+  _authStateSub?.cancel();
+  _authStateSub = supabase.auth.onAuthStateChange.listen((data) async {
     final event = data.event;
+
+    // ✅ A role can appear/disappear as recoverable across sign-in,
+    // sign-out, or a user-data update, so drop the cache eagerly here.
+    // (appState's own listener below covers restore/reactivation too.)
+    if (event == AuthChangeEvent.signedIn ||
+        event == AuthChangeEvent.signedOut ||
+        event == AuthChangeEvent.userUpdated) {
+      _invalidateRecoverableRolesCache();
+    }
 
     if (event == AuthChangeEvent.tokenRefreshed) {
       final session = data.session;
@@ -407,6 +502,16 @@ Future<bool> _hasRecoverableRoles() async {
     final userId = Supabase.instance.client.auth.currentUser?.id;
     if (userId == null) return false;
 
+    // ✅ Reuse a cached result for this same user instead of hitting
+    // Supabase again — GoRouter's redirect callback can legitimately
+    // run several times back-to-back while resolving one navigation.
+    // The cache is cleared by _invalidateRecoverableRolesCache() on
+    // any auth event or any appState change, so it can't go stale.
+    if (_cachedRecoverableRoles != null &&
+        _cachedRecoverableRolesUserId == userId) {
+      return _cachedRecoverableRoles!;
+    }
+
     final response = await Supabase.instance.client
         .from('user_roles')
         .select('id')
@@ -414,7 +519,9 @@ Future<bool> _hasRecoverableRoles() async {
         .inFilter('status', ['inactive', 'scheduled_for_deletion'])
         .limit(1);
 
-    return response.isNotEmpty;
+    _cachedRecoverableRoles = response.isNotEmpty;
+    _cachedRecoverableRolesUserId = userId;
+    return _cachedRecoverableRoles!;
   } catch (e) {
     debugPrint('❌ Error checking recoverable roles: $e');
     return false;
@@ -422,7 +529,7 @@ Future<bool> _hasRecoverableRoles() async {
 }
 
 // ============================================================
-// ✅ NEW: SHARED SESSION-FROM-URL PROCESSOR
+// ✅ SHARED SESSION-FROM-URL PROCESSOR
 // ------------------------------------------------------------
 // Single source of truth for turning a raw auth redirect URI
 // (from either a mobile deep link OR the web's initial page URL)
@@ -431,21 +538,6 @@ Future<bool> _hasRecoverableRoles() async {
 // (?code=...) AND the URL fragment (#access_token=...), unlike
 // manual uri.queryParameters checks which silently miss fragment
 // tokens.
-//
-// Previously this logic was duplicated (and each copy was
-// incomplete) in two places:
-//   1. main.dart's old _handleDeepLink() — only checked
-//      queryParameters, so it NEVER caught fragment-based tokens
-//      (which is how Supabase actually sends them for email
-//      confirmation / magic link / recovery).
-//   2. AuthCallbackHandlerScreen's old _processAuthCallback() —
-//      used Uri.base, which is a WEB-ONLY concept. On mobile,
-//      Uri.base is meaningless, so session processing there
-//      silently no-op'd every time.
-//
-// Now there is exactly one place this happens. Callers just get
-// back a clean, already-classified result map and never touch
-// raw URIs again.
 // ============================================================
 Future<Map<String, dynamic>> _establishSessionFromUri(Uri uri) async {
   final fragParams = uri.fragment.isNotEmpty
@@ -547,13 +639,19 @@ Future<void> _setupMobileDeepLinks() async {
     if (initialUri != null) {
       debugPrint('📱 Initial deep link: $initialUri');
       pendingDeepLink = initialUri.toString();
-      _handleDeepLink(initialUri);
+      // ✅ FIX: awaited now — this runs during app startup (PHASE 9B in
+      // main()), so we want the session fully established and the
+      // router.go('/auth/callback') call made before startup proceeds
+      // to PHASE 10/11/12, instead of letting it race in the background.
+      await _handleDeepLink(initialUri);
     }
 
-    _linkSubscription = _appLinks.uriLinkStream.listen(
+    linkSubscription = _appLinks.uriLinkStream.listen(
       (uri) {
         debugPrint('📱 Deep link received: $uri');
         pendingDeepLink = uri.toString();
+        // Runtime-received links (app already running) are fine as
+        // fire-and-forget — there's no startup sequence left to race.
         _handleDeepLink(uri);
       },
       onError: (err) {
@@ -576,7 +674,7 @@ Future<void> _setupMobileDeepLinks() async {
 // checks both query AND fragment, then forwards a clean status
 // result to the /auth/callback route via `extra`.
 // ============================================================
-void _handleDeepLink(Uri uri) async {
+Future<void> _handleDeepLink(Uri uri) async {
   final uriString = uri.toString();
 
   if (uriString.contains('myapp://') || uriString.contains('/auth/callback')) {
@@ -800,20 +898,15 @@ GoRouter _createRouter() {
       }
 
       // ============================================
-      // 6. CUSTOMER ROUTES - FIXED
+      // 6. CUSTOMER ROUTES
       // ============================================
-      final customerRoutes = [
-        '/customer',
-        '/customer/my-bookings',
-        '/customer/booking-flow',
-        '/customer/book',
-        '/customer/vip-booking',
-        '/customer/salon-profile',
-      ];
-
-      final isCustomerRoute = customerRoutes.any(
-        (route) => path.startsWith('/customer'),
-      );
+      // ✅ FIX: the previous version built a `customerRoutes` list and
+      // then did `customerRoutes.any((route) => path.startsWith('/customer'))`
+      // — the `route` value from the list was never actually compared
+      // against anything, so the list was dead code and this check was
+      // functionally identical to a plain startsWith. Simplified below
+      // to avoid the misleading dead code.
+      final isCustomerRoute = path.startsWith('/customer');
 
       if (isCustomerRoute) {
         debugPrint('🛍️ Customer route accessed: $path');
@@ -845,28 +938,15 @@ GoRouter _createRouter() {
       // ============================================
       // 7. OWNER ROUTES
       // ============================================
-      final ownerRoutes = [
-        '/owner',
-        '/owner/add-barber',
-        '/owner/services/add',
-        '/owner/services',
-        '/owner/barber-schedule',
-        '/owner/barber-leaves',
-        '/owner/barbers',
-        '/owner/edit-barber-services',
-        '/owner/vip-requests',
-        '/owner/genders/add',
-        '/owner/age-categories/add',
-        '/owner/salon/holidays',
-        '/owner/salon/create',
-        '/owner/salon/edit',
-        '/owner/categories/add',
-        '/owner/salon/:salonId/barber/:barberId/add-service',
-      ];
-
-      final isOwnerRoute = ownerRoutes.any(
-        (route) => path.startsWith('/owner'),
-      );
+      // ⚠️ NOTE: '/owner/vip-requests', '/owner/genders/add',
+      // '/owner/age-categories/add' and '/owner/categories/add' are
+      // permitted here (they start with '/owner') but there is no
+      // matching GoRoute defined further down in this file. If any
+      // screen actually navigates to one of those paths, GoRouter
+      // will throw a "no matching route" error at runtime. Either add
+      // the missing GoRoute entries for those screens, or remove
+      // navigation calls that target them.
+      final isOwnerRoute = path.startsWith('/owner');
 
       if (isOwnerRoute) {
         debugPrint('👑 Owner route accessed: $path');
@@ -898,10 +978,7 @@ GoRouter _createRouter() {
       // ============================================
       // 8. BARBER ROUTES
       // ============================================
-      final barberRoutes = ['/barber'];
-      final isBarberRoute = barberRoutes.any(
-        (route) => path.startsWith('/barber'),
-      );
+      final isBarberRoute = path.startsWith('/barber');
 
       if (isBarberRoute) {
         debugPrint('💇 Barber route accessed: $path');
@@ -933,6 +1010,12 @@ GoRouter _createRouter() {
       // ============================================
       // 9. DASHBOARD REDIRECTS
       // ============================================
+      // NOTE: This block is effectively unreachable dead code for the
+      // exact paths '/owner', '/barber', '/customer' because steps 6-8
+      // above already match and `return` before execution ever reaches
+      // here (all three paths start with '/owner', '/barber' or
+      // '/customer' respectively). It's left in place since it's
+      // harmless, but it will never actually run.
       final roleToPath = {
         'owner': '/owner',
         'barber': '/barber',
@@ -1074,11 +1157,11 @@ GoRouter _createRouter() {
         },
       ),
       // ============================================================
-      // ✅ FIX: this route now also reads `state.extra`, which is
-      // where main.dart's _establishSessionFromUri() result lands
-      // (status/type/userId/email). Query params are still read as
-      // a fallback for direct-link cases (e.g. an error-only link
-      // opened with no prior processing).
+      // ✅ This route reads `state.extra`, which is where main.dart's
+      // _establishSessionFromUri() result lands (status/type/userId/
+      // email). Query params are still read as a fallback for
+      // direct-link cases (e.g. an error-only link opened with no
+      // prior processing).
       // ============================================================
       GoRoute(
         path: '/auth/callback',
@@ -1404,7 +1487,13 @@ GoRouter _createRouter() {
         path: '/customer/salon-profile',
         name: 'salon-profile',
         builder: (context, state) {
-          final salon = state.extra as Map<String, dynamic>;
+          // ✅ FIX: previously this was `state.extra as Map<String, dynamic>`
+          // with NO null fallback. Navigating here without passing
+          // `extra` (e.g. a stale deep link, browser back/forward on
+          // web, or a bug elsewhere) threw an uncaught type-cast
+          // exception and crashed the screen. Now falls back to an
+          // empty map instead of crashing.
+          final salon = state.extra as Map<String, dynamic>? ?? <String, dynamic>{};
           return SalonProfileScreen(salon: salon);
         },
       ),
@@ -1492,7 +1581,7 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> {
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   late final NetworkService _networkService;
   StreamSubscription<bool>? _networkSub;
   bool _offline = false;
@@ -1505,9 +1594,32 @@ class _MyAppState extends State<MyApp> {
     _initNetworkMonitoring();
     appState.addListener(_onAppStateChanged);
     themeNotifier.addListener(_onThemeChanged);
+
+    // ✅ FIX: keep the OS in sync with the platform brightness when the
+    // user's preference is ThemeMode.system (WidgetsBindingObserver's
+    // didChangePlatformBrightness fires when the OS-level light/dark
+    // setting changes while the app is running).
+    WidgetsBinding.instance.addObserver(this);
+
+    // ✅ Re-apply the status bar style once the widget tree exists, in
+    // case ThemeNotifier finished loading the saved preference after
+    // the best-effort call made in main().
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      applySystemUIOverlayStyle(_resolveIsDark());
+    });
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    super.didChangePlatformBrightness();
+    if (themeNotifier.currentTheme == ThemeMode.system) {
+      applySystemUIOverlayStyle(_resolveIsDark());
+      if (mounted) setState(() {});
+    }
   }
 
   void _onThemeChanged() {
+    applySystemUIOverlayStyle(_resolveIsDark());
     setState(() {});
   }
 
@@ -1611,12 +1723,21 @@ class _MyAppState extends State<MyApp> {
   // ============================================================
   // ✅ REACTIVATE DIALOG - AppTheme based
   // ============================================================
+  // ✅ FIX: previously this dialog didn't read isDarkMode / textColor
+  // / secondaryTextColor like _showRestoreDialog() did, so in dark
+  // mode it always rendered with the (light) default AlertDialog
+  // background and default black text — inconsistent and hard to
+  // read against the rest of the dark-themed app. Now mirrors the
+  // restore dialog's theming.
   Future<void> _showReactivateDialog() async {
     final dialogContext = navigatorKey.currentContext;
     if (dialogContext == null || _restoreDialogShowing) return;
 
     _restoreDialogShowing = true;
+    final isDark = dialogContext.isDarkMode;
     final primaryColor = dialogContext.primaryColor;
+    final textColor = dialogContext.textColor;
+    final secondaryTextColor = dialogContext.secondaryTextColor;
 
     await showDialog<void>(
       context: dialogContext,
@@ -1624,6 +1745,7 @@ class _MyAppState extends State<MyApp> {
       builder: (context) => PopScope(
         canPop: false,
         child: AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -1631,13 +1753,17 @@ class _MyAppState extends State<MyApp> {
             children: [
               Icon(Icons.restore, color: primaryColor),
               const SizedBox(width: 8),
-              const Text('Reactivate Your Account?'),
+              Text(
+                'Reactivate Your Account?',
+                style: TextStyle(color: textColor),
+              ),
             ],
           ),
-          content: const Text(
+          content: Text(
             'Your account is currently deactivated. Would you like to '
             'reactivate it and continue using the app, or log out and '
             'keep it deactivated?',
+            style: TextStyle(color: secondaryTextColor),
           ),
           actions: [
             TextButton(
@@ -1649,6 +1775,9 @@ class _MyAppState extends State<MyApp> {
                   router.go('/login');
                 }
               },
+              style: TextButton.styleFrom(
+                foregroundColor: isDark ? Colors.white70 : Colors.grey[700],
+              ),
               child: const Text('Log Out'),
             ),
             ElevatedButton(
@@ -1675,14 +1804,33 @@ class _MyAppState extends State<MyApp> {
   void dispose() {
     _networkSub?.cancel();
     _networkService.dispose();
-    _linkSubscription?.cancel();
+    // ✅ FIX: _linkSubscription is a global, app-lifetime resource, not
+    // something owned by this State. MyApp is the root widget passed
+    // to runApp() and is only disposed when the whole engine/process
+    // tears down (at which point the subscription dies with it
+    // anyway) — but IF this dispose() were ever triggered while the
+    // process kept running (an edge case, e.g. certain hot-reload
+    // scenarios), cancelling it here would permanently kill deep-link
+    // handling for the rest of the app's life with no way to
+    // re-subscribe. Safer to simply not touch it from here.
     appState.removeListener(_onAppStateChanged);
     themeNotifier.removeListener(_onThemeChanged);
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    // ✅ FIX: a call here used to read `Theme.of(context).brightness`,
+    // but `context` at this point is MyApp's OWN context — which sits
+    // ABOVE the `MaterialApp.router` built below, not inside it. There
+    // is no Theme ancestor above MyApp, so Theme.of(context) silently
+    // fell back to Flutter's default fallback ThemeData (always
+    // "light"), regardless of the app's actual active theme. That call
+    // has been removed entirely: the overlay style is already kept in
+    // sync correctly via `_resolveIsDark()` (which reads themeNotifier
+    // + platform brightness directly) from initState's post-frame
+    // callback, `_onThemeChanged`, and `didChangePlatformBrightness`.
     return MaterialApp.router(
       routerConfig: router,
       scaffoldMessengerKey: messengerKey,
@@ -1749,40 +1897,55 @@ class _ErrorApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       theme: AppTheme.lightTheme,
-      home: Scaffold(
-        backgroundColor: context.backgroundColor,
-        body: Center(
-          child: Padding(
-            padding: EdgeInsets.all(context.responsivePadding),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.error_outline, size: 64, color: context.errorColor),
-                const SizedBox(height: 20),
-                Text(
-                  'Unable to Start App',
-                  style: context.headlineSmall.copyWith(
-                    color: context.textColor,
+      // ✅ FIX: the `context` passed into this widget's build() sits
+      // ABOVE this MaterialApp (it's the context runApp() renders
+      // into), so `context.backgroundColor` etc. (which call
+      // Theme.of(context) under the hood) previously found no Theme
+      // ancestor and silently fell back to Flutter's generic default
+      // theme — AppTheme.lightTheme was never actually reflected in
+      // this screen's colors/text styles. Wrapping the content in a
+      // Builder gives us a new context that IS a descendant of this
+      // MaterialApp, so the extensions now resolve correctly.
+      home: Builder(
+        builder: (context) => Scaffold(
+          backgroundColor: context.backgroundColor,
+          body: Center(
+            child: Padding(
+              padding: EdgeInsets.all(context.responsivePadding),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 64,
+                    color: context.errorColor,
                   ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  error,
-                  textAlign: TextAlign.center,
-                  style: context.bodyMedium.copyWith(
-                    color: context.secondaryTextColor,
+                  const SizedBox(height: 20),
+                  Text(
+                    'Unable to Start App',
+                    style: context.headlineSmall.copyWith(
+                      color: context.textColor,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 30),
-                ElevatedButton(
-                  onPressed: () => main(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: context.primaryColor,
-                    foregroundColor: Colors.white,
+                  const SizedBox(height: 10),
+                  Text(
+                    error,
+                    textAlign: TextAlign.center,
+                    style: context.bodyMedium.copyWith(
+                      color: context.secondaryTextColor,
+                    ),
                   ),
-                  child: const Text('Restart App'),
-                ),
-              ],
+                  const SizedBox(height: 30),
+                  ElevatedButton(
+                    onPressed: () => main(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.primaryColor,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('Restart App'),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
