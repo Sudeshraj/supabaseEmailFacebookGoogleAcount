@@ -6,7 +6,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../utils/ip_helper.dart';
 import '../../services/timezone_service.dart';
 import '../../extensions/context_extensions.dart';
-import '../../theme/app_theme.dart';
 
 final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
@@ -28,11 +27,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ==================== DATA LISTS ====================
   List<Map<String, dynamic>> _searchResults = [];
   List<Map<String, dynamic>> _ownerSalons = [];
-
-  // Services with their variants
   List<Map<String, dynamic>> _services = [];
 
-  // Selected items: serviceId -> list of selected variantIds
   final Map<String, List<int>> _selectedItems = {};
 
   // ==================== SELECTED ITEMS ====================
@@ -44,8 +40,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   String _deviceTimezone = '';
   String _salonTimezone = '';
   bool _isTimezoneLoaded = false;
-
-  // Salon hours
   String _salonOpenTimeUtc = '09:00:00';
   String _salonCloseTimeUtc = '18:00:00';
 
@@ -66,6 +60,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ==================== CATEGORY TAB STATE ====================
   String? _selectedCategoryTab;
 
+  // ==================== BARBER ASSIGNED SERVICES ====================
+  // Tracks which services/variants are already assigned to the currently
+  // selected barber, so we can disable just those items instead of
+  // disabling the whole barber.
+  Set<int> _barberAssignedVariantIds = {};
+  Set<String> _barberAssignedServiceIds = {};
+  bool _isLoadingBarberServices = false;
+
   // ==================== TIMERS ====================
   Timer? _debounceTimer;
 
@@ -74,29 +76,18 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   // ==================== RESPONSIVE HELPERS ====================
   late bool _isWeb;
-  late bool _isDark;
 
-  // Alternating card colors - Dark mode aware
-  final List<Color> _cardColorsLight = [
-    const Color(0xFFE3F2FD), // Light Blue
-    const Color(0xFFFCE4EC), // Light Pink
-    const Color(0xFFE8F5E9), // Light Green
-    const Color(0xFFFFF3E0), // Light Orange
-    const Color(0xFFF3E5F5), // Light Purple
-    const Color(0xFFE0F7FA), // Light Cyan
-    const Color(0xFFFFEBEE), // Light Red
-    const Color(0xFFE8EAF6), // Light Indigo
-  ];
-
-  final List<Color> _cardColorsDark = [
-    const Color(0xFF1A237E), // Dark Blue
-    const Color(0xFF4A148C), // Dark Purple
-    const Color(0xFF1B5E20), // Dark Green
-    const Color(0xFFE65100), // Dark Orange
-    const Color(0xFF4A148C), // Dark Purple
-    const Color(0xFF004D40), // Dark Cyan
-    const Color(0xFFB71C1C), // Dark Red
-    const Color(0xFF1A237E), // Dark Indigo
+  // ✅ Alternating card colors - using theme-aware alpha blending
+  // These are palette variations; base colors come from AppTheme.primary
+  final List<Color> _cardColorTints = [
+    const Color(0xFFE3F2FD), // Light Blue tint
+    const Color(0xFFFCE4EC), // Light Pink tint
+    const Color(0xFFE8F5E9), // Light Green tint
+    const Color(0xFFFFF3E0), // Light Orange tint
+    const Color(0xFFF3E5F5), // Light Purple tint
+    const Color(0xFFE0F7FA), // Light Cyan tint
+    const Color(0xFFFFEBEE), // Light Red tint
+    const Color(0xFFE8EAF6), // Light Indigo tint
   ];
 
   // ==================== COMPUTED PROPERTIES ====================
@@ -112,9 +103,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     return total;
   }
 
-  int get _totalSelectedServices {
-    return _selectedItems.keys.length;
-  }
+  int get _totalSelectedServices => _selectedItems.keys.length;
 
   @override
   bool get wantKeepAlive => true;
@@ -139,8 +128,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     if (route is PageRoute) {
       routeObserver.subscribe(this, route);
     }
-    _isWeb = context.isWeb;
-    _isDark = context.isDarkMode;
   }
 
   @override
@@ -158,7 +145,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // DST-SAFE TIMEZONE CONVERSION USING TimezoneService
+  // DST-SAFE TIMEZONE CONVERSION
   // ============================================================
 
   String _localTimeToUtcString(TimeOfDay localTime, String timezone) {
@@ -184,9 +171,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       }
 
       if (mounted) {
-        setState(() {
-          _isTimezoneLoaded = true;
-        });
+        setState(() => _isTimezoneLoaded = true);
       }
 
       await _loadIpAddress();
@@ -226,9 +211,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       });
 
       debugPrint('✅ Loaded salon timezone: $_salonTimezone');
-      debugPrint(
-        '✅ Salon hours (UTC): $_salonOpenTimeUtc - $_salonCloseTimeUtc',
-      );
     } catch (e) {
       debugPrint('❌ Error loading salon timezone: $e');
       setState(() {
@@ -273,7 +255,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             'source': 'special',
             'date': dateStr,
           };
-          debugPrint('✅ Day $dayOfWeek ($dateStr): Using SPECIAL break');
           continue;
         }
 
@@ -292,7 +273,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             'end': regularBreak['end_time'] as String,
             'source': 'regular',
           };
-          debugPrint('✅ Day $dayOfWeek: Using REGULAR break');
           continue;
         }
 
@@ -310,7 +290,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           'end': defaultEndUtc,
           'source': 'default',
         };
-        debugPrint('⚠️ Day $dayOfWeek: No break found, using DEFAULT');
       }
 
       return lunchBreaks;
@@ -318,17 +297,15 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       debugPrint('❌ Error loading lunch breaks: $e');
       final Map<int, Map<String, String>> defaultBreaks = {};
       for (int day = 1; day <= 7; day++) {
-        final defaultStartUtc = _localTimeToUtcString(
-          const TimeOfDay(hour: 12, minute: 0),
-          _salonTimezone,
-        );
-        final defaultEndUtc = _localTimeToUtcString(
-          const TimeOfDay(hour: 13, minute: 0),
-          _salonTimezone,
-        );
         defaultBreaks[day] = {
-          'start': defaultStartUtc,
-          'end': defaultEndUtc,
+          'start': _localTimeToUtcString(
+            const TimeOfDay(hour: 12, minute: 0),
+            _salonTimezone,
+          ),
+          'end': _localTimeToUtcString(
+            const TimeOfDay(hour: 13, minute: 0),
+            _salonTimezone,
+          ),
           'source': 'default_error',
         };
       }
@@ -388,18 +365,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               'updated_at': DateTime.now().toIso8601String(),
             });
             specialCreatedCount++;
-            debugPrint('✅ Created SPECIAL break for day $dayOfWeek ($dateStr)');
-          } else {
-            await supabase
-                .from('barber_special_breaks')
-                .update({
-                  'start_time': startTime,
-                  'end_time': endTime,
-                  'updated_at': DateTime.now().toIso8601String(),
-                })
-                .eq('id', existingSpecial['id']);
-            updatedCount++;
-            debugPrint('✅ Updated SPECIAL break for day $dayOfWeek ($dateStr)');
           }
         } else if (source == 'regular') {
           final existingRegular = await supabase
@@ -423,7 +388,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               'updated_at': DateTime.now().toIso8601String(),
             });
             createdCount++;
-            debugPrint('✅ Created REGULAR break for day $dayOfWeek');
           } else {
             await supabase
                 .from('barber_breaks')
@@ -434,7 +398,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 })
                 .eq('id', existingRegular['id']);
             updatedCount++;
-            debugPrint('✅ Updated REGULAR break for day $dayOfWeek');
           }
         } else {
           final existingRegular = await supabase
@@ -458,13 +421,12 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               'updated_at': DateTime.now().toIso8601String(),
             });
             createdCount++;
-            debugPrint('✅ Created DEFAULT break for day $dayOfWeek');
           }
         }
       }
 
       debugPrint(
-        '📊 Lunch Break Summary: Regular Created=$createdCount, Special Created=$specialCreatedCount, Updated=$updatedCount',
+        '📊 Lunch Break: Created=$createdCount, Special=$specialCreatedCount, Updated=$updatedCount',
       );
     } catch (e) {
       debugPrint('❌ Error creating lunch breaks: $e');
@@ -501,7 +463,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       final ownerId = supabase.auth.currentUser?.id;
       if (ownerId == null) return;
       final ip = _currentIp ?? await IpHelper.getPublicIp();
-      final logData = {
+      await supabase.from('owner_activity_log').insert({
         'owner_id': ownerId,
         'action_type': actionType,
         'target_type': targetType,
@@ -509,8 +471,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         'details': details ?? {},
         'ip_address': ip,
         'created_at': DateTime.now().toIso8601String(),
-      };
-      await supabase.from('owner_activity_log').insert(logData);
+      });
     } catch (e) {
       debugPrint('❌ Error logging activity: $e');
     }
@@ -533,7 +494,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
-        _showSnackBar('Data refreshed!', Colors.green);
+        _showSnackBar('Data refreshed!', context.successColor);
       }
     }
   }
@@ -595,10 +556,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
   }
 
-  // ============================================================
-  // Helper: Check if barber is already in salon
-  // ============================================================
-
   Future<bool> _isBarberAlreadyInSalon(String barberId, int salonId) async {
     try {
       final response = await supabase
@@ -615,7 +572,82 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // Search users using PostgreSQL function
+  // LOAD BARBER'S ALREADY-ASSIGNED SERVICES (for this salon)
+  // ============================================================
+
+  Future<void> _loadBarberAssignedServices(String barberId) async {
+    if (_selectedSalonId == null) {
+      if (mounted) {
+        setState(() {
+          _barberAssignedVariantIds = {};
+          _barberAssignedServiceIds = {};
+        });
+      }
+      return;
+    }
+
+    if (mounted) setState(() => _isLoadingBarberServices = true);
+
+    try {
+      final salonIdInt = int.parse(_selectedSalonId!);
+
+      final salonBarberResponse = await supabase
+          .from('salon_barbers')
+          .select('id')
+          .eq('salon_id', salonIdInt)
+          .eq('barber_id', barberId)
+          .maybeSingle();
+
+      if (salonBarberResponse == null) {
+        if (mounted) {
+          setState(() {
+            _barberAssignedVariantIds = {};
+            _barberAssignedServiceIds = {};
+            _isLoadingBarberServices = false;
+          });
+        }
+        return;
+      }
+
+      final salonBarberId = salonBarberResponse['id'];
+
+      final existingServices = await supabase
+          .from('barber_services')
+          .select('service_id, variant_id')
+          .eq('salon_barber_id', salonBarberId);
+
+      final Set<int> variantIds = {};
+      final Set<String> fullServiceIds = {};
+
+      for (var row in existingServices) {
+        if (row['variant_id'] != null) {
+          variantIds.add(row['variant_id'] as int);
+        } else {
+          fullServiceIds.add(row['service_id'].toString());
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _barberAssignedVariantIds = variantIds;
+          _barberAssignedServiceIds = fullServiceIds;
+          _isLoadingBarberServices = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading barber assigned services: $e');
+      if (mounted) {
+        setState(() {
+          _barberAssignedVariantIds = {};
+          _barberAssignedServiceIds = {};
+          _isLoadingBarberServices = false;
+        });
+      }
+    }
+  }
+
+  // ============================================================
+  // SEARCH
   // ============================================================
 
   void _onSearchChanged() {
@@ -628,6 +660,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           _searchResults = [];
           _isSearching = false;
           _selectedBarberId = null;
+          _selectedItems.clear();
+          _barberAssignedVariantIds = {};
+          _barberAssignedServiceIds = {};
         });
       }
       return;
@@ -647,9 +682,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     if (query.length >= 2) {
       if (mounted) setState(() => _isSearching = true);
       _debounceTimer = Timer(const Duration(milliseconds: 500), () {
-        if (mounted) {
-          _searchUsers(query);
-        }
+        if (mounted) _searchUsers(query);
       });
     } else {
       if (mounted) {
@@ -717,9 +750,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           _isSearching = false;
         });
       }
-      if (results.isEmpty && mounted) {
-        _showSnackBar('No barbers found matching "$query"', Colors.orange);
-      }
     } catch (e) {
       debugPrint('❌ Search error: $e');
       if (mounted) {
@@ -733,7 +763,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // Load salon-specific data
+  // LOAD SALON SPECIFIC DATA
   // ============================================================
 
   Future<void> _loadSalonSpecificData() async {
@@ -749,11 +779,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
     if (mounted) setState(() => _isLoadingSalonData = true);
     try {
-      if (mounted) {
-        setState(() {
-          _isLoadingSalonData = false;
-        });
-      }
+      if (mounted) setState(() => _isLoadingSalonData = false);
       await _loadServicesWithVariants();
       if (mounted) {
         setState(() {
@@ -762,6 +788,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           _selectedBarberId = null;
           _isSearching = false;
           _selectedCategoryTab = null;
+          _barberAssignedVariantIds = {};
+          _barberAssignedServiceIds = {};
         });
       }
     } catch (e) {
@@ -778,7 +806,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // Load services and variants
+  // LOAD SERVICES WITH VARIANTS
   // ============================================================
 
   Future<void> _loadServicesWithVariants() async {
@@ -1010,6 +1038,12 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ============================================================
 
   void _toggleSelection(String serviceId, [int? variantId]) {
+    // Guard: never allow toggling a service/variant already assigned to
+    // the selected barber.
+    if (variantId != null && _isVariantAssigned(variantId)) return;
+    if (variantId == null && _barberAssignedServiceIds.contains(serviceId)) {
+      return;
+    }
     setState(() {
       if (variantId == null) {
         if (_selectedItems.containsKey(serviceId)) {
@@ -1043,7 +1077,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     });
   }
 
-
   bool _isSelected(String serviceId, [int? variantId]) {
     if (variantId == null) {
       return _selectedItems.containsKey(serviceId) &&
@@ -1055,6 +1088,21 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   int _getSelectedCount(String serviceId) {
     return _selectedItems[serviceId]?.length ?? 0;
+  }
+
+  bool _isVariantAssigned(int variantId) {
+    return _barberAssignedVariantIds.contains(variantId);
+  }
+
+  bool _isServiceFullyAssigned(Map<String, dynamic> service) {
+    final hasVariants = service['hasVariants'] as bool;
+    if (hasVariants) {
+      final variants = service['variants'] as List;
+      if (variants.isEmpty) return false;
+      return variants.every((v) => _barberAssignedVariantIds.contains(v['id']));
+    } else {
+      return _barberAssignedServiceIds.contains(service['id']);
+    }
   }
 
   Map<String, dynamic>? _findVariantById(String serviceId, int variantId) {
@@ -1082,7 +1130,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   List<Widget> _buildSelectedServicesList() {
-    final isDark = _isDark;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
     final List<Widget> widgets = [];
     for (var entry in _selectedItems.entries) {
       final serviceId = entry.key;
@@ -1102,15 +1151,17 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             padding: const EdgeInsets.only(left: 8, bottom: 4),
             child: Row(
               children: [
-                const Icon(Icons.check_circle, size: 16, color: Colors.green),
+                Icon(Icons.check_circle, size: 16, color: context.successColor),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     service['name'] ?? 'Service',
                     style: TextStyle(
                       fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white : Colors.black87,
+                      color: textColor,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -1127,10 +1178,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 padding: const EdgeInsets.only(left: 24, bottom: 2),
                 child: Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.check_circle,
                       size: 14,
-                      color: Colors.green,
+                      color: context.successColor,
                     ),
                     const SizedBox(width: 6),
                     Expanded(
@@ -1138,8 +1189,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                         variant['display_text']?.toString() ?? 'Variant',
                         style: TextStyle(
                           fontSize: 13,
-                          color: isDark ? Colors.white70 : Colors.black87,
+                          color: secondaryTextColor,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
@@ -1159,8 +1212,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                     service['name'] ?? 'Service',
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
+                      color: textColor,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 ...variantWidgets,
@@ -1174,278 +1229,233 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // ADD BARBER WITH CORRECT TIMEZONE CONVERSION & LUNCH BREAKS
+  // ADD BARBER
   // ============================================================
 
   Future<void> _addBarber() async {
     if (_selectedBarberId == null) {
-      if (mounted) _showSnackBar('Please select a barber', Colors.red);
+      _showSnackBar('Please select a barber', context.errorColor);
       return;
     }
     if (_selectedSalonId == null) {
-      if (mounted) _showSnackBar('Please select a salon', Colors.red);
+      _showSnackBar('Please select a salon', context.errorColor);
       return;
     }
     if (_totalSelectedItems == 0) {
-      if (mounted) {
-        _showSnackBar('Please select at least one service', Colors.red);
-      }
+      _showSnackBar('Please select at least one service', context.errorColor);
       return;
     }
 
     final isActive = await _isBarberActive(_selectedBarberId!);
     if (!isActive) {
-      if (mounted) {
-        _showSnackBar(
-          'This barber account is inactive. Please reactivate before adding.',
-          Colors.orange,
-        );
-      }
+      _showSnackBar(
+        'This barber account is inactive. Please reactivate before adding.',
+        Colors.orange,
+      );
       return;
     }
 
-    final alreadyExists = await _isBarberAlreadyInSalon(
-      _selectedBarberId!,
-      int.parse(_selectedSalonId!),
-    );
-
-    if (alreadyExists) {
-      if (mounted) {
-        _showSnackBar(
-          'This barber is already added to the salon',
-          Colors.orange,
-        );
-      }
-      return;
-    }
     if (!mounted) return;
 
-    final isDark = _isDark;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
 
     final confirm = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppTheme.primary,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.person_add,
-                color: Colors.white,
-                size: 24,
-              ),
+      builder: (dialogContext) {
+        // Fully custom Dialog — full manual control over layout so
+        // Flutter's internal AlertDialog / OverflowBar sizing quirks
+        // (which can silently force extra height on narrow screens)
+        // never cause an overflow again.
+        final screenHeight = MediaQuery.of(dialogContext).size.height;
+        final maxDialogHeight = screenHeight * 0.85;
+
+        return Dialog(
+          backgroundColor: context.backgroundColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 24,
+            vertical: 24,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxHeight: maxDialogHeight,
+              maxWidth: _isWeb ? 450 : 420,
             ),
-            const SizedBox(width: 12),
-            Text(
-              'Confirm Add Barber',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-          ],
-        ),
-        content: SizedBox(
-          width: _isWeb ? 450 : null,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.05),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.person, color: AppTheme.primary, size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        'Add ${_getBarberName()} to ${_selectedSalonDetails?['name'] ?? 'salon'}?',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                          color: isDark ? Colors.white : Colors.black87,
+            // ✅ The ENTIRE dialog (title + content + actions) scrolls as
+            // one unit. This is the only 100%-safe approach: even if the
+            // available height is smaller than the title+actions' own
+            // minimum size, the dialog just scrolls instead of overflowing.
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ---------- TITLE ----------
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: primaryColor,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.person_add,
+                            color: Colors.white,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Confirm Add Barber',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: textColor,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ---------- CONTENT (plain — outer scrollview handles scrolling) ----------
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: primaryColor.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.person,
+                                color: primaryColor,
+                                size: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Add ${_getBarberName()} to ${_selectedSalonDetails?['name'] ?? 'salon'}?',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: textColor,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        _buildInfoBox(
+                          icon: Icons.schedule,
+                          color: Colors.green,
+                          title: 'Auto Schedule',
+                          subtitle:
+                              'All days (Mon-Sun) will be set as working days with salon hours',
+                        ),
+                        const SizedBox(height: 12),
+                        _buildInfoBox(
+                          icon: Icons.restaurant,
+                          color: Colors.orange,
+                          title: 'Lunch Break',
+                          subtitle:
+                              'Loaded from: Special → Regular → Default (12-1 PM)',
+                        ),
+                        const SizedBox(height: 12),
+                        _buildInfoBox(
+                          icon: Icons.access_time,
+                          color: Colors.blue,
+                          title: 'Timezone',
+                          subtitle:
+                              'Business hours saved in UTC. Salon: ${_salonTimezone.split('/').last}',
+                        ),
+                        const SizedBox(height: 20),
+                        Text(
+                          'Selected Services:',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: textColor,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: _buildSelectedServicesList(),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
+                  // ---------- ACTIONS (fixed row, always horizontal) ----------
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () =>
+                              Navigator.pop(dialogContext, false),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                          ),
+                          child: Text(
+                            'Cancel',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: secondaryTextColor,
+                            ),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.schedule, color: Colors.green, size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Auto Schedule',
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () => Navigator.pop(dialogContext, true),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: primaryColor,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          child: const Text(
+                            'Confirm Add',
                             style: TextStyle(
+                              fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              fontSize: 13,
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          Text(
-                            'All days (Mon-Sun) will be set as working days with salon hours',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: isDark ? Colors.white60 : Colors.grey[700],
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.restaurant,
-                      color: Colors.orange,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Lunch Break',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                          Text(
-                            'Lunch breaks will be loaded from: Special → Regular → Default (12-1 PM)',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: isDark ? Colors.white60 : Colors.grey[700],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.blue.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.access_time, color: Colors.blue, size: 20),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Timezone',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
-                          ),
-                          Text(
-                            'Business hours saved in UTC. Salon timezone: ${_salonTimezone.split('/').last}',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: isDark ? Colors.white60 : Colors.grey[700],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              Text(
-                'Selected Services:',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: isDark ? Colors.white : Colors.black87,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Container(
-                constraints: const BoxConstraints(maxHeight: 300),
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: _buildSelectedServicesList(),
+                    ],
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white60 : Colors.grey,
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            child: const Text(
-              'Confirm Add',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
 
     if (confirm != true) return;
@@ -1626,19 +1636,15 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             'created_at': DateTime.now().toIso8601String(),
             'updated_at': DateTime.now().toIso8601String(),
           });
-          debugPrint('✅ Barber role assigned with status active');
         }
-      } else {
-        if (userRoleCheck['status'] != 'active') {
-          await supabase
-              .from('user_roles')
-              .update({
-                'status': 'active',
-                'updated_at': DateTime.now().toIso8601String(),
-              })
-              .eq('id', userRoleCheck['id']);
-          debugPrint('✅ Barber role reactivated');
-        }
+      } else if (userRoleCheck['status'] != 'active') {
+        await supabase
+            .from('user_roles')
+            .update({
+              'status': 'active',
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', userRoleCheck['id']);
       }
 
       await _logOwnerActivity(
@@ -1663,13 +1669,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       );
 
       if (mounted) {
-        String message =
-            'Barber added successfully!\n'
-            '• $createdCount schedules created\n'
-            '• Lunch breaks configured (Special → Regular → Default)\n'
-            '• $servicesAddedCount services, $variantsAddedCount variants added\n'
-            '• Salon timezone: ${_salonTimezone.split('/').last}';
-        _showSnackBar(message, Colors.green);
+        _showSnackBar(
+          'Barber added successfully!\n'
+          '• $createdCount schedules created\n'
+          '• Lunch breaks configured\n'
+          '• $servicesAddedCount services, $variantsAddedCount variants added\n'
+          '• Salon timezone: ${_salonTimezone.split('/').last}',
+          context.successColor,
+        );
 
         setState(() {
           _selectedBarberId = null;
@@ -1679,11 +1686,13 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           _searchResults = [];
           _isSearching = false;
           _selectedCategoryTab = null;
+          _barberAssignedVariantIds = {};
+          _barberAssignedServiceIds = {};
         });
       }
     } catch (e) {
       debugPrint('❌ Error adding barber: $e');
-      if (mounted) _showSnackBar('Error: ${e.toString()}', Colors.red);
+      if (mounted) _showSnackBar('Error: ${e.toString()}', context.errorColor);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -1698,10 +1707,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           .eq('role_id', 2)
           .maybeSingle();
 
-      if (response == null) {
-        return true;
-      }
-
+      if (response == null) return true;
       return response['status'] == 'active';
     } catch (e) {
       debugPrint('❌ Error checking barber status: $e');
@@ -1726,27 +1732,79 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // UI BUILDERS
   // ============================================================
 
+  Widget _buildInfoBox({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+  }) {
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: textColor,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 11, color: secondaryTextColor),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCategoryChip(String label, bool isSelected, VoidCallback onTap) {
-    final isDark = _isDark;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final cardColor = context.cardColor;
+    final isDark = context.isDarkMode;
 
     return FilterChip(
-      label: Text(
-        label,
-        style: TextStyle(
-          color: isSelected
-              ? AppTheme.primary
-              : (isDark ? Colors.white70 : Colors.grey[700]),
-          fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+      label: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 160),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? primaryColor : textColor,
+            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ),
       selected: isSelected,
       onSelected: (_) => onTap(),
-      selectedColor: AppTheme.primary.withValues(alpha: 0.2),
-      checkmarkColor: AppTheme.primary,
-      backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+      selectedColor: primaryColor.withValues(alpha: 0.2),
+      checkmarkColor: primaryColor,
+      backgroundColor: isDark ? cardColor : Colors.grey[100],
       shape: StadiumBorder(
         side: BorderSide(
-          color: isSelected ? AppTheme.primary : Colors.transparent,
+          color: isSelected ? primaryColor : Colors.transparent,
           width: 1,
         ),
       ),
@@ -1754,33 +1812,42 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   Widget _buildServiceCard(Map<String, dynamic> service, int index) {
-    final isDark = _isDark;
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final cardColor = context.cardColor;
+    final borderColor = context.dividerColor;
+
     final serviceId = service['id'] as String;
     final hasVariants = service['hasVariants'] as bool;
     final variants = service['variants'] as List;
     final selectedCount = _getSelectedCount(serviceId);
     final isExpanded = _expandedServices.contains(serviceId);
-    final accentColor = AppTheme.primary;
-    final cardColor = isDark
-        ? _cardColorsDark[index % _cardColorsDark.length]
-        : _cardColorsLight[index % _cardColorsLight.length];
+    final isFullyAssigned =
+        _selectedBarberId != null && _isServiceFullyAssigned(service);
+
+    // Use theme card color with tint
+    final tintColor = isDark
+        ? cardColor.withValues(alpha: 0.3)
+        : _cardColorTints[index % _cardColorTints.length].withValues(
+            alpha: 0.4,
+          );
 
     return Card(
       elevation: 2,
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      color: cardColor,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: selectedCount > 0
-              ? accentColor
-              : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
+          color: selectedCount > 0 ? primaryColor : borderColor,
           width: selectedCount > 0 ? 2 : 1,
         ),
       ),
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: cardColor,
+          color: tintColor,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1789,33 +1856,25 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 color: isDark
-                    ? Colors.black.withValues(alpha: 0.3)
-                    : Colors.white.withValues(alpha: 0.5),
+                    ? Colors.black.withValues(alpha: 0.2)
+                    : Colors.white.withValues(alpha: 0.4),
                 borderRadius: const BorderRadius.only(
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
                 ),
               ),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                      color: cardColor,
                       borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(
-                            alpha: isDark ? 0.3 : 0.1,
-                          ),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
                     ),
                     child: Icon(
                       service['icon'] ?? Icons.build,
-                      color: accentColor,
+                      color: primaryColor,
                       size: 28,
                     ),
                   ),
@@ -1829,25 +1888,27 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 16,
-                            color: isDark ? Colors.white : Colors.black87,
+                            color: textColor,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
-                        Row(
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 8,
+                          runSpacing: 4,
                           children: [
                             Text(
                               service['category_name'],
                               style: TextStyle(
                                 fontSize: 11,
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.grey[600],
+                                color: secondaryTextColor,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            if (hasVariants) ...[
-                              const SizedBox(width: 8),
+                            if (hasVariants)
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 6,
@@ -1863,13 +1924,31 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                                   '${variants.length} options',
                                   style: TextStyle(
                                     fontSize: 10,
-                                    color: isDark
-                                        ? Colors.white60
-                                        : Colors.grey[600],
+                                    color: secondaryTextColor,
                                   ),
                                 ),
                               ),
-                            ],
+                            if (isFullyAssigned)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.blueGrey.withValues(
+                                    alpha: 0.15,
+                                  ),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: const Text(
+                                  'Already Assigned',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.blueGrey,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                       ],
@@ -1877,12 +1956,13 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                   ),
                   if (selectedCount > 0)
                     Container(
+                      margin: const EdgeInsets.only(left: 8),
                       padding: const EdgeInsets.symmetric(
                         horizontal: 8,
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: accentColor,
+                        color: primaryColor,
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
@@ -1901,7 +1981,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                         turns: isExpanded ? 0.5 : 0.0,
                         child: Icon(
                           Icons.keyboard_arrow_down,
-                          color: isDark ? Colors.white60 : Colors.grey,
+                          color: secondaryTextColor,
                         ),
                       ),
                       onPressed: () => _toggleExpand(serviceId),
@@ -1915,10 +1995,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 padding: const EdgeInsets.all(16),
                 child: Text(
                   service['description'],
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: isDark ? Colors.white60 : Colors.grey[600],
-                  ),
+                  style: TextStyle(fontSize: 13, color: secondaryTextColor),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1930,14 +2007,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 children: [
                   if (hasVariants) ...[
                     if (isExpanded) ...[
-                      const Divider(),
+                      Divider(color: borderColor),
                       const SizedBox(height: 8),
                       Text(
                         'Select Options:',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white60 : Colors.grey,
+                          color: secondaryTextColor,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -1945,58 +2022,86 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                         (variant) => _buildVariantCard(serviceId, variant),
                       ),
                     ] else if (selectedCount > 0) ...[
-                      const Divider(),
+                      Divider(color: borderColor),
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.check_circle,
                             size: 14,
-                            color: Colors.green,
+                            color: context.successColor,
                           ),
                           const SizedBox(width: 8),
-                          Text(
-                            '$selectedCount option${selectedCount > 1 ? 's' : ''} selected',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: isDark ? Colors.green[300] : Colors.green,
+                          Flexible(
+                            child: Text(
+                              '$selectedCount option${selectedCount > 1 ? 's' : ''} selected',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: context.successColor,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ],
                       ),
                     ],
                   ] else ...[
-                    const Divider(),
+                    Divider(color: borderColor),
                     const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () => _toggleSelection(serviceId),
-                        icon: Icon(
-                          _isSelected(serviceId)
-                              ? Icons.check_circle
-                              : Icons.add_circle_outline,
-                          size: 18,
-                        ),
-                        label: Text(
-                          _isSelected(serviceId)
-                              ? 'Selected'
-                              : 'Select Service',
-                          style: const TextStyle(fontSize: 13),
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _isSelected(serviceId)
-                              ? Colors.green
-                              : accentColor,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
+                    if (_selectedBarberId != null &&
+                        _barberAssignedServiceIds.contains(serviceId))
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: null,
+                          icon: const Icon(Icons.lock, size: 18),
+                          label: const Text(
+                            'Already Assigned',
+                            style: TextStyle(fontSize: 13),
                           ),
-                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          style: ElevatedButton.styleFrom(
+                            disabledBackgroundColor: isDark
+                                ? Colors.grey[700]
+                                : Colors.grey[300],
+                            disabledForegroundColor: secondaryTextColor,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
+                        ),
+                      )
+                    else
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () => _toggleSelection(serviceId),
+                          icon: Icon(
+                            _isSelected(serviceId)
+                                ? Icons.check_circle
+                                : Icons.add_circle_outline,
+                            size: 18,
+                          ),
+                          label: Text(
+                            _isSelected(serviceId)
+                                ? 'Selected'
+                                : 'Select Service',
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _isSelected(serviceId)
+                                ? context.successColor
+                                : primaryColor,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                          ),
                         ),
                       ),
-                    ),
                   ],
                 ],
               ),
@@ -2008,138 +2113,194 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   Widget _buildVariantCard(String serviceId, Map<String, dynamic> variant) {
-    final isDark = _isDark;
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final cardColor = context.cardColor;
+    final dividerColor = context.dividerColor;
+
     final isSelected = _isSelected(serviceId, variant['id']);
-    final accentColor = AppTheme.primary;
+    final isAssigned = _isVariantAssigned(variant['id'] as int);
 
     return GestureDetector(
-      onTap: () => _toggleSelection(serviceId, variant['id']),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? accentColor.withValues(alpha: 0.1)
-              : (isDark
-                    ? const Color(0xFF2A2A2A)
-                    : Colors.white.withValues(alpha: 0.7)),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected
-                ? accentColor
-                : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
-            width: isSelected ? 1.5 : 1,
+      onTap: isAssigned
+          ? null
+          : () => _toggleSelection(serviceId, variant['id']),
+      child: Opacity(
+        opacity: isAssigned ? 0.55 : 1.0,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isAssigned
+                ? (isDark ? Colors.grey[850] : Colors.grey[200])
+                : isSelected
+                ? primaryColor.withValues(alpha: 0.1)
+                : cardColor.withValues(alpha: 0.7),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: (isSelected && !isAssigned) ? primaryColor : dividerColor,
+              width: (isSelected && !isAssigned) ? 1.5 : 1,
+            ),
           ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? accentColor.withValues(alpha: 0.2)
-                    : (isDark ? const Color(0xFF2A2A2A) : Colors.white),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(
-                variant['gender_name'].toLowerCase().contains('male')
-                    ? Icons.male
-                    : variant['gender_name'].toLowerCase().contains('female')
-                    ? Icons.female
-                    : Icons.people,
-                color: isSelected
-                    ? accentColor
-                    : (isDark ? Colors.white60 : Colors.grey[600]),
-                size: 20,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    variant['display_text'] ??
-                        '${variant['gender_name']} • ${variant['age_category_name']}',
-                    style: TextStyle(
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w500,
-                      fontSize: 13,
-                      color: isSelected
-                          ? accentColor
-                          : (isDark ? Colors.white : Colors.grey[800]),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.currency_rupee,
-                        size: 12,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                      const SizedBox(width: 2),
-                      Text(
-                        '${variant['price']}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white70 : Colors.grey[700],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Icon(
-                        Icons.timer,
-                        size: 12,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                      const SizedBox(width: 2),
-                      Text(
-                        '${variant['duration']} min',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isSelected ? accentColor : Colors.transparent,
-                border: Border.all(
-                  color: isSelected
-                      ? accentColor
-                      : (isDark ? Colors.grey[600]! : Colors.grey[400]!),
-                  width: 1.5,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: (isSelected && !isAssigned)
+                      ? primaryColor.withValues(alpha: 0.2)
+                      : (isDark ? const Color(0xFF2A2A2A) : Colors.white),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  variant['gender_name'].toLowerCase().contains('male')
+                      ? Icons.male
+                      : variant['gender_name'].toLowerCase().contains(
+                          'female',
+                        )
+                      ? Icons.female
+                      : Icons.people,
+                  color: (isSelected && !isAssigned)
+                      ? primaryColor
+                      : secondaryTextColor,
+                  size: 20,
                 ),
               ),
-              child: isSelected
-                  ? const Icon(Icons.check, size: 14, color: Colors.white)
-                  : null,
-            ),
-          ],
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      runSpacing: 2,
+                      children: [
+                        Text(
+                          variant['display_text'] ??
+                              '${variant['gender_name']} • ${variant['age_category_name']}',
+                          style: TextStyle(
+                            fontWeight: (isSelected && !isAssigned)
+                                ? FontWeight.w600
+                                : FontWeight.w500,
+                            fontSize: 13,
+                            color: (isSelected && !isAssigned)
+                                ? primaryColor
+                                : textColor,
+                          ),
+                        ),
+                        if (isAssigned)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 1,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.blueGrey.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'Already Assigned',
+                              style: TextStyle(
+                                fontSize: 9,
+                                color: Colors.blueGrey,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 2,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.currency_rupee,
+                              size: 12,
+                              color: secondaryTextColor,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              '${variant['price']}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: secondaryTextColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.timer,
+                              size: 12,
+                              color: secondaryTextColor,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              '${variant['duration']} min',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: secondaryTextColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              if (isAssigned)
+                Icon(Icons.lock, size: 18, color: secondaryTextColor)
+              else
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: isSelected ? primaryColor : Colors.transparent,
+                    border: Border.all(
+                      color: isSelected ? primaryColor : dividerColor,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: isSelected
+                      ? const Icon(Icons.check, size: 14, color: Colors.white)
+                      : null,
+                ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   Widget _buildServicesSection() {
-    final isDark = _isDark;
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final cardColor = context.cardColor;
 
     if (_services.isEmpty && !_isLoadingServices) {
       return Card(
         elevation: _isWeb ? 4 : 2,
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        color: cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
           padding: const EdgeInsets.all(40),
@@ -2155,7 +2316,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 'No services available',
                 style: TextStyle(
                   fontSize: _isWeb ? 18 : 16,
-                  color: isDark ? Colors.white60 : Colors.grey[600],
+                  color: secondaryTextColor,
                   fontWeight: FontWeight.w500,
                 ),
               ),
@@ -2164,7 +2325,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 'Please add services to this salon first',
                 style: TextStyle(
                   fontSize: _isWeb ? 14 : 12,
-                  color: isDark ? Colors.white70 : Colors.grey[500],
+                  color: secondaryTextColor,
                 ),
               ),
             ],
@@ -2174,14 +2335,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     }
 
     if (_services.isEmpty && _isLoadingServices) {
-      return const Center(
+      return Center(
         child: Padding(
-          padding: EdgeInsets.all(32),
+          padding: const EdgeInsets.all(32),
           child: Column(
             children: [
-              CircularProgressIndicator(color: AppTheme.primary),
-              SizedBox(height: 16),
-              Text('Loading services...'),
+              CircularProgressIndicator(color: primaryColor),
+              const SizedBox(height: 16),
+              Text('Loading services...', style: TextStyle(color: textColor)),
             ],
           ),
         ),
@@ -2216,55 +2377,55 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       children: [
         Container(
           margin: const EdgeInsets.only(bottom: 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      Icons.build_circle_outlined,
-                      color: AppTheme.primary,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'Select Services',
-                      style: TextStyle(
-                        fontSize: _isWeb ? 22 : 18,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                  ),
-                  if (_totalSelectedServices > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '$_totalSelectedServices service${_totalSelectedServices > 1 ? 's' : ''} selected',
-                        style: TextStyle(
-                          fontSize: _isWeb ? 14 : 12,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    ),
-                ],
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: primaryColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.build_circle_outlined,
+                  color: primaryColor,
+                  size: 24,
+                ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Select Services',
+                  style: TextStyle(
+                    fontSize: _isWeb ? 22 : 18,
+                    fontWeight: FontWeight.bold,
+                    color: textColor,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (_totalSelectedServices > 0)
+                Container(
+                  margin: const EdgeInsets.only(left: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '$_totalSelectedServices service${_totalSelectedServices > 1 ? 's' : ''} selected',
+                    style: TextStyle(
+                      fontSize: _isWeb ? 14 : 12,
+                      fontWeight: FontWeight.w600,
+                      color: primaryColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
             ],
           ),
         ),
@@ -2275,7 +2436,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             scrollDirection: Axis.horizontal,
             children: [
               _buildCategoryChip('All', _selectedCategoryTab == null, () {
-                if (mounted) setState(() => _selectedCategoryTab = null);
+                setState(() => _selectedCategoryTab = null);
               }),
               const SizedBox(width: 8),
               ...categories.map(
@@ -2284,11 +2445,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                   child: _buildCategoryChip(
                     category,
                     _selectedCategoryTab == category,
-                    () {
-                      if (mounted) {
-                        setState(() => _selectedCategoryTab = category);
-                      }
-                    },
+                    () => setState(() => _selectedCategoryTab = category),
                   ),
                 ),
               ),
@@ -2322,14 +2479,18 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   Widget _buildSalonSection() {
-    final isDark = _isDark;
+    final isWeb = context.isWeb;
+    final isDark = context.isDarkMode; // ✅ Keep this
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final cardColor = context.cardColor;
 
     return Card(
-      elevation: _isWeb ? 4 : 2,
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      elevation: isWeb ? 4 : 2,
+      color: cardColor,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: EdgeInsets.all(_isWeb ? 20 : 16),
+        padding: EdgeInsets.all(isWeb ? 20 : 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -2339,22 +2500,22 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    color: primaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(
-                    Icons.store,
-                    color: AppTheme.primary,
-                    size: 24,
-                  ),
+                  child: Icon(Icons.store, color: primaryColor, size: 24),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  'Select Salon',
-                  style: TextStyle(
-                    fontSize: _isWeb ? 20 : 18,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
+                Expanded(
+                  child: Text(
+                    'Select Salon',
+                    style: TextStyle(
+                      fontSize: isWeb ? 20 : 18,
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -2363,14 +2524,21 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             if (_ownerSalons.isEmpty && !_isLoadingSalons)
               _buildNoSalonWarning()
             else if (_ownerSalons.isEmpty && _isLoadingSalons)
-              const Center(
+              Center(
                 child: Padding(
-                  padding: EdgeInsets.all(32),
+                  padding: const EdgeInsets.all(32),
                   child: Column(
                     children: [
-                      CircularProgressIndicator(color: AppTheme.primary),
-                      SizedBox(height: 12),
-                      Text('Loading salons...'),
+                      // ✅ Use isDark for progress indicator
+                      CircularProgressIndicator(
+                        color: isDark ? primaryColor : primaryColor,
+                      ),
+                      const SizedBox(height: 12),
+                      // ✅ Use isDark for text color
+                      Text(
+                        'Loading salons...',
+                        style: TextStyle(color: textColor),
+                      ),
                     ],
                   ),
                 ),
@@ -2394,14 +2562,23 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   Widget _buildNoSalonWarning() {
-    final isDark = _isDark;
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final primaryColor = context.primaryColor;
+    final cardColor = context.cardColor;
 
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+        color: cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange[200]!),
+        // ✅ Use isDark for border color
+        border: Border.all(
+          color: isDark
+              ? Colors.orange.withValues(alpha: 0.4)
+              : Colors.orange[200]!,
+        ),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -2409,14 +2586,15 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           Icon(
             Icons.warning_amber_rounded,
             size: 48,
-            color: Colors.orange[700],
+            // ✅ Use isDark for icon color
+            color: isDark ? Colors.orange[300] : Colors.orange[700],
           ),
           const SizedBox(height: 12),
           Text(
             'No Salons Found',
             style: TextStyle(
               fontSize: _isWeb ? 18 : 16,
-              color: isDark ? Colors.white : Colors.grey[800],
+              color: textColor,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -2425,7 +2603,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             'You need to create a salon first before adding barbers.',
             style: TextStyle(
               fontSize: _isWeb ? 14 : 12,
-              color: isDark ? Colors.white60 : Colors.grey[600],
+              color: secondaryTextColor,
             ),
             textAlign: TextAlign.center,
           ),
@@ -2435,7 +2613,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             icon: const Icon(Icons.add_business),
             label: const Text('Create Salon'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
+              backgroundColor: primaryColor,
               foregroundColor: Colors.white,
             ),
           ),
@@ -2445,8 +2623,12 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   Widget _buildSalonTile(Map<String, dynamic> salon, bool isSelected) {
-    final isDark = _isDark;
-    final accentColor = AppTheme.primary;
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final cardColor = context.cardColor;
+    final borderColor = context.dividerColor;
 
     return InkWell(
       onTap: () async {
@@ -2460,6 +2642,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             _searchResults = [];
             _isSearching = false;
             _selectedCategoryTab = null;
+            _barberAssignedVariantIds = {};
+            _barberAssignedServiceIds = {};
           });
         }
         await _loadSalonTimezoneAndHours();
@@ -2468,14 +2652,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected
-              ? accentColor.withValues(alpha: 0.05)
-              : (isDark ? const Color(0xFF2A2A2A) : Colors.white),
+          color: isSelected ? primaryColor.withValues(alpha: 0.05) : cardColor,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected
-                ? accentColor
-                : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
+            color: isSelected ? primaryColor : borderColor,
             width: isSelected ? 2 : 1,
           ),
         ),
@@ -2484,7 +2664,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             CircleAvatar(
               radius: 20,
               backgroundColor: isSelected
-                  ? accentColor
+                  ? primaryColor
                   : (isDark ? Colors.grey[800] : Colors.grey[100]),
               backgroundImage: salon['logo_url'] != null
                   ? NetworkImage(salon['logo_url'])
@@ -2492,9 +2672,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               child: salon['logo_url'] == null
                   ? Icon(
                       Icons.store,
-                      color: isSelected
-                          ? Colors.white
-                          : (isDark ? Colors.white60 : Colors.grey[600]),
+                      color: isSelected ? Colors.white : secondaryTextColor,
                       size: 20,
                     )
                   : null,
@@ -2511,24 +2689,25 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                           ? FontWeight.bold
                           : FontWeight.w500,
                       fontSize: 15,
-                      color: isDark ? Colors.white : Colors.black87,
+                      color: textColor,
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   if (salon['address'] != null)
                     Text(
                       salon['address'],
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 12, color: secondaryTextColor),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
                 ],
               ),
             ),
-            if (isSelected)
-              const Icon(Icons.check_circle, color: AppTheme.primary, size: 24),
+            if (isSelected) ...[
+              const SizedBox(width: 8),
+              Icon(Icons.check_circle, color: primaryColor, size: 24),
+            ],
           ],
         ),
       ),
@@ -2536,14 +2715,20 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   Widget _buildSearchSection() {
-    final isDark = _isDark;
+    final isWeb = context.isWeb;
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final cardColor = context.cardColor;
+    final dividerColor = context.dividerColor;
 
     return Card(
-      elevation: _isWeb ? 4 : 2,
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      elevation: isWeb ? 4 : 2,
+      color: cardColor,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
-        padding: EdgeInsets.all(_isWeb ? 20 : 16),
+        padding: EdgeInsets.all(isWeb ? 20 : 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -2553,22 +2738,22 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    color: primaryColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(
-                    Icons.search,
-                    color: AppTheme.primary,
-                    size: 24,
-                  ),
+                  child: Icon(Icons.search, color: primaryColor, size: 24),
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  'Search Barbers',
-                  style: TextStyle(
-                    fontSize: _isWeb ? 20 : 18,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
+                Expanded(
+                  child: Text(
+                    'Search Barbers',
+                    style: TextStyle(
+                      fontSize: isWeb ? 20 : 18,
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -2577,63 +2762,41 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             TextField(
               controller: _searchController,
               enabled: _selectedSalonId != null,
-              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              style: TextStyle(color: textColor),
               decoration: InputDecoration(
                 hintText: _selectedSalonId != null
                     ? 'Type name or email to search...'
                     : 'Select a salon first',
-                hintStyle: TextStyle(
-                  color: isDark ? Colors.white70 : Colors.grey,
-                ),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: isDark ? Colors.white70 : Colors.grey,
-                ),
+                prefixIcon: Icon(Icons.search, color: secondaryTextColor),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
-                        icon: Icon(
-                          Icons.clear,
-                          color: isDark ? Colors.white70 : Colors.grey,
-                        ),
+                        icon: Icon(Icons.clear, color: secondaryTextColor),
                         onPressed: () {
                           _searchController.clear();
-                          if (mounted) {
-                            setState(() {
-                              _searchResults = [];
-                              _isSearching = false;
-                              _selectedBarberId = null;
-                            });
-                          }
+                          setState(() {
+                            _searchResults = [];
+                            _isSearching = false;
+                            _selectedBarberId = null;
+                            _selectedItems.clear();
+                            _barberAssignedVariantIds = {};
+                            _barberAssignedServiceIds = {};
+                          });
                         },
                       )
                     : null,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(
-                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                  ),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(
-                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                  ),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(
-                    color: AppTheme.primary,
-                    width: 2,
-                  ),
+                  borderSide: BorderSide(color: primaryColor, width: 2),
                 ),
                 contentPadding: EdgeInsets.symmetric(
                   horizontal: 16,
-                  vertical: _isWeb ? 16 : 12,
+                  vertical: isWeb ? 16 : 12,
                 ),
                 filled: true,
-                fillColor: _selectedSalonId != null
-                    ? (isDark ? const Color(0xFF2A2A2A) : Colors.grey[50])
-                    : (isDark ? const Color(0xFF1A1A1A) : Colors.grey[100]),
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
               ),
             ),
             if (_selectedSalonId == null)
@@ -2642,7 +2805,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 child: Text(
                   '⚠️ Please select a salon first to search barbers',
                   style: TextStyle(
-                    fontSize: _isWeb ? 13 : 12,
+                    fontSize: isWeb ? 13 : 12,
                     color: Colors.orange[700],
                     fontStyle: FontStyle.italic,
                   ),
@@ -2655,22 +2818,25 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 child: Text(
                   '🔍 Type at least 2 characters to search',
                   style: TextStyle(
-                    fontSize: _isWeb ? 13 : 12,
-                    color: isDark ? Colors.white70 : Colors.grey[600],
+                    fontSize: isWeb ? 13 : 12,
+                    color: secondaryTextColor,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
               ),
             if (_isSearching) ...[
               const SizedBox(height: 16),
-              const Center(
+              Center(
                 child: Padding(
-                  padding: EdgeInsets.all(32),
+                  padding: const EdgeInsets.all(32),
                   child: Column(
                     children: [
-                      CircularProgressIndicator(color: AppTheme.primary),
-                      SizedBox(height: 12),
-                      Text('Searching for barbers...'),
+                      CircularProgressIndicator(color: primaryColor),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Searching for barbers...',
+                        style: TextStyle(color: textColor),
+                      ),
                     ],
                   ),
                 ),
@@ -2681,7 +2847,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 itemCount: _searchResults.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
+                separatorBuilder: (_, _) =>
+                    Divider(color: dividerColor, height: 1),
                 itemBuilder: (context, index) {
                   final barber = _searchResults[index];
                   final isSelected = _selectedBarberId == barber['id'];
@@ -2706,15 +2873,15 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                       Text(
                         'No barbers found',
                         style: TextStyle(
-                          fontSize: _isWeb ? 16 : 14,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
+                          fontSize: isWeb ? 16 : 14,
+                          color: secondaryTextColor,
                         ),
                       ),
                       Text(
                         'Try a different name or email',
                         style: TextStyle(
-                          fontSize: _isWeb ? 12 : 11,
-                          color: isDark ? Colors.white70 : Colors.grey[500],
+                          fontSize: isWeb ? 12 : 11,
+                          color: secondaryTextColor,
                         ),
                       ),
                     ],
@@ -2729,18 +2896,20 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   Widget _buildBarberTile(Map<String, dynamic> barber, bool isSelected) {
-    final isDark = _isDark;
+    final isWeb = context.isWeb;
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
     final alreadyInSalon = barber['already_in_salon'] == true;
-    final isDisabled = alreadyInSalon && !isSelected;
-    final accentColor = AppTheme.primary;
 
     return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       leading: CircleAvatar(
         radius: 24,
         backgroundColor: isSelected
-            ? accentColor
-            : alreadyInSalon
-            ? (isDark ? Colors.grey[700] : Colors.grey[400])
+            ? primaryColor
             : (isDark ? Colors.grey[800] : Colors.grey[200]),
         backgroundImage: barber['avatar_url'] != null
             ? NetworkImage(barber['avatar_url'])
@@ -2749,105 +2918,116 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             ? Text(
                 barber['full_name']?[0]?.toUpperCase() ?? '?',
                 style: TextStyle(
-                  color: isSelected
-                      ? Colors.white
-                      : (isDark ? Colors.white70 : Colors.grey[700]),
+                  color: isSelected ? Colors.white : secondaryTextColor,
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
                 ),
               )
             : null,
       ),
-      title: Row(
+      title: Text(
+        barber['full_name'] ?? 'Unknown',
+        style: TextStyle(
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          fontSize: isWeb ? 16 : 14,
+          color: textColor,
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: Text(
-              barber['full_name'] ?? 'Unknown',
-              style: TextStyle(
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                fontSize: _isWeb ? 16 : 14,
-                color: alreadyInSalon && !isSelected
-                    ? (isDark ? Colors.white70 : Colors.grey)
-                    : (isDark ? Colors.white : Colors.black87),
-              ),
+          Text(
+            barber['email'] ?? '',
+            style: TextStyle(
+              fontSize: isWeb ? 14 : 12,
+              color: secondaryTextColor,
             ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
           ),
-          if (alreadyInSalon && !isSelected)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange, width: 0.5),
-              ),
-              child: const Text(
-                'Already Added',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.orange,
-                  fontWeight: FontWeight.w500,
+          // ℹ️ Informational only — no longer disables the barber tile.
+          // Selecting an existing barber now lets you add any services
+          // they don't already have (those specific ones get disabled
+          // further down, in the services list).
+          if (alreadyInSalon)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 2,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue, width: 0.5),
+                ),
+                child: const Text(
+                  'Already in this salon',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: Colors.blue,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
             ),
         ],
       ),
-      subtitle: Text(
-        barber['email'] ?? '',
-        style: TextStyle(
-          fontSize: _isWeb ? 14 : 12,
-          color: alreadyInSalon && !isSelected
-              ? (isDark ? Colors.white30 : Colors.grey[500])
-              : (isDark ? Colors.white70 : Colors.grey[600]),
-        ),
+      trailing: SizedBox(
+        width: 28,
+        child: isSelected
+            ? Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: primaryColor,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.check, color: Colors.white, size: 16),
+              )
+            : Icon(Icons.radio_button_unchecked, color: secondaryTextColor),
       ),
-      trailing: isSelected
-          ? Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                color: accentColor,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.check, color: Colors.white, size: 16),
-            )
-          : alreadyInSalon
-          ? Icon(
-              Icons.check_circle,
-              color: isDark ? Colors.white30 : Colors.grey,
-              size: 20,
-            )
-          : Icon(
-              Icons.radio_button_unchecked,
-              color: isDark ? Colors.white30 : Colors.grey,
-            ),
-      onTap: isDisabled
-          ? null
-          : () {
-              if (mounted) setState(() => _selectedBarberId = barber['id']);
-            },
-      enabled: !isDisabled,
+      onTap: () {
+        setState(() {
+          _selectedBarberId = barber['id'];
+          _selectedItems.clear();
+          _barberAssignedVariantIds = {};
+          _barberAssignedServiceIds = {};
+        });
+        _loadBarberAssignedServices(barber['id']);
+      },
     );
   }
 
   Widget _buildSelectedBarber() {
-    final isDark = _isDark;
+    final isWeb = context.isWeb;
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
     final barber = _searchResults.firstWhere(
       (b) => b['id'] == _selectedBarberId,
       orElse: () => {},
     );
-    final accentColor = AppTheme.primary;
 
     return Container(
-      padding: EdgeInsets.all(_isWeb ? 20 : 16),
+      padding: EdgeInsets.all(isWeb ? 20 : 16),
       decoration: BoxDecoration(
-        color: accentColor.withValues(alpha: 0.1),
+        color: primaryColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: accentColor, width: 1.5),
+        border: Border.all(color: primaryColor, width: 1.5),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           CircleAvatar(
-            radius: _isWeb ? 32 : 28,
-            backgroundColor: accentColor,
+            radius: isWeb ? 32 : 28,
+            backgroundColor: primaryColor,
             backgroundImage: barber['avatar_url'] != null
                 ? NetworkImage(barber['avatar_url'])
                 : null,
@@ -2857,7 +3037,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                     style: TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
-                      fontSize: _isWeb ? 20 : 16,
+                      fontSize: isWeb ? 20 : 16,
                     ),
                   )
                 : null,
@@ -2867,51 +3047,68 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Selected Barber',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                  style: TextStyle(fontSize: 12, color: secondaryTextColor),
                 ),
                 Text(
                   barber['full_name'] ?? 'Unknown',
                   style: TextStyle(
-                    fontSize: _isWeb ? 20 : 18,
+                    fontSize: isWeb ? 20 : 18,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: textColor,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   barber['email'] ?? '',
                   style: TextStyle(
-                    fontSize: _isWeb ? 14 : 12,
-                    color: isDark ? Colors.white60 : Colors.grey[600],
+                    fontSize: isWeb ? 14 : 12,
+                    color: secondaryTextColor,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
+          if (_isLoadingBarberServices)
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: primaryColor,
+              ),
+            ),
         ],
       ),
     );
   }
 
-  // ✅ Use isDark for dark mode styling
   Widget _buildAddButton() {
-    final isDark = _isDark;
+    final isWeb = context.isWeb;
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(horizontal: _isWeb ? 0 : 16, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: isWeb ? 0 : 16, vertical: 8),
+      // ✅ On web, don't force the button to stretch full width — align it
+      // and let minimumSize control its (small, fixed) size instead.
+      alignment: isWeb ? Alignment.centerLeft : null,
       child: ElevatedButton(
         onPressed: _isLoading ? null : _addBarber,
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppTheme.primary,
+          backgroundColor: primaryColor,
           foregroundColor: Colors.white,
-          minimumSize: Size(_isWeb ? 400 : double.infinity, _isWeb ? 60 : 54),
+          minimumSize: Size(isWeb ? 320 : double.infinity, isWeb ? 54 : 54),
+          maximumSize: Size(isWeb ? 420 : double.infinity, isWeb ? 60 : 60),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
           elevation: 4,
-          // ✅ Dark mode shadow
           shadowColor: isDark
               ? Colors.white.withValues(alpha: 0.1)
               : Colors.black.withValues(alpha: 0.3),
@@ -2927,14 +3124,19 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               )
             : Row(
                 mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Icon(Icons.person_add, size: 20),
                   const SizedBox(width: 8),
-                  Text(
-                    _isWeb ? 'Add Barber to Selected Salon' : 'Add Barber',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+                  Flexible(
+                    child: Text(
+                      isWeb ? 'Add Barber to Selected Salon' : 'Add Barber',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ],
@@ -2944,13 +3146,17 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // ✅ BUILD METHOD - WITH EDGE-TO-EDGE SAFEAREA
+  // BUILD METHOD
   // ============================================================
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final primaryColor = context.primaryColor;
+    final backgroundColor = context.backgroundColor;
+    final textColor = context.textColor;
+
     _isWeb = context.isWeb;
-    _isDark = context.isDarkMode;
 
     final isLoading =
         _isLoading ||
@@ -2960,7 +3166,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         !_isTimezoneLoaded;
 
     return Scaffold(
-      backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
+      backgroundColor: backgroundColor,
       appBar: AppBar(
         title: Text(
           'Add New Barber',
@@ -2969,8 +3175,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             fontWeight: FontWeight.w600,
             color: Colors.white,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
-        backgroundColor: AppTheme.primary,
+        backgroundColor: primaryColor,
         foregroundColor: Colors.white,
         centerTitle: _isWeb,
         elevation: 4,
@@ -3024,114 +3232,106 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const CircularProgressIndicator(color: AppTheme.primary),
+                    CircularProgressIndicator(color: primaryColor),
                     const SizedBox(height: 16),
                     Text(
                       _isTimezoneLoaded
                           ? 'Loading salons...'
                           : 'Loading timezone...',
-                      style: TextStyle(
-                        color: _isDark ? Colors.white60 : Colors.grey,
-                      ),
+                      style: TextStyle(color: textColor),
                     ),
-                    const SizedBox(height: 8),
-                    if (_isLoadingSalons && _ownerSalons.isEmpty)
-                      Text(
-                        'Checking your salons...',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _isDark ? Colors.white70 : Colors.grey,
-                        ),
-                      ),
-                    if (_isLoadingServices && _services.isEmpty)
-                      Text(
-                        'Loading services...',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: _isDark ? Colors.white70 : Colors.grey,
-                        ),
-                      ),
                   ],
                 ),
               )
-            : Container(
-                color: _isDark ? const Color(0xFF121212) : Colors.grey[50],
-                child: _isWeb ? _buildWebLayout() : _buildMobileLayout(),
-              ),
+            : _isWeb
+            ? _buildWebLayout()
+            : _buildMobileLayout(),
       ),
     );
   }
 
   Widget _buildWebLayout() {
-    final isDark = _isDark;
+    final backgroundColor = context.backgroundColor;
+    final dividerColor = context.dividerColor;
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 380,
-          margin: const EdgeInsets.all(16),
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                _buildSalonSection(),
-                const SizedBox(height: 16),
-                _buildSearchSection(),
-              ],
-            ),
-          ),
-        ),
-        Container(
-          width: 1,
-          height: MediaQuery.of(context).size.height - 80,
-          color: isDark ? Colors.grey[800]! : Colors.grey[300],
-        ),
-        Expanded(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (_selectedBarberId != null) ...[
-                  _buildSelectedBarber(),
-                  const SizedBox(height: 24),
+    return Container(
+      color: backgroundColor,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 380,
+            margin: const EdgeInsets.all(16),
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  _buildSalonSection(),
+                  const SizedBox(height: 16),
+                  _buildSearchSection(),
                 ],
-                _buildServicesSection(),
-                const SizedBox(height: 24),
-                if (_selectedBarberId != null &&
-                    _selectedSalonId != null &&
-                    _totalSelectedItems > 0)
-                  _buildAddButton(),
-                const SizedBox(height: 40),
-              ],
+              ),
             ),
           ),
-        ),
-      ],
+          Container(
+            width: 1,
+            height: MediaQuery.of(context).size.height - 80,
+            color: dividerColor,
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_selectedBarberId != null) ...[
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 700),
+                      child: _buildSelectedBarber(),
+                    ),
+                    const SizedBox(height: 24),
+                  ],
+                  _buildServicesSection(),
+                  const SizedBox(height: 24),
+                  if (_selectedBarberId != null &&
+                      _selectedSalonId != null &&
+                      _totalSelectedItems > 0)
+                    _buildAddButton(),
+                  const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildMobileLayout() {
-    return SingleChildScrollView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSalonSection(),
-          const SizedBox(height: 24),
-          _buildSearchSection(),
-          const SizedBox(height: 24),
-          if (_selectedBarberId != null) _buildSelectedBarber(),
-          const SizedBox(height: 24),
-          _buildServicesSection(),
-          const SizedBox(height: 24),
-          if (_selectedBarberId != null &&
-              _selectedSalonId != null &&
-              _totalSelectedItems > 0)
-            _buildAddButton(),
-          const SizedBox(height: 32),
-        ],
+    final backgroundColor = context.backgroundColor;
+
+    return Container(
+      color: backgroundColor,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildSalonSection(),
+            const SizedBox(height: 24),
+            _buildSearchSection(),
+            const SizedBox(height: 24),
+            if (_selectedBarberId != null) _buildSelectedBarber(),
+            const SizedBox(height: 24),
+            _buildServicesSection(),
+            const SizedBox(height: 24),
+            if (_selectedBarberId != null &&
+                _selectedSalonId != null &&
+                _totalSelectedItems > 0)
+              _buildAddButton(),
+            const SizedBox(height: 32),
+          ],
+        ),
       ),
     );
   }

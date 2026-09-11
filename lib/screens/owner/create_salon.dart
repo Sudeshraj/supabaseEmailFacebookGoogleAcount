@@ -102,149 +102,172 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
     final isMobile = context.isMobile;
+    final screenHeight = MediaQuery.of(context).size.height;
 
     return Dialog(
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      child: Container(
-        width: isMobile ? double.infinity : 320,
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Select Time',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: isMobile ? double.infinity : 320,
+          // ✅ Cap the dialog height to a fraction of the screen. This is
+          // just an upper bound now - the content below is fully
+          // scrollable, so however small the *actual* available height
+          // ends up being (even down to a few dozen pixels, as can happen
+          // in some embedded/preview hosts), the dialog scrolls instead of
+          // tripping a RenderFlex overflow assertion.
+          maxHeight: screenHeight * 0.85,
+        ),
+        // ✅ The ENTIRE dialog body - title, time display, scroll wheels,
+        // AND the Cancel/OK buttons - now lives inside one
+        // SingleChildScrollView. Previously only the middle section
+        // scrolled while the title/buttons stayed fixed outside it, which
+        // still overflowed when the host gave the dialog very little
+        // height (e.g. constraints h<=62). Making the whole thing
+        // scrollable means there is no fixed-size Column being forced
+        // into a space smaller than its natural size, so it can never
+        // overflow - worst case the user scrolls a little to see the
+        // buttons.
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Select Time',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(16),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      _selectedHour.toString().padLeft(2, '0'),
+                      style: const TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                    Text(
+                      ':',
+                      style: TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : AppTheme.primary,
+                      ),
+                    ),
+                    Text(
+                      _selectedMinute.toString().padLeft(2, '0'),
+                      style: const TextStyle(
+                        fontSize: 48,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey[800] : Colors.grey[200],
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _selectedPeriod,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              const SizedBox(height: 16),
+
+              Row(
                 children: [
-                  Text(
-                    _selectedHour.toString().padLeft(2, '0'),
-                    style: const TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primary,
-                    ),
+                  _buildScrollPicker(
+                    title: 'HOUR',
+                    items: hours12,
+                    selectedValue: _selectedHour,
+                    onChanged: (value) => setState(() => _selectedHour = value),
                   ),
-                  Text(
-                    ':',
-                    style: TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : AppTheme.primary,
-                    ),
+                  const SizedBox(width: 12),
+                  _buildScrollPicker(
+                    title: 'MINUTE',
+                    items: minutes,
+                    selectedValue: _selectedMinute,
+                    onChanged: (value) => setState(() => _selectedMinute = value),
                   ),
-                  Text(
-                    _selectedMinute.toString().padLeft(2, '0'),
-                    style: const TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primary,
+                  const SizedBox(width: 12),
+                  _buildScrollPicker(
+                    title: 'PERIOD',
+                    items: periods,
+                    selectedValue: _selectedPeriod,
+                    onChanged: (value) => setState(() => _selectedPeriod = value),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: _cancelTime,
+                      style: TextButton.styleFrom(
+                        foregroundColor: isDark ? Colors.white60 : Colors.grey,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Cancel', style: TextStyle(fontSize: 16)),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.grey[800] : Colors.grey[200],
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _selectedPeriod,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _confirmTime,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'OK',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 20),
-
-            Row(
-              children: [
-                _buildScrollPicker(
-                  title: 'HOUR',
-                  items: hours12,
-                  selectedValue: _selectedHour,
-                  onChanged: (value) => setState(() => _selectedHour = value),
-                ),
-                const SizedBox(width: 12),
-                _buildScrollPicker(
-                  title: 'MINUTE',
-                  items: minutes,
-                  selectedValue: _selectedMinute,
-                  onChanged: (value) => setState(() => _selectedMinute = value),
-                ),
-                const SizedBox(width: 12),
-                _buildScrollPicker(
-                  title: 'PERIOD',
-                  items: periods,
-                  selectedValue: _selectedPeriod,
-                  onChanged: (value) => setState(() => _selectedPeriod = value),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: _cancelTime,
-                    style: TextButton.styleFrom(
-                      foregroundColor: isDark ? Colors.white60 : Colors.grey,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Cancel', style: TextStyle(fontSize: 16)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _confirmTime,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'OK',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -260,6 +283,7 @@ class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
 
     return Expanded(
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             title,
@@ -513,6 +537,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   bool _isLoadingGlobalData = false;
   bool _hasErrorLoadingData = false;
   bool _isLoading = false;
+
+  // ✅ Guards the confirmation flow so the create-salon insert can only ever
+  // fire once per explicit user confirmation - a dismissed/cancelled
+  // confirm dialog (tap outside, back button, or the Cancel button) never
+  // triggers a create, and rapid double-taps can't queue up two inserts.
+  bool _isConfirmDialogOpen = false;
 
   final _formKey = GlobalKey<FormState>();
   late bool _isWeb;
@@ -2800,8 +2830,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== CREATE SALON ====================
-  Future<void> _createSalon() async {
+  // ==================== CREATE SALON (VALIDATION + CONFIRM) ====================
+  // ✅ This is now the entry point wired to the "Create Salon" button. It
+  // only validates the form and, if everything is valid, opens a
+  // confirmation dialog. Actually inserting into the database now happens
+  // ONLY inside `_performCreateSalon()`, which is called from the dialog's
+  // "Confirm" button. If the user closes the dialog any other way (tap
+  // outside, system back, or the "Cancel" button) nothing is created.
+  Future<void> _onCreateSalonPressed() async {
     if (!_formKey.currentState!.validate()) return;
 
     final phone = _phoneController.text.trim();
@@ -2845,9 +2881,94 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       return;
     }
 
+    // Everything about the form is valid - now ask for explicit confirmation
+    // before touching the database.
+    await _showCreateConfirmationDialog();
+  }
+
+  // ✅ Yes/No confirmation dialog. Returns only via the "Confirm" button
+  // calling _performCreateSalon(); every other way of closing this dialog
+  // (Cancel button, tap outside barrierDismissible, back button/back
+  // gesture) simply pops with no side effects, so no salon is created.
+  Future<void> _showCreateConfirmationDialog() async {
+    if (_isConfirmDialogOpen) return; // guard against double taps
+    _isConfirmDialogOpen = true;
+
+    final isDark = _isDark;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          title: Text(
+            'Create this salon?',
+            style: TextStyle(
+              color: isDark ? Colors.white : Colors.black87,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Text(
+            'Please confirm you want to create "${_nameController.text.trim()}". '
+            'This will save the salon and cannot be undone from here.',
+            style: TextStyle(
+              color: isDark ? Colors.white70 : Colors.grey[700],
+            ),
+          ),
+          actions: [
+            TextButton(
+              // ✅ Cancel: just closes the dialog. Nothing is created.
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                  color: isDark ? Colors.white60 : Colors.grey,
+                ),
+              ),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onPressed: () {
+                // ✅ Confirm: close the dialog first, then - and only then -
+                // run the actual create logic exactly once.
+                Navigator.of(dialogContext).pop();
+                _performCreateSalon();
+              },
+              child: const Text('Confirm & Create'),
+            ),
+          ],
+        );
+      },
+    );
+
+    _isConfirmDialogOpen = false;
+  }
+
+  // ✅ The actual database insert logic - unchanged from before, except it
+  // now only ever runs after explicit confirmation from
+  // _showCreateConfirmationDialog(), and _isLoading still guards it against
+  // being triggered twice in a row.
+  Future<void> _performCreateSalon() async {
+    if (_isLoading) return;
     setState(() => _isLoading = true);
 
     try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) {
+        _showSnackBar('Please login first', Colors.red);
+        return;
+      }
+
       final prefs = await SharedPreferences.getInstance();
       final userTimezone =
           prefs.getString('user_timezone') ??
@@ -3204,7 +3325,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                   _isUploadingLogo ||
                                   _isUploadingCover)
                               ? null
-                              : _createSalon,
+                              : _onCreateSalonPressed,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppTheme.primary,
                             foregroundColor: Colors.white,
