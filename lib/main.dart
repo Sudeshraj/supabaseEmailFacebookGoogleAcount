@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:app_links/app_links.dart';
 import 'package:flutter_application_1/firebase_options.dart';
+import 'package:flutter_application_1/providers/currency_provider.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
@@ -58,6 +59,7 @@ import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -199,12 +201,13 @@ void applySystemUIOverlayStyle(bool isDark) {
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
-
       // Navigation bar
-      systemNavigationBarColor:
-          isDark ? AppTheme.darkSurface : AppTheme.lightBackground,
-      systemNavigationBarIconBrightness:
-          isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarColor: isDark
+          ? AppTheme.darkSurface
+          : AppTheme.lightBackground,
+      systemNavigationBarIconBrightness: isDark
+          ? Brightness.light
+          : Brightness.dark,
       systemNavigationBarDividerColor: Colors.transparent,
     ),
   );
@@ -401,7 +404,15 @@ Future<void> main() async {
     applySystemUIOverlayStyle(_resolveIsDark());
 
     debugPrint('${DateTime.now()}: Initialization complete');
-    runApp(MyApp());
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => CurrencyProvider()),
+          // ... other providers
+        ],
+        child: const MyApp(),
+      ),
+    );
   } catch (e, stackTrace) {
     debugPrint('CRITICAL ERROR: $e');
     debugPrint('Stack: $stackTrace');
@@ -1493,7 +1504,8 @@ GoRouter _createRouter() {
           // web, or a bug elsewhere) threw an uncaught type-cast
           // exception and crashed the screen. Now falls back to an
           // empty map instead of crashing.
-          final salon = state.extra as Map<String, dynamic>? ?? <String, dynamic>{};
+          final salon =
+              state.extra as Map<String, dynamic>? ?? <String, dynamic>{};
           return SalonProfileScreen(salon: salon);
         },
       ),

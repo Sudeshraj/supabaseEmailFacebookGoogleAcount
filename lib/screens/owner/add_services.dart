@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/widgets/currency_prefix.dart';
 
 class AddServiceScreen extends StatefulWidget {
   final int salonId;
@@ -61,6 +62,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   String? _priceError;
   String? _durationError;
   String? _serviceNameError;
+
+  // ✅ Currency state
+  String _salonCurrencyCode = 'LKR';
+  String _salonCurrencySymbol = 'Rs.';
+  String _salonPriceHint = 'e.g., 1500';
 
   // ✅ Responsive variables
   bool _isWeb = false;
@@ -138,6 +144,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   void initState() {
     super.initState();
     _loadData();
+    _loadSalonCurrency();
     _selectedIcon = _iconSuggestions.first['name'];
 
     if (widget.isEditing && widget.serviceId != null) {
@@ -163,6 +170,37 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     _variantPriceController.dispose();
     _variantDurationController.dispose();
     super.dispose();
+  }
+
+  // ============================================
+  // CURRENCY LOADING
+  // ============================================
+
+  Future<void> _loadSalonCurrency() async {
+    try {
+      final response = await supabase
+          .from('salons')
+          .select('currency_code, currency_symbol')
+          .eq('id', widget.salonId)
+          .single();
+
+      if (!mounted) return;
+
+      final code = response['currency_code'] as String? ?? 'LKR';
+      final symbol = response['currency_symbol'] as String? ?? 'Rs.';
+
+      setState(() {
+        _salonCurrencyCode = code;
+        _salonCurrencySymbol = symbol;
+        _salonPriceHint = CurrencyHelper.getHint(code);
+      });
+    } catch (e) {
+      debugPrint('Error loading salon currency: $e');
+    }
+  }
+
+  bool _currencyUsesDecimals() {
+    return CurrencyHelper.usesDecimals(_salonCurrencyCode);
   }
 
   // ============================================
@@ -226,15 +264,30 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       setState(() {
         _priceError = 'Please enter a valid number';
       });
-    } else if (price <= 0) {
+      return;
+    }
+
+    if (price <= 0) {
       setState(() {
         _priceError = 'Price must be greater than 0';
       });
-    } else {
-      setState(() {
-        _priceError = null;
-      });
+      return;
     }
+
+    // ✅ Currency-aware decimal validation
+    if (!_currencyUsesDecimals() && priceText.contains('.')) {
+      final decimalPart = priceText.split('.').last;
+      if (decimalPart.isNotEmpty && int.tryParse(decimalPart) != 0) {
+        setState(() {
+          _priceError = '$_salonCurrencyCode does not use decimals';
+        });
+        return;
+      }
+    }
+
+    setState(() {
+      _priceError = null;
+    });
   }
 
   void _validateDuration() {
@@ -1087,7 +1140,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
                 ),
               ),
-              // ✅ Use accentColor here
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(color: accentColor, width: 2),
@@ -1141,7 +1193,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
                 ),
               ),
-              // ✅ Use accentColor here
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(color: accentColor, width: 2),
@@ -1472,12 +1523,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
           Row(
             children: [
+              // ✅ Price field with reusable CurrencyPrefix
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Price (Rs.) *',
+                      'Price ($_salonCurrencySymbol) *',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -1487,19 +1539,27 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     const SizedBox(height: 8),
                     TextFormField(
                       controller: _variantPriceController,
-                      keyboardType: TextInputType.number,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       style: TextStyle(
                         color: isDark ? Colors.white : Colors.black87,
                       ),
                       decoration: InputDecoration(
-                        hintText: 'e.g., 1500',
+                        hintText: _salonPriceHint,
                         hintStyle: TextStyle(
                           color: isDark ? Colors.white70 : Colors.grey,
                         ),
-                        prefixIcon: Icon(
-                          Icons.currency_rupee,
+                        // ✅ Reusable CurrencyPrefix widget
+                        prefixIcon: CurrencyPrefix(
+                          symbol: _salonCurrencySymbol,
+                          type: CurrencyDisplayType.text,
                           color: isDark ? Colors.white70 : Colors.grey,
-                          size: 20,
+                          fontSize: 16,
+                        ),
+                        prefixIconConstraints: const BoxConstraints(
+                          minWidth: 50,
+                          minHeight: 20,
                         ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -1700,11 +1760,26 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
-                subtitle: Text(
-                  'Rs. ${variant['price']} | ${variant['duration']} mins',
-                  style: TextStyle(
-                    color: isDark ? Colors.white60 : Colors.grey[600],
-                  ),
+                // ✅ Use CurrencyHelper.formatPrice
+                subtitle: Row(
+                  children: [
+                    Text(
+                      CurrencyHelper.formatPrice(
+                        price: variant['price'],
+                        currencyCode: _salonCurrencyCode,
+                        symbol: _salonCurrencySymbol,
+                      ),
+                      style: TextStyle(
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                    Text(
+                      ' | ${variant['duration']} mins',
+                      style: TextStyle(
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                  ],
                 ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -1801,7 +1876,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
-  // ✅ BUILD METHOD
+  // BUILD METHOD
   // ============================================
   @override
   Widget build(BuildContext context) {
@@ -1809,7 +1884,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     _isDark = context.isDarkMode;
 
     final accentColor = AppTheme.primary;
-    final double padding = _isWeb ? 24.0 : 16.0; // ✅ Used
+    final double padding = _isWeb ? 24.0 : 16.0;
 
     return Scaffold(
       backgroundColor: _isDark ? const Color(0xFF121212) : Colors.grey[50],
@@ -1825,7 +1900,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         backgroundColor: accentColor,
         foregroundColor: Colors.white,
         elevation: 0,
-        centerTitle: _isWeb, // ✅ Used
+        centerTitle: _isWeb,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
@@ -1836,11 +1911,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           ? Center(child: CircularProgressIndicator(color: accentColor))
           : SafeArea(
               child: SingleChildScrollView(
-                padding: EdgeInsets.all(padding), // ✅ Used
+                padding: EdgeInsets.all(padding),
                 child: Center(
                   child: ConstrainedBox(
                     constraints: BoxConstraints(
-                      maxWidth: _isWeb ? 800 : double.infinity, // ✅ Used
+                      maxWidth: _isWeb ? 800 : double.infinity,
                     ),
                     child: Card(
                       elevation: 2,
@@ -1849,7 +1924,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Padding(
-                        padding: EdgeInsets.all(padding), // ✅ Used
+                        padding: EdgeInsets.all(padding),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
