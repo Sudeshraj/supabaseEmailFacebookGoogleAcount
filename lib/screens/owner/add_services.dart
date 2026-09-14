@@ -4,6 +4,7 @@ import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/widgets/currency_prefix.dart';
+import 'package:flutter_application_1/services/currency_service.dart';
 
 class AddServiceScreen extends StatefulWidget {
   final int salonId;
@@ -34,6 +35,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   final TextEditingController _variantDurationController =
       TextEditingController();
 
+  // ✅ Currency Service (singleton)
+  final CurrencyService _currencyService = CurrencyService.instance;
+
   // Selected items
   int? _selectedCategoryId;
   int? _selectedGenderId;
@@ -63,10 +67,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   String? _durationError;
   String? _serviceNameError;
 
-  // ✅ Currency state
+  // ✅ Currency state (only code - rest from service)
   String _salonCurrencyCode = 'LKR';
-  String _salonCurrencySymbol = 'Rs.';
-  String _salonPriceHint = 'e.g., 1500';
 
   // ✅ Responsive variables
   bool _isWeb = false;
@@ -140,6 +142,17 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   final supabase = Supabase.instance.client;
 
+  // ============================================
+  // ✅ CURRENCY GETTERS (from CurrencyService)
+  // ============================================
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
+
+  String get _salonPriceHint => _currencyService.getHint(_salonCurrencyCode);
+
+  bool get _currencyUsesDecimals =>
+      _currencyService.getInfo(_salonCurrencyCode).decimals > 0;
+
   @override
   void initState() {
     super.initState();
@@ -180,27 +193,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     try {
       final response = await supabase
           .from('salons')
-          .select('currency_code, currency_symbol')
+          .select('currency_code')
           .eq('id', widget.salonId)
           .single();
 
       if (!mounted) return;
 
-      final code = response['currency_code'] as String? ?? 'LKR';
-      final symbol = response['currency_symbol'] as String? ?? 'Rs.';
-
       setState(() {
-        _salonCurrencyCode = code;
-        _salonCurrencySymbol = symbol;
-        _salonPriceHint = CurrencyHelper.getHint(code);
+        _salonCurrencyCode = response['currency_code'] as String? ?? 'LKR';
       });
     } catch (e) {
       debugPrint('Error loading salon currency: $e');
     }
-  }
-
-  bool _currencyUsesDecimals() {
-    return CurrencyHelper.usesDecimals(_salonCurrencyCode);
   }
 
   // ============================================
@@ -222,15 +226,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             service['name'].toString().toLowerCase() == name.toLowerCase(),
       );
 
-      if (exists) {
-        setState(() {
-          _serviceNameError = 'A service with this name already exists';
-        });
-      } else {
-        setState(() {
-          _serviceNameError = null;
-        });
-      }
+      setState(() {
+        _serviceNameError =
+            exists ? 'A service with this name already exists' : null;
+      });
     } else if (widget.isEditing) {
       final bool exists = _existingServices.any(
         (service) =>
@@ -238,15 +237,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             service['name'].toString().toLowerCase() == name.toLowerCase(),
       );
 
-      if (exists) {
-        setState(() {
-          _serviceNameError = 'A service with this name already exists';
-        });
-      } else {
-        setState(() {
-          _serviceNameError = null;
-        });
-      }
+      setState(() {
+        _serviceNameError =
+            exists ? 'A service with this name already exists' : null;
+      });
     }
   }
 
@@ -274,8 +268,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return;
     }
 
-    // ✅ Currency-aware decimal validation
-    if (!_currencyUsesDecimals() && priceText.contains('.')) {
+    // ✅ Currency-aware decimal validation (using getter)
+    if (!_currencyUsesDecimals && priceText.contains('.')) {
       final decimalPart = priceText.split('.').last;
       if (decimalPart.isNotEmpty && int.tryParse(decimalPart) != 0) {
         setState(() {
@@ -533,7 +527,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _editingVariantIndex = index;
       _selectedGenderId = variant['gender_id'];
       _selectedAgeCategoryId = variant['age_category_id'];
-      _variantPriceController.text = variant['price'].toString();
+
+      // ✅ Clean price display (no .0 for LKR)
+      final double price = (variant['price'] as num).toDouble();
+      _variantPriceController.text = _currencyUsesDecimals
+          ? price.toString()
+          : price.toInt().toString();
+
       _variantDurationController.text = variant['duration'].toString();
       _validatePrice();
       _validateDuration();
@@ -837,8 +837,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             widget.barberName != null
                 ? '${widget.isEditing ? 'Edit' : 'Add'} service for ${widget.barberName}'
                 : widget.isEditing
-                ? 'Update service details'
-                : 'Create a new service',
+                    ? 'Update service details'
+                    : 'Create a new service',
             style: TextStyle(
               fontSize: 14,
               color: isDark ? Colors.white60 : Colors.grey[600],
@@ -1523,7 +1523,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
           Row(
             children: [
-              // ✅ Price field with reusable CurrencyPrefix
+              // ✅ Price field with CurrencyPrefix widget
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1550,7 +1550,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         hintStyle: TextStyle(
                           color: isDark ? Colors.white70 : Colors.grey,
                         ),
-                        // ✅ Reusable CurrencyPrefix widget
                         prefixIcon: CurrencyPrefix(
                           symbol: _salonCurrencySymbol,
                           type: CurrencyDisplayType.text,
@@ -1760,14 +1759,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
-                // ✅ Use CurrencyHelper.formatPrice
+                // ✅ CurrencyService.format() use කරනවා
                 subtitle: Row(
                   children: [
                     Text(
-                      CurrencyHelper.formatPrice(
+                      _currencyService.format(
                         price: variant['price'],
                         currencyCode: _salonCurrencyCode,
-                        symbol: _salonCurrencySymbol,
                       ),
                       style: TextStyle(
                         color: isDark ? Colors.white60 : Colors.grey[600],
@@ -1893,8 +1891,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           widget.barberName != null
               ? '${widget.isEditing ? 'Edit' : 'Add'} Service - ${widget.barberName}'
               : widget.isEditing
-              ? 'Edit Service'
-              : 'Add New Service',
+                  ? 'Edit Service'
+                  : 'Add New Service',
           style: const TextStyle(color: Colors.white),
         ),
         backgroundColor: accentColor,
