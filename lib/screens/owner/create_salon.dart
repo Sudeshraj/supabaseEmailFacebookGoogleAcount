@@ -2388,12 +2388,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   }
 
   // ==================== CREATE SALON (VALIDATION + CONFIRM) ====================
-  // ✅ This is now the entry point wired to the "Create Salon" button. It
-  // only validates the form and, if everything is valid, opens a
-  // confirmation dialog. Actually inserting into the database now happens
-  // ONLY inside `_performCreateSalon()`, which is called from the dialog's
-  // "Confirm" button. If the user closes the dialog any other way (tap
-  // outside, system back, or the "Cancel" button) nothing is created.
+  // ✅ This is the entry point wired to the "Create Salon" button. It
+  // validates the form, then confirms via `showCustomAlert` (with
+  // showCancelButton: true, so only "Cancel" / "Create" show - no ✕ close
+  // icon, and the barrier itself isn't dismissible). `_performCreateSalon()`
+  // only runs when that call resolves to exactly `true` (the "Create"
+  // button was pressed). Pressing "Cancel" - or any other way of leaving
+  // the dialog - resolves to something other than `true`, and nothing is
+  // created.
   Future<void> _onCreateSalonPressed() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -2438,83 +2440,45 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       return;
     }
 
-    // Everything about the form is valid - now ask for explicit confirmation
-    // before touching the database.
-    await _showCreateConfirmationDialog();
-  }
-
-  // ✅ Yes/No confirmation dialog. Returns only via the "Confirm" button
-  // calling _performCreateSalon(); every other way of closing this dialog
-  // (Cancel button, tap outside barrierDismissible, back button/back
-  // gesture) simply pops with no side effects, so no salon is created.
-  Future<void> _showCreateConfirmationDialog() async {
     if (_isConfirmDialogOpen) return; // guard against double taps
     _isConfirmDialogOpen = true;
 
-    final isDark = _isDark;
-
-    await showDialog<void>(
+    // ✅ Confirm via showCustomAlert with showCancelButton:true. That does
+    // two important things:
+    //   1. It hides the ✕ close icon entirely (see time_picker_dialog's
+    //      sibling, show_custom_alert.dart: the close icon only renders
+    //      when `!showCancelButton`), leaving only "Cancel" and "Create".
+    //   2. showCustomAlert resolves to true only when the OK/confirm
+    //      button is pressed, false when Cancel is pressed, and the
+    //      barrier itself is not dismissible (barrierDismissible: false
+    //      inside showCustomAlert), so there is no way to get a `true`
+    //      result except by explicitly tapping "Create".
+    // We only call _performCreateSalon() when the result is exactly true.
+    final confirmed = await showCustomAlert(
       context: context,
-      barrierDismissible: true,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Text(
-            'Create this salon?',
-            style: TextStyle(
-              color: isDark ? Colors.white : Colors.black87,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          content: Text(
-            'Please confirm you want to create "${_nameController.text.trim()}". '
-            'This will save the salon and cannot be undone from here.',
-            style: TextStyle(
-              color: isDark ? Colors.white70 : Colors.grey[700],
-            ),
-          ),
-          actions: [
-            TextButton(
-              // ✅ Cancel: just closes the dialog. Nothing is created.
-              onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(
-                'Cancel',
-                style: TextStyle(
-                  color: isDark ? Colors.white60 : Colors.grey,
-                ),
-              ),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              onPressed: () {
-                // ✅ Confirm: close the dialog first, then - and only then -
-                // run the actual create logic exactly once.
-                Navigator.of(dialogContext).pop();
-                _performCreateSalon();
-              },
-              child: const Text('Confirm & Create'),
-            ),
-          ],
-        );
-      },
+      title: "Create Salon?",
+      message:
+          'Do you want to create "${_nameController.text.trim()}"? '
+          'This will save the salon with the details you entered.',
+      isError: false,
+      buttonText: "Create",
+      buttonIcon: Icons.add_business,
+      showCancelButton: true,
+      cancelButtonText: "Cancel",
     );
 
     _isConfirmDialogOpen = false;
+
+    if (!mounted) return;
+    if (confirmed != true) return; // Cancel (or anything but explicit OK)
+
+    await _performCreateSalon();
   }
 
   // ✅ The actual database insert logic - unchanged from before, except it
-  // now only ever runs after explicit confirmation from
-  // _showCreateConfirmationDialog(), and _isLoading still guards it against
-  // being triggered twice in a row.
+  // now only ever runs after the user has pressed OK on the
+  // `showCustomAlert` confirmation in `_onCreateSalonPressed()`, and
+  // `_isLoading` still guards it against being triggered twice in a row.
   Future<void> _performCreateSalon() async {
     if (_isLoading) return;
     setState(() => _isLoading = true);
@@ -2637,23 +2601,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       }
       debugPrint('✅ Added ${_addedServiceCategories.length} service categories');
 
-      if (!mounted) return;
-
-      await showCustomAlert(
-        context: context,
-        title: "🎉 Salon Created!",
-        message:
-            "${_nameController.text.trim()} created successfully.\n\n"
-            "📍 Salon Timezone: ${_getTimezoneDisplay()}\n"
-            "🕐 Business Hours (Local): ${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)}\n"
-            "🕐 Business Hours (UTC): $_openTimeUtc - $_closeTimeUtc\n"
-            "✅ ${_selectedGenderIds.length} genders selected\n"
-            "✅ ${_addedAgeCategories.length} age categories added\n"
-            "✅ ${_addedServiceCategories.length} service categories added\n\n"
-            "💡 Tip: All times are stored in UTC. When you view them, they will automatically adjust to your local timezone.",
-        isError: false,
-      );
-
+      // ✅ No success dialog - the salon is already saved at this point,
+      // so we just close the screen and hand control straight back to
+      // whatever pushed it (result: true tells the caller a salon was
+      // created, e.g. so a listing screen can refresh).
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {
