@@ -1192,6 +1192,20 @@ class TimezoneService {
     return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
   }
 
+    static TimeOfDay convertTimeOfDayBetweenTimezones(
+    TimeOfDay time, {
+    required String fromTimezone,
+    required String toTimezone,
+  }) {
+    try {
+      final utcString = timeOfDayToUtcWithTimezone(time, fromTimezone);
+      return utcToTimeOfDayWithTimezone(utcString, toTimezone);
+    } catch (e) {
+      debugPrint('❌ Error in convertTimeOfDayBetweenTimezones: $e');
+      return time;
+    }
+  }
+
   // ==================== GET LOCAL HOUR MINUTE ====================
 
   /// Get local hour/minute for recurring schedules

@@ -13,7 +13,22 @@ import 'package:image_cropper/image_cropper.dart';
 import '../../services/timezone_service.dart';
 import '../../utils/image_compression.dart';
 
-// ==================== MAIN CREATE SALON SCREEN ====================
+// ====================================================================
+// CREATE SALON SCREEN — step-by-step wizard
+//
+// Steps:
+//  0. Basic + Contact Info (+ logo/cover)
+//  1. Business Hours + Currency
+//  2. Age Categories
+//  3. Genders
+//  4. Service Categories
+//  5. Services (add services under categories)
+//  6. Pricing (add pricing variants to services — OPTIONAL step)
+//  7. Review & Create
+//
+// NOTE: The Pricing step can be skipped. If skipped, services are still
+// saved (without variants). Price can be left empty (saved as 0).
+// ====================================================================
 class CreateSalonScreen extends StatefulWidget {
   const CreateSalonScreen({super.key});
 
@@ -22,6 +37,11 @@ class CreateSalonScreen extends StatefulWidget {
 }
 
 class _CreateSalonScreenState extends State<CreateSalonScreen> {
+  // ==================== STEP MANAGEMENT ====================
+  int _currentStep = 0;
+  int _furthestStep = 0;
+  static const int _totalSteps = 8;
+
   // Basic info controllers
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
@@ -61,6 +81,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   List<Map<String, dynamic>> _globalCategories = [];
 
   final List<Map<String, dynamic>> _iconList = [
+    {'name': 'content_cut', 'icon': Icons.content_cut, 'label': 'Hair'},
     {'name': 'face', 'icon': Icons.face, 'label': 'Face'},
     {
       'name': 'face_retouching_natural',
@@ -74,6 +95,30 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     {'name': 'masks', 'icon': Icons.masks, 'label': 'Masks'},
     {'name': 'spa_outlined', 'icon': Icons.spa_outlined, 'label': 'Wellness'},
   ];
+
+  // ==================== SERVICES + PRICING ====================
+  // Locally-held services, each referencing its category by display_name.
+  final List<Map<String, dynamic>> _addedServices = [];
+
+  // ---- Services step (step 5) ----
+  final TextEditingController _newServiceNameController =
+      TextEditingController();
+  final TextEditingController _newServiceDescriptionController =
+      TextEditingController();
+  String? _newServiceIcon;
+  String? _serviceFormCategoryRef;
+  int _editingServiceIndex = -1;
+  String? _serviceNameError;
+
+  // ---- Pricing step (step 6) ----
+  int? _variantTargetServiceIndex;
+  String? _variantGenderRef;
+  String? _variantAgeRef;
+  final TextEditingController _variantPriceController = TextEditingController();
+  final TextEditingController _variantDurationController =
+      TextEditingController();
+  String? _newVariantPriceError;
+  String? _newVariantDurationError;
 
   // Images
   File? _logoFile;
@@ -95,11 +140,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   bool _hasErrorLoadingData = false;
   bool _isLoading = false;
 
-  // ==================== ✅ CURRENCY RELATED VARIABLES ====================
+  // ==================== CURRENCY RELATED VARIABLES ====================
   String _salonCurrencyCode = 'LKR';
   String _salonCurrencySymbol = 'Rs.';
 
-  // ✅ Supported currencies list
   static const List<Map<String, String>> _supportedCurrencies = [
     {'code': 'LKR', 'symbol': 'Rs.', 'name': 'Sri Lankan Rupee'},
     {'code': 'USD', 'symbol': '\$', 'name': 'US Dollar'},
@@ -123,7 +167,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   bool _isConfirmDialogOpen = false;
 
-  final _formKey = GlobalKey<FormState>();
   late bool _isWeb;
   late bool _isDark;
 
@@ -142,6 +185,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     super.initState();
     _ageCategoryMinAgeController.text = '0';
     _ageCategoryMaxAgeController.text = '100';
+    _newServiceIcon = _iconList.first['name'] as String;
     _initializeWithTimezone();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -156,18 +200,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     _isDark = context.isDarkMode;
   }
 
-  // ============================================================
-  // ✅ CORE LOGIC:
-  //    1. Timezone: Local storage → Device (fallback)
-  //    2. Currency: ALWAYS auto-detect from timezone
-  //       (Manual override නෑ - Screen එකට එද්දීම auto set වෙනවා)
-  // ============================================================
   Future<void> _initializeWithTimezone() async {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
 
-    // ✅ STEP 1: Timezone - Local storage → Service (fallback)
     String cachedUserTimezone =
         prefs.getString(TimezoneService.kUserTimezone) ?? '';
 
@@ -183,8 +220,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
     _salonTimezone = _userTimezone;
 
-    // ✅ STEP 2: Currency - ALWAYS auto-detect from timezone
-    //    Manual override නෑ - හැම වතාවකම timezone එකෙන් ගන්නවා
     _detectCurrencyFromTimezone();
     debugPrint('✅ Currency AUTO-DETECTED: $_salonCurrencyCode');
 
@@ -197,24 +232,19 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     await _loadGlobalData();
   }
 
-  // ✅ Check if timezone changed (from Settings Screen or elsewhere)
   Future<void> _checkTimezoneChanges() async {
     final prefs = await SharedPreferences.getInstance();
     final currentTimezone =
         prefs.getString(TimezoneService.kUserTimezone) ?? '';
 
-    // Timezone වෙනස් උනොත් update කරන්න
     if (_userTimezone.isNotEmpty && _userTimezone != currentTimezone) {
       debugPrint('🔄 Timezone changed: $_userTimezone → $currentTimezone');
 
       setState(() {
         _userTimezone = currentTimezone;
         _salonTimezone = currentTimezone;
-
-        // ✅ CURRENCY AUTO-SYNC: Timezone වෙනස් උනාම currency එකත් auto-detect
         _detectCurrencyFromTimezone();
         debugPrint('✅ Currency AUTO-SYNCED: $_salonCurrencyCode');
-
         _refreshDisplayTimes();
       });
     }
@@ -251,24 +281,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
 
     debugPrint('✅ Business hours initialized');
-    debugPrint('   Timezone: $_salonTimezone');
-    debugPrint('   Currency: $_salonCurrencyCode ($_salonCurrencySymbol)');
   }
 
-  // ==================== ✅ CURRENCY HELPERS ====================
-
-  /// Timezone එකෙන් currency එක auto-detect කරනවා
   void _detectCurrencyFromTimezone() {
     _salonCurrencyCode = TimezoneService.getCurrencyForTimezone(_salonTimezone);
     _salonCurrencySymbol = _getSymbolForCode(_salonCurrencyCode);
-    debugPrint(
-        '💱 Auto-detected: $_salonTimezone → $_salonCurrencyCode ($_salonCurrencySymbol)');
   }
 
-  /// Currency code එකෙන් symbol එක ගන්නවා
   String _getSymbolForCode(String code) {
     return TimezoneService.getSymbolForCurrency(code);
-  }  
+  }
 
   @override
   void dispose() {
@@ -282,6 +304,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     _ageCategoryMaxAgeController.dispose();
     _serviceCategoryDisplayNameController.dispose();
     _serviceCategoryDescriptionController.dispose();
+    _newServiceNameController.dispose();
+    _newServiceDescriptionController.dispose();
+    _variantPriceController.dispose();
+    _variantDurationController.dispose();
     super.dispose();
   }
 
@@ -425,27 +451,22 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       _showSnackBar('Age category display name is required', Colors.orange);
       return;
     }
-
     if (minAgeStr.isEmpty || maxAgeStr.isEmpty) {
       _showSnackBar('Both min age and max age are required', Colors.orange);
       return;
     }
-
     if (minAge == null || maxAge == null) {
       _showSnackBar('Please enter valid numbers for age range', Colors.orange);
       return;
     }
-
     if (minAge < 0 || minAge > 150 || maxAge < 0 || maxAge > 150) {
       _showSnackBar('Age must be between 0 and 150', Colors.orange);
       return;
     }
-
     if (minAge > maxAge) {
       _showSnackBar('Min age cannot be greater than max age', Colors.orange);
       return;
     }
-
     if (_addedAgeCategories.any((a) => a['display_name'] == displayName)) {
       _showSnackBar('This age category is already added', Colors.orange);
       return;
@@ -469,10 +490,18 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   }
 
   void _removeAgeCategory(int index) {
-    setState(() => _addedAgeCategories.removeAt(index));
-    for (int i = 0; i < _addedAgeCategories.length; i++) {
-      _addedAgeCategories[i]['display_order'] = i;
-    }
+    final removedName = _addedAgeCategories[index]['display_name'];
+    setState(() {
+      _addedAgeCategories.removeAt(index);
+      for (int i = 0; i < _addedAgeCategories.length; i++) {
+        _addedAgeCategories[i]['display_order'] = i;
+      }
+      for (var service in _addedServices) {
+        (service['variants'] as List).removeWhere(
+          (v) => v['age_ref'] == removedName,
+        );
+      }
+    });
   }
 
   // ==================== SERVICE CATEGORY ====================
@@ -519,29 +548,376 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   }
 
   void _removeServiceCategory(int index) {
-    setState(() => _addedServiceCategories.removeAt(index));
-    for (int i = 0; i < _addedServiceCategories.length; i++) {
-      _addedServiceCategories[i]['display_order'] = i;
+    final removedName = _addedServiceCategories[index]['display_name'];
+    setState(() {
+      _addedServiceCategories.removeAt(index);
+      for (int i = 0; i < _addedServiceCategories.length; i++) {
+        _addedServiceCategories[i]['display_order'] = i;
+      }
+      _addedServices.removeWhere((s) => s['category_ref'] == removedName);
+      if (_serviceFormCategoryRef == removedName) {
+        _serviceFormCategoryRef = null;
+      }
+      if (_variantTargetServiceIndex != null &&
+          _variantTargetServiceIndex! >= _addedServices.length) {
+        _variantTargetServiceIndex = null;
+      }
+    });
+  }
+
+  // ==================== SERVICES + PRICING LOGIC ====================
+
+  List<String> _selectedGenderDisplayNames() {
+    return _globalGenders
+        .where((g) => _selectedGenderIds.contains(g['id']))
+        .map((g) => g['display_name'] as String)
+        .toList();
+  }
+
+  /// Price is OPTIONAL. Empty => no error. Non-empty => must be a valid number >= 0.
+  void _validateNewVariantPrice() {
+    final text = _variantPriceController.text.trim();
+    if (text.isEmpty) {
+      setState(() => _newVariantPriceError = null);
+      return;
+    }
+    final price = double.tryParse(text);
+    setState(() {
+      if (price == null) {
+        _newVariantPriceError = 'Enter a valid number';
+      } else if (price < 0) {
+        _newVariantPriceError = 'Price cannot be negative';
+      } else {
+        _newVariantPriceError = null;
+      }
+    });
+  }
+
+  /// Duration is REQUIRED (validated only when non-empty for live feedback).
+  void _validateNewVariantDuration() {
+    final text = _variantDurationController.text.trim();
+    if (text.isEmpty) {
+      setState(() => _newVariantDurationError = null);
+      return;
+    }
+    final duration = int.tryParse(text);
+    setState(() {
+      if (duration == null) {
+        _newVariantDurationError = 'Enter a valid number';
+      } else if (duration <= 0) {
+        _newVariantDurationError = 'Duration must be greater than 0';
+      } else {
+        _newVariantDurationError = null;
+      }
+    });
+  }
+
+  void _validateNewServiceName() {
+    final name = _newServiceNameController.text.trim();
+    if (name.isEmpty) {
+      setState(() => _serviceNameError = null);
+      return;
+    }
+    final exists = _addedServices.asMap().entries.any(
+      (e) =>
+          e.value['name'].toString().toLowerCase() == name.toLowerCase() &&
+          e.key != _editingServiceIndex,
+    );
+    setState(() {
+      _serviceNameError = exists
+          ? 'A service with this name already exists'
+          : null;
+    });
+  }
+
+  void _saveCurrentService() {
+    _validateNewServiceName();
+
+    if (_serviceFormCategoryRef == null) {
+      _showSnackBar('Please select a category for this service', Colors.orange);
+      return;
+    }
+    final name = _newServiceNameController.text.trim();
+    if (name.isEmpty) {
+      _showSnackBar('Service name is required', Colors.orange);
+      return;
+    }
+    if (_serviceNameError != null) {
+      _showSnackBar(_serviceNameError!, Colors.orange);
+      return;
+    }
+
+    final isEditing = _editingServiceIndex >= 0;
+
+    final variants = isEditing
+        ? List<Map<String, dynamic>>.from(
+            (_addedServices[_editingServiceIndex]['variants'] as List).map(
+              (v) => Map<String, dynamic>.from(v),
+            ),
+          )
+        : <Map<String, dynamic>>[];
+
+    final newService = {
+      'name': name,
+      'description': _newServiceDescriptionController.text.trim(),
+      'icon_name': _newServiceIcon ?? _iconList.first['name'],
+      'category_ref': _serviceFormCategoryRef,
+      'variants': variants,
+    };
+
+    setState(() {
+      if (isEditing) {
+        _addedServices[_editingServiceIndex] = newService;
+        _editingServiceIndex = -1;
+      } else {
+        _addedServices.add(newService);
+      }
+      _newServiceNameController.clear();
+      _newServiceDescriptionController.clear();
+      _newServiceIcon = _iconList.first['name'] as String;
+      _serviceFormCategoryRef = null;
+      _serviceNameError = null;
+    });
+  }
+
+  void _editAddedService(int index) {
+    final service = _addedServices[index];
+    setState(() {
+      _editingServiceIndex = index;
+      _serviceFormCategoryRef = service['category_ref'] as String?;
+      _newServiceNameController.text = service['name'] as String;
+      _newServiceDescriptionController.text = service['description'] as String;
+      _newServiceIcon = service['icon_name'] as String;
+      _serviceNameError = null;
+      _variantTargetServiceIndex = null;
+    });
+    _goToStep(5);
+  }
+
+  void _cancelEditingService() {
+    setState(() {
+      _editingServiceIndex = -1;
+      _newServiceNameController.clear();
+      _newServiceDescriptionController.clear();
+      _newServiceIcon = _iconList.first['name'] as String;
+      _serviceFormCategoryRef = null;
+      _serviceNameError = null;
+    });
+  }
+
+  void _removeAddedService(int index) {
+    setState(() {
+      _addedServices.removeAt(index);
+      if (_editingServiceIndex == index) {
+        _cancelEditingService();
+      } else if (_editingServiceIndex > index) {
+        _editingServiceIndex--;
+      }
+      if (_variantTargetServiceIndex == index) {
+        _variantTargetServiceIndex = null;
+      } else if (_variantTargetServiceIndex != null &&
+          _variantTargetServiceIndex! > index) {
+        _variantTargetServiceIndex = _variantTargetServiceIndex! - 1;
+      }
+    });
+  }
+
+  /// Adds a pricing variant. Gender + age + duration are REQUIRED. Price is
+  /// optional (empty => 0).
+  void _addVariantToService(int serviceIndex) {
+    // Gender + age required
+    if (_variantGenderRef == null) {
+      _showSnackBar('Please select a gender', Colors.orange);
+      return;
+    }
+    if (_variantAgeRef == null) {
+      _showSnackBar('Please select an age category', Colors.orange);
+      return;
+    }
+
+    // Live validation
+    _validateNewVariantPrice();
+    _validateNewVariantDuration();
+
+    // Price: optional. Empty => 0.
+    final priceText = _variantPriceController.text.trim();
+    final double price;
+    if (priceText.isEmpty) {
+      price = 0;
+    } else {
+      final parsed = double.tryParse(priceText);
+      if (parsed == null || parsed < 0) {
+        _showSnackBar(
+          'Please enter a valid price (or leave empty)',
+          Colors.orange,
+        );
+        return;
+      }
+      price = parsed;
+    }
+
+    // Duration: required
+    final durationText = _variantDurationController.text.trim();
+    final duration = int.tryParse(durationText);
+    if (durationText.isEmpty || duration == null || duration <= 0) {
+      _showSnackBar('Please enter a valid duration', Colors.orange);
+      return;
+    }
+
+    final service = _addedServices[serviceIndex];
+    final variants = service['variants'] as List;
+
+    final isDuplicate = variants.any(
+      (v) =>
+          v['gender_ref'] == _variantGenderRef &&
+          v['age_ref'] == _variantAgeRef,
+    );
+    if (isDuplicate) {
+      _showSnackBar(
+        'This gender + age combination is already added',
+        Colors.orange,
+      );
+      return;
+    }
+
+    setState(() {
+      variants.add({
+        'gender_ref': _variantGenderRef,
+        'age_ref': _variantAgeRef,
+        'price': price,
+        'duration': duration,
+      });
+      _variantGenderRef = null;
+      _variantAgeRef = null;
+      _variantPriceController.clear();
+      _variantDurationController.clear();
+      _newVariantPriceError = null;
+      _newVariantDurationError = null;
+    });
+  }
+
+  // ==================== STEP VALIDATION ====================
+
+  bool _canProceedFromStep(int step) {
+    switch (step) {
+      case 0:
+        return _nameController.text.trim().isNotEmpty &&
+            _isPhoneValid &&
+            _isEmailValid;
+      case 1:
+        return true;
+      case 2:
+        return _addedAgeCategories.isNotEmpty;
+      case 3:
+        return _selectedGenderIds.isNotEmpty;
+      case 4:
+        return _addedServiceCategories.isNotEmpty;
+      case 5:
+        return _addedServices.isNotEmpty;
+      case 6:
+        // Pricing step is OPTIONAL — can always proceed.
+        return true;
+      default:
+        return true;
     }
   }
 
-  // ==================== WIDGETS ====================
-  Widget _buildGenderSelection() {
+  String _stepRequirementMessage(int step) {
+    switch (step) {
+      case 0:
+        return 'Please enter a salon name (and a valid phone/email if provided)';
+      case 2:
+        return 'Add at least one age category (e.g., Adult, Child)';
+      case 3:
+        return 'Select at least one gender your salon serves';
+      case 4:
+        return 'Add at least one service category (e.g., Hair, Nails, Spa)';
+      case 5:
+        return 'Add at least one service';
+      default:
+        return '';
+    }
+  }
+
+  void _goToStep(int step) {
+    setState(() {
+      _currentStep = step;
+      if (step > _furthestStep) _furthestStep = step;
+    });
+  }
+
+  // ==================== WIDGETS: SHARED HELPERS ====================
+
+  Widget _buildStepHeader(String title, String subtitle) {
     final isDark = _isDark;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'STEP ${_currentStep + 1} OF $_totalSteps',
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.primary,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            style: TextStyle(
+              fontSize: 13,
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-    if (_isLoadingGlobalData) {
-      return _buildLoadingCard('Genders', Icons.people, Colors.blue);
-    }
+  Widget _buildInfoBanner(String message, IconData icon, Color color) {
+    final isDark = _isDark;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.15 : 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white70 : Colors.grey[800],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-    if (_hasErrorLoadingData && _globalGenders.isEmpty) {
-      return _buildErrorCard('Genders', Icons.people, Colors.blue, () {
-        _loadGlobalData();
-      });
-    }
-
-    if (_globalGenders.isEmpty) {
-      return const SizedBox.shrink();
-    }
+  Widget _buildLoadingCard(String title, IconData icon, Color color) {
+    final isDark = _isDark;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -550,114 +926,31 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(Icons.people, color: Colors.blue),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Gender Categories',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                const Spacer(),
-                if (_selectedGenderIds.isNotEmpty)
-                  TextButton(
-                    onPressed: () => setState(() => _selectedGenderIds.clear()),
-                    child: Text(
-                      'Clear All',
-                      style: TextStyle(
-                          color: isDark ? Colors.red[300] : Colors.red),
-                    ),
-                  ),
-              ],
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color),
             ),
-            const SizedBox(height: 12),
+            const SizedBox(width: 12),
             Text(
-              'Select the genders your salon serves',
+              title,
               style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.white60 : Colors.grey,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
               ),
             ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _globalGenders.map((gender) {
-                final id = gender['id'] as int;
-                final isSelected = _selectedGenderIds.contains(id);
-                final displayName = gender['display_name'] as String;
-
-                return FilterChip(
-                  label: Text(
-                    displayName,
-                    style: TextStyle(
-                      color: isSelected
-                          ? Colors.blue
-                          : (isDark ? Colors.white70 : Colors.grey[700]),
-                    ),
-                  ),
-                  selected: isSelected,
-                  onSelected: (selected) {
-                    setState(() {
-                      if (selected) {
-                        if (!_selectedGenderIds.contains(id)) {
-                          _selectedGenderIds.add(id);
-                        }
-                      } else {
-                        _selectedGenderIds.remove(id);
-                      }
-                    });
-                  },
-                  backgroundColor:
-                      isDark ? const Color(0xFF2A2A2A) : Colors.white,
-                  selectedColor: Colors.blue.withValues(alpha: 0.2),
-                  checkmarkColor: Colors.blue,
-                  shape: StadiumBorder(
-                    side: BorderSide(
-                      color: isSelected
-                          ? Colors.blue
-                          : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
-                    ),
-                  ),
-                );
-              }).toList(),
+            const Spacer(),
+            const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            if (_selectedGenderIds.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    '${_selectedGenderIds.length} gender${_selectedGenderIds.length > 1 ? 's' : ''} selected',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? Colors.blue[300] : Colors.blue,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -732,8 +1025,21 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  Widget _buildLoadingCard(String title, IconData icon, Color color) {
+  // ==================== WIDGETS: GENDERS ====================
+  Widget _buildGenderSelection() {
     final isDark = _isDark;
+
+    if (_isLoadingGlobalData) {
+      return _buildLoadingCard('Genders', Icons.people, Colors.blue);
+    }
+    if (_hasErrorLoadingData && _globalGenders.isEmpty) {
+      return _buildErrorCard('Genders', Icons.people, Colors.blue, () {
+        _loadGlobalData();
+      });
+    }
+    if (_globalGenders.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -742,36 +1048,135 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.people, color: Colors.blue),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Gender Categories',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                if (_selectedGenderIds.isNotEmpty)
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _selectedGenderIds.clear();
+                        for (var service in _addedServices) {
+                          (service['variants'] as List).clear();
+                        }
+                      });
+                    },
+                    child: Text(
+                      'Clear All',
+                      style: TextStyle(
+                        color: isDark ? Colors.red[300] : Colors.red,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-            const SizedBox(width: 12),
+            const SizedBox(height: 12),
             Text(
-              title,
+              'Select the genders your salon serves',
               style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.grey,
               ),
             ),
-            const Spacer(),
-            const SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
+            const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _globalGenders.map((gender) {
+                final id = gender['id'] as int;
+                final isSelected = _selectedGenderIds.contains(id);
+                final displayName = gender['display_name'] as String;
+
+                return FilterChip(
+                  label: Text(
+                    displayName,
+                    style: TextStyle(
+                      color: isSelected
+                          ? Colors.blue
+                          : (isDark ? Colors.white70 : Colors.grey[700]),
+                    ),
+                  ),
+                  selected: isSelected,
+                  onSelected: (selected) {
+                    setState(() {
+                      if (selected) {
+                        if (!_selectedGenderIds.contains(id)) {
+                          _selectedGenderIds.add(id);
+                        }
+                      } else {
+                        _selectedGenderIds.remove(id);
+                        for (var service in _addedServices) {
+                          (service['variants'] as List).removeWhere(
+                            (v) => v['gender_ref'] == displayName,
+                          );
+                        }
+                      }
+                    });
+                  },
+                  backgroundColor: isDark
+                      ? const Color(0xFF2A2A2A)
+                      : Colors.white,
+                  selectedColor: Colors.blue.withValues(alpha: 0.2),
+                  checkmarkColor: Colors.blue,
+                  shape: StadiumBorder(
+                    side: BorderSide(
+                      color: isSelected
+                          ? Colors.blue
+                          : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
+                    ),
+                  ),
+                );
+              }).toList(),
             ),
+            if (_selectedGenderIds.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${_selectedGenderIds.length} gender${_selectedGenderIds.length > 1 ? 's' : ''} selected',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.blue[300] : Colors.blue,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
+
+  // ==================== SHARED: AGE FIELD / SUGGESTIONS / TEXT ====================
 
   Widget _buildAgeTextField({
     required TextEditingController controller,
@@ -848,6 +1253,170 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     final isDark = _isDark;
     final isDesktop = _isWeb;
 
+    Widget addFormBox() => Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.add_circle_outline,
+                size: 20,
+                color: Colors.green,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Add New $title',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          formFields,
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: onAdd,
+              icon: const Icon(Icons.add, size: 18),
+              label: Text('Add $title'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: color,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    Widget listBox() => Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.list, size: 20, color: Colors.blue),
+              const SizedBox(width: 8),
+              Text(
+                'Added $title',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+              const Spacer(),
+              if (addedItems.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(() => addedItems.clear()),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                  ),
+                  child: Text(
+                    'Clear All',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.red[300] : Colors.red,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (addedItems.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.inbox,
+                      size: 40,
+                      color: isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No $title added yet',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: addedItems.length,
+              separatorBuilder: (context, index) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final item = addedItems[index];
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: color.withValues(alpha: 0.1),
+                    child: Text(
+                      '${index + 1}',
+                      style: TextStyle(fontSize: 12, color: color),
+                    ),
+                  ),
+                  title: Text(
+                    itemDisplayName(item),
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  trailing: IconButton(
+                    icon: Icon(
+                      Icons.delete_outline,
+                      size: 20,
+                      color: isDark ? Colors.red[300] : Colors.red,
+                    ),
+                    onPressed: () => onRemove(index),
+                  ),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                );
+              },
+            ),
+        ],
+      ),
+    );
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
@@ -891,7 +1460,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     '${addedItems.length} items',
                     style: TextStyle(
                       fontSize: 12,
-                      color: isDark ? color : color,
+                      color: color,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -899,425 +1468,18 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ],
             ),
             const SizedBox(height: 16),
-
             if (isDesktop)
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    flex: 1,
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF2A2A2A)
-                            : Colors.grey[50],
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isDark
-                              ? Colors.grey[700]!
-                              : Colors.grey[200]!,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.add_circle_outline,
-                                size: 20,
-                                color: Colors.green,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Add New $title',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark ? color : color,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          formFields,
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: onAdd,
-                              icon: const Icon(Icons.add, size: 18),
-                              label: Text('Add $title'),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: color,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 10,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  Expanded(child: addFormBox()),
                   const SizedBox(width: 16),
-                  Expanded(
-                    flex: 1,
-                    child: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF2A2A2A)
-                            : Colors.grey[50],
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isDark
-                              ? Colors.grey[700]!
-                              : Colors.grey[200]!,
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.list,
-                                size: 20,
-                                color: Colors.blue,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                'Added $title',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark ? color : color,
-                                ),
-                              ),
-                              const Spacer(),
-                              if (addedItems.isNotEmpty)
-                                TextButton(
-                                  onPressed: () =>
-                                      setState(() => addedItems.clear()),
-                                  style: TextButton.styleFrom(
-                                    padding: EdgeInsets.zero,
-                                    minimumSize: Size.zero,
-                                  ),
-                                  child: Text(
-                                    'Clear All',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isDark
-                                          ? Colors.red[300]
-                                          : Colors.red,
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          if (addedItems.isEmpty)
-                            Container(
-                              padding: const EdgeInsets.all(24),
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? const Color(0xFF2A2A2A)
-                                    : Colors.white,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Center(
-                                child: Column(
-                                  children: [
-                                    Icon(
-                                      Icons.inbox,
-                                      size: 40,
-                                      color: isDark
-                                          ? Colors.white30
-                                          : Colors.grey[400],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      'No $title added yet',
-                                      style: TextStyle(
-                                        color: isDark
-                                            ? Colors.white70
-                                            : Colors.grey[500],
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                    Text(
-                                      'Use the form on the left to add',
-                                      style: TextStyle(
-                                        color: isDark
-                                            ? Colors.white30
-                                            : Colors.grey[400],
-                                        fontSize: 10,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                          else
-                            ListView.separated(
-                              shrinkWrap: true,
-                              physics: const NeverScrollableScrollPhysics(),
-                              itemCount: addedItems.length,
-                              separatorBuilder: (context, index) =>
-                                  const Divider(height: 1),
-                              itemBuilder: (context, index) {
-                                final item = addedItems[index];
-                                return ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: color.withValues(
-                                      alpha: 0.1,
-                                    ),
-                                    child: Text(
-                                      '${index + 1}',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: isDark ? color : color,
-                                      ),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    itemDisplayName(item),
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w500,
-                                      color: isDark
-                                          ? Colors.white
-                                          : Colors.black87,
-                                    ),
-                                  ),
-                                  trailing: IconButton(
-                                    icon: Icon(
-                                      Icons.delete_outline,
-                                      size: 20,
-                                      color: isDark
-                                          ? Colors.red[300]
-                                          : Colors.red,
-                                    ),
-                                    onPressed: () => onRemove(index),
-                                  ),
-                                  dense: true,
-                                  contentPadding: EdgeInsets.zero,
-                                );
-                              },
-                            ),
-                        ],
-                      ),
-                    ),
-                  ),
+                  Expanded(child: listBox()),
                 ],
               )
             else
               Column(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color:
-                          isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color:
-                            isDark ? Colors.grey[700]! : Colors.grey[200]!,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.add_circle_outline,
-                              size: 20,
-                              color: Colors.green,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Add New $title',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? color : color,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        formFields,
-                        const SizedBox(height: 12),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton.icon(
-                            onPressed: onAdd,
-                            icon: const Icon(Icons.add, size: 18),
-                            label: Text('Add $title'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: color,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color:
-                          isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color:
-                            isDark ? Colors.grey[700]! : Colors.grey[200]!,
-                      ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.list,
-                              size: 20,
-                              color: Colors.blue,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Added $title',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? color : color,
-                              ),
-                            ),
-                            const Spacer(),
-                            if (addedItems.isNotEmpty)
-                              TextButton(
-                                onPressed: () =>
-                                    setState(() => addedItems.clear()),
-                                style: TextButton.styleFrom(
-                                  padding: EdgeInsets.zero,
-                                  minimumSize: Size.zero,
-                                ),
-                                child: Text(
-                                  'Clear All',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: isDark
-                                        ? Colors.red[300]
-                                        : Colors.red,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        if (addedItems.isEmpty)
-                          Container(
-                            padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? const Color(0xFF2A2A2A)
-                                  : Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Center(
-                              child: Column(
-                                children: [
-                                  Icon(
-                                    Icons.inbox,
-                                    size: 40,
-                                    color: isDark
-                                        ? Colors.white30
-                                        : Colors.grey[400],
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'No $title added yet',
-                                    style: TextStyle(
-                                      color: isDark
-                                          ? Colors.white70
-                                          : Colors.grey[500],
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  Text(
-                                    'Tap + button to add',
-                                    style: TextStyle(
-                                      color: isDark
-                                          ? Colors.white30
-                                          : Colors.grey[400],
-                                      fontSize: 10,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )
-                        else
-                          ListView.separated(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: addedItems.length,
-                            separatorBuilder: (context, index) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final item = addedItems[index];
-                              return ListTile(
-                                leading: CircleAvatar(
-                                  backgroundColor: color.withValues(alpha: 0.1),
-                                  child: Text(
-                                    '${index + 1}',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isDark ? color : color,
-                                    ),
-                                  ),
-                                ),
-                                title: Text(
-                                  itemDisplayName(item),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                    color: isDark
-                                        ? Colors.white
-                                        : Colors.black87,
-                                  ),
-                                ),
-                                trailing: IconButton(
-                                  icon: Icon(
-                                    Icons.delete_outline,
-                                    size: 20,
-                                    color: isDark
-                                        ? Colors.red[300]
-                                        : Colors.red,
-                                  ),
-                                  onPressed: () => onRemove(index),
-                                ),
-                                dense: true,
-                                contentPadding: EdgeInsets.zero,
-                              );
-                            },
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
+                children: [addFormBox(), const SizedBox(height: 16), listBox()],
               ),
           ],
         ),
@@ -1333,7 +1495,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         Colors.green,
       );
     }
-
     if (_hasErrorLoadingData && _globalAgeCategories.isEmpty) {
       return _buildErrorCard(
         'Age Categories',
@@ -1358,7 +1519,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           _buildSuggestionField(
             controller: _ageCategoryDisplayNameController,
             label: 'Display Name *',
-            hint: 'e.g., Child, Teen, Adult, Senior',
+            hint: 'e.g., Child, Adult',
             icon: Icons.visibility,
             suggestions: _globalAgeCategories
                 .map((a) => a['display_name'] as String)
@@ -1403,10 +1564,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Row(
-                children: [
+                children: const [
                   Icon(Icons.error_outline, size: 14, color: Colors.red),
-                  const SizedBox(width: 4),
-                  const Text(
+                  SizedBox(width: 4),
+                  Text(
                     'Min age cannot be greater than max age',
                     style: TextStyle(fontSize: 12, color: Colors.red),
                   ),
@@ -1421,12 +1582,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   Widget _buildServiceCategorySection() {
     if (_isLoadingGlobalData) {
-      return _buildLoadingCard('Main Services', Icons.category, Colors.orange);
+      return _buildLoadingCard(
+        'Service Categories',
+        Icons.category,
+        Colors.orange,
+      );
     }
-
     if (_hasErrorLoadingData && _globalCategories.isEmpty) {
       return _buildErrorCard(
-        'Main Services',
+        'Service Categories',
         Icons.category,
         Colors.orange,
         () {
@@ -1436,7 +1600,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
 
     return _buildSplitViewSection(
-      title: 'Main Services',
+      title: 'Service Categories',
       icon: Icons.category,
       color: Colors.orange,
       addedItems: _addedServiceCategories,
@@ -1446,7 +1610,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         children: [
           _buildSuggestionField(
             controller: _serviceCategoryDisplayNameController,
-            label: 'Service Name *',
+            label: 'Service Category Name *',
             hint: 'e.g., Hair, Skin, Nails, Grooming',
             icon: Icons.category,
             suggestions: _globalCategories
@@ -1469,7 +1633,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             maxLines: 2,
           ),
           const SizedBox(height: 8),
-          _buildIconSelector(),
+          _buildIconSelectorGeneric(
+            selectedIcon: _selectedIcon,
+            onSelect: (v) => setState(() => _selectedIcon = v),
+          ),
           const SizedBox(height: 8),
           _buildColorPicker(),
         ],
@@ -1478,7 +1645,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  Widget _buildIconSelector() {
+  Widget _buildIconSelectorGeneric({
+    required String selectedIcon,
+    required ValueChanged<String> onSelect,
+  }) {
     final isDark = _isDark;
 
     return Column(
@@ -1500,11 +1670,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             itemCount: _iconList.length,
             itemBuilder: (context, index) {
               final iconItem = _iconList[index];
-              final isSelected = _selectedIcon == iconItem['name'];
+              final isSelected = selectedIcon == iconItem['name'];
 
               return GestureDetector(
-                onTap: () =>
-                    setState(() => _selectedIcon = iconItem['name'] as String),
+                onTap: () => onSelect(iconItem['name'] as String),
                 child: Container(
                   width: 60,
                   margin: const EdgeInsets.only(right: 8),
@@ -1666,10 +1835,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 decoration: InputDecoration(
                   labelText: label,
                   hintText: hint,
-                  hintStyle:
-                      TextStyle(color: isDark ? Colors.white70 : Colors.grey),
-                  prefixIcon:
-                      Icon(icon, color: isDark ? Colors.white70 : Colors.grey),
+                  hintStyle: TextStyle(
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
+                  prefixIcon: Icon(
+                    icon,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
                   suffixIcon: Icon(
                     Icons.arrow_drop_down,
                     color: isDark ? Colors.white70 : Colors.grey,
@@ -1692,11 +1864,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide:
-                        const BorderSide(color: AppTheme.primary, width: 2),
+                    borderSide: const BorderSide(
+                      color: AppTheme.primary,
+                      width: 2,
+                    ),
                   ),
-                  fillColor:
-                      isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                  fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                   filled: true,
                 ),
                 onChanged: (value) => controller.text = value,
@@ -1737,8 +1910,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           errorText: isPhone && !_isPhoneValid && controller.text.isNotEmpty
               ? 'Enter valid phone number (e.g., 0771234567)'
               : isEmail && !_isEmailValid && controller.text.isNotEmpty
-                  ? 'Enter valid email address'
-                  : null,
+              ? 'Enter valid email address'
+              : null,
           errorStyle: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
@@ -1775,7 +1948,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== ✅ CURRENCY CARD (SIMPLIFIED) ====================
+  // ==================== CURRENCY CARD ====================
   Widget _buildCurrencyCard() {
     final isDark = _isDark;
 
@@ -1810,7 +1983,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   ),
                 ),
                 const Spacer(),
-                // ✅ Auto badge
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -1851,7 +2023,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ),
             ),
             const SizedBox(height: 16),
-
             DropdownButtonFormField<String>(
               initialValue: _salonCurrencyCode,
               isExpanded: true,
@@ -1909,16 +2080,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   value: currency['code'],
                   child: Row(
                     children: [
-                      // SizedBox(
-                      //   width: 40,
-                      //   child: Text(
-                      //     currency['symbol']!,
-                      //     style: TextStyle(
-                      //       fontWeight: FontWeight.bold,
-                      //       color: isDark ? Colors.white70 : Colors.grey[700],
-                      //     ),
-                      //   ),
-                      // ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -1934,8 +2095,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 );
               }).toList(),
               onChanged: (value) {
-                // ✅ Manual change - dropdown එකෙන් විතරයි change වෙන්නේ
-                //    Screen එකට ආපහු ආවම auto-detect වෙනවා
                 if (value != null) {
                   final selected = _supportedCurrencies.firstWhere(
                     (c) => c['code'] == value,
@@ -1947,7 +2106,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 }
               },
             ),
-
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(8),
@@ -1966,7 +2124,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'All prices will be in $_salonCurrencyCode ($_salonCurrencySymbol). ',
+                      'All prices will be in $_salonCurrencyCode ($_salonCurrencySymbol).',
                       style: TextStyle(
                         fontSize: 11,
                         color: isDark ? Colors.teal[300] : Colors.teal[700],
@@ -2024,9 +2182,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                           Text(
                             'Tap to add cover photo',
                             style: TextStyle(
-                              color: isDark
-                                  ? Colors.white60
-                                  : Colors.grey[600],
+                              color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                           ),
                         ],
@@ -2052,9 +2208,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.edit, size: 14, color: Colors.white),
-                      const SizedBox(width: 4),
+                    children: const [
+                      Icon(Icons.edit, size: 14, color: Colors.white),
+                      SizedBox(width: 4),
                       Text(
                         'Edit',
                         style: TextStyle(color: Colors.white, fontSize: 12),
@@ -2180,14 +2336,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ),
             const Divider(),
             ListTile(
-              leading: const Icon(
-                Icons.photo_library,
-                color: AppTheme.primary,
-              ),
+              leading: const Icon(Icons.photo_library, color: AppTheme.primary),
               title: Text(
                 'Choose from Gallery',
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(context);
@@ -2198,8 +2350,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
               title: Text(
                 'Take a Photo',
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(context);
@@ -2211,8 +2362,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Logo',
-                  style:
-                      TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                  style: TextStyle(
+                    color: isDark ? Colors.red[300] : Colors.red,
+                  ),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -2252,14 +2404,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ),
             const Divider(),
             ListTile(
-              leading: const Icon(
-                Icons.photo_library,
-                color: AppTheme.primary,
-              ),
+              leading: const Icon(Icons.photo_library, color: AppTheme.primary),
               title: Text(
                 'Choose from Gallery',
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(context);
@@ -2270,8 +2418,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
               title: Text(
                 'Take a Photo',
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(context);
@@ -2283,8 +2430,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Cover',
-                  style:
-                      TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                  style: TextStyle(
+                    color: isDark ? Colors.red[300] : Colors.red,
+                  ),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -2627,7 +2775,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Icon(Icons.access_time, size: 14, color: AppTheme.primary),
+                  const Icon(
+                    Icons.access_time,
+                    size: 14,
+                    color: AppTheme.primary,
+                  ),
                 ],
               ),
             ),
@@ -2644,11 +2796,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                         _openTimeLocal = time;
                         _openTimeUtc =
                             TimezoneService.timeOfDayToUtcWithTimezone(
-                          time,
-                          _salonTimezone,
-                        );
-                        debugPrint(
-                            '✅ Open time updated: Local=${_openTimeLocal.format(context)}, UTC=$_openTimeUtc');
+                              time,
+                              _salonTimezone,
+                            );
                       });
                     },
                   ),
@@ -2664,11 +2814,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                         _closeTimeLocal = time;
                         _closeTimeUtc =
                             TimezoneService.timeOfDayToUtcWithTimezone(
-                          time,
-                          _salonTimezone,
-                        );
-                        debugPrint(
-                            '✅ Close time updated: Local=${_closeTimeLocal.format(context)}, UTC=$_closeTimeUtc');
+                              time,
+                              _salonTimezone,
+                            );
                       });
                     },
                   ),
@@ -2708,43 +2856,1285 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
+  // ==================== STEP 5: SERVICES ====================
+
+  Widget _buildServicesStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStepHeader(
+          'Add Services',
+          'Add services under your categories. You can add pricing in the next step (optional).',
+        ),
+        if (_addedServiceCategories.isEmpty)
+          _buildInfoBanner(
+            'You need at least one service category before you can add services. Go back to the "Service Categories" step.',
+            Icons.warning_amber,
+            Colors.orange,
+          )
+        else
+          _buildAddServiceCard(),
+      ],
+    );
+  }
+
+  Widget _buildAddServiceCard() {
+    final isDark = _isDark;
+    final isDesktop = _isWeb;
+    final categorySelected = _serviceFormCategoryRef != null;
+
+    Widget formBox() => Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.add_circle_outline,
+                size: 20,
+                color: Colors.green,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _editingServiceIndex >= 0 ? 'Edit Service' : 'Add New Service',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.orange,
+                ),
+              ),
+              const Spacer(),
+              if (_editingServiceIndex >= 0)
+                TextButton(
+                  onPressed: _cancelEditingService,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontSize: 12, color: Colors.red),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          DropdownButtonFormField<String>(
+            initialValue: _serviceFormCategoryRef,
+            isExpanded: true,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            decoration: InputDecoration(
+              labelText: 'Select Category *',
+              hintText: 'Choose a category...',
+              hintStyle: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
+              prefixIcon: Icon(
+                Icons.category,
+                size: 20,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+            items: _addedServiceCategories
+                .map(
+                  (c) => DropdownMenuItem<String>(
+                    value: c['display_name'] as String,
+                    child: Text(c['display_name'] as String),
+                  ),
+                )
+                .toList(),
+            onChanged: (v) => setState(() {
+              _serviceFormCategoryRef = v;
+            }),
+          ),
+
+          if (categorySelected) ...[
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _newServiceNameController,
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              decoration: InputDecoration(
+                labelText: 'Service Name *',
+                hintText: 'e.g., Hair Cut, Facial',
+                hintStyle: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                prefixIcon: Icon(
+                  Icons.build,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                errorText: _serviceNameError,
+                errorMaxLines: 2,
+              ),
+              onChanged: (_) => _validateNewServiceName(),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: _newServiceDescriptionController,
+              maxLines: 2,
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              decoration: InputDecoration(
+                labelText: 'Description',
+                hintText: 'Describe this service...',
+                hintStyle: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                prefixIcon: Icon(
+                  Icons.description,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            _buildIconSelectorGeneric(
+              selectedIcon:
+                  _newServiceIcon ?? _iconList.first['name'] as String,
+              onSelect: (v) => setState(() => _newServiceIcon = v),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _saveCurrentService,
+                icon: Icon(
+                  _editingServiceIndex >= 0 ? Icons.save : Icons.add,
+                  size: 18,
+                ),
+                label: Text(
+                  _editingServiceIndex >= 0 ? 'Update Service' : 'Add Service',
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 16,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Select a category to continue',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    Widget listBox() => Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.list, size: 20, color: Colors.blue),
+              const SizedBox(width: 8),
+              const Text(
+                'Added Services',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.orange,
+                ),
+              ),
+              const Spacer(),
+              if (_addedServices.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(() => _addedServices.clear()),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                  ),
+                  child: Text(
+                    'Clear All',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.red[300] : Colors.red,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_addedServices.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.inbox,
+                      size: 40,
+                      color: isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No services added yet',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _addedServices.length,
+              separatorBuilder: (context, index) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final service = _addedServices[index];
+                final variants = service['variants'] as List;
+
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.orange.withValues(alpha: 0.1),
+                    child: Icon(
+                      _iconList.firstWhere(
+                            (i) => i['name'] == service['icon_name'],
+                            orElse: () => _iconList.first,
+                          )['icon']
+                          as IconData,
+                      size: 18,
+                      color: Colors.orange,
+                    ),
+                  ),
+                  title: Text(
+                    service['name'] as String,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${service['category_ref']} • ${variants.length} pricing${variants.length == 1 ? '' : 's'}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(
+                          Icons.edit,
+                          size: 18,
+                          color: Colors.blue,
+                        ),
+                        onPressed: () => _editAddedService(index),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        icon: Icon(
+                          Icons.delete_outline,
+                          size: 18,
+                          color: isDark ? Colors.red[300] : Colors.red,
+                        ),
+                        onPressed: () => _removeAddedService(index),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+                    ],
+                  ),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                );
+              },
+            ),
+        ],
+      ),
+    );
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.build, color: Colors.orange),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Services',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${_addedServices.length} items',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (isDesktop)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: formBox()),
+                  const SizedBox(width: 16),
+                  Expanded(child: listBox()),
+                ],
+              )
+            else
+              Column(
+                children: [formBox(), const SizedBox(height: 16), listBox()],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== STEP 6: PRICING ====================
+
+  Widget _buildPricingStep() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStepHeader(
+          'Add Pricing (Optional)',
+          'Optionally pick a service and add a price + duration for each gender/age combination. You can skip this step.',
+        ),
+        _buildInfoBanner(
+          'This step is optional. If you skip it, your services will be saved without any pricing. You can add pricing later.',
+          Icons.info_outline,
+          Colors.blue,
+        ),
+        if (_addedServices.isEmpty)
+          _buildInfoBanner(
+            'You need at least one service first. Go back to the "Services" step.',
+            Icons.warning_amber,
+            Colors.orange,
+          )
+        else if (_addedAgeCategories.isEmpty || _selectedGenderIds.isEmpty)
+          _buildInfoBanner(
+            'You need age categories and genders before you can price a service.',
+            Icons.warning_amber,
+            Colors.orange,
+          )
+        else
+          _buildAddPricingCard(),
+      ],
+    );
+  }
+
+  Widget _buildAddPricingCard() {
+    final isDark = _isDark;
+    final isDesktop = _isWeb;
+    final genderOptions = _selectedGenderDisplayNames();
+
+    final selectedService = _variantTargetServiceIndex != null
+        ? _addedServices[_variantTargetServiceIndex!]
+        : null;
+    final variants = selectedService != null
+        ? (selectedService['variants'] as List)
+        : <dynamic>[];
+
+    // ===== FORM BOX =====
+    Widget addFormBox() => Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.add_circle_outline,
+                size: 20,
+                color: Colors.green,
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Add New Pricing',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.orange,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Step 1: Service dropdown (always visible)
+          DropdownButtonFormField<int>(
+            initialValue: _variantTargetServiceIndex,
+            isExpanded: true,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            decoration: InputDecoration(
+              labelText: 'Select Service *',
+              hintText: 'Choose a service...',
+              hintStyle: TextStyle(
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
+              prefixIcon: Icon(
+                Icons.build,
+                size: 20,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+            items: _addedServices.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final svc = entry.value;
+              final vCount = (svc['variants'] as List).length;
+              return DropdownMenuItem<int>(
+                value: idx,
+                child: Text(
+                  '${svc['name']} (${svc['category_ref']}) • $vCount pricing${vCount == 1 ? '' : 's'}',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            }).toList(),
+            onChanged: (v) => setState(() {
+              _variantTargetServiceIndex = v;
+              _variantGenderRef = null;
+              _variantAgeRef = null;
+              _variantPriceController.clear();
+              _variantDurationController.clear();
+              _newVariantPriceError = null;
+              _newVariantDurationError = null;
+            }),
+          ),
+
+          // Step 2: Only show the rest when a service is picked
+          if (selectedService != null) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _variantGenderRef,
+                    isExpanded: true,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Gender *',
+                      hintText: 'Select',
+                      hintStyle: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.wc,
+                        size: 20,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppTheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                      filled: true,
+                      fillColor: isDark
+                          ? const Color(0xFF2A2A2A)
+                          : Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                    ),
+                    items: genderOptions
+                        .map(
+                          (g) => DropdownMenuItem<String>(
+                            value: g,
+                            child: Text(g),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setState(() => _variantGenderRef = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _variantAgeRef,
+                    isExpanded: true,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Age Category *',
+                      hintText: 'Select',
+                      hintStyle: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.timeline,
+                        size: 20,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppTheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                      filled: true,
+                      fillColor: isDark
+                          ? const Color(0xFF2A2A2A)
+                          : Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                    ),
+                    items: _addedAgeCategories
+                        .map(
+                          (a) => DropdownMenuItem<String>(
+                            value: a['display_name'] as String,
+                            child: Text(
+                              '${a['display_name']} (${a['min_age']}-${a['max_age']})',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (v) => setState(() => _variantAgeRef = v),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: _variantPriceController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Price (optional)',
+                      hintText: '0',
+                      hintStyle: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                      prefixIcon: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        child: Center(
+                          widthFactor: 1.0,
+                          child: Text(
+                            _salonCurrencySymbol,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white70 : Colors.grey,
+                            ),
+                          ),
+                        ),
+                      ),
+                      prefixIconConstraints: const BoxConstraints(
+                        minWidth: 50,
+                        minHeight: 20,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppTheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                      filled: true,
+                      fillColor: isDark
+                          ? const Color(0xFF2A2A2A)
+                          : Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      errorText: _newVariantPriceError,
+                    ),
+                    onChanged: (_) => _validateNewVariantPrice(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextFormField(
+                    controller: _variantDurationController,
+                    keyboardType: TextInputType.number,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: 'Duration (mins) *',
+                      hintText: '0',
+                      hintStyle: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                      prefixIcon: Icon(
+                        Icons.timer,
+                        size: 20,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide(
+                          color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(
+                          color: AppTheme.primary,
+                          width: 2,
+                        ),
+                      ),
+                      filled: true,
+                      fillColor: isDark
+                          ? const Color(0xFF2A2A2A)
+                          : Colors.white,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      errorText: _newVariantDurationError,
+                    ),
+                    onChanged: (_) => _validateNewVariantDuration(),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () =>
+                    _addVariantToService(_variantTargetServiceIndex!),
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Add Pricing'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 16,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Select a service to add pricing',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    // ===== LIST BOX =====
+    Widget listBox() => Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.list, size: 20, color: Colors.blue),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  selectedService != null
+                      ? 'Pricing — ${selectedService['name']}'
+                      : 'Added Pricing',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.orange,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (variants.isNotEmpty && selectedService != null)
+                TextButton(
+                  onPressed: () => setState(
+                    () => (selectedService['variants'] as List).clear(),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                  ),
+                  child: Text(
+                    'Clear All',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.red[300] : Colors.red,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (selectedService == null)
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.tune,
+                      size: 40,
+                      color: isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Select a service to view its pricing',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (variants.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.inbox,
+                      size: 40,
+                      color: isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No pricing added yet',
+                      style: TextStyle(
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: variants.length,
+              separatorBuilder: (context, index) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final v = variants[index];
+                final gender = v['gender_ref'] as String;
+                final age = v['age_ref'] as String;
+                final price = v['price'] as double;
+                final duration = v['duration'] as int;
+                final priceDisplay = price == 0
+                    ? 'Free'
+                    : '$_salonCurrencySymbol${price.toStringAsFixed(0)}';
+
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundColor: Colors.orange.withValues(alpha: 0.1),
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.orange,
+                      ),
+                    ),
+                  ),
+                  title: Text(
+                    '$gender • $age',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '$priceDisplay • $duration min',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                  ),
+                  trailing: IconButton(
+                    icon: Icon(
+                      Icons.delete_outline,
+                      size: 20,
+                      color: isDark ? Colors.red[300] : Colors.red,
+                    ),
+                    onPressed: () => setState(() {
+                      (selectedService['variants'] as List).removeAt(index);
+                    }),
+                  ),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                );
+              },
+            ),
+        ],
+      ),
+    );
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.tune, color: Colors.orange),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Pricing',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${variants.length} items',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            if (isDesktop)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: addFormBox()),
+                  const SizedBox(width: 16),
+                  Expanded(child: listBox()),
+                ],
+              )
+            else
+              Column(
+                children: [addFormBox(), const SizedBox(height: 16), listBox()],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== STEP 7: REVIEW ====================
+
+  Widget _buildReviewTile({
+    required IconData icon,
+    required String title,
+    required String value,
+    required VoidCallback onEdit,
+  }) {
+    final isDark = _isDark;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: AppTheme.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          TextButton(onPressed: onEdit, child: const Text('Edit')),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReviewStep() {
+    final totalVariants = _addedServices.fold<int>(
+      0,
+      (sum, s) => sum + (s['variants'] as List).length,
+    );
+    final servicesWithVariants = _addedServices
+        .where((s) => (s['variants'] as List).isNotEmpty)
+        .length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStepHeader(
+          'Review & Create',
+          'Check everything below, then tap "Create Salon" to finish.',
+        ),
+        _buildReviewTile(
+          icon: Icons.store,
+          title: 'Salon Name',
+          value: _nameController.text.trim().isEmpty
+              ? 'Not set'
+              : _nameController.text.trim(),
+          onEdit: () => _goToStep(0),
+        ),
+        _buildReviewTile(
+          icon: Icons.access_time,
+          title: 'Business Hours & Currency',
+          value:
+              '${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)} · $_salonCurrencyCode ($_salonCurrencySymbol)',
+          onEdit: () => _goToStep(1),
+        ),
+        _buildReviewTile(
+          icon: Icons.calendar_today,
+          title: 'Age Categories',
+          value: '${_addedAgeCategories.length} added',
+          onEdit: () => _goToStep(2),
+        ),
+        _buildReviewTile(
+          icon: Icons.people,
+          title: 'Genders',
+          value: '${_selectedGenderIds.length} selected',
+          onEdit: () => _goToStep(3),
+        ),
+        _buildReviewTile(
+          icon: Icons.category,
+          title: 'Service Categories',
+          value: '${_addedServiceCategories.length} added',
+          onEdit: () => _goToStep(4),
+        ),
+        _buildReviewTile(
+          icon: Icons.build,
+          title: 'Services',
+          value: '${_addedServices.length} services',
+          onEdit: () => _goToStep(5),
+        ),
+        _buildReviewTile(
+          icon: Icons.tune,
+          title: 'Pricing (optional)',
+          value: totalVariants == 0
+              ? 'None — services will be saved without pricing'
+              : '$totalVariants pricing entries across $servicesWithVariants service${servicesWithVariants == 1 ? '' : 's'}',
+          onEdit: () => _goToStep(6),
+        ),
+        const SizedBox(height: 8),
+        _buildInfoBanner(
+          'Tapping "Create Salon" will save the salon, its categories, ages, genders, and all services${totalVariants > 0 ? ' with their pricing' : ' (no pricing)'}.',
+          Icons.info_outline,
+          AppTheme.primary,
+        ),
+      ],
+    );
+  }
+
   // ==================== CREATE SALON ====================
   Future<void> _onCreateSalonPressed() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    final phone = _phoneController.text.trim();
-    if (phone.isNotEmpty) {
-      final cleaned = phone.replaceAll(RegExp(r'[^0-9]'), '');
-      if (cleaned.length < 9 ||
-          cleaned.length > 10 ||
-          !cleaned.startsWith('0')) {
-        _showSnackBar('Please enter a valid phone number', Colors.orange);
+    // Only validate required steps (skip step 6 — pricing is optional)
+    for (int step = 0; step <= 7; step++) {
+      if (step == 6) continue; // Pricing step is optional
+      if (!_canProceedFromStep(step)) {
+        _goToStep(step);
+        _showSnackBar(_stepRequirementMessage(step), Colors.orange);
         return;
       }
-    }
-
-    final email = _emailController.text.trim();
-    if (email.isNotEmpty) {
-      final emailRegex = RegExp(
-        r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$',
-      );
-      if (!emailRegex.hasMatch(email)) {
-        _showSnackBar('Please enter a valid email address', Colors.orange);
-        return;
-      }
-    }
-
-    if (_selectedGenderIds.isEmpty) {
-      _showSnackBar('Please select at least one gender', Colors.orange);
-      return;
-    }
-    if (_addedAgeCategories.isEmpty) {
-      _showSnackBar('Please add at least one age category', Colors.orange);
-      return;
-    }
-    if (_addedServiceCategories.isEmpty) {
-      _showSnackBar('Please add at least one service category', Colors.orange);
-      return;
     }
 
     final userId = supabase.auth.currentUser?.id;
@@ -2756,13 +4146,22 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     if (_isConfirmDialogOpen) return;
     _isConfirmDialogOpen = true;
 
+    final totalVariants = _addedServices.fold<int>(
+      0,
+      (sum, s) => sum + (s['variants'] as List).length,
+    );
+
     final confirmed = await showCustomAlert(
       context: context,
       title: "Create Salon?",
-      message: 'Do you want to create "${_nameController.text.trim()}"?\n\n'
+      message:
+          'Do you want to create "${_nameController.text.trim()}"?\n\n'
+          'Service Categories: ${_addedServiceCategories.length}\n'
+          'Services: ${_addedServices.length}\n'
+          'Pricing entries: $totalVariants\n'
           'Currency: $_salonCurrencyCode ($_salonCurrencySymbol)\n'
           'Timezone: $_salonTimezone\n\n'
-          'This will save the salon with the details you entered.',
+          'This will save the salon with everything you\'ve set up.',
       isError: false,
       buttonText: "Create",
       buttonIcon: Icons.add_business,
@@ -2790,7 +4189,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       }
 
       final prefs = await SharedPreferences.getInstance();
-      final userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
+      final userTimezone =
+          prefs.getString(TimezoneService.kUserTimezone) ??
           TimezoneService.getCurrentTimezone();
 
       final extraData = {
@@ -2825,19 +4225,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'is_active': true,
       };
 
-      debugPrint('📝 Creating salon:');
-      debugPrint('   Name: ${salonData['name']}');
-      debugPrint('   Timezone: ${salonData['timezone']}');
-      debugPrint(
-          '   Currency: ${salonData['currency_code']} (${salonData['currency_symbol']})');
-
       final response = await supabase
           .from('salons')
           .insert(salonData)
           .select('id, name')
           .single();
       final salonId = response['id'] as int;
-
       debugPrint('✅ Salon created with ID: $salonId');
 
       String? logoUrl = (_logoFile != null || _logoWebBytes != null)
@@ -2854,38 +4247,98 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         await supabase.from('salons').update(imageUpdate).eq('id', salonId);
       }
 
+      // ---- Genders ----
+      final Map<String, int> genderIdMap = {};
       for (int i = 0; i < _selectedGenderIds.length; i++) {
         final genderId = _selectedGenderIds[i];
         final gender = _globalGenders.firstWhere((g) => g['id'] == genderId);
-        await supabase.from('salon_genders').insert({
-          'salon_id': salonId,
-          'display_name': gender['display_name'],
-          'display_order': i,
-          'is_active': true,
-        });
+        final displayName = gender['display_name'] as String;
+        final inserted = await supabase
+            .from('salon_genders')
+            .insert({
+              'salon_id': salonId,
+              'display_name': displayName,
+              'display_order': i,
+              'is_active': true,
+            })
+            .select('id')
+            .single();
+        genderIdMap[displayName] = inserted['id'] as int;
       }
 
+      // ---- Age categories ----
+      final Map<String, int> ageIdMap = {};
       for (var ageCat in _addedAgeCategories) {
-        await supabase.from('salon_age_categories').insert({
-          'salon_id': salonId,
-          'display_name': ageCat['display_name'],
-          'min_age': ageCat['min_age'],
-          'max_age': ageCat['max_age'],
-          'display_order': ageCat['display_order'],
-          'is_active': ageCat['is_active'],
-        });
+        final inserted = await supabase
+            .from('salon_age_categories')
+            .insert({
+              'salon_id': salonId,
+              'display_name': ageCat['display_name'],
+              'min_age': ageCat['min_age'],
+              'max_age': ageCat['max_age'],
+              'display_order': ageCat['display_order'],
+              'is_active': ageCat['is_active'],
+            })
+            .select('id')
+            .single();
+        ageIdMap[ageCat['display_name'] as String] = inserted['id'] as int;
       }
 
+      // ---- Service categories ----
+      final Map<String, int> categoryIdMap = {};
       for (var serviceCat in _addedServiceCategories) {
-        await supabase.from('salon_categories').insert({
-          'salon_id': salonId,
-          'display_name': serviceCat['display_name'],
-          'description': serviceCat['description'],
-          'icon_name': serviceCat['icon_name'],
-          'color': serviceCat['color'],
-          'display_order': serviceCat['display_order'],
-          'is_active': serviceCat['is_active'],
-        });
+        final inserted = await supabase
+            .from('salon_categories')
+            .insert({
+              'salon_id': salonId,
+              'display_name': serviceCat['display_name'],
+              'description': serviceCat['description'],
+              'icon_name': serviceCat['icon_name'],
+              'color': serviceCat['color'],
+              'display_order': serviceCat['display_order'],
+              'is_active': serviceCat['is_active'],
+            })
+            .select('id')
+            .single();
+        categoryIdMap[serviceCat['display_name'] as String] =
+            inserted['id'] as int;
+      }
+
+      // ---- Services + pricing ----
+      for (var svc in _addedServices) {
+        final categoryId = categoryIdMap[svc['category_ref']];
+        final description = (svc['description'] as String).isNotEmpty
+            ? svc['description']
+            : null;
+
+        final serviceInserted = await supabase
+            .from('services')
+            .insert({
+              'salon_id': salonId,
+              'name': svc['name'],
+              'description': description,
+              'category_id': categoryId,
+              'icon_name': svc['icon_name'],
+              'is_active': true,
+              'created_by': userId,
+            })
+            .select('id')
+            .single();
+        final serviceId = serviceInserted['id'] as int;
+
+        // Pricing is optional — skip if none
+        for (var v in (svc['variants'] as List)) {
+          final genderId = genderIdMap[v['gender_ref']];
+          final ageId = ageIdMap[v['age_ref']];
+          await supabase.from('service_variants').insert({
+            'service_id': serviceId,
+            'salon_gender_id': genderId,
+            'salon_age_category_id': ageId,
+            'price': v['price'], // 0 if empty was passed
+            'duration': v['duration'],
+            'is_active': true,
+          });
+        }
       }
 
       if (!mounted) return;
@@ -2901,10 +4354,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   String _getPlatformName() => kIsWeb
       ? 'web'
       : Platform.isIOS
-          ? 'ios'
-          : Platform.isAndroid
-              ? 'android'
-              : 'mobile';
+      ? 'ios'
+      : Platform.isAndroid
+      ? 'android'
+      : 'mobile';
 
   void _showSnackBar(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2917,11 +4370,449 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
+  // ==================== STEP CONTENT SWITCH ====================
+
+  Widget _buildStep0() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStepHeader(
+          'Basic & Contact Information',
+          'Add your salon\'s core details and how customers can reach you.',
+        ),
+        _buildCoverSection(),
+        Transform.translate(
+          offset: const Offset(16, -40),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: _buildLogoSeparate(),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Basic Information',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildTextField(
+                  controller: _nameController,
+                  label: 'Salon Name *',
+                  hint: 'Enter salon name',
+                  icon: Icons.store,
+                ),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _addressController,
+                  label: 'Address',
+                  hint: 'Enter address',
+                  icon: Icons.location_on,
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _descriptionController,
+                  label: 'Description',
+                  hint: 'Tell about your salon',
+                  icon: Icons.description,
+                  maxLines: 3,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Contact Information',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildTextField(
+                  controller: _phoneController,
+                  label: 'Phone Number',
+                  hint: 'Enter phone number (e.g., 0771234567)',
+                  icon: Icons.phone,
+                  keyboardType: TextInputType.phone,
+                  isPhone: true,
+                ),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _emailController,
+                  label: 'Email Address',
+                  hint: 'Enter email address (e.g., salon@example.com)',
+                  icon: Icons.email,
+                  keyboardType: TextInputType.emailAddress,
+                  isEmail: true,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Phone and email are optional but recommended',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStep1() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStepHeader(
+          'Business Hours & Currency',
+          'Set your working hours; the currency is auto-detected but you can change it.',
+        ),
+        _buildBusinessHoursCard(),
+        const SizedBox(height: 16),
+        _buildCurrencyCard(),
+      ],
+    );
+  }
+
+  Widget _buildStep2() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStepHeader(
+          'Age Categories',
+          'Define the age groups your salon prices differently, e.g. Child, Adult, Senior.',
+        ),
+        _buildAgeCategorySection(),
+      ],
+    );
+  }
+
+  Widget _buildStep3() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStepHeader(
+          'Genders',
+          'Select which genders your salon serves. This is combined with age categories to price each service.',
+        ),
+        _buildGenderSelection(),
+      ],
+    );
+  }
+
+  Widget _buildStep4() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStepHeader(
+          'Service Categories',
+          'Group your services under categories like Hair, Nails, or Spa. You\'ll add individual services under these in a later step.',
+        ),
+        _buildServiceCategorySection(),
+      ],
+    );
+  }
+
+  Widget _buildStepContent() {
+    switch (_currentStep) {
+      case 0:
+        return _buildStep0();
+      case 1:
+        return _buildStep1();
+      case 2:
+        return _buildStep2(); // Ages
+      case 3:
+        return _buildStep3(); // Genders
+      case 4:
+        return _buildStep4(); // Service Categories
+      case 5:
+        return _buildServicesStep(); // Services
+      case 6:
+        return _buildPricingStep(); // Pricing (optional)
+      case 7:
+        return _buildReviewStep(); // Review
+      default:
+        return const SizedBox();
+    }
+  }
+
+  // ==================== STEP INDICATOR ====================
+
+  static const List<Map<String, dynamic>> _stepMeta = [
+    {'label': 'Basic', 'icon': Icons.store},
+    {'label': 'Hours', 'icon': Icons.access_time},
+    {'label': 'Ages', 'icon': Icons.calendar_today},
+    {'label': 'Genders', 'icon': Icons.people},
+    {'label': 'Categories', 'icon': Icons.category},
+    {'label': 'Services', 'icon': Icons.build},
+    {'label': 'Pricing', 'icon': Icons.tune},
+    {'label': 'Review', 'icon': Icons.check_circle},
+  ];
+
+  Widget _buildStepIndicatorRow() {
+    final isMobile = !_isWeb;
+
+    return Container(
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: EdgeInsets.symmetric(
+          horizontal: isMobile ? 12 : 20,
+          vertical: isMobile ? 12 : 16,
+        ),
+        child: Row(
+          children: [
+            for (int i = 0; i < _stepMeta.length; i++) ...[
+              _buildStepCircle(
+                i,
+                _stepMeta[i]['label'] as String,
+                _stepMeta[i]['icon'] as IconData,
+                isMobile,
+              ),
+              if (i != _stepMeta.length - 1)
+                Container(
+                  width: isMobile ? 18 : 30,
+                  height: 2,
+                  color: _furthestStep > i
+                      ? AppTheme.primary
+                      : Colors.grey[300],
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStepCircle(
+    int step,
+    String label,
+    IconData icon,
+    bool isMobile,
+  ) {
+    final isActive = _currentStep == step;
+    final isCompleted = _furthestStep > step;
+    final isDark = _isDark;
+    final size = isMobile ? 34.0 : 42.0;
+    final iconSize = isMobile ? 16.0 : 20.0;
+    final canTap = step <= _furthestStep;
+
+    return GestureDetector(
+      onTap: canTap ? () => _goToStep(step) : null,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isCompleted
+                  ? AppTheme.primary
+                  : (isActive
+                        ? AppTheme.primary.withValues(alpha: 0.1)
+                        : (isDark ? Colors.grey[800] : Colors.grey[200])),
+              border: Border.all(
+                color: isActive
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[600]! : Colors.grey[300]!),
+                width: isActive ? 2 : 1.5,
+              ),
+            ),
+            child: Center(
+              child: isCompleted
+                  ? Icon(Icons.check, size: iconSize, color: Colors.white)
+                  : Icon(
+                      icon,
+                      size: iconSize,
+                      color: isActive ? AppTheme.primary : Colors.grey[500],
+                    ),
+            ),
+          ),
+          if (!isMobile) ...[
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 10,
+                color: isActive
+                    ? AppTheme.primary
+                    : (isDark ? Colors.white60 : Colors.grey[500]),
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ==================== BOTTOM NAVIGATION ====================
+
+  Widget _buildBottomNavBar() {
+    final isDark = _isDark;
+    final isLastStep = _currentStep == 7;
+    final canProceed = _canProceedFromStep(_currentStep);
+    final busy = _isLoading || _isUploadingLogo || _isUploadingCover;
+    final isPricingStep = _currentStep == 6;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: Row(
+          children: [
+            if (_currentStep > 0) ...[
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: busy ? null : () => setState(() => _currentStep--),
+                  icon: const Icon(Icons.arrow_back, size: 18),
+                  label: const Text('Back'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: BorderSide(
+                      color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              flex: 2,
+              child: ElevatedButton(
+                onPressed: busy
+                    ? null
+                    : () {
+                        if (!canProceed) {
+                          _showSnackBar(
+                            _stepRequirementMessage(_currentStep),
+                            Colors.orange,
+                          );
+                          return;
+                        }
+                        if (isLastStep) {
+                          _onCreateSalonPressed();
+                        } else {
+                          setState(() {
+                            _currentStep++;
+                            if (_currentStep > _furthestStep) {
+                              _furthestStep = _currentStep;
+                            }
+                          });
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: canProceed
+                      ? AppTheme.primary
+                      : (isDark ? Colors.grey[800] : Colors.grey[300]),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                child: busy
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            _isUploadingLogo || _isUploadingCover
+                                ? 'Uploading...'
+                                : 'Creating...',
+                          ),
+                        ],
+                      )
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            isLastStep
+                                ? 'Create Salon'
+                                : (isPricingStep
+                                      ? 'Skip / Continue'
+                                      : 'Continue'),
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Icon(
+                            isLastStep
+                                ? Icons.check_circle
+                                : Icons.arrow_forward,
+                            size: 20,
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== BUILD ====================
+
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
     final isWeb = context.isWeb;
-    final isDesktop = isWeb;
+    _isWeb = isWeb;
+    _isDark = isDark;
 
     if (!_isTimezoneLoaded) {
       return Scaffold(
@@ -2957,17 +4848,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
-        title: Text(
+        title: const Text(
           'Create New Salon',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
-        centerTitle: isDesktop,
+        centerTitle: isWeb,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
@@ -2980,199 +4868,19 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           child: Center(
             child: Container(
               constraints: BoxConstraints(
-                maxWidth: isDesktop ? 1200 : double.infinity,
+                maxWidth: isWeb ? 1000 : double.infinity,
               ),
-              child: SingleChildScrollView(
-                padding: EdgeInsets.all(isDesktop ? 32 : 16),
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    children: [
-                      _buildCoverSection(),
-                      Transform.translate(
-                        offset: const Offset(16, -40),
-                        child: Align(
-                          alignment: Alignment.topLeft,
-                          child: _buildLogoSeparate(),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Basic Information
-                      Card(
-                        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Basic Information',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              _buildTextField(
-                                controller: _nameController,
-                                label: 'Salon Name *',
-                                hint: 'Enter salon name',
-                                icon: Icons.store,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildTextField(
-                                controller: _addressController,
-                                label: 'Address',
-                                hint: 'Enter address',
-                                icon: Icons.location_on,
-                                maxLines: 2,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildTextField(
-                                controller: _descriptionController,
-                                label: 'Description',
-                                hint: 'Tell about your salon',
-                                icon: Icons.description,
-                                maxLines: 3,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Contact Information
-                      Card(
-                        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Contact Information',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                              const SizedBox(height: 16),
-                              _buildTextField(
-                                controller: _phoneController,
-                                label: 'Phone Number',
-                                hint: 'Enter phone number (e.g., 0771234567)',
-                                icon: Icons.phone,
-                                keyboardType: TextInputType.phone,
-                                isPhone: true,
-                              ),
-                              const SizedBox(height: 12),
-                              _buildTextField(
-                                controller: _emailController,
-                                label: 'Email Address',
-                                hint:
-                                    'Enter email address (e.g., salon@example.com)',
-                                icon: Icons.email,
-                                keyboardType: TextInputType.emailAddress,
-                                isEmail: true,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Phone and email are optional but recommended',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.grey[500],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      _buildBusinessHoursCard(),
-                      const SizedBox(height: 16),
-
-                      _buildCurrencyCard(),
-                      const SizedBox(height: 16),
-
-                      _buildServiceCategorySection(),
-                      _buildAgeCategorySection(),
-                      _buildGenderSelection(),
-
-                      const SizedBox(height: 24),
-
-                      SizedBox(
-                        width: double.infinity,
-                        height: 54,
-                        child: ElevatedButton(
-                          onPressed: (_isLoading ||
-                                  _isUploadingLogo ||
-                                  _isUploadingCover)
-                              ? null
-                              : _onCreateSalonPressed,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primary,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: (_isLoading ||
-                                  _isUploadingLogo ||
-                                  _isUploadingCover)
-                              ? Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const SizedBox(
-                                      height: 24,
-                                      width: 24,
-                                      child: CircularProgressIndicator(
-                                        color: Colors.white,
-                                        strokeWidth: 2,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Text(
-                                      _isUploadingLogo || _isUploadingCover
-                                          ? 'Uploading...'
-                                          : 'Creating...',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                      ),
-                                    ),
-                                  ],
-                                )
-                              : const Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(Icons.add_business, size: 20),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Create Salon',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                        ),
-                      ),
-                    ],
+              child: Column(
+                children: [
+                  _buildStepIndicatorRow(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: EdgeInsets.all(isWeb ? 32 : 16),
+                      child: _buildStepContent(),
+                    ),
                   ),
-                ),
+                  _buildBottomNavBar(),
+                ],
               ),
             ),
           ),
