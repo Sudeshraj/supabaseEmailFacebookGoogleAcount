@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
+import 'package:flutter_application_1/alertBox/time_picker_dialog.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:image_picker/image_picker.dart';
@@ -11,426 +12,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
 import '../../services/timezone_service.dart';
 import '../../utils/image_compression.dart';
-
-// ==================== ENHANCED TIME PICKER ====================
-class EnhancedTimePicker extends StatefulWidget {
-  final TimeOfDay? initialTime;
-  final ValueChanged<TimeOfDay> onTimeSelected;
-
-  const EnhancedTimePicker({
-    super.key,
-    required this.initialTime,
-    required this.onTimeSelected,
-  });
-
-  @override
-  State<EnhancedTimePicker> createState() => _EnhancedTimePickerState();
-}
-
-class _EnhancedTimePickerState extends State<EnhancedTimePicker> {
-  late int _selectedHour;
-  late int _selectedMinute;
-  late String _selectedPeriod;
-
-  final List<int> hours12 = [12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
-  final List<int> minutes = List.generate(60, (i) => i);
-  final List<String> periods = ['AM', 'PM'];
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeTime();
-  }
-
-  void _initializeTime() {
-    if (widget.initialTime != null) {
-      final hour24 = widget.initialTime!.hour;
-      final minute = widget.initialTime!.minute;
-
-      if (hour24 == 0) {
-        _selectedHour = 12;
-        _selectedPeriod = 'AM';
-      } else if (hour24 == 12) {
-        _selectedHour = 12;
-        _selectedPeriod = 'PM';
-      } else if (hour24 > 12) {
-        _selectedHour = hour24 - 12;
-        _selectedPeriod = 'PM';
-      } else {
-        _selectedHour = hour24;
-        _selectedPeriod = 'AM';
-      }
-      _selectedMinute = minute;
-    } else {
-      final now = TimeOfDay.now();
-      final hour24 = now.hour;
-      if (hour24 == 0) {
-        _selectedHour = 12;
-        _selectedPeriod = 'AM';
-      } else if (hour24 == 12) {
-        _selectedHour = 12;
-        _selectedPeriod = 'PM';
-      } else if (hour24 > 12) {
-        _selectedHour = hour24 - 12;
-        _selectedPeriod = 'PM';
-      } else {
-        _selectedHour = hour24;
-        _selectedPeriod = 'AM';
-      }
-      _selectedMinute = now.minute;
-    }
-  }
-
-  void _confirmTime() {
-    int hour24;
-    if (_selectedPeriod == 'AM') {
-      hour24 = _selectedHour == 12 ? 0 : _selectedHour;
-    } else {
-      hour24 = _selectedHour == 12 ? 12 : _selectedHour + 12;
-    }
-
-    final selectedTime = TimeOfDay(hour: hour24, minute: _selectedMinute);
-    widget.onTimeSelected(selectedTime);
-    Navigator.of(context).pop(selectedTime);
-  }
-
-  void _cancelTime() {
-    Navigator.of(context).pop();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = context.isDarkMode;
-    final isMobile = context.isMobile;
-
-    return Dialog(
-      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      child: Container(
-        width: isMobile ? double.infinity : 320,
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Select Time',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              decoration: BoxDecoration(
-                color: AppTheme.primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _selectedHour.toString().padLeft(2, '0'),
-                    style: const TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                  Text(
-                    ':',
-                    style: TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : AppTheme.primary,
-                    ),
-                  ),
-                  Text(
-                    _selectedMinute.toString().padLeft(2, '0'),
-                    style: const TextStyle(
-                      fontSize: 48,
-                      fontWeight: FontWeight.bold,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.grey[800] : Colors.grey[200],
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      _selectedPeriod,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            Row(
-              children: [
-                _buildScrollPicker(
-                  title: 'HOUR',
-                  items: hours12,
-                  selectedValue: _selectedHour,
-                  onChanged: (value) => setState(() => _selectedHour = value),
-                ),
-                const SizedBox(width: 12),
-                _buildScrollPicker(
-                  title: 'MINUTE',
-                  items: minutes,
-                  selectedValue: _selectedMinute,
-                  onChanged: (value) => setState(() => _selectedMinute = value),
-                ),
-                const SizedBox(width: 12),
-                _buildScrollPicker(
-                  title: 'PERIOD',
-                  items: periods,
-                  selectedValue: _selectedPeriod,
-                  onChanged: (value) => setState(() => _selectedPeriod = value),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            Row(
-              children: [
-                Expanded(
-                  child: TextButton(
-                    onPressed: _cancelTime,
-                    style: TextButton.styleFrom(
-                      foregroundColor: isDark ? Colors.white60 : Colors.grey,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Cancel', style: TextStyle(fontSize: 16)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _confirmTime,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'OK',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildScrollPicker<T>({
-    required String title,
-    required List<T> items,
-    required T selectedValue,
-    required ValueChanged<T> onChanged,
-  }) {
-    final isDark = context.isDarkMode;
-
-    return Expanded(
-      child: Column(
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 12,
-              color: isDark ? Colors.white60 : Colors.grey,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Container(
-            height: 150,
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-              ),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: ListWheelScrollView.useDelegate(
-              itemExtent: 40,
-              onSelectedItemChanged: (newIndex) {
-                if (newIndex >= 0 && newIndex < items.length) {
-                  onChanged(items[newIndex]);
-                }
-              },
-              childDelegate: ListWheelChildBuilderDelegate(
-                builder: (context, i) {
-                  final item = items[i];
-                  final isSelected = item == selectedValue;
-                  return Container(
-                    alignment: Alignment.center,
-                    child: Text(
-                      item.toString(),
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        color: isSelected
-                            ? AppTheme.primary
-                            : (isDark ? Colors.white70 : Colors.grey[800]),
-                      ),
-                    ),
-                  );
-                },
-                childCount: items.length,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ==================== TIME PICKER FIELD ====================
-class TimePickerField extends StatefulWidget {
-  final String label;
-  final TimeOfDay? initialTime;
-  final ValueChanged<TimeOfDay> onTimeSelected;
-  final bool isRequired;
-
-  const TimePickerField({
-    super.key,
-    required this.label,
-    this.initialTime,
-    required this.onTimeSelected,
-    this.isRequired = true,
-  });
-
-  @override
-  State<TimePickerField> createState() => _TimePickerFieldState();
-}
-
-class _TimePickerFieldState extends State<TimePickerField> {
-  TimeOfDay? _selectedTime;
-
-  @override
-  void initState() {
-    super.initState();
-    _selectedTime = widget.initialTime;
-  }
-
-  String _formatTimeForDisplay(TimeOfDay time) {
-    final hour = time.hour == 0
-        ? 12
-        : (time.hour > 12 ? time.hour - 12 : time.hour);
-    final minute = time.minute.toString().padLeft(2, '0');
-    final period = time.hour >= 12 ? 'PM' : 'AM';
-    return '$hour:$minute $period';
-  }
-
-  Future<void> _showTimePicker() async {
-    final result = await showDialog<TimeOfDay>(
-      context: context,
-      builder: (context) => EnhancedTimePicker(
-        initialTime: _selectedTime,
-        onTimeSelected: (time) {},
-      ),
-    );
-
-    if (result != null) {
-      setState(() {
-        _selectedTime = result;
-      });
-      widget.onTimeSelected(result);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = context.isDarkMode;
-    final accentColor = AppTheme.primary;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          widget.label,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white70 : Colors.grey[700],
-          ),
-        ),
-        const SizedBox(height: 8),
-        GestureDetector(
-          onTap: _showTimePicker,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              border: Border.all(
-                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                width: 1,
-              ),
-              borderRadius: BorderRadius.circular(12),
-              color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.access_time,
-                  size: 20,
-                  color: _selectedTime != null ? accentColor : Colors.grey[400],
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    _selectedTime != null
-                        ? _formatTimeForDisplay(_selectedTime!)
-                        : 'Select time',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: _selectedTime != null
-                          ? (isDark ? Colors.white : Colors.black)
-                          : (isDark ? Colors.white70 : Colors.grey[500]),
-                    ),
-                  ),
-                ),
-                Icon(
-                  Icons.arrow_drop_down,
-                  color: isDark ? Colors.white70 : Colors.grey,
-                  size: 24,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
 
 // ==================== EDIT SALON SCREEN ====================
 class EditSalonScreen extends StatefulWidget {
@@ -538,6 +119,38 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _isSaving = false;
   bool _isDeleting = false;
 
+  // ============================================
+  // ✅ CURRENCY VARIABLES
+  // ============================================
+  String _salonCurrencyCode = 'LKR';
+  String _salonCurrencySymbol = 'Rs.';
+
+  // ✅ Supported currencies list (same as Create Salon screen)
+  static const List<Map<String, String>> _supportedCurrencies = [
+    {'code': 'LKR', 'symbol': 'Rs.', 'name': 'Sri Lankan Rupee'},
+    {'code': 'USD', 'symbol': '\$', 'name': 'US Dollar'},
+    {'code': 'INR', 'symbol': '₹', 'name': 'Indian Rupee'},
+    {'code': 'GBP', 'symbol': '£', 'name': 'British Pound'},
+    {'code': 'EUR', 'symbol': '€', 'name': 'Euro'},
+    {'code': 'AUD', 'symbol': 'A\$', 'name': 'Australian Dollar'},
+    {'code': 'CAD', 'symbol': 'C\$', 'name': 'Canadian Dollar'},
+    {'code': 'SGD', 'symbol': 'S\$', 'name': 'Singapore Dollar'},
+    {'code': 'AED', 'symbol': 'د.إ', 'name': 'UAE Dirham'},
+    {'code': 'MYR', 'symbol': 'RM', 'name': 'Malaysian Ringgit'},
+    {'code': 'THB', 'symbol': '฿', 'name': 'Thai Baht'},
+    {'code': 'JPY', 'symbol': '¥', 'name': 'Japanese Yen'},
+    {'code': 'CNY', 'symbol': '¥', 'name': 'Chinese Yuan'},
+    {'code': 'NZD', 'symbol': 'NZ\$', 'name': 'New Zealand Dollar'},
+    {'code': 'CHF', 'symbol': 'CHF', 'name': 'Swiss Franc'},
+    {'code': 'PKR', 'symbol': '₨', 'name': 'Pakistani Rupee'},
+    {'code': 'BDT', 'symbol': '৳', 'name': 'Bangladeshi Taka'},
+    {'code': 'NPR', 'symbol': 'रू', 'name': 'Nepalese Rupee'},
+  ];
+
+  // ✅ Guards against double-tapping "Save Changes" while the confirm
+  // dialog is open (same pattern as the Create Salon screen).
+  bool _isConfirmDialogOpen = false;
+
   final _formKey = GlobalKey<FormState>();
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
@@ -550,6 +163,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       return 'Loading timezone...';
     }
     return TimezoneService.getFullTimezoneDisplay();
+  }
+
+  /// ✅ Currency code එකෙන් symbol එක ගන්නවා
+  String _getSymbolForCode(String code) {
+    final match = _supportedCurrencies.firstWhere(
+      (c) => c['code'] == code,
+      orElse: () => {'symbol': _salonCurrencySymbol},
+    );
+    return match['symbol'] ?? _salonCurrencySymbol;
   }
 
   @override
@@ -694,22 +316,56 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _currentLogoUrl = response['logo_url'];
       _currentCoverUrl = response['cover_url'];
 
-      _salonTimezone = response['timezone'] ?? TimezoneService.getCurrentTimezone();
+      _salonTimezone =
+          response['timezone'] ?? TimezoneService.getCurrentTimezone();
+
+      // ✅ CURRENCY: use whatever is saved on the salon; if this salon
+      // has none saved yet, fall back to auto-detecting from its timezone
+      // (same fallback the Create Salon screen uses by default).
+      final savedCurrencyCode = response['currency_code']?.toString();
+      if (savedCurrencyCode != null && savedCurrencyCode.isNotEmpty) {
+        _salonCurrencyCode = savedCurrencyCode;
+        _salonCurrencySymbol =
+            response['currency_symbol']?.toString() ??
+            _getSymbolForCode(_salonCurrencyCode);
+      } else {
+        _salonCurrencyCode = TimezoneService.getCurrencyForTimezone(
+          _salonTimezone,
+        );
+        _salonCurrencySymbol = TimezoneService.getSymbolForCurrency(
+          _salonCurrencyCode,
+        );
+      }
+      debugPrint(
+        '✅ Salon currency loaded: $_salonCurrencyCode ($_salonCurrencySymbol)',
+      );
 
       if (response['open_time'] != null) {
         _openTimeUtc = response['open_time'] as String;
-        _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(_openTimeUtc, _salonTimezone);
+        _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
+          _openTimeUtc,
+          _salonTimezone,
+        );
       } else {
         _openTimeLocal = const TimeOfDay(hour: 9, minute: 0);
-        _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(_openTimeLocal!, _salonTimezone);
+        _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+          _openTimeLocal!,
+          _salonTimezone,
+        );
       }
 
       if (response['close_time'] != null) {
         _closeTimeUtc = response['close_time'] as String;
-        _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(_closeTimeUtc, _salonTimezone);
+        _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
+          _closeTimeUtc,
+          _salonTimezone,
+        );
       } else {
         _closeTimeLocal = const TimeOfDay(hour: 18, minute: 0);
-        _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(_closeTimeLocal!, _salonTimezone);
+        _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+          _closeTimeLocal!,
+          _salonTimezone,
+        );
       }
 
       debugPrint('✅ Salon timezone loaded: $_salonTimezone');
@@ -860,7 +516,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _ageCategoryDisplayNameController.text =
           selected['display_name']?.toString() ?? '';
       _ageCategoryMinAgeController.text = (selected['min_age'] ?? 0).toString();
-      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100).toString();
+      _ageCategoryMaxAgeController.text = (selected['max_age'] ?? 100)
+          .toString();
       _validateAgeFields();
     });
   }
@@ -996,7 +653,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           setState(() {
             _logoWebBytes = compressed;
             _logoFile = null;
-            _logoRemoved = false; // ✅ picking a new logo cancels a pending removal
+            _logoRemoved =
+                false; // ✅ picking a new logo cancels a pending removal
           });
         } else {
           final croppedFile = await ImageCropper().cropImage(
@@ -1022,7 +680,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             setState(() {
               _logoWebBytes = compressed;
               _logoFile = null;
-              _logoRemoved = false; // ✅ picking a new logo cancels a pending removal
+              _logoRemoved =
+                  false; // ✅ picking a new logo cancels a pending removal
             });
           }
         }
@@ -1229,7 +888,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     setState(() => _isUploadingLogo = true);
     try {
       if (_logoWebBytes != null) {
-        await supabase.storage.from('salon-images').uploadBinary(
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(
               filePath,
               _logoWebBytes!,
               fileOptions: const FileOptions(
@@ -1238,7 +899,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ),
             );
       } else if (_logoFile != null) {
-        await supabase.storage.from('salon-images').upload(
+        await supabase.storage
+            .from('salon-images')
+            .upload(
               filePath,
               _logoFile!,
               fileOptions: const FileOptions(
@@ -1284,7 +947,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     setState(() => _isUploadingCover = true);
     try {
       if (_coverWebBytes != null) {
-        await supabase.storage.from('salon-images').uploadBinary(
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(
               filePath,
               _coverWebBytes!,
               fileOptions: const FileOptions(
@@ -1293,7 +958,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ),
             );
       } else if (_coverFile != null) {
-        await supabase.storage.from('salon-images').upload(
+        await supabase.storage
+            .from('salon-images')
+            .upload(
               filePath,
               _coverFile!,
               fileOptions: const FileOptions(
@@ -1364,6 +1031,34 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       return;
     }
 
+    // ✅ Confirm before saving - same pattern as the Create Salon screen
+    if (_isConfirmDialogOpen) return;
+    _isConfirmDialogOpen = true;
+
+    final confirmed = await showCustomAlert(
+      context: context,
+      title: "Save Changes?",
+      message:
+          'Do you want to save changes to "${_nameController.text.trim()}"?\n\n'
+          'Currency: $_salonCurrencyCode ($_salonCurrencySymbol)\n'
+          'Timezone: $_salonTimezone\n\n'
+          'This will update the salon with the details you entered.',
+      isError: false,
+      buttonText: "Save",
+      buttonIcon: Icons.save,
+      showCancelButton: true,
+      cancelButtonText: "Cancel",
+    );
+
+    _isConfirmDialogOpen = false;
+
+    if (!mounted) return;
+    if (confirmed != true) return;
+
+    await _performUpdateSalon();
+  }
+
+  Future<void> _performUpdateSalon() async {
     setState(() => _isSaving = true);
 
     try {
@@ -1397,6 +1092,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         'cover_url': coverUrl,
         'open_time': openTimeUtc,
         'close_time': closeTimeUtc,
+        'currency_code': _salonCurrencyCode,
+        'currency_symbol': _salonCurrencySymbol,
         'updated_at': DateTime.now().toIso8601String(),
       };
 
@@ -1461,7 +1158,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             "${_nameController.text.trim()} has been updated successfully.\n\n"
             "📍 Salon Timezone: ${_getTimezoneDisplay()}\n"
             "🕐 UTC Time: $openTimeUtc - $closeTimeUtc\n"
-            "🕐 Local Time: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)}\n\n"
+            "🕐 Local Time: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)}\n"
+            "💱 Currency: $_salonCurrencyCode ($_salonCurrencySymbol)\n\n"
             "✅ ${_selectedGenderIds.length} genders\n"
             "✅ ${_addedAgeCategories.length} age categories\n"
             "✅ ${_addedServiceCategories.length} service categories\n\n"
@@ -1493,7 +1191,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            const Icon(
+              Icons.warning_amber_rounded,
+              color: Colors.red,
+              size: 28,
+            ),
             const SizedBox(width: 12),
             Text(
               'Delete Salon',
@@ -1736,7 +1438,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   ),
                 ),
                 const Spacer(),
-                Icon(Icons.error_outline, color: isDark ? Colors.red[300] : Colors.red),
+                Icon(
+                  Icons.error_outline,
+                  color: isDark ? Colors.red[300] : Colors.red,
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -1944,7 +1649,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                        color: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.grey[50],
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
@@ -1983,7 +1690,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: color,
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 10),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 10,
+                                ),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
@@ -2001,7 +1710,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                        color: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.grey[50],
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
                           color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
@@ -2029,7 +1740,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                               const Spacer(),
                               if (addedItems.isNotEmpty)
                                 TextButton(
-                                  onPressed: () => setState(() => addedItems.clear()),
+                                  onPressed: () =>
+                                      setState(() => addedItems.clear()),
                                   style: TextButton.styleFrom(
                                     padding: EdgeInsets.zero,
                                     minimumSize: Size.zero,
@@ -2038,7 +1750,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                     'Clear All',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: isDark ? Colors.red[300] : Colors.red,
+                                      color: isDark
+                                          ? Colors.red[300]
+                                          : Colors.red,
                                     ),
                                   ),
                                 ),
@@ -2049,7 +1763,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                             Container(
                               padding: const EdgeInsets.all(24),
                               decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                                color: isDark
+                                    ? const Color(0xFF2A2A2A)
+                                    : Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Center(
@@ -2058,20 +1774,26 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                     Icon(
                                       Icons.inbox,
                                       size: 40,
-                                      color: isDark ? Colors.white30 : Colors.grey[400],
+                                      color: isDark
+                                          ? Colors.white30
+                                          : Colors.grey[400],
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
                                       'No $title added yet',
                                       style: TextStyle(
-                                        color: isDark ? Colors.white70 : Colors.grey[500],
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.grey[500],
                                         fontSize: 12,
                                       ),
                                     ),
                                     Text(
                                       'Use the form on the left to add',
                                       style: TextStyle(
-                                        color: isDark ? Colors.white30 : Colors.grey[400],
+                                        color: isDark
+                                            ? Colors.white30
+                                            : Colors.grey[400],
                                         fontSize: 10,
                                       ),
                                     ),
@@ -2090,7 +1812,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                 final item = addedItems[index];
                                 return ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: color.withValues(alpha: 0.1),
+                                    backgroundColor: color.withValues(
+                                      alpha: 0.1,
+                                    ),
                                     child: Text(
                                       '${index + 1}',
                                       style: TextStyle(
@@ -2104,14 +1828,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w500,
-                                      color: isDark ? Colors.white : Colors.black87,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
                                     ),
                                   ),
                                   trailing: IconButton(
                                     icon: Icon(
                                       Icons.delete_outline,
                                       size: 20,
-                                      color: isDark ? Colors.red[300] : Colors.red,
+                                      color: isDark
+                                          ? Colors.red[300]
+                                          : Colors.red,
                                     ),
                                     onPressed: () => onRemove(index),
                                   ),
@@ -2214,7 +1942,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                             const Spacer(),
                             if (addedItems.isNotEmpty)
                               TextButton(
-                                onPressed: () => setState(() => addedItems.clear()),
+                                onPressed: () =>
+                                    setState(() => addedItems.clear()),
                                 style: TextButton.styleFrom(
                                   padding: EdgeInsets.zero,
                                   minimumSize: Size.zero,
@@ -2223,7 +1952,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                   'Clear All',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: isDark ? Colors.red[300] : Colors.red,
+                                    color: isDark
+                                        ? Colors.red[300]
+                                        : Colors.red,
                                   ),
                                 ),
                               ),
@@ -2234,7 +1965,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                              color: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.white,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Center(
@@ -2243,20 +1976,26 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                   Icon(
                                     Icons.inbox,
                                     size: 40,
-                                    color: isDark ? Colors.white30 : Colors.grey[400],
+                                    color: isDark
+                                        ? Colors.white30
+                                        : Colors.grey[400],
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
                                     'No $title added yet',
                                     style: TextStyle(
-                                      color: isDark ? Colors.white70 : Colors.grey[500],
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.grey[500],
                                       fontSize: 12,
                                     ),
                                   ),
                                   Text(
                                     'Tap + button to add',
                                     style: TextStyle(
-                                      color: isDark ? Colors.white30 : Colors.grey[400],
+                                      color: isDark
+                                          ? Colors.white30
+                                          : Colors.grey[400],
                                       fontSize: 10,
                                     ),
                                   ),
@@ -2289,14 +2028,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
-                                    color: isDark ? Colors.white : Colors.black87,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
                                   ),
                                 ),
                                 trailing: IconButton(
                                   icon: Icon(
                                     Icons.delete_outline,
                                     size: 20,
-                                    color: isDark ? Colors.red[300] : Colors.red,
+                                    color: isDark
+                                        ? Colors.red[300]
+                                        : Colors.red,
                                   ),
                                   onPressed: () => onRemove(index),
                                 ),
@@ -2368,7 +2111,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     onPressed: () => setState(() => _selectedGenderIds.clear()),
                     child: Text(
                       'Clear All',
-                      style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                      style: TextStyle(
+                        color: isDark ? Colors.red[300] : Colors.red,
+                      ),
                     ),
                   ),
               ],
@@ -2411,7 +2156,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       }
                     });
                   },
-                  backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                  backgroundColor: isDark
+                      ? const Color(0xFF2A2A2A)
+                      : Colors.white,
                   selectedColor: Colors.blue.withValues(alpha: 0.2),
                   checkmarkColor: Colors.blue,
                   shape: StadiumBorder(
@@ -2454,13 +2201,22 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Widget _buildAgeCategorySection() {
     if (_isLoadingGlobalData) {
-      return _buildLoadingCard('Age Categories', Icons.calendar_today, Colors.green);
+      return _buildLoadingCard(
+        'Age Categories',
+        Icons.calendar_today,
+        Colors.green,
+      );
     }
 
     if (_hasErrorLoadingData && _globalAgeCategories.isEmpty) {
-      return _buildErrorCard('Age Categories', Icons.calendar_today, Colors.green, () {
-        _loadAllData();
-      });
+      return _buildErrorCard(
+        'Age Categories',
+        Icons.calendar_today,
+        Colors.green,
+        () {
+          _loadAllData();
+        },
+      );
     }
 
     return _buildSplitViewSection(
@@ -2543,9 +2299,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     }
 
     if (_hasErrorLoadingData && _globalCategories.isEmpty) {
-      return _buildErrorCard('Main Services', Icons.category, Colors.orange, () {
-        _loadAllData();
-      });
+      return _buildErrorCard(
+        'Main Services',
+        Icons.category,
+        Colors.orange,
+        () {
+          _loadAllData();
+        },
+      );
     }
 
     return _buildSplitViewSection(
@@ -2616,7 +2377,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               final isSelected = _selectedIcon == iconItem['name'];
 
               return GestureDetector(
-                onTap: () => setState(() => _selectedIcon = iconItem['name'] as String),
+                onTap: () =>
+                    setState(() => _selectedIcon = iconItem['name'] as String),
                 child: Container(
                   width: 60,
                   margin: const EdgeInsets.only(right: 8),
@@ -2759,62 +2521,66 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           onSelected(selection);
           controller.text = selection;
         },
-        fieldViewBuilder: (
-          context,
-          textController,
-          focusNode,
-          onFieldSubmitted,
-        ) {
-          if (textController.text != controller.text) {
-            textController.text = controller.text;
-          }
-          controller.addListener(() {
-            if (textController.text != controller.text) {
-              textController.text = controller.text;
-            }
-          });
+        fieldViewBuilder:
+            (context, textController, focusNode, onFieldSubmitted) {
+              if (textController.text != controller.text) {
+                textController.text = controller.text;
+              }
+              controller.addListener(() {
+                if (textController.text != controller.text) {
+                  textController.text = controller.text;
+                }
+              });
 
-          return TextFormField(
-            controller: textController,
-            focusNode: focusNode,
-            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-            keyboardType: keyboardType,
-            maxLines: maxLines,
-            decoration: InputDecoration(
-              labelText: label,
-              hintText: hint,
-              hintStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey),
-              prefixIcon: Icon(icon, color: isDark ? Colors.white70 : Colors.grey),
-              suffixIcon: Icon(
-                Icons.arrow_drop_down,
-                color: isDark ? Colors.white70 : Colors.grey,
-              ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(
-                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              return TextFormField(
+                controller: textController,
+                focusNode: focusNode,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                keyboardType: keyboardType,
+                maxLines: maxLines,
+                decoration: InputDecoration(
+                  labelText: label,
+                  hintText: hint,
+                  hintStyle: TextStyle(
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
+                  prefixIcon: Icon(
+                    icon,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
+                  suffixIcon: Icon(
+                    Icons.arrow_drop_down,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                    ),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(
+                      color: AppTheme.primary,
+                      width: 2,
+                    ),
+                  ),
+                  fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                  filled: true,
                 ),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: BorderSide(
-                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                ),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
-              ),
-              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-              filled: true,
-            ),
-            onChanged: (value) => controller.text = value,
-          );
-        },
+                onChanged: (value) => controller.text = value,
+              );
+            },
       ),
     );
   }
@@ -2910,7 +2676,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               decoration: BoxDecoration(
                 color: isDark ? Colors.grey[800] : Colors.grey[200],
                 borderRadius: BorderRadius.circular(16),
-                image: (_coverFile != null ||
+                image:
+                    (_coverFile != null ||
                         _coverWebBytes != null ||
                         _currentCoverUrl != null)
                     ? DecorationImage(
@@ -2919,7 +2686,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       )
                     : null,
               ),
-              child: (_coverFile == null &&
+              child:
+                  (_coverFile == null &&
                       _coverWebBytes == null &&
                       _currentCoverUrl == null)
                   ? Center(
@@ -3012,7 +2780,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 offset: const Offset(0, 2),
               ),
             ],
-            image: (_logoFile != null ||
+            image:
+                (_logoFile != null ||
                     _logoWebBytes != null ||
                     _currentLogoUrl != null)
                 ? DecorationImage(
@@ -3021,7 +2790,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   )
                 : null,
           ),
-          child: (_logoFile == null &&
+          child:
+              (_logoFile == null &&
                   _logoWebBytes == null &&
                   _currentLogoUrl == null)
               ? Container(
@@ -3115,10 +2885,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
             const Divider(),
             ListTile(
-              leading: const Icon(
-                Icons.photo_library,
-                color: AppTheme.primary,
-              ),
+              leading: const Icon(Icons.photo_library, color: AppTheme.primary),
               title: Text(
                 'Choose from Gallery',
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87),
@@ -3146,7 +2913,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Logo',
-                  style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                  style: TextStyle(
+                    color: isDark ? Colors.red[300] : Colors.red,
+                  ),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -3186,10 +2955,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
             const Divider(),
             ListTile(
-              leading: const Icon(
-                Icons.photo_library,
-                color: AppTheme.primary,
-              ),
+              leading: const Icon(Icons.photo_library, color: AppTheme.primary),
               title: Text(
                 'Choose from Gallery',
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87),
@@ -3217,7 +2983,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Cover',
-                  style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                  style: TextStyle(
+                    color: isDark ? Colors.red[300] : Colors.red,
+                  ),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -3281,11 +3049,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     onTimeSelected: (time) {
                       setState(() {
                         _openTimeLocal = time;
-                        _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
-                          time,
-                          _salonTimezone,
+                        _openTimeUtc =
+                            TimezoneService.timeOfDayToUtcWithTimezone(
+                              time,
+                              _salonTimezone,
+                            );
+                        debugPrint(
+                          '✅ Open time updated: Local=${_openTimeLocal!.format(context)}, UTC=$_openTimeUtc',
                         );
-                        debugPrint('✅ Open time updated: Local=${_openTimeLocal!.format(context)}, UTC=$_openTimeUtc');
                       });
                     },
                   ),
@@ -3299,11 +3070,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     onTimeSelected: (time) {
                       setState(() {
                         _closeTimeLocal = time;
-                        _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
-                          time,
-                          _salonTimezone,
+                        _closeTimeUtc =
+                            TimezoneService.timeOfDayToUtcWithTimezone(
+                              time,
+                              _salonTimezone,
+                            );
+                        debugPrint(
+                          '✅ Close time updated: Local=${_closeTimeLocal!.format(context)}, UTC=$_closeTimeUtc',
                         );
-                        debugPrint('✅ Close time updated: Local=${_closeTimeLocal!.format(context)}, UTC=$_closeTimeUtc');
                       });
                     },
                   ),
@@ -3319,7 +3093,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, size: 14, color: isDark ? Colors.white70 : Colors.grey),
+                  Icon(
+                    Icons.info_outline,
+                    size: 14,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -3327,6 +3105,172 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       style: TextStyle(
                         fontSize: 10,
                         color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================
+  // ✅ CURRENCY CARD
+  // ============================================
+  Widget _buildCurrencyCard() {
+    final isDark = _isDark;
+
+    return Card(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.currency_exchange,
+                    color: Colors.teal,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Currency',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Currency used for pricing in this salon',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.grey,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            DropdownButtonFormField<String>(
+              initialValue: _salonCurrencyCode,
+              isExpanded: true,
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+                fontSize: 15,
+              ),
+              decoration: InputDecoration(
+                prefixIcon: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Center(
+                    widthFactor: 1.0,
+                    child: Text(
+                      _salonCurrencySymbol,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                    ),
+                  ),
+                ),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: 60,
+                  minHeight: 20,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+              ),
+              items: _supportedCurrencies.map((currency) {
+                return DropdownMenuItem<String>(
+                  value: currency['code'],
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${currency['code']} - ${currency['name']}',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  final selected = _supportedCurrencies.firstWhere(
+                    (c) => c['code'] == value,
+                  );
+                  setState(() {
+                    _salonCurrencyCode = value;
+                    _salonCurrencySymbol = selected['symbol']!;
+                  });
+                }
+              },
+            ),
+
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.teal.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.teal.withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 14,
+                    color: isDark ? Colors.teal[300] : Colors.teal[700],
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'All prices will be in $_salonCurrencyCode ($_salonCurrencySymbol). ',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.teal[300] : Colors.teal[700],
                       ),
                     ),
                   ),
@@ -3377,7 +3321,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              SizedBox(width: 40, height: 40, child: CircularProgressIndicator()),
+              SizedBox(
+                width: 40,
+                height: 40,
+                child: CircularProgressIndicator(),
+              ),
               SizedBox(height: 16),
               Text('Loading timezone...'),
             ],
@@ -3391,10 +3339,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       appBar: AppBar(
         title: Text(
           'Edit Salon',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
@@ -3415,9 +3360,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       ),
       body: SafeArea(
         child: _isLoading
-            ? Center(
-                child: CircularProgressIndicator(color: AppTheme.primary),
-              )
+            ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
             : Container(
                 color: isDark ? const Color(0xFF121212) : Colors.grey[50],
                 child: Center(
@@ -3446,7 +3389,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
                             // Basic Info Card
                             Card(
-                              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                              color: isDark
+                                  ? const Color(0xFF1E1E1E)
+                                  : Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
                               ),
@@ -3460,7 +3405,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                       style: TextStyle(
                                         fontSize: 18,
                                         fontWeight: FontWeight.bold,
-                                        color: isDark ? Colors.white : Colors.black87,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
                                       ),
                                     ),
                                     const SizedBox(height: 16),
@@ -3494,7 +3441,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
                             // Contact Info Card
                             Card(
-                              color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                              color: isDark
+                                  ? const Color(0xFF1E1E1E)
+                                  : Colors.white,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
                               ),
@@ -3508,14 +3457,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                       style: TextStyle(
                                         fontSize: 18,
                                         fontWeight: FontWeight.bold,
-                                        color: isDark ? Colors.white : Colors.black87,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
                                       ),
                                     ),
                                     const SizedBox(height: 16),
                                     _buildTextField(
                                       controller: _phoneController,
                                       label: 'Phone Number',
-                                      hint: 'Enter phone number (e.g., 0771234567)',
+                                      hint:
+                                          'Enter phone number (e.g., 0771234567)',
                                       icon: Icons.phone,
                                       keyboardType: TextInputType.phone,
                                       isPhone: true,
@@ -3524,7 +3476,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                     _buildTextField(
                                       controller: _emailController,
                                       label: 'Email Address',
-                                      hint: 'Enter email address (e.g., salon@example.com)',
+                                      hint:
+                                          'Enter email address (e.g., salon@example.com)',
                                       icon: Icons.email,
                                       keyboardType: TextInputType.emailAddress,
                                       isEmail: true,
@@ -3534,7 +3487,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                       'Phone and email are optional but recommended',
                                       style: TextStyle(
                                         fontSize: 11,
-                                        color: isDark ? Colors.white70 : Colors.grey[500],
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.grey[500],
                                       ),
                                     ),
                                   ],
@@ -3544,6 +3499,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                             const SizedBox(height: 16),
 
                             _buildBusinessHoursCard(),
+                            const SizedBox(height: 16),
+
+                            _buildCurrencyCard(),
                             const SizedBox(height: 16),
 
                             _buildServiceCategorySection(),
@@ -3561,11 +3519,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                         ? null
                                         : () => Navigator.pop(context),
                                     style: OutlinedButton.styleFrom(
-                                      foregroundColor: isDark ? Colors.white60 : Colors.grey[700],
+                                      foregroundColor: isDark
+                                          ? Colors.white60
+                                          : Colors.grey[700],
                                       side: BorderSide(
-                                        color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                                        color: isDark
+                                            ? Colors.grey[700]!
+                                            : Colors.grey[300]!,
                                       ),
-                                      padding: const EdgeInsets.symmetric(vertical: 14),
+                                      padding: const EdgeInsets.symmetric(
+                                        vertical: 14,
+                                      ),
                                       shape: RoundedRectangleBorder(
                                         borderRadius: BorderRadius.circular(12),
                                       ),
@@ -3574,7 +3538,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                       'Cancel',
                                       style: TextStyle(
                                         fontSize: 16,
-                                        color: isDark ? Colors.white : Colors.black87,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
                                       ),
                                     ),
                                   ),
@@ -3582,7 +3548,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                 const SizedBox(width: 16),
                                 Expanded(
                                   child: ElevatedButton(
-                                    onPressed: (_isSaving ||
+                                    onPressed:
+                                        (_isSaving ||
                                             _isUploadingLogo ||
                                             _isUploadingCover)
                                         ? null
@@ -3597,7 +3564,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                     ),
-                                    child: _isSaving ||
+                                    child:
+                                        _isSaving ||
                                             _isUploadingLogo ||
                                             _isUploadingCover
                                         ? const Row(
@@ -3606,10 +3574,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                                               SizedBox(
                                                 height: 20,
                                                 width: 20,
-                                                child: CircularProgressIndicator(
-                                                  color: Colors.white,
-                                                  strokeWidth: 2,
-                                                ),
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      color: Colors.white,
+                                                      strokeWidth: 2,
+                                                    ),
                                               ),
                                               SizedBox(width: 8),
                                               Text('Saving...'),
