@@ -12,6 +12,13 @@ class TimezoneService {
   static int _utcOffsetHours = 5;
   static int _utcOffsetMinutes = 30;
 
+  // ==================== ✅ STORAGE KEYS (PUBLIC - SINGLE SOURCE OF TRUTH) ====================
+  // ✅ Public constants - CreateSalonScreen, Settings, හැම file එකකින්ම use කරන්න පුළුවන්
+  //    ('user_timezone', 'user_currency' - typo errors නෑ)
+  static const String kUserTimezone = 'user_timezone';
+  static const String kUserCurrency = 'user_currency';
+  static const String kCachedTimezone = 'cached_timezone'; // Legacy backup
+
   // ==================== COUNTRY TIMEZONES MAP ====================
   static final Map<String, List<Map<String, String>>> countryTimezones = {
     'LK': [
@@ -362,37 +369,67 @@ class TimezoneService {
     await _loadTimezone();
   }
 
+  /// ✅ FIX: 3-tier priority loading
+  /// 1st: 'user_timezone' (Settings වලින් set කරපු එක) - PRIMARY
+  /// 2nd: 'cached_timezone' (Legacy backup)
+  /// 3rd: Device timezone (First time only)
   static Future<void> _loadTimezone() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final cachedTimezone = prefs.getString('cached_timezone');
 
-      if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
-        _currentTimezone = cachedTimezone;
-        await _applyTimezone(_currentTimezone);
-        debugPrint('✅ Using cached timezone: $_currentTimezone');
-        return;
+      // ✅ PRIORITY 1: 'user_timezone' (Settings වලින් set කරපු එක)
+      final userTimezone = prefs.getString(kUserTimezone);
+      if (userTimezone != null && userTimezone.isNotEmpty) {
+        if (_isValidTimezone(userTimezone)) {
+          _currentTimezone = userTimezone;
+          await _applyTimezone(_currentTimezone);
+          // ✅ Sync both keys
+          await prefs.setString(kCachedTimezone, userTimezone);
+          debugPrint('✅ Timezone from USER SETTING: $_currentTimezone');
+          return;
+        }
       }
 
-    final String deviceTimezone = (await FlutterTimezone.getLocalTimezone()).identifier;
+      // ✅ PRIORITY 2: 'cached_timezone' (Legacy backup)
+      final cachedTimezone = prefs.getString(kCachedTimezone);
+      if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
+        if (_isValidTimezone(cachedTimezone)) {
+          _currentTimezone = cachedTimezone;
+          await _applyTimezone(_currentTimezone);
+          // ✅ Migrate to user_timezone
+          await prefs.setString(kUserTimezone, cachedTimezone);
+          debugPrint('✅ Timezone from CACHE: $_currentTimezone');
+          return;
+        }
+      }
+
+      // ✅ PRIORITY 3: Device timezone (First time only)
+      final String deviceTimezone =
+          (await FlutterTimezone.getLocalTimezone()).identifier;
       debugPrint('📱 Device timezone detected: $deviceTimezone');
 
       if (_isValidTimezone(deviceTimezone)) {
         _currentTimezone = deviceTimezone;
         await _applyTimezone(_currentTimezone);
-        await prefs.setString('cached_timezone', _currentTimezone);
-        debugPrint('✅ Saved device timezone to cache: $_currentTimezone');
+        // ✅ Save BOTH keys (sync)
+        await prefs.setString(kCachedTimezone, _currentTimezone);
+        await prefs.setString(kUserTimezone, _currentTimezone);
+        debugPrint('✅ Saved DEVICE timezone: $_currentTimezone');
       } else {
         _currentTimezone = 'Asia/Colombo';
         await _applyTimezone(_currentTimezone);
-        await prefs.setString('cached_timezone', _currentTimezone);
+        await prefs.setString(kCachedTimezone, _currentTimezone);
+        await prefs.setString(kUserTimezone, _currentTimezone);
       }
     } catch (e) {
       debugPrint('❌ Error detecting timezone: $e');
       _currentTimezone = 'Asia/Colombo';
       await _applyTimezone(_currentTimezone);
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('cached_timezone', _currentTimezone);
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(kCachedTimezone, _currentTimezone);
+        await prefs.setString(kUserTimezone, _currentTimezone);
+      } catch (_) {}
     }
   }
 
@@ -505,6 +542,7 @@ class TimezoneService {
     return '${getTimezoneFlag()} ${getTimezoneDisplayName()} (${getUtcOffsetString()})';
   }
 
+  /// ✅ FIX: දැන් දෙකම keys save කරනවා (sync)
   static Future<void> setTimezone(String timezone) async {
     if (!_isValidTimezone(timezone)) {
       debugPrint('❌ Invalid timezone: $timezone');
@@ -513,14 +551,19 @@ class TimezoneService {
 
     _currentTimezone = timezone;
     await _applyTimezone(timezone);
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('cached_timezone', timezone);
-    debugPrint('✏️ User changed timezone to: $timezone');
+
+    // ✅ Save BOTH keys - sync එකේ තියාගන්න
+    await prefs.setString(kCachedTimezone, timezone);
+    await prefs.setString(kUserTimezone, timezone);
+
+    debugPrint('✏️ User changed timezone to: $timezone (saved to both keys)');
   }
 
   static Future<void> clearCachedTimezone() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('cached_timezone');
+    await prefs.remove(kCachedTimezone);
     debugPrint('🗑️ Cached timezone cleared');
   }
 
@@ -528,6 +571,25 @@ class TimezoneService {
     await clearCachedTimezone();
     await _loadTimezone();
     debugPrint('🔄 Timezone refreshed');
+  }
+
+  /// ✅ Reset to device timezone (clears user setting)
+  static Future<void> resetToDeviceTimezone() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(kUserTimezone);
+    await prefs.remove(kCachedTimezone);
+
+    // Reload from device
+    final String deviceTimezone =
+        (await FlutterTimezone.getLocalTimezone()).identifier;
+
+    if (_isValidTimezone(deviceTimezone)) {
+      _currentTimezone = deviceTimezone;
+      await _applyTimezone(_currentTimezone);
+      await prefs.setString(kUserTimezone, deviceTimezone);
+      await prefs.setString(kCachedTimezone, deviceTimezone);
+      debugPrint('🔄 Reset to device timezone: $deviceTimezone');
+    }
   }
 
   static List<Map<String, String>> getTimezonesForCountry(String countryCode) {
@@ -550,6 +612,71 @@ class TimezoneService {
 
   static List<String> getAllAvailableTimezones() {
     return tz.timeZoneDatabase.locations.keys.toList();
+  }
+
+  // ==================== ✅ CURRENCY HELPERS ====================
+
+  /// Get currency code from timezone
+  static String getCurrencyForTimezone(String timezone) {
+    if (timezone.startsWith('Asia/Colombo')) return 'LKR';
+    if (timezone.startsWith('America/') || timezone.startsWith('US/')) {
+      return 'USD';
+    }
+    if (timezone.startsWith('Asia/Kolkata') ||
+        timezone.startsWith('Asia/Calcutta')) {
+      return 'INR';
+    }
+    if (timezone.startsWith('Europe/London') ||
+        timezone.startsWith('Europe/Belfast')) {
+      return 'GBP';
+    }
+    if (timezone.startsWith('Europe/')) return 'EUR';
+    if (timezone.startsWith('Australia/')) return 'AUD';
+    if (timezone.startsWith('Asia/Singapore')) return 'SGD';
+    if (timezone.startsWith('Asia/Dubai')) return 'AED';
+    if (timezone.startsWith('Asia/Kuala_Lumpur')) return 'MYR';
+    if (timezone.startsWith('Asia/Bangkok')) return 'THB';
+    if (timezone.startsWith('Asia/Karachi')) return 'PKR';
+    if (timezone.startsWith('Asia/Dhaka')) return 'BDT';
+    if (timezone.startsWith('Asia/Kathmandu')) return 'NPR';
+    if (timezone.startsWith('Asia/Tokyo')) return 'JPY';
+    if (timezone.startsWith('Asia/Shanghai') ||
+        timezone.startsWith('Asia/Chongqing')) {
+      return 'CNY';
+    }
+    if (timezone.startsWith('Pacific/Auckland')) return 'NZD';
+    if (timezone.startsWith('Europe/Zurich')) return 'CHF';
+    if (timezone.startsWith('Canada/') ||
+        timezone == 'America/Toronto' ||
+        timezone == 'America/Vancouver') {
+      return 'CAD';
+    }
+    return 'USD';
+  }
+
+  /// Get symbol for currency code
+  static String getSymbolForCurrency(String code) {
+    const symbols = {
+      'LKR': 'Rs.',
+      'USD': '\$',
+      'INR': '₹',
+      'GBP': '£',
+      'EUR': '€',
+      'AUD': 'A\$',
+      'CAD': 'C\$',
+      'SGD': 'S\$',
+      'AED': 'د.إ',
+      'MYR': 'RM',
+      'THB': '฿',
+      'JPY': '¥',
+      'CNY': '¥',
+      'NZD': 'NZ\$',
+      'CHF': 'CHF',
+      'PKR': '₨',
+      'BDT': '৳',
+      'NPR': 'रू',
+    };
+    return symbols[code] ?? '\$';
   }
 
   // ==================== DST-SAFE CONVERSIONS (WITH CURRENT TIMEZONE) ====================
@@ -638,6 +765,7 @@ class TimezoneService {
       return localTime;
     }
   }
+
   // ==================== DST DETECTION ====================
 
   /// Check if DST (Daylight Saving Time) is currently active

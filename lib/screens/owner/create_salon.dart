@@ -95,10 +95,32 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   bool _hasErrorLoadingData = false;
   bool _isLoading = false;
 
-  // ✅ Guards the confirmation flow so the create-salon insert can only ever
-  // fire once per explicit user confirmation - a dismissed/cancelled
-  // confirm dialog (tap outside, back button, or the Cancel button) never
-  // triggers a create, and rapid double-taps can't queue up two inserts.
+  // ==================== ✅ CURRENCY RELATED VARIABLES ====================
+  String _salonCurrencyCode = 'LKR';
+  String _salonCurrencySymbol = 'Rs.';
+
+  // ✅ Supported currencies list
+  static const List<Map<String, String>> _supportedCurrencies = [
+    {'code': 'LKR', 'symbol': 'Rs.', 'name': 'Sri Lankan Rupee'},
+    {'code': 'USD', 'symbol': '\$', 'name': 'US Dollar'},
+    {'code': 'INR', 'symbol': '₹', 'name': 'Indian Rupee'},
+    {'code': 'GBP', 'symbol': '£', 'name': 'British Pound'},
+    {'code': 'EUR', 'symbol': '€', 'name': 'Euro'},
+    {'code': 'AUD', 'symbol': 'A\$', 'name': 'Australian Dollar'},
+    {'code': 'CAD', 'symbol': 'C\$', 'name': 'Canadian Dollar'},
+    {'code': 'SGD', 'symbol': 'S\$', 'name': 'Singapore Dollar'},
+    {'code': 'AED', 'symbol': 'د.إ', 'name': 'UAE Dirham'},
+    {'code': 'MYR', 'symbol': 'RM', 'name': 'Malaysian Ringgit'},
+    {'code': 'THB', 'symbol': '฿', 'name': 'Thai Baht'},
+    {'code': 'JPY', 'symbol': '¥', 'name': 'Japanese Yen'},
+    {'code': 'CNY', 'symbol': '¥', 'name': 'Chinese Yuan'},
+    {'code': 'NZD', 'symbol': 'NZ\$', 'name': 'New Zealand Dollar'},
+    {'code': 'CHF', 'symbol': 'CHF', 'name': 'Swiss Franc'},
+    {'code': 'PKR', 'symbol': '₨', 'name': 'Pakistani Rupee'},
+    {'code': 'BDT', 'symbol': '৳', 'name': 'Bangladeshi Taka'},
+    {'code': 'NPR', 'symbol': 'रू', 'name': 'Nepalese Rupee'},
+  ];
+
   bool _isConfirmDialogOpen = false;
 
   final _formKey = GlobalKey<FormState>();
@@ -134,15 +156,65 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     _isDark = context.isDarkMode;
   }
 
+  // ============================================================
+  // ✅ CORE LOGIC:
+  //    1. Timezone: Local storage → Device (fallback)
+  //    2. Currency: ALWAYS auto-detect from timezone
+  //       (Manual override නෑ - Screen එකට එද්දීම auto set වෙනවා)
+  // ============================================================
+  Future<void> _initializeWithTimezone() async {
+    await TimezoneService.initialize();
+
+    final prefs = await SharedPreferences.getInstance();
+
+    // ✅ STEP 1: Timezone - Local storage → Service (fallback)
+    String cachedUserTimezone =
+        prefs.getString(TimezoneService.kUserTimezone) ?? '';
+
+    if (cachedUserTimezone.isNotEmpty) {
+      _userTimezone = cachedUserTimezone;
+      await TimezoneService.setTimezone(_userTimezone);
+      debugPrint('✅ Timezone from USER SETTING: $_userTimezone');
+    } else {
+      _userTimezone = TimezoneService.getCurrentTimezone();
+      await prefs.setString(TimezoneService.kUserTimezone, _userTimezone);
+      debugPrint('✅ Timezone from SERVICE (first time): $_userTimezone');
+    }
+
+    _salonTimezone = _userTimezone;
+
+    // ✅ STEP 2: Currency - ALWAYS auto-detect from timezone
+    //    Manual override නෑ - හැම වතාවකම timezone එකෙන් ගන්නවා
+    _detectCurrencyFromTimezone();
+    debugPrint('✅ Currency AUTO-DETECTED: $_salonCurrencyCode');
+
+    _initializeBusinessHours();
+
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+
+    await _loadGlobalData();
+  }
+
+  // ✅ Check if timezone changed (from Settings Screen or elsewhere)
   Future<void> _checkTimezoneChanges() async {
     final prefs = await SharedPreferences.getInstance();
     final currentTimezone =
-        prefs.getString('user_timezone') ??
-        TimezoneService.getCurrentTimezone();
+        prefs.getString(TimezoneService.kUserTimezone) ?? '';
 
+    // Timezone වෙනස් උනොත් update කරන්න
     if (_userTimezone.isNotEmpty && _userTimezone != currentTimezone) {
+      debugPrint('🔄 Timezone changed: $_userTimezone → $currentTimezone');
+
       setState(() {
         _userTimezone = currentTimezone;
+        _salonTimezone = currentTimezone;
+
+        // ✅ CURRENCY AUTO-SYNC: Timezone වෙනස් උනාම currency එකත් auto-detect
+        _detectCurrencyFromTimezone();
+        debugPrint('✅ Currency AUTO-SYNCED: $_salonCurrencyCode');
+
         _refreshDisplayTimes();
       });
     }
@@ -162,31 +234,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     setState(() {});
   }
 
-  Future<void> _initializeWithTimezone() async {
-    await TimezoneService.initialize();
-
-    final prefs = await SharedPreferences.getInstance();
-
-    String cachedUserTimezone = prefs.getString('user_timezone') ?? '';
-
-    if (cachedUserTimezone.isEmpty) {
-      _userTimezone = TimezoneService.getCurrentTimezone();
-      await prefs.setString('user_timezone', _userTimezone);
-    } else {
-      _userTimezone = cachedUserTimezone;
-      await TimezoneService.setTimezone(_userTimezone);
-    }
-
-    _salonTimezone = _userTimezone;
-    _initializeBusinessHours();
-
-    setState(() {
-      _isTimezoneLoaded = true;
-    });
-
-    await _loadGlobalData();
-  }
-
   void _initializeBusinessHours() {
     const defaultOpenLocal = TimeOfDay(hour: 9, minute: 0);
     const defaultCloseLocal = TimeOfDay(hour: 18, minute: 0);
@@ -203,10 +250,25 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       _salonTimezone,
     );
 
-    debugPrint('✅ Business hours initialized: Local=${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)}');
-    debugPrint('✅ UTC hours for DB: $_openTimeUtc - $_closeTimeUtc');
-    debugPrint('✅ Salon timezone: $_salonTimezone');
+    debugPrint('✅ Business hours initialized');
+    debugPrint('   Timezone: $_salonTimezone');
+    debugPrint('   Currency: $_salonCurrencyCode ($_salonCurrencySymbol)');
   }
+
+  // ==================== ✅ CURRENCY HELPERS ====================
+
+  /// Timezone එකෙන් currency එක auto-detect කරනවා
+  void _detectCurrencyFromTimezone() {
+    _salonCurrencyCode = TimezoneService.getCurrencyForTimezone(_salonTimezone);
+    _salonCurrencySymbol = _getSymbolForCode(_salonCurrencyCode);
+    debugPrint(
+        '💱 Auto-detected: $_salonTimezone → $_salonCurrencyCode ($_salonCurrencySymbol)');
+  }
+
+  /// Currency code එකෙන් symbol එක ගන්නවා
+  String _getSymbolForCode(String code) {
+    return TimezoneService.getSymbolForCurrency(code);
+  }  
 
   @override
   void dispose() {
@@ -516,7 +578,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     onPressed: () => setState(() => _selectedGenderIds.clear()),
                     child: Text(
                       'Clear All',
-                      style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                      style: TextStyle(
+                          color: isDark ? Colors.red[300] : Colors.red),
                     ),
                   ),
               ],
@@ -559,7 +622,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       }
                     });
                   },
-                  backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                  backgroundColor:
+                      isDark ? const Color(0xFF2A2A2A) : Colors.white,
                   selectedColor: Colors.blue.withValues(alpha: 0.2),
                   checkmarkColor: Colors.blue,
                   shape: StadiumBorder(
@@ -845,10 +909,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                        color: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.grey[50],
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                          color: isDark
+                              ? Colors.grey[700]!
+                              : Colors.grey[200]!,
                         ),
                       ),
                       child: Column(
@@ -903,10 +971,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     child: Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                        color: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.grey[50],
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                          color: isDark
+                              ? Colors.grey[700]!
+                              : Colors.grey[200]!,
                         ),
                       ),
                       child: Column(
@@ -941,7 +1013,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                     'Clear All',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: isDark ? Colors.red[300] : Colors.red,
+                                      color: isDark
+                                          ? Colors.red[300]
+                                          : Colors.red,
                                     ),
                                   ),
                                 ),
@@ -952,7 +1026,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                             Container(
                               padding: const EdgeInsets.all(24),
                               decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                                color: isDark
+                                    ? const Color(0xFF2A2A2A)
+                                    : Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Center(
@@ -961,20 +1037,26 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                     Icon(
                                       Icons.inbox,
                                       size: 40,
-                                      color: isDark ? Colors.white30 : Colors.grey[400],
+                                      color: isDark
+                                          ? Colors.white30
+                                          : Colors.grey[400],
                                     ),
                                     const SizedBox(height: 8),
                                     Text(
                                       'No $title added yet',
                                       style: TextStyle(
-                                        color: isDark ? Colors.white70 : Colors.grey[500],
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.grey[500],
                                         fontSize: 12,
                                       ),
                                     ),
                                     Text(
                                       'Use the form on the left to add',
                                       style: TextStyle(
-                                        color: isDark ? Colors.white30 : Colors.grey[400],
+                                        color: isDark
+                                            ? Colors.white30
+                                            : Colors.grey[400],
                                         fontSize: 10,
                                       ),
                                     ),
@@ -1009,14 +1091,18 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w500,
-                                      color: isDark ? Colors.white : Colors.black87,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
                                     ),
                                   ),
                                   trailing: IconButton(
                                     icon: Icon(
                                       Icons.delete_outline,
                                       size: 20,
-                                      color: isDark ? Colors.red[300] : Colors.red,
+                                      color: isDark
+                                          ? Colors.red[300]
+                                          : Colors.red,
                                     ),
                                     onPressed: () => onRemove(index),
                                   ),
@@ -1037,10 +1123,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                      color:
+                          isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                        color:
+                            isDark ? Colors.grey[700]! : Colors.grey[200]!,
                       ),
                     ),
                     child: Column(
@@ -1090,10 +1178,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                      color:
+                          isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                        color:
+                            isDark ? Colors.grey[700]! : Colors.grey[200]!,
                       ),
                     ),
                     child: Column(
@@ -1128,7 +1218,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                   'Clear All',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: isDark ? Colors.red[300] : Colors.red,
+                                    color: isDark
+                                        ? Colors.red[300]
+                                        : Colors.red,
                                   ),
                                 ),
                               ),
@@ -1139,7 +1231,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                           Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                              color: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.white,
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Center(
@@ -1148,20 +1242,26 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                   Icon(
                                     Icons.inbox,
                                     size: 40,
-                                    color: isDark ? Colors.white30 : Colors.grey[400],
+                                    color: isDark
+                                        ? Colors.white30
+                                        : Colors.grey[400],
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
                                     'No $title added yet',
                                     style: TextStyle(
-                                      color: isDark ? Colors.white70 : Colors.grey[500],
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.grey[500],
                                       fontSize: 12,
                                     ),
                                   ),
                                   Text(
                                     'Tap + button to add',
                                     style: TextStyle(
-                                      color: isDark ? Colors.white30 : Colors.grey[400],
+                                      color: isDark
+                                          ? Colors.white30
+                                          : Colors.grey[400],
                                       fontSize: 10,
                                     ),
                                   ),
@@ -1194,14 +1294,18 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
-                                    color: isDark ? Colors.white : Colors.black87,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
                                   ),
                                 ),
                                 trailing: IconButton(
                                   icon: Icon(
                                     Icons.delete_outline,
                                     size: 20,
-                                    color: isDark ? Colors.red[300] : Colors.red,
+                                    color: isDark
+                                        ? Colors.red[300]
+                                        : Colors.red,
                                   ),
                                   onPressed: () => onRemove(index),
                                 ),
@@ -1562,8 +1666,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 decoration: InputDecoration(
                   labelText: label,
                   hintText: hint,
-                  hintStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey),
-                  prefixIcon: Icon(icon, color: isDark ? Colors.white70 : Colors.grey),
+                  hintStyle:
+                      TextStyle(color: isDark ? Colors.white70 : Colors.grey),
+                  prefixIcon:
+                      Icon(icon, color: isDark ? Colors.white70 : Colors.grey),
                   suffixIcon: Icon(
                     Icons.arrow_drop_down,
                     color: isDark ? Colors.white70 : Colors.grey,
@@ -1586,9 +1692,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+                    borderSide:
+                        const BorderSide(color: AppTheme.primary, width: 2),
                   ),
-                  fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                  fillColor:
+                      isDark ? const Color(0xFF2A2A2A) : Colors.white,
                   filled: true,
                 ),
                 onChanged: (value) => controller.text = value,
@@ -1629,8 +1737,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           errorText: isPhone && !_isPhoneValid && controller.text.isNotEmpty
               ? 'Enter valid phone number (e.g., 0771234567)'
               : isEmail && !_isEmailValid && controller.text.isNotEmpty
-              ? 'Enter valid email address'
-              : null,
+                  ? 'Enter valid email address'
+                  : null,
           errorStyle: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
@@ -1662,6 +1770,213 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           ),
           fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
           filled: true,
+        ),
+      ),
+    );
+  }
+
+  // ==================== ✅ CURRENCY CARD (SIMPLIFIED) ====================
+  Widget _buildCurrencyCard() {
+    final isDark = _isDark;
+
+    return Card(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.currency_exchange,
+                    color: Colors.teal,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Currency',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const Spacer(),
+                // ✅ Auto badge
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.auto_awesome,
+                        size: 10,
+                        color: isDark ? Colors.teal[300] : Colors.teal[700],
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Auto',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.teal[300] : Colors.teal[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Auto-detected from your timezone: $_salonTimezone',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.grey,
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            DropdownButtonFormField<String>(
+              initialValue: _salonCurrencyCode,
+              isExpanded: true,
+              style: TextStyle(
+                color: isDark ? Colors.white : Colors.black87,
+                fontSize: 15,
+              ),
+              decoration: InputDecoration(
+                prefixIcon: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Center(
+                    widthFactor: 1.0,
+                    child: Text(
+                      _salonCurrencySymbol,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white70 : Colors.grey,
+                      ),
+                    ),
+                  ),
+                ),
+                prefixIconConstraints: const BoxConstraints(
+                  minWidth: 60,
+                  minHeight: 20,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+              ),
+              items: _supportedCurrencies.map((currency) {
+                return DropdownMenuItem<String>(
+                  value: currency['code'],
+                  child: Row(
+                    children: [
+                      // SizedBox(
+                      //   width: 40,
+                      //   child: Text(
+                      //     currency['symbol']!,
+                      //     style: TextStyle(
+                      //       fontWeight: FontWeight.bold,
+                      //       color: isDark ? Colors.white70 : Colors.grey[700],
+                      //     ),
+                      //   ),
+                      // ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${currency['code']} - ${currency['name']}',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+              onChanged: (value) {
+                // ✅ Manual change - dropdown එකෙන් විතරයි change වෙන්නේ
+                //    Screen එකට ආපහු ආවම auto-detect වෙනවා
+                if (value != null) {
+                  final selected = _supportedCurrencies.firstWhere(
+                    (c) => c['code'] == value,
+                  );
+                  setState(() {
+                    _salonCurrencyCode = value;
+                    _salonCurrencySymbol = selected['symbol']!;
+                  });
+                }
+              },
+            ),
+
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.teal.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.teal.withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 14,
+                    color: isDark ? Colors.teal[300] : Colors.teal[700],
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'All prices will be in $_salonCurrencyCode ($_salonCurrencySymbol). ',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.teal[300] : Colors.teal[700],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1709,7 +2024,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                           Text(
                             'Tap to add cover photo',
                             style: TextStyle(
-                              color: isDark ? Colors.white60 : Colors.grey[600],
+                              color: isDark
+                                  ? Colors.white60
+                                  : Colors.grey[600],
                             ),
                           ),
                         ],
@@ -1869,7 +2186,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ),
               title: Text(
                 'Choose from Gallery',
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style:
+                    TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(context);
@@ -1880,7 +2198,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
               title: Text(
                 'Take a Photo',
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style:
+                    TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(context);
@@ -1892,7 +2211,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Logo',
-                  style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                  style:
+                      TextStyle(color: isDark ? Colors.red[300] : Colors.red),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -1938,7 +2258,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ),
               title: Text(
                 'Choose from Gallery',
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style:
+                    TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(context);
@@ -1949,7 +2270,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
               title: Text(
                 'Take a Photo',
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style:
+                    TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(context);
@@ -1961,7 +2283,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Cover',
-                  style: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                  style:
+                      TextStyle(color: isDark ? Colors.red[300] : Colors.red),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -2007,9 +2330,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ],
           );
           if (croppedFile != null) {
-            // ✅ Compress the cropped file's bytes before storing - same
-            // path as web, so both platforms end up with a small,
-            // upload-ready Uint8List regardless of the original photo size.
             final rawBytes = await File(croppedFile.path).readAsBytes();
             final compressed = await compressAvatarBytes(rawBytes);
             setState(() {
@@ -2174,12 +2494,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     });
   }
 
-  // ✅ Fixed path per SALON: 'salons/{userId}/{salonId}/logo.jpg'. This is the
-  // EXACT SAME path scheme EditSalonScreen uses, so a logo uploaded here at
-  // creation time is the same storage object that a later edit will replace
-  // via upsert:true - never a separate orphan file. Requires the salon row
-  // to already exist (see _createSalon(), which inserts the row first to
-  // obtain a real salonId before calling this).
   Future<String?> _uploadLogo(int salonId) async {
     if (_logoFile == null && _logoWebBytes == null) return null;
     setState(() => _isUploadingLogo = true);
@@ -2227,7 +2541,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  // ✅ Same fixed-path-per-salon + upsert pattern as _uploadLogo() above.
   Future<String?> _uploadCover(int salonId) async {
     if (_coverFile == null && _coverWebBytes == null) return null;
     setState(() => _isUploadingCover = true);
@@ -2329,11 +2642,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     onTimeSelected: (time) {
                       setState(() {
                         _openTimeLocal = time;
-                        _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+                        _openTimeUtc =
+                            TimezoneService.timeOfDayToUtcWithTimezone(
                           time,
                           _salonTimezone,
                         );
-                        debugPrint('✅ Open time updated: Local=${_openTimeLocal.format(context)}, UTC=$_openTimeUtc');
+                        debugPrint(
+                            '✅ Open time updated: Local=${_openTimeLocal.format(context)}, UTC=$_openTimeUtc');
                       });
                     },
                   ),
@@ -2347,11 +2662,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     onTimeSelected: (time) {
                       setState(() {
                         _closeTimeLocal = time;
-                        _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+                        _closeTimeUtc =
+                            TimezoneService.timeOfDayToUtcWithTimezone(
                           time,
                           _salonTimezone,
                         );
-                        debugPrint('✅ Close time updated: Local=${_closeTimeLocal.format(context)}, UTC=$_closeTimeUtc');
+                        debugPrint(
+                            '✅ Close time updated: Local=${_closeTimeLocal.format(context)}, UTC=$_closeTimeUtc');
                       });
                     },
                   ),
@@ -2367,7 +2684,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, size: 14, color: isDark ? Colors.white70 : Colors.grey),
+                  Icon(
+                    Icons.info_outline,
+                    size: 14,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -2387,15 +2708,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== CREATE SALON (VALIDATION + CONFIRM) ====================
-  // ✅ This is the entry point wired to the "Create Salon" button. It
-  // validates the form, then confirms via `showCustomAlert` (with
-  // showCancelButton: true, so only "Cancel" / "Create" show - no ✕ close
-  // icon, and the barrier itself isn't dismissible). `_performCreateSalon()`
-  // only runs when that call resolves to exactly `true` (the "Create"
-  // button was pressed). Pressing "Cancel" - or any other way of leaving
-  // the dialog - resolves to something other than `true`, and nothing is
-  // created.
+  // ==================== CREATE SALON ====================
   Future<void> _onCreateSalonPressed() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -2440,25 +2753,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       return;
     }
 
-    if (_isConfirmDialogOpen) return; // guard against double taps
+    if (_isConfirmDialogOpen) return;
     _isConfirmDialogOpen = true;
 
-    // ✅ Confirm via showCustomAlert with showCancelButton:true. That does
-    // two important things:
-    //   1. It hides the ✕ close icon entirely (see time_picker_dialog's
-    //      sibling, show_custom_alert.dart: the close icon only renders
-    //      when `!showCancelButton`), leaving only "Cancel" and "Create".
-    //   2. showCustomAlert resolves to true only when the OK/confirm
-    //      button is pressed, false when Cancel is pressed, and the
-    //      barrier itself is not dismissible (barrierDismissible: false
-    //      inside showCustomAlert), so there is no way to get a `true`
-    //      result except by explicitly tapping "Create".
-    // We only call _performCreateSalon() when the result is exactly true.
     final confirmed = await showCustomAlert(
       context: context,
       title: "Create Salon?",
-      message:
-          'Do you want to create "${_nameController.text.trim()}"? '
+      message: 'Do you want to create "${_nameController.text.trim()}"?\n\n'
+          'Currency: $_salonCurrencyCode ($_salonCurrencySymbol)\n'
+          'Timezone: $_salonTimezone\n\n'
           'This will save the salon with the details you entered.',
       isError: false,
       buttonText: "Create",
@@ -2470,15 +2773,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     _isConfirmDialogOpen = false;
 
     if (!mounted) return;
-    if (confirmed != true) return; // Cancel (or anything but explicit OK)
+    if (confirmed != true) return;
 
     await _performCreateSalon();
   }
 
-  // ✅ The actual database insert logic - unchanged from before, except it
-  // now only ever runs after the user has pressed OK on the
-  // `showCustomAlert` confirmation in `_onCreateSalonPressed()`, and
-  // `_isLoading` still guards it against being triggered twice in a row.
   Future<void> _performCreateSalon() async {
     if (_isLoading) return;
     setState(() => _isLoading = true);
@@ -2491,8 +2790,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       }
 
       final prefs = await SharedPreferences.getInstance();
-      final userTimezone =
-          prefs.getString('user_timezone') ??
+      final userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
           TimezoneService.getCurrentTimezone();
 
       final extraData = {
@@ -2501,11 +2799,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'user_timezone': userTimezone,
       };
 
-      // ✅ Step 1: insert the salon row WITHOUT logo/cover first, so we get
-      // a real salonId. Images are uploaded to a path keyed by that salonId
-      // (see below) - the EXACT SAME path scheme EditSalonScreen uses, so a
-      // later edit's upsert replaces this same file instead of creating a
-      // separate orphan.
       final salonData = {
         'name': _nameController.text.trim(),
         'address': _addressController.text.trim().isEmpty
@@ -2526,15 +2819,17 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'open_time': _openTimeUtc,
         'close_time': _closeTimeUtc,
         'timezone': _salonTimezone,
+        'currency_code': _salonCurrencyCode,
+        'currency_symbol': _salonCurrencySymbol,
         'extra_data': extraData,
         'is_active': true,
       };
 
-      debugPrint('📝 Creating salon with data:');
+      debugPrint('📝 Creating salon:');
       debugPrint('   Name: ${salonData['name']}');
       debugPrint('   Timezone: ${salonData['timezone']}');
-      debugPrint('   Open Time UTC: ${salonData['open_time']}');
-      debugPrint('   Close Time UTC: ${salonData['close_time']}');
+      debugPrint(
+          '   Currency: ${salonData['currency_code']} (${salonData['currency_symbol']})');
 
       final response = await supabase
           .from('salons')
@@ -2545,9 +2840,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
       debugPrint('✅ Salon created with ID: $salonId');
 
-      // ✅ Step 2: now that salonId exists, upload logo/cover to
-      // 'salons/{userId}/{salonId}/logo.jpg' (and cover.jpg) - same path
-      // EditSalonScreen will reuse for this salon going forward.
       String? logoUrl = (_logoFile != null || _logoWebBytes != null)
           ? await _uploadLogo(salonId)
           : null;
@@ -2555,13 +2847,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           ? await _uploadCover(salonId)
           : null;
 
-      // ✅ Step 3: patch the row with the uploaded URLs, if any.
       if (logoUrl != null || coverUrl != null) {
         final imageUpdate = <String, dynamic>{};
         if (logoUrl != null) imageUpdate['logo_url'] = logoUrl;
         if (coverUrl != null) imageUpdate['cover_url'] = coverUrl;
         await supabase.from('salons').update(imageUpdate).eq('id', salonId);
-        debugPrint('✅ Salon images saved: logo=$logoUrl, cover=$coverUrl');
       }
 
       for (int i = 0; i < _selectedGenderIds.length; i++) {
@@ -2574,7 +2864,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           'is_active': true,
         });
       }
-      debugPrint('✅ Added ${_selectedGenderIds.length} genders');
 
       for (var ageCat in _addedAgeCategories) {
         await supabase.from('salon_age_categories').insert({
@@ -2586,7 +2875,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           'is_active': ageCat['is_active'],
         });
       }
-      debugPrint('✅ Added ${_addedAgeCategories.length} age categories');
 
       for (var serviceCat in _addedServiceCategories) {
         await supabase.from('salon_categories').insert({
@@ -2599,12 +2887,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           'is_active': serviceCat['is_active'],
         });
       }
-      debugPrint('✅ Added ${_addedServiceCategories.length} service categories');
 
-      // ✅ No success dialog - the salon is already saved at this point,
-      // so we just close the screen and hand control straight back to
-      // whatever pushed it (result: true tells the caller a salon was
-      // created, e.g. so a listing screen can refresh).
       if (!mounted) return;
       Navigator.pop(context, true);
     } catch (e) {
@@ -2618,10 +2901,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   String _getPlatformName() => kIsWeb
       ? 'web'
       : Platform.isIOS
-      ? 'ios'
-      : Platform.isAndroid
-      ? 'android'
-      : 'mobile';
+          ? 'ios'
+          : Platform.isAndroid
+              ? 'android'
+              : 'mobile';
 
   void _showSnackBar(String msg, Color color) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -2806,7 +3089,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                                 'Phone and email are optional but recommended',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: isDark ? Colors.white70 : Colors.grey[500],
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.grey[500],
                                 ),
                               ),
                             ],
@@ -2816,6 +3101,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       const SizedBox(height: 16),
 
                       _buildBusinessHoursCard(),
+                      const SizedBox(height: 16),
+
+                      _buildCurrencyCard(),
                       const SizedBox(height: 16),
 
                       _buildServiceCategorySection(),
@@ -2828,8 +3116,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                         width: double.infinity,
                         height: 54,
                         child: ElevatedButton(
-                          onPressed:
-                              (_isLoading ||
+                          onPressed: (_isLoading ||
                                   _isUploadingLogo ||
                                   _isUploadingCover)
                               ? null
@@ -2842,8 +3129,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                             ),
                             elevation: 0,
                           ),
-                          child:
-                              (_isLoading ||
+                          child: (_isLoading ||
                                   _isUploadingLogo ||
                                   _isUploadingCover)
                               ? Row(
