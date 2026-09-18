@@ -102,7 +102,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     if (route is PageRoute) {
       routeObserver.subscribe(this, route);
     }
-    _checkScreenSize();
+    // _checkScreenSize();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _checkScreenSize();
+    });
   }
 
   // ✅ Android 16: Check screen size for responsive layout
@@ -1115,14 +1118,21 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showNoSalonSelectedDialog();
       return;
     }
-    if (_ownerSalons.length == 1) {
-      final salon = _ownerSalons.first;
-      context.push(
-        '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}',
-      );
-    } else {
-      _showSalonSelectionDialogForServices();
-    }
+    // if (_ownerSalons.length == 1) {
+    //   final salon = _ownerSalons.first;
+    //   context.push(
+    //     '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}',
+    //   );
+    // } else {
+    //   _showSalonSelectionDialogForServices();
+    // }
+    final salon = _ownerSalons.firstWhere(
+      (s) => s['id'].toString() == _selectedSalonId,
+      orElse: () => _ownerSalons.first,
+    );
+    context.push(
+      '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'] ?? 'Salon')}',
+    );
   }
 
   void _viewAllCustomers() {
@@ -1368,6 +1378,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           setState(() {
             _ownerSalons = [];
             _hasSalon = false;
+            _selectedSalonId = null;
+            _selectedSalonName = null;
           });
         }
         return;
@@ -1389,24 +1401,46 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       if (mounted) {
         setState(() {
           _ownerSalons = List<Map<String, dynamic>>.from(response);
+
           if (_ownerSalons.isNotEmpty) {
             _hasSalon = true;
+
+            // ✅ Case 1: No salon selected yet → pick the first-created one
+            //    (list is ordered by created_at DESC, so .last = oldest = first created)
             if (_selectedSalonId == null) {
               final firstCreatedSalon = _ownerSalons.last;
               _selectedSalonId = firstCreatedSalon['id'].toString();
-              _selectedSalonName = firstCreatedSalon['name']?.toString();
+              _selectedSalonName =
+                  firstCreatedSalon['name']?.toString() ?? 'Salon';
               debugPrint(
                 '✅ Selected first-created salon: $_selectedSalonName (ID: $_selectedSalonId)',
               );
-            } else {
+            }
+            // ✅ Case 2: A salon is already selected → verify it still exists
+            else {
               final selected = _ownerSalons.firstWhere(
                 (s) => s['id'].toString() == _selectedSalonId,
-                orElse: () => {},
+                orElse: () => _ownerSalons.first, // ✅ fallback to first
               );
-              _selectedSalonName = selected['name']?.toString();
+
+              // If the previously selected salon no longer exists, sync the ID
+              if (selected['id'].toString() != _selectedSalonId) {
+                debugPrint(
+                  '⚠️ Previously selected salon not found — falling back to: ${selected['name']}',
+                );
+                _selectedSalonId = selected['id'].toString();
+              }
+
+              _selectedSalonName = selected['name']?.toString() ?? 'Salon';
+              debugPrint(
+                '✅ Kept selected salon: $_selectedSalonName (ID: $_selectedSalonId)',
+              );
             }
           } else {
+            // ✅ No salons at all → clear everything
             _hasSalon = false;
+            _selectedSalonId = null;
+            _selectedSalonName = null;
             debugPrint('⚠️ No active salons found for this owner');
           }
         });
@@ -1417,6 +1451,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         setState(() {
           _ownerSalons = [];
           _hasSalon = false;
+          _selectedSalonId = null;
+          _selectedSalonName = null;
         });
       }
     }
@@ -2547,49 +2583,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     if (result == true) await _refreshAllData();
   }
 
-  void _showSalonSelectionDialogForServices() {
-    final isDark = context.isDarkMode;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        title: const Text('Select Salon'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _ownerSalons.length,
-            itemBuilder: (context, index) {
-              final salon = _ownerSalons[index];
-              return ListTile(
-                leading: const Icon(Icons.store, color: AppTheme.primary),
-                title: Text(
-                  salon['name'] ?? 'Salon',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  context.push(
-                    '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'] ?? 'Salon')}',
-                  );
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-        ],
-      ),
-    );
-  }
 
   void _viewSettings() => context.push('/settings');
 

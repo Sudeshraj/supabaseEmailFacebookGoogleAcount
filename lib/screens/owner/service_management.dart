@@ -1,3 +1,5 @@
+// servite list <--menue eka
+
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/owner/add_services.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
@@ -38,17 +40,16 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
   // Alternating card colors
   final List<Color> _cardColors = [
-    const Color(0xFFE3F2FD), // Light Blue
-    const Color(0xFFFCE4EC), // Light Pink
-    const Color(0xFFE8F5E9), // Light Green
-    const Color(0xFFFFF3E0), // Light Orange
-    const Color(0xFFF3E5F5), // Light Purple
-    const Color(0xFFE0F7FA), // Light Cyan
-    const Color(0xFFFFEBEE), // Light Red
-    const Color(0xFFE8EAF6), // Light Indigo
+    const Color(0xFFE3F2FD),
+    const Color(0xFFFCE4EC),
+    const Color(0xFFE8F5E9),
+    const Color(0xFFFFF3E0),
+    const Color(0xFFF3E5F5),
+    const Color(0xFFE0F7FA),
+    const Color(0xFFFFEBEE),
+    const Color(0xFFE8EAF6),
   ];
 
-  // ✅ Web Scroll Controller
   final ScrollController _scrollController = ScrollController();
 
   final supabase = Supabase.instance.client;
@@ -83,7 +84,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
           .from('user_roles')
           .select('status')
           .eq('user_id', user.id)
-          .eq('role_id', 1)
+          .eq('role_id', 3)
           .maybeSingle();
 
       if (userRoleCheck == null || userRoleCheck['status'] != 'active') {
@@ -188,7 +189,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
   Future<void> _loadServices() async {
     try {
-      // Load services
+      // ✅ STEP 1: Load services
       final servicesResponse = await supabase
           .from('services')
           .select('''
@@ -206,52 +207,92 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
       final services = List<Map<String, dynamic>>.from(servicesResponse);
 
-      // Load variants for each service
-      for (var service in services) {
-        final variantsResponse = await supabase
-            .from('service_variants')
-            .select('''
-              id,
-              price,
-              duration,
-              is_active,
-              salon_gender_id,
-              salon_age_category_id,
-              salon_genders!inner (display_name),
-              salon_age_categories!inner (display_name, min_age, max_age)
-            ''')
-            .eq('service_id', service['id'])
-            .eq('is_active', true);
+      if (services.isEmpty) {
+        setState(() {
+          _services = [];
+          _expandedServices.clear();
+        });
+        return;
+      }
 
-        final variants = List<Map<String, dynamic>>.from(variantsResponse);
+      // ✅ STEP 2: Get all service IDs
+      final serviceIds = services.map<int>((s) => s['id'] as int).toList();
 
-        // Format variants for display
-        final formattedVariants = variants.map((variant) {
-          final genderName =
-              variant['salon_genders']?['display_name'] ?? 'Unknown';
-          final ageCat = variant['salon_age_categories'];
-          String ageName = ageCat?['display_name'] ?? 'Unknown';
-          if (ageCat?['min_age'] != null && ageCat?['max_age'] != null) {
-            ageName =
-                '$ageName (${ageCat['min_age']}-${ageCat['max_age']} yrs)';
+      // ✅ STEP 3: Load ALL variants for these services in ONE query
+      //    WITHOUT any join syntax — just get raw data
+      final variantsResponse = await supabase
+          .from('service_variants')
+          .select('''
+            id,
+            service_id,
+            price,
+            duration,
+            is_active,
+            salon_gender_id,
+            salon_age_category_id
+          ''')
+          .inFilter('service_id', serviceIds)
+          .eq('is_active', true);
+
+      final allVariants = List<Map<String, dynamic>>.from(variantsResponse);
+
+      // ✅ STEP 4: Build lookup maps for gender + age category names
+      final genderIdToName = <int, String>{};
+      for (var g in _genders) {
+        genderIdToName[g['id'] as int] = g['display_name'] as String;
+      }
+
+      final ageIdToInfo = <int, Map<String, dynamic>>{};
+      for (var a in _ageCategories) {
+        ageIdToInfo[a['id'] as int] = a;
+      }
+
+      // ✅ STEP 5: Group variants by service_id
+      final Map<int, List<Map<String, dynamic>>> variantsByService = {};
+      for (var v in allVariants) {
+        final sid = v['service_id'] as int;
+        final genderId = v['salon_gender_id'] as int?;
+        final ageId = v['salon_age_category_id'] as int?;
+
+        // Resolve gender name
+        String genderName = 'Any';
+        if (genderId != null && genderIdToName.containsKey(genderId)) {
+          genderName = genderIdToName[genderId]!;
+        }
+
+        // Resolve age name
+        String ageName = 'Any';
+        if (ageId != null && ageIdToInfo.containsKey(ageId)) {
+          final ageInfo = ageIdToInfo[ageId]!;
+          ageName = ageInfo['display_name'] as String? ?? 'Any';
+          final minAge = ageInfo['min_age'];
+          final maxAge = ageInfo['max_age'];
+          if (minAge != null && maxAge != null) {
+            ageName = '$ageName ($minAge-$maxAge yrs)';
           }
-          return {
-            'id': variant['id'],
-            'gender_name': genderName,
-            'age_name': ageName,
-            'price': variant['price'],
-            'duration': variant['duration'],
-            'is_active': variant['is_active'],
-            'gender_id': variant['salon_gender_id'],
-            'age_category_id': variant['salon_age_category_id'],
-          };
-        }).toList();
+        }
 
-        service['variants'] = formattedVariants;
-        service['variant_count'] = formattedVariants.length;
-        service['has_variants'] = formattedVariants.isNotEmpty;
+        variantsByService.putIfAbsent(sid, () => []).add({
+          'id': v['id'],
+          'gender_name': genderName,
+          'age_name': ageName,
+          'price': v['price'],
+          'duration': v['duration'],
+          'is_active': v['is_active'],
+          'gender_id': genderId,
+          'age_category_id': ageId,
+        });
+      }
 
-        // Get category name
+      // ✅ STEP 6: Attach variants + category name to each service
+      for (var service in services) {
+        final sid = service['id'] as int;
+        final serviceVariants = variantsByService[sid] ?? [];
+
+        service['variants'] = serviceVariants;
+        service['variant_count'] = serviceVariants.length;
+        service['has_variants'] = serviceVariants.isNotEmpty;
+
         final category = _categories.firstWhere(
           (c) => c['id'] == service['category_id'],
           orElse: () => {'display_name': 'Uncategorized'},
@@ -352,38 +393,40 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    _getIconForName(service['icon_name']),
-                    color: AppTheme.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Add New Option',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+            title: null,
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          _getIconForName(service['icon_name']),
+                          color: AppTheme.primary,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Add New Option',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -413,7 +456,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                   const SizedBox(height: 20),
 
-                  // Gender Dropdown
                   Text(
                     'Gender',
                     style: TextStyle(
@@ -473,7 +515,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Age Category Dropdown
                   Text(
                     'Age Category',
                     style: TextStyle(
@@ -539,7 +580,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Price and Duration Row
                   Row(
                     children: [
                       Expanded(
@@ -698,7 +738,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     return;
                   }
 
-                  // Check for duplicate variant
                   final bool isDuplicate = service['variants'].any((variant) {
                     return variant['gender_id'] == selectedGenderId &&
                         variant['age_category_id'] == selectedAgeCategoryId;
@@ -812,36 +851,38 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    _getIconForName(service['icon_name']),
-                    color: AppTheme.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Edit Option',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-              ],
-            ),
+            title: null,
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          _getIconForName(service['icon_name']),
+                          color: AppTheme.primary,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Edit Option',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -1088,81 +1129,87 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       builder: (dialogContext) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            const Icon(
-              Icons.warning_amber_rounded,
-              color: Colors.red,
-              size: 28,
-            ),
-            const SizedBox(width: 12),
-            Text(
-              'Delete Option',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Are you sure you want to delete this option?",
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.grey[800] : Colors.grey[100],
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        title: null,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  Text(
-                    'Service: ${service['name']}',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.red,
+                    size: 28,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${variant['gender_name']} - ${variant['age_name']}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isDark ? Colors.white60 : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Rs. ${variant['price']} | ${variant['duration']} mins',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isDark ? Colors.white60 : Colors.black87,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Delete Option',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'This action cannot be undone!',
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.red[300] : Colors.red,
+              const SizedBox(height: 16),
+              Text(
+                "Are you sure you want to delete this option?",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.grey[800] : Colors.grey[100],
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Service: ${service['name']}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${variant['gender_name']} - ${variant['age_name']}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white60 : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Rs. ${variant['price']} | ${variant['duration']} mins',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white60 : Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'This action cannot be undone!',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.red[300] : Colors.red,
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -1233,35 +1280,39 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(20),
             ),
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    _getIconForName(service['icon_name']),
-                    color: AppTheme.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Edit Service',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-              ],
-            ),
+            title: null,
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          _getIconForName(service['icon_name']),
+                          color: AppTheme.primary,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Edit Service',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
                   TextFormField(
                     controller: nameController,
                     style: TextStyle(
@@ -1421,89 +1472,88 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       builder: (dialogContext) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            const Icon(
-              Icons.warning_amber_rounded,
-              color: Colors.red,
-              size: 28,
-            ),
-            const SizedBox(width: 12),
-            Text(
-              'Delete Service',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              "Are you sure you want to delete '${service['name']}'?",
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+        title: null,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  const Text(
-                    '⚠️ This will also delete:',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.red,
-                    ),
+                  const Icon(
+                    Icons.warning_amber_rounded,
+                    color: Colors.red,
+                    size: 28,
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '• ${service['variant_count']} option${service['variant_count'] != 1 ? 's' : ''}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isDark ? Colors.white70 : Colors.black87,
-                    ),
-                  ),
-                  Text(
-                    '• All barber assignments',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isDark ? Colors.white70 : Colors.black87,
-                    ),
-                  ),
-                  Text(
-                    '• All barber assignments',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isDark ? Colors.white70 : Colors.black87,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Delete Service',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
                     ),
                   ),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'This action cannot be undone!',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w500,
-                color: isDark ? Colors.red[300] : Colors.red,
+              const SizedBox(height: 16),
+              Text(
+                "Are you sure you want to delete '${service['name']}'?",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '⚠️ This will also delete:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '• ${service['variant_count']} option${service['variant_count'] != 1 ? 's' : ''}',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                    Text(
+                      '• All barber assignments',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'This action cannot be undone!',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.red[300] : Colors.red,
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -1562,7 +1612,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     );
   }
 
-  // Filter services based on search and category
   List<Map<String, dynamic>> get _filteredServices {
     return _services.where((service) {
       final matchesSearch =
@@ -1582,7 +1631,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // ADD SERVICE CARD (WEB)
+  // ADD SERVICE CARDS
   // ============================================
 
   Widget _buildAddServiceCard() {
@@ -1661,10 +1710,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       ),
     );
   }
-
-  // ============================================
-  // ADD SERVICE CARD (MOBILE)
-  // ============================================
 
   Widget _buildAddServiceCardMobile() {
     final isDark = context.isDarkMode;
@@ -1780,7 +1825,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Service Header
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -1839,14 +1883,16 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       ],
                     ),
                   ),
-                  // Service Action Buttons
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
-                        icon: const Icon(
-                          Icons.edit,
-                          color: Colors.blue,
-                          size: 20,
+                        icon: const Icon(Icons.edit, color: Colors.blue),
+                        iconSize: 18,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
                         ),
                         onPressed: _isProcessing
                             ? null
@@ -1854,10 +1900,12 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                         tooltip: 'Edit Service',
                       ),
                       IconButton(
-                        icon: const Icon(
-                          Icons.delete,
-                          color: Colors.red,
-                          size: 20,
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        iconSize: 18,
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(
+                          minWidth: 32,
+                          minHeight: 32,
                         ),
                         onPressed: _isProcessing
                             ? null
@@ -1874,6 +1922,12 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               color: isDark ? Colors.white60 : Colors.grey,
                             ),
                           ),
+                          iconSize: 18,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 32,
+                          ),
                           onPressed: () => _toggleExpand(service['id']),
                         ),
                     ],
@@ -1882,7 +1936,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               ),
             ),
 
-            // Description
             if (service['description'] != null &&
                 service['description'].isNotEmpty)
               Padding(
@@ -1898,176 +1951,185 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                 ),
               ),
 
-            // Variants Section
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Text(
-                        'Options',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white70 : Colors.grey[700],
-                        ),
-                      ),
-                      const Spacer(),
-                      TextButton.icon(
-                        onPressed: _isProcessing
-                            ? null
-                            : () => _showAddVariantDialog(service),
-                        icon: const Icon(Icons.add, size: 16),
-                        label: const Text('Add Option'),
-                        style: TextButton.styleFrom(
-                          foregroundColor: accentColor,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Options',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white70 : Colors.grey[700],
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
+                        const Spacer(),
+                        TextButton.icon(
+                          onPressed: _isProcessing
+                              ? null
+                              : () => _showAddVariantDialog(service),
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Add Option'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: accentColor,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
 
-                  if (hasVariants && isExpanded) ...[
-                    ...variants.map((variant) {
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
+                    if (hasVariants && isExpanded) ...[
+                      ...variants.map((variant) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF1E1E1E)
+                                : Colors.white.withValues(alpha: 0.7),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[200]!,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 40,
+                                height: 40,
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(
+                                  Icons.local_offer,
+                                  color: Colors.orange,
+                                  size: 20,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${variant['gender_name']} • ${variant['age_name']}',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Rs. ${variant['price']} | ${variant['duration']} mins',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isDark
+                                            ? Colors.white60
+                                            : Colors.grey[600],
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.edit,
+                                      size: 18,
+                                      color: Colors.blue,
+                                    ),
+                                    onPressed: _isProcessing
+                                        ? null
+                                        : () => _showEditVariantDialog(
+                                            service,
+                                            variant,
+                                          ),
+                                    tooltip: 'Edit Option',
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.delete,
+                                      size: 18,
+                                      color: Colors.red,
+                                    ),
+                                    onPressed: _isProcessing
+                                        ? null
+                                        : () =>
+                                            _deleteVariant(service, variant),
+                                    tooltip: 'Delete Option',
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ] else if (!hasVariants) ...[
+                      Container(
+                        padding: const EdgeInsets.all(24),
                         decoration: BoxDecoration(
                           color: isDark
                               ? const Color(0xFF1E1E1E)
                               : Colors.white.withValues(alpha: 0.7),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: isDark
-                                ? Colors.grey[700]!
-                                : Colors.grey[200]!,
+                            color:
+                                isDark ? Colors.grey[700]! : Colors.grey[200]!,
                           ),
                         ),
-                        child: Row(
+                        child: Column(
                           children: [
-                            Container(
-                              width: 40,
-                              height: 40,
-                              decoration: BoxDecoration(
-                                color: Colors.orange.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(
-                                Icons.local_offer,
-                                color: Colors.orange,
-                                size: 20,
+                            Icon(
+                              Icons.add_circle_outline,
+                              size: 48,
+                              color:
+                                  isDark ? Colors.white30 : Colors.grey[400],
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'No options added yet',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '${variant['gender_name']} • ${variant['age_name']}',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 13,
-                                      color: isDark
-                                          ? Colors.white
-                                          : Colors.black87,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    'Rs. ${variant['price']} | ${variant['duration']} mins',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: isDark
-                                          ? Colors.white60
-                                          : Colors.grey[600],
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
+                            const SizedBox(height: 8),
+                            Text(
+                              'Click "Add Option" to add gender and age-based pricing',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.grey[500],
                               ),
-                            ),
-                            Row(
-                              children: [
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.edit,
-                                    size: 18,
-                                    color: Colors.blue,
-                                  ),
-                                  onPressed: _isProcessing
-                                      ? null
-                                      : () => _showEditVariantDialog(
-                                          service,
-                                          variant,
-                                        ),
-                                  tooltip: 'Edit Option',
-                                ),
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.delete,
-                                    size: 18,
-                                    color: Colors.red,
-                                  ),
-                                  onPressed: _isProcessing
-                                      ? null
-                                      : () => _deleteVariant(service, variant),
-                                  tooltip: 'Delete Option',
-                                ),
-                              ],
+                              textAlign: TextAlign.center,
                             ),
                           ],
                         ),
-                      );
-                    }),
-                  ] else if (!hasVariants) ...[
-                    Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? const Color(0xFF1E1E1E)
-                            : Colors.white.withValues(alpha: 0.7),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-                        ),
                       ),
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.add_circle_outline,
-                            size: 48,
-                            color: isDark ? Colors.white30 : Colors.grey[400],
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            'No options added yet',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: isDark ? Colors.white60 : Colors.grey[600],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Click "Add Option" to add gender and age-based pricing',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark ? Colors.white70 : Colors.grey[500],
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                      ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ],
@@ -2106,7 +2168,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         ),
         child: Column(
           children: [
-            // Service Header
             InkWell(
               onTap: hasVariants ? () => _toggleExpand(service['id']) : null,
               child: Padding(
@@ -2137,17 +2198,23 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               fontSize: 16,
                               color: isDark ? Colors.white : Colors.grey[800],
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
                           Row(
                             children: [
-                              Text(
-                                service['category_name'],
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? Colors.white60
-                                      : Colors.grey[600],
+                              Flexible(
+                                child: Text(
+                                  service['category_name'],
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDark
+                                        ? Colors.white60
+                                        : Colors.grey[600],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                               if (hasVariants) ...[
@@ -2180,31 +2247,42 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       ),
                     ),
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                          icon: const Icon(
-                            Icons.edit,
-                            color: Colors.blue,
-                            size: 20,
+                          icon: const Icon(Icons.edit, color: Colors.blue),
+                          iconSize: 18,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 32,
                           ),
                           onPressed: _isProcessing
                               ? null
                               : () => _editService(service),
                         ),
                         IconButton(
-                          icon: const Icon(
-                            Icons.delete,
-                            color: Colors.red,
-                            size: 20,
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          iconSize: 18,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 32,
+                            minHeight: 32,
                           ),
                           onPressed: _isProcessing
                               ? null
                               : () => _deleteService(service),
                         ),
                         if (hasVariants)
-                          Icon(
-                            isExpanded ? Icons.expand_less : Icons.expand_more,
-                            color: isDark ? Colors.white60 : Colors.grey,
+                          Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Icon(
+                              isExpanded
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                              size: 20,
+                              color: isDark ? Colors.white60 : Colors.grey,
+                            ),
                           ),
                       ],
                     ),
@@ -2213,7 +2291,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               ),
             ),
 
-            // Description
             if (service['description'] != null &&
                 service['description'].isNotEmpty)
               Padding(
@@ -2227,7 +2304,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                 ),
               ),
 
-            // Variants Section
             if (hasVariants && isExpanded)
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -2319,6 +2395,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               ),
                             ),
                             Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
                                   icon: const Icon(
@@ -2362,75 +2439,40 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   // WEB VIEW
   // ============================================
 
-  Widget _buildWebView() {
+  // Sliver version used inside CustomScrollView so the search bar and the
+  // grid/list share ONE scrollable — this is what prevents the
+  // "not enough height" RenderFlex overflow on short screens.
+  Widget _buildWebViewSliver() {
     final filteredServices = _filteredServices;
     final isDark = context.isDarkMode;
 
     if (filteredServices.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.inbox,
-              size: 64,
-              color: isDark ? Colors.white70 : Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No services added yet',
-              style: TextStyle(
-                fontSize: 16,
-                color: isDark ? Colors.white60 : Colors.grey[600],
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _isProcessing
-                  ? null
-                  : () async {
-                      if (!mounted) return;
-                      final result = await Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) =>
-                              AddServiceScreen(salonId: widget.salonId),
-                        ),
-                      );
-                      if (result == true && mounted) {
-                        await _loadServices();
-                      }
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text('Add Your First Service'),
-            ),
-          ],
-        ),
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: _buildEmptyState(isDark),
       );
     }
 
-    return GridView.builder(
+    return SliverPadding(
       padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 400,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-        childAspectRatio: 0.85,
+      sliver: SliverGrid(
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 400,
+          crossAxisSpacing: 16,
+          mainAxisSpacing: 16,
+          childAspectRatio: 0.7,
+        ),
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            if (index == filteredServices.length) {
+              return _buildAddServiceCard();
+            }
+            final service = filteredServices[index];
+            return _buildServiceCardWeb(service, index);
+          },
+          childCount: filteredServices.length + 1,
+        ),
       ),
-      itemCount: filteredServices.length + 1,
-      itemBuilder: (context, index) {
-        if (index == filteredServices.length) {
-          return _buildAddServiceCard();
-        }
-        final service = filteredServices[index];
-        return _buildServiceCardWeb(service, index);
-      },
     );
   }
 
@@ -2438,14 +2480,43 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   // MOBILE VIEW
   // ============================================
 
-  Widget _buildMobileView() {
+  // Sliver version used inside CustomScrollView (same reasoning as
+  // _buildWebViewSliver above).
+  Widget _buildMobileViewSliver() {
     final filteredServices = _filteredServices;
     final isDark = context.isDarkMode;
 
     if (filteredServices.isEmpty) {
-      return Center(
+      return SliverFillRemaining(
+        hasScrollBody: false,
+        child: _buildEmptyState(isDark),
+      );
+    }
+
+    return SliverPadding(
+      padding: const EdgeInsets.all(12),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            if (index == filteredServices.length) {
+              return _buildAddServiceCardMobile();
+            }
+            final service = filteredServices[index];
+            return _buildServiceCardMobile(service, index);
+          },
+          childCount: filteredServices.length + 1,
+        ),
+      ),
+    );
+  }
+
+  // Shared empty state, sized to fit whatever remaining space is given
+  // (mainAxisSize.min + a scroll view so it never hard-overflows).
+  Widget _buildEmptyState(bool isDark) {
+    return Center(
+      child: SingleChildScrollView(
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               Icons.inbox,
@@ -2488,19 +2559,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             ),
           ],
         ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: filteredServices.length + 1,
-      itemBuilder: (context, index) {
-        if (index == filteredServices.length) {
-          return _buildAddServiceCardMobile();
-        }
-        final service = filteredServices[index];
-        return _buildServiceCardMobile(service, index);
-      },
+      ),
     );
   }
 
@@ -2528,7 +2587,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // ✅ MAIN BUILD METHOD - WITH EDGE-TO-EDGE
+  // MAIN BUILD METHOD
   // ============================================
 
   @override
@@ -2588,7 +2647,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
           ),
         ],
       ),
-      // ✅ EDGE-TO-EDGE: SafeArea with Web/Mobile Layout
       body: SafeArea(
         child: _isLoading
             ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
@@ -2599,21 +2657,21 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     );
   }
 
-  // ✅ WEB LAYOUT - Centered with Scrollbar
   Widget _buildWebLayout() {
     final isDark = context.isDarkMode;
 
     return Container(
       color: isDark ? const Color(0xFF121212) : Colors.white,
       child: Center(
-        child: Container(
+        child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1200),
-          child: Column(
-            children: [
-              // Search and Filter Bar
-              _buildSearchAndFilter(),
-              // Services Grid
-              Expanded(child: _buildWebView()),
+          // CustomScrollView puts the search bar and the grid on ONE
+          // scrollable, so a short/narrow viewport just scrolls instead
+          // of forcing a fixed-height Column to overflow.
+          child: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: _buildSearchAndFilter()),
+              _buildWebViewSliver(),
             ],
           ),
         ),
@@ -2621,19 +2679,15 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     );
   }
 
-  // ✅ MOBILE LAYOUT
   Widget _buildMobileLayout() {
-    return Column(
-      children: [
-        // Search and Filter Bar
-        _buildSearchAndFilter(),
-        // Services List
-        Expanded(child: _buildMobileView()),
+    return CustomScrollView(
+      slivers: [
+        SliverToBoxAdapter(child: _buildSearchAndFilter()),
+        _buildMobileViewSliver(),
       ],
     );
   }
 
-  // ✅ SEARCH AND FILTER BAR
   Widget _buildSearchAndFilter() {
     final isDark = context.isDarkMode;
 
@@ -2690,7 +2744,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
           ),
           const SizedBox(height: 12),
 
-          // Category filter chips
           SizedBox(
             height: 45,
             child: ListView(
