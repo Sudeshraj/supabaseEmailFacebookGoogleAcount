@@ -1817,36 +1817,43 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   // ==================== BOTTOM NAVIGATION ====================
 
-  Widget _buildBottomNavBar() {
-    final isDark = _isDark;
-    final isLastStep = _currentStep == 2;
-    final canProceed = _canProceedFromStep(_currentStep);
-    final busy = _isLoading || _isUploadingLogo || _isUploadingCover;
+Widget _buildBottomNavBar() {
+  final isDark = _isDark;
+  final isLastStep = _currentStep == 2;
+  final canProceed = _canProceedFromStep(_currentStep);
+  final busy = _isLoading || _isUploadingLogo || _isUploadingCover;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
-        child: Row(
+  return Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
+          blurRadius: 8,
+          offset: const Offset(0, -2),
+        ),
+      ],
+    ),
+    child: SafeArea(
+      top: false,
+      child: SizedBox(
+        height: 52,
+        child: Stack(
+          alignment: Alignment.center,
           children: [
-            if (_currentStep > 0) ...[
-              Expanded(
+            if (_currentStep > 0)
+              Align(
+                alignment: Alignment.centerLeft,
                 child: OutlinedButton.icon(
                   onPressed: busy ? null : () => setState(() => _currentStep--),
                   icon: const Icon(Icons.arrow_back, size: 18),
                   label: const Text('Back'),
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 20,
+                    ),
                     side: BorderSide(
                       color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
                     ),
@@ -1856,10 +1863,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-            ],
-            Expanded(
-              flex: 2,
+            Align(
+              alignment: Alignment.center,
               child: ElevatedButton(
                 onPressed: busy
                     ? null
@@ -1887,7 +1892,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       ? AppTheme.primary
                       : (isDark ? Colors.grey[800] : Colors.grey[300]),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 14,
+                    horizontal: 28,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1913,7 +1921,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                         ],
                       )
                     : Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
                             isLastStep ? 'Create Salon' : 'Continue',
@@ -1936,8 +1944,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           ],
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 
   // ==================== BUILD ====================
 
@@ -1963,17 +1972,19 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           ),
         ),
         body: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: CircularProgressIndicator(),
-              ),
-              SizedBox(height: 16),
-              Text('Loading timezone...'),
-            ],
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 40,
+                  height: 40,
+                  child: CircularProgressIndicator(),
+                ),
+                SizedBox(height: 16),
+                Text('Loading timezone...'),
+              ],
+            ),
           ),
         ),
       );
@@ -1996,25 +2007,31 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           tooltip: 'Back',
         ),
       ),
+      // ✅ The nav bar lives outside the scrolling body (Scaffold sizes it
+      // safely on its own), so the body never has to fit a fixed-height
+      // bar plus content inside a constrained Expanded — it can just be
+      // one long scrollable Column. That makes it impossible for this
+      // screen to hard-overflow, no matter how short the viewport is.
+      bottomNavigationBar: _buildBottomNavBar(),
       body: SafeArea(
         child: Container(
           color: isDark ? const Color(0xFF121212) : Colors.grey[50],
           child: Center(
-            child: Container(
+            child: ConstrainedBox(
               constraints: BoxConstraints(
                 maxWidth: isWeb ? 1000 : double.infinity,
               ),
-              child: Column(
-                children: [
-                  _buildStepIndicatorRow(),
-                  Expanded(
-                    child: SingleChildScrollView(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _buildStepIndicatorRow(),
+                    Padding(
                       padding: EdgeInsets.all(isWeb ? 32 : 16),
                       child: _buildStepContent(),
                     ),
-                  ),
-                  _buildBottomNavBar(),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
