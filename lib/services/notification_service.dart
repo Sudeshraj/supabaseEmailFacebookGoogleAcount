@@ -17,6 +17,16 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
+  // ✅ FIX: guards init()/initWithoutPermission() so it's safe to call
+  // more than once (e.g. if a future code path re-initializes after
+  // permission is granted, or on hot-restart in dev). Without this,
+  // every extra call would register another full set of
+  // FirebaseMessaging.onMessage / onMessageOpenedApp / onTokenRefresh
+  // listeners on top of the existing ones, multiplying every
+  // notification's side effects (DB writes, local notification
+  // popups, navigation) by however many times init() was called.
+  bool _initialized = false;
+
   // Supabase client
   SupabaseClient? _supabaseClient;
   SupabaseClient get supabase {
@@ -50,6 +60,13 @@ class NotificationService {
   /// Initialize with optional permission request
   /// For Web: Pass requestPermission: false to avoid auto-prompt
   Future<void> init({bool requestPermission = true}) async {
+    // ✅ FIX: idempotency guard — see _initialized doc comment above.
+    if (_initialized) {
+      debugPrint('⚠️ NotificationService already initialized - skipping');
+      return;
+    }
+    _initialized = true;
+
     debugPrint('🚀 Initializing NotificationService for $platformName');
 
     if (isWeb) {
@@ -115,11 +132,22 @@ class NotificationService {
         // ✅ Permission ඉල්ලන්නේ නැතුව Firebase initialize කරන්න
         debugPrint('🌐 Web: Initializing WITHOUT permission request');
 
-        // Setup message listeners without requesting permission
-        _setupWebMessageListeners();
-
-        // ✅ DO NOT call getToken() here - it triggers permission request
-        // Token will be obtained via JavaScript when user grants permission
+        // ✅ FIX: previously called _setupWebMessageListeners() here,
+        // which registered its own FirebaseMessaging.onMessage /
+        // onMessageOpenedApp / getInitialMessage handlers. init()
+        // ALSO unconditionally calls _setupMessageListeners() a few
+        // lines later (for both web and mobile), which registers an
+        // equivalent, overlapping set of handlers for web too. The
+        // result: every incoming foreground message on web fired
+        // BOTH handler sets, and _setupMessageListeners()'s onMessage
+        // callback itself called _handleWebForegroundMessage() (which
+        // also saved to the DB) on top of its own direct DB save —
+        // so a single push notification produced 3 duplicate
+        // `notifications` table rows and could show the same item
+        // three times in the UI. _setupMessageListeners() already
+        // fully covers the web case via its `isWeb` branch, so this
+        // duplicate registration is simply removed; no functionality
+        // is lost.
       }
 
       // ✅ Token refresh listener - only if token already exists
@@ -195,6 +223,16 @@ class NotificationService {
             _handleNavigation(payload);
           }
         },
+        // ✅ FIX: _handleBackgroundNotificationResponse was already
+        // defined (with @pragma('vm:entry-point'), specifically
+        // meant for this) but never actually passed here, so it was
+        // dead code. Without it, tapping a local notification while
+        // the app is fully backgrounded/terminated has no navigation
+        // handler running in that headless context — the plugin
+        // requires a separate top-level/static callback for that
+        // case since the main isolate's UI may not be running yet.
+        onDidReceiveBackgroundNotificationResponse:
+            _handleBackgroundNotificationResponse,
       );
 
       if (isAndroid) {
@@ -490,42 +528,35 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 WEB MESSAGE LISTENERS - COMPLETE
+  // 🔥 WEB FOREGROUND MESSAGE HANDLING
   // ===============================================================
-
-  void _setupWebMessageListeners() {
-    // ✅ Web messages handle කරන්න - permission නැතුව වුණත් වැඩ කරයි
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      _handleWebForegroundMessage(message);
-    });
-
-    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
-      _handleMessage(message);
-    });
-
-    FirebaseMessaging.instance.getInitialMessage().then((
-      RemoteMessage? message,
-    ) {
-      if (message != null) {
-        _handleMessage(message);
-      }
-    });
-  }
-
+  // ✅ FIX: the standalone _setupWebMessageListeners() method (which
+  // used to register its own onMessage/onMessageOpenedApp/
+  // getInitialMessage listeners) has been removed entirely — it was
+  // called from _initWebNotifications() AND duplicated everything
+  // _setupMessageListeners() already does below (which runs
+  // unconditionally for every platform, web included, via its
+  // internal `isWeb` branch). Having both registered meant every web
+  // push notification was handled twice over, and — because this
+  // method used to also call _saveNotificationToDatabase() itself —
+  // combined with _setupMessageListeners()'s own direct DB save, a
+  // single incoming message produced 3 duplicate database rows.
+  //
+  // _handleWebForegroundMessage() below no longer saves to the
+  // database itself; _setupMessageListeners()'s onMessage callback
+  // already does that for every platform before branching into this
+  // method, so this is purely "what extra thing does web need on top
+  // of the shared DB save" (currently: nothing but a debug log, since
+  // the native browser popup was intentionally removed — see the
+  // comment further down).
   void _handleWebForegroundMessage(RemoteMessage message) {
     RemoteNotification? notification = message.notification;
     if (notification != null) {
-      _saveNotificationToDatabase(
-        title: notification.title ?? 'Notification',
-        body: notification.body ?? '',
-        type: message.data['type'] ?? 'general',
-        data: message.data,
-      );
-
       // NOTE: Native browser Notification popup removed.
       // Reason: it required dart:js_interop, which is web-only and
       // breaks Android/iOS builds when compiled into a shared file.
-      // The notification is still saved to the database (above) and
+      // The notification is still saved to the database (by the
+      // caller, _setupMessageListeners()'s onMessage handler) and
       // shown inside the app UI / notification bell. If you need an
       // actual OS-level browser popup on web, put that code in a
       // separate file guarded by a conditional import, e.g.:
@@ -928,26 +959,81 @@ class NotificationService {
     int? salonId,
   }) async {
     try {
-      var query = supabase
-          .from('user_roles')
-          .select('user_id, roles!inner(name), profiles!inner (id, fcm_token)')
-          .eq('roles.name', role)
-          .eq('status', 'active');
+      // ✅ FIX: `user_roles` has NO `salon_id` column and no relation
+      // to `salons` at all (confirmed against the schema) — the old
+      // `.eq('salons.id', salonId)` filter referenced a relation that
+      // doesn't exist, so Supabase/PostgREST threw at query time and
+      // the surrounding try/catch silently swallowed it: notifying a
+      // specific salon's owner sent NOTHING, with no visible error.
+      // On top of that, the filter was only ever applied when
+      // `role == 'owner'` — a `salonId` passed with `role == 'barber'`
+      // was silently ignored, so "notify this salon's barbers" was
+      // actually notifying every active barber in the entire system.
+      //
+      // The schema's real relationships are:
+      //   - owner  -> salon:  salons.owner_id      (direct column)
+      //   - barber -> salon:  salon_barbers table   (salon_id, barber_id, status)
+      // Both are used explicitly below instead of trying to filter
+      // through user_roles.
+      final List<String> targetUserIds = [];
 
       if (salonId != null && role == 'owner') {
-        query = query.eq('salons.id', salonId);
+        final salon = await supabase
+            .from('salons')
+            .select('owner_id')
+            .eq('id', salonId)
+            .maybeSingle();
+
+        final ownerId = salon?['owner_id'] as String?;
+        if (ownerId == null) {
+          debugPrint('⚠️ No owner found for salon $salonId');
+          return;
+        }
+
+        final isActiveOwner = await hasActiveRole(
+          userId: ownerId,
+          role: 'owner',
+        );
+        if (isActiveOwner) {
+          targetUserIds.add(ownerId);
+        } else {
+          debugPrint('⚠️ Owner $ownerId does not have an active owner role');
+        }
+      } else if (salonId != null && role == 'barber') {
+        final rows = await supabase
+            .from('salon_barbers')
+            .select('barber_id')
+            .eq('salon_id', salonId)
+            .eq('status', 'active');
+
+        for (final row in rows) {
+          targetUserIds.add(row['barber_id'] as String);
+        }
+      } else {
+        // No salon scoping requested — every active user with this role.
+        final rows = await supabase
+            .from('user_roles')
+            .select('user_id, roles!inner(name)')
+            .eq('roles.name', role)
+            .eq('status', 'active');
+
+        for (final row in rows) {
+          targetUserIds.add(row['user_id'] as String);
+        }
       }
 
-      final users = await query;
-
       debugPrint(
-        '📤 Sending notification to ${users.length} active $role users',
+        '📤 Sending notification to ${targetUserIds.length} active $role users',
       );
 
-      for (var user in users) {
-        final userId = user['user_id'] as String;
-        final fcmToken = user['profiles']?['fcm_token'] as String?;
+      for (final userId in targetUserIds) {
+        final profile = await supabase
+            .from('profiles')
+            .select('fcm_token')
+            .eq('id', userId)
+            .maybeSingle();
 
+        final fcmToken = profile?['fcm_token'] as String?;
         if (fcmToken != null && fcmToken.isNotEmpty) {
           await sendNotificationWithRole(
             userId: userId,
@@ -969,41 +1055,98 @@ class NotificationService {
     int? salonId,
   }) async {
     try {
-      var query = supabase
-          .from('user_roles')
-          .select('''
-      user_id,
-      roles!inner (
-        name
-      ),
-      profiles!inner (
-        id,
-        full_name,
-        email,
-        fcm_token,
-        is_active
-      )
-    ''')
-          .eq('roles.name', role)
-          .eq('status', 'active');
+      // ✅ FIX: same underlying issue as sendNotificationToActiveUsers()
+      // above — `user_roles` has no relation to `salons`, so
+      // `.eq('salons.id', salonId)` threw at query time and this
+      // silently returned an empty list via the catch block for any
+      // salon-scoped 'owner' lookup, and never filtered by salon at
+      // all for 'barber' (returned every active barber system-wide).
+      List<Map<String, dynamic>> users = [];
 
       if (salonId != null && role == 'owner') {
-        query = query.eq('salons.id', salonId);
-      }
+        final salon = await supabase
+            .from('salons')
+            .select('owner_id')
+            .eq('id', salonId)
+            .maybeSingle();
 
-      final response = await query;
+        final ownerId = salon?['owner_id'] as String?;
+        if (ownerId == null) {
+          debugPrint('⚠️ No owner found for salon $salonId');
+          return [];
+        }
 
-      List<Map<String, dynamic>> users = [];
-      for (var item in response) {
-        final profile = item['profiles'] as Map?;
-        if (profile != null && profile['is_active'] == true) {
-          users.add({
-            'userId': item['user_id'],
-            'fullName': profile['full_name'],
-            'email': profile['email'],
-            'fcmToken': profile['fcm_token'],
-            'isActive': profile['is_active'],
-          });
+        final isActiveOwner = await hasActiveRole(
+          userId: ownerId,
+          role: 'owner',
+        );
+        if (isActiveOwner) {
+          final profile = await supabase
+              .from('profiles')
+              .select('id, full_name, email, fcm_token, is_active')
+              .eq('id', ownerId)
+              .maybeSingle();
+          if (profile != null && profile['is_active'] == true) {
+            users.add({
+              'userId': ownerId,
+              'fullName': profile['full_name'],
+              'email': profile['email'],
+              'fcmToken': profile['fcm_token'],
+              'isActive': profile['is_active'],
+            });
+          }
+        }
+      } else if (salonId != null && role == 'barber') {
+        final rows = await supabase
+            .from('salon_barbers')
+            .select(
+              'barber_id, profiles!inner(id, full_name, email, fcm_token, is_active)',
+            )
+            .eq('salon_id', salonId)
+            .eq('status', 'active');
+
+        for (final row in rows) {
+          final profile = row['profiles'] as Map?;
+          if (profile != null && profile['is_active'] == true) {
+            users.add({
+              'userId': row['barber_id'],
+              'fullName': profile['full_name'],
+              'email': profile['email'],
+              'fcmToken': profile['fcm_token'],
+              'isActive': profile['is_active'],
+            });
+          }
+        }
+      } else {
+        final response = await supabase
+            .from('user_roles')
+            .select('''
+        user_id,
+        roles!inner (
+          name
+        ),
+        profiles!inner (
+          id,
+          full_name,
+          email,
+          fcm_token,
+          is_active
+        )
+      ''')
+            .eq('roles.name', role)
+            .eq('status', 'active');
+
+        for (var item in response) {
+          final profile = item['profiles'] as Map?;
+          if (profile != null && profile['is_active'] == true) {
+            users.add({
+              'userId': item['user_id'],
+              'fullName': profile['full_name'],
+              'email': profile['email'],
+              'fcmToken': profile['fcm_token'],
+              'isActive': profile['is_active'],
+            });
+          }
         }
       }
 
@@ -2042,7 +2185,19 @@ class NotificationService {
 
     try {
       RemoteNotification? notification = message.notification;
-      if (notification == null) return;
+
+      // ✅ FIX: previously returned immediately whenever
+      // message.notification was null — which is exactly the shape of
+      // a "data-only" FCM message (no `notification` block, only
+      // `data`). Any such message silently showed nothing at all. Now
+      // falls back to reading title/body out of the data payload, and
+      // only bails out if there's truly nothing to show.
+      final String title =
+          notification?.title ?? message.data['title']?.toString() ?? '';
+      final String body =
+          notification?.body ?? message.data['body']?.toString() ?? '';
+
+      if (title.isEmpty && body.isEmpty) return;
 
       final notificationType = message.data['type'] ?? 'general';
       final notificationColor = _getNotificationColor(notificationType);
@@ -2078,8 +2233,8 @@ class NotificationService {
 
       await _localNotifications.show(
         id: notificationId,
-        title: notification.title,
-        body: notification.body,
+        title: title,
+        body: body,
         notificationDetails: platformChannelSpecifics,
         payload: jsonEncode(message.data),
       );
@@ -2145,89 +2300,119 @@ class NotificationService {
     }
   }
 
+  // ✅ FIX: every case below previously targeted a path that does not
+  // exist anywhere in main.dart's GoRouter route table (verified by
+  // cross-checking every `path:` string GoRouter actually defines).
+  // Since main.dart's router has no `errorBuilder` override, tapping
+  // any of these notifications landed the user on GoRouter's default
+  // "page not found" screen instead of anywhere useful — not a crash,
+  // but a dead end for every notification type below except
+  // 'barber_appointments', 'offers', and 'my_bookings' (the only three
+  // that already happened to match a real route).
+  //
+  // Two of these also need a role-appropriate destination, not just
+  // any existing path: '/owner/*' routes redirect away any user
+  // without the 'owner' role, and '/barber/*' routes redirect away
+  // any user without the 'barber' role (see the redirect callback in
+  // main.dart's _createRouter()). So a barber tapping a "leave status"
+  // notification can't be sent to '/owner/barber-leaves' (that's an
+  // owner-only screen and the redirect would just bounce them back to
+  // '/barber'), and an owner tapping a "review" notification can't be
+  // sent to '/barber/reviews' for the same reason in reverse. Neither
+  // a barber-facing "my leave requests" screen nor an owner-facing
+  // "my reviews" screen exists in the route table yet, so both fall
+  // back to that role's own dashboard for now rather than a broken or
+  // wrong-role destination.
   void _handleNavigation(String payload) {
     try {
       Map<String, dynamic> data = jsonDecode(payload);
       String screen = data['screen'] ?? 'home';
-      String bookingId = data['bookingId'] ?? '';
       String role = data['role'] ?? 'customer';
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         switch (screen) {
           // ========== BARBER SCREENS ==========
           case 'barber_appointment':
-            if (bookingId.isNotEmpty) {
-              navigatorKey.currentState?.context.go(
-                '/barber/appointment/$bookingId',
-              );
-            } else {
-              navigatorKey.currentState?.context.go('/barber/appointments');
-            }
-            break;
           case 'barber_appointments':
+            // No per-booking detail route exists for barbers yet, so
+            // both cases land on the appointments list.
             navigatorKey.currentState?.context.go('/barber/appointments');
             break;
           case 'barber_leaves':
-            navigatorKey.currentState?.context.go('/barber/leaves');
+            // '/owner/barber-leaves' is an owner-only screen (role
+            // redirect would bounce a barber straight back out of it).
+            // No barber-facing "my leave requests" route exists yet,
+            // so fall back to the barber's own dashboard.
+            navigatorKey.currentState?.context.go('/barber');
             break;
 
           // ========== OWNER SCREENS ==========
           case 'owner_leaves':
-            navigatorKey.currentState?.context.go('/owner/leaves');
+            // This one IS owner-facing and '/owner/barber-leaves' is
+            // reachable by an owner.
+            navigatorKey.currentState?.context.go('/owner/barber-leaves');
             break;
           case 'owner_salon':
-            navigatorKey.currentState?.context.go('/owner/salon');
+            // No generic "view my salon" route exists (only
+            // /owner/salon/create, /edit, /holidays, each needing a
+            // specific salonId) — fall back to the owner dashboard.
+            navigatorKey.currentState?.context.go('/owner');
             break;
           case 'owner_reviews':
-            navigatorKey.currentState?.context.go('/owner/reviews');
+            // '/barber/reviews' is a barber-only screen (role redirect
+            // would bounce an owner straight back out of it). No
+            // owner-facing "my salon's reviews" route exists yet, so
+            // fall back to the owner's own dashboard.
+            navigatorKey.currentState?.context.go('/owner');
             break;
           case 'owner_bookings':
-            navigatorKey.currentState?.context.go('/owner/bookings');
+            navigatorKey.currentState?.context.go('/owner/appointments');
             break;
           case 'owner_inventory':
-            navigatorKey.currentState?.context.go('/owner/inventory');
+            // No inventory route exists yet.
+            navigatorKey.currentState?.context.go('/owner');
             break;
           case 'owner_dashboard':
-            navigatorKey.currentState?.context.go('/owner/dashboard');
+            navigatorKey.currentState?.context.go('/owner');
             break;
 
           // ========== CUSTOMER SCREENS ==========
           case 'booking_details':
-            if (bookingId.isNotEmpty) {
-              navigatorKey.currentState?.context.go(
-                '/customer/booking/$bookingId',
-              );
-            } else {
-              navigatorKey.currentState?.context.go('/customer/my-bookings');
-            }
+            // No per-booking detail route exists for customers yet —
+            // land on the bookings list regardless of bookingId.
+            navigatorKey.currentState?.context.go('/customer/my-bookings');
             break;
           case 'vip_bookings':
-            navigatorKey.currentState?.context.go('/customer/vip-bookings');
+            // Route is singular: '/customer/vip-booking'.
+            navigatorKey.currentState?.context.go('/customer/vip-booking');
             break;
           case 'offers':
             navigatorKey.currentState?.context.go('/customer/offers');
             break;
           case 'waiting_list':
-            navigatorKey.currentState?.context.go('/customer/waiting-list');
+            // No waiting-list route exists yet.
+            navigatorKey.currentState?.context.go('/customer');
             break;
           case 'my_bookings':
             navigatorKey.currentState?.context.go('/customer/my-bookings');
             break;
           case 'reviews':
-            navigatorKey.currentState?.context.go('/customer/reviews');
+            // No "my reviews" route exists for customers yet.
+            navigatorKey.currentState?.context.go('/customer');
             break;
           case 'loyalty':
-            navigatorKey.currentState?.context.go('/customer/loyalty');
+            // No loyalty route exists yet.
+            navigatorKey.currentState?.context.go('/customer');
             break;
 
           // ========== DEFAULT ==========
           default:
             if (role == 'barber') {
-              navigatorKey.currentState?.context.go('/barber/dashboard');
+              navigatorKey.currentState?.context.go('/barber');
             } else if (role == 'owner') {
-              navigatorKey.currentState?.context.go('/owner/dashboard');
+              navigatorKey.currentState?.context.go('/owner');
             } else {
-              navigatorKey.currentState?.context.go('/customer/dashboard');
+              navigatorKey.currentState?.context.go('/customer');
             }
             break;
         }

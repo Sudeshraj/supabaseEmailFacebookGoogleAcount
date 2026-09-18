@@ -6,7 +6,6 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:app_links/app_links.dart';
 import 'package:flutter_application_1/firebase_options.dart';
-import 'package:flutter_application_1/providers/currency_provider.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
@@ -59,7 +58,6 @@ import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:go_router/go_router.dart';
-import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -98,7 +96,15 @@ String? pendingDeepLink;
 
 // Deep link handling (mobile)
 final AppLinks _appLinks = AppLinks();
-StreamSubscription<Uri>? linkSubscription;
+// ✅ FIX: previously there was a `StreamSubscription<Uri>? _linkSubscription`
+// field here so dispose() could cancel it. That cancel call was
+// deliberately removed (see the comment at the old dispose() site) because
+// this listener is a global, app-lifetime resource, not something owned by
+// a widget's State — cancelling it if a State's dispose() ever fired while
+// the process kept running would permanently kill deep-link handling with
+// no way to re-subscribe. Once nothing reads it anymore, keeping the field
+// around is just dead state (and trips the `unused_element` lint), so the
+// subscription returned by .listen() below is simply not stored.
 
 // ✅ Stored so the auth-state listener can be cancelled/replaced safely
 // instead of leaking a subscription that nothing ever references.
@@ -201,13 +207,12 @@ void applySystemUIOverlayStyle(bool isDark) {
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
+
       // Navigation bar
-      systemNavigationBarColor: isDark
-          ? AppTheme.darkSurface
-          : AppTheme.lightBackground,
-      systemNavigationBarIconBrightness: isDark
-          ? Brightness.light
-          : Brightness.dark,
+      systemNavigationBarColor:
+          isDark ? AppTheme.darkSurface : AppTheme.lightBackground,
+      systemNavigationBarIconBrightness:
+          isDark ? Brightness.light : Brightness.dark,
       systemNavigationBarDividerColor: Colors.transparent,
     ),
   );
@@ -404,15 +409,7 @@ Future<void> main() async {
     applySystemUIOverlayStyle(_resolveIsDark());
 
     debugPrint('${DateTime.now()}: Initialization complete');
-    runApp(
-      MultiProvider(
-        providers: [
-          ChangeNotifierProvider(create: (_) => CurrencyProvider()),
-          // ... other providers
-        ],
-        child: const MyApp(),
-      ),
-    );
+    runApp(MyApp());
   } catch (e, stackTrace) {
     debugPrint('CRITICAL ERROR: $e');
     debugPrint('Stack: $stackTrace');
@@ -657,7 +654,9 @@ Future<void> _setupMobileDeepLinks() async {
       await _handleDeepLink(initialUri);
     }
 
-    linkSubscription = _appLinks.uriLinkStream.listen(
+    // ✅ Not stored in a field anymore — see the comment at the old
+    // _linkSubscription declaration site for why.
+    _appLinks.uriLinkStream.listen(
       (uri) {
         debugPrint('📱 Deep link received: $uri');
         pendingDeepLink = uri.toString();
@@ -1504,8 +1503,7 @@ GoRouter _createRouter() {
           // web, or a bug elsewhere) threw an uncaught type-cast
           // exception and crashed the screen. Now falls back to an
           // empty map instead of crashing.
-          final salon =
-              state.extra as Map<String, dynamic>? ?? <String, dynamic>{};
+          final salon = state.extra as Map<String, dynamic>? ?? <String, dynamic>{};
           return SalonProfileScreen(salon: salon);
         },
       ),
@@ -1816,15 +1814,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void dispose() {
     _networkSub?.cancel();
     _networkService.dispose();
-    // ✅ FIX: _linkSubscription is a global, app-lifetime resource, not
+    // Note: the mobile deep-link stream subscription is intentionally
+    // not tracked/cancelled here — it's a global, app-lifetime
+    // listener (see its setup in _setupMobileDeepLinks()), not
     // something owned by this State. MyApp is the root widget passed
     // to runApp() and is only disposed when the whole engine/process
-    // tears down (at which point the subscription dies with it
-    // anyway) — but IF this dispose() were ever triggered while the
-    // process kept running (an edge case, e.g. certain hot-reload
-    // scenarios), cancelling it here would permanently kill deep-link
-    // handling for the rest of the app's life with no way to
-    // re-subscribe. Safer to simply not touch it from here.
+    // tears down, at which point the subscription dies with it anyway.
     appState.removeListener(_onAppStateChanged);
     themeNotifier.removeListener(_onThemeChanged);
     WidgetsBinding.instance.removeObserver(this);

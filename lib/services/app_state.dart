@@ -221,7 +221,23 @@ class AppState extends ChangeNotifier {
 
       developer.log('AppState: Initialization successful', name: 'AppState');
 
-      if (!_loggedIn && hasProfiles && rememberMe) {
+      // ============================================================
+      // ✅ FIX: previously this checked ONLY `!_loggedIn && hasProfiles
+      // && rememberMe`, using `hasProfiles`/`rememberMe` captured
+      // BEFORE _updateUserProfile() ran. But _updateUserProfile() can
+      // itself call logout() in-band (no exception thrown) when the
+      // account is blocked or in an unknown inactive state, setting
+      // `_loggedIn = false` and `_errorMessage` in the process. That
+      // meant: a blocked/bad-status account got force-logged-out, and
+      // then THIS SAME initializeApp() call immediately tried
+      // attemptAutoLogin() again with the (possibly still valid for a
+      // moment) saved refresh token — undoing the forced logout, or at
+      // best wasting 3 retry attempts against an already-revoked
+      // token. Guarding on `_errorMessage == null` skips auto-login
+      // whenever _updateUserProfile() just force-logged the user out
+      // for a real account-status reason in this very pass.
+      // ============================================================
+      if (!_loggedIn && hasProfiles && rememberMe && _errorMessage == null) {
         await attemptAutoLogin();
       }
     } catch (e, stackTrace) {
@@ -241,6 +257,16 @@ class AppState extends ChangeNotifier {
   // Refresh app state
   Future<void> refreshState({bool silent = false}) async {
     if (!silent) _setLoading(true);
+    // ✅ FIX: previously this was called at the END of the try block
+    // (after _updateUserProfile()), which meant it silently erased any
+    // real error _updateUserProfile() had just set — e.g. 'Account
+    // blocked' or 'Account inactive' when logout() gets triggered
+    // in-band during this same refreshState() call. By the time this
+    // method returned, the UI could never see why the user got logged
+    // out. Clearing it up-front (matching initializeApp()'s pattern)
+    // means only a stale PREVIOUS error gets cleared, and a fresh one
+    // set later in this same call correctly survives.
+    _setErrorMessage(null);
 
     try {
       _setCurrentUser(Supabase.instance.client.auth.currentUser);
@@ -254,7 +280,6 @@ class AppState extends ChangeNotifier {
       _setRememberMeEnabled(rememberMe);
 
       _lastUpdateTime = DateTime.now();
-      _setErrorMessage(null);
 
       developer.log(
         'AppState: Refreshed - Roles: $_roles, Current: $_currentRole',
@@ -282,15 +307,34 @@ class AppState extends ChangeNotifier {
     try {
       await SessionManager.logoutUser();
 
-      _setLoggedIn(false);
-      _setEmailVerified(false);
-      _setProfileCompleted(false);
-      _setRoles([]);
-      _setCurrentRole(null);
-      _setCurrentEmail(null);
-      _setLoginProvider(null);
-      _setPendingDeletionRestore(pending: false);
-      _setPendingReactivation(false);
+      // ✅ OPTIMIZATION: this used to be 8 separate _setX() calls, each
+      // independently calling notifyListeners() — so every logout()
+      // fired ~8 back-to-back GoRouter redirect re-evaluations (plus
+      // every other appState listener, e.g. the dialog-visibility
+      // check in main.dart) for what is conceptually ONE atomic state
+      // transition. It also meant listeners could observe a
+      // momentarily inconsistent halfway state mid-cascade (e.g.
+      // loggedIn already false but roles still populated, a few
+      // statements before _setRoles([]) ran). Setting the fields
+      // directly and notifying once avoids both.
+      _loggedIn = false;
+      _emailVerified = false;
+      _profileCompleted = false;
+      _roles = [];
+      _currentRole = null;
+      _currentEmail = null;
+      _loginProvider = null;
+      // ✅ FIX: this was missing from the batch — _currentUser stayed
+      // at its stale (pre-logout) value, contradicting loggedIn=false
+      // (main.dart's role-selector route falls back to
+      // appState.currentUser?.id).
+      _currentUser = null;
+      _pendingDeletionRestore = false;
+      _deletionRestoreDueDate = null;
+      _deletionRestoreDaysRemaining = null;
+      _pendingReactivation = false;
+      notifyListeners();
+
       developer.log('User logged out', name: 'AppState');
     } catch (e, stackTrace) {
       developer.log(
@@ -316,15 +360,27 @@ class AppState extends ChangeNotifier {
     try {
       await SessionManager.logoutForContinue();
 
-      _setLoggedIn(false);
-      _setEmailVerified(false);
-      _setProfileCompleted(false);
-      _setRoles([]);
-      _setCurrentRole(null);
-      _setCurrentEmail(null);
-      _setLoginProvider(null);
-      _setPendingDeletionRestore(pending: false);
-      _setPendingReactivation(false);
+      // ✅ Same batching as logout() — one notifyListeners() instead
+      // of a cascade of 8.
+      _loggedIn = false;
+      _emailVerified = false;
+      _profileCompleted = false;
+      _roles = [];
+      _currentRole = null;
+      _currentEmail = null;
+      _loginProvider = null;
+      // ✅ FIX: was missing here too. Safe to null out even though the
+      // underlying Supabase session is intentionally left untouched by
+      // this quick-switch logout — the next _checkAuthenticationState()
+      // call (on the following refreshState()/initializeApp()) simply
+      // re-populates it from that still-valid session.
+      _currentUser = null;
+      _pendingDeletionRestore = false;
+      _deletionRestoreDueDate = null;
+      _deletionRestoreDaysRemaining = null;
+      _pendingReactivation = false;
+      notifyListeners();
+
       developer.log('Quick-switch logout complete', name: 'AppState');
     } catch (e, stackTrace) {
       developer.log(
@@ -622,6 +678,18 @@ Future<void> _checkAuthenticationState() async {
   if (isPendingQuickLogout) {
     _setLoggedIn(false);
     _setEmailVerified(false);
+    // ✅ FIX: previously left _currentUser/_currentEmail at whatever
+    // they'd just been set to a moment earlier (by the fresh
+    // Supabase.instance.client.auth.currentUser fetch at the top of
+    // initializeApp()/refreshState()) — technically not "stale" data,
+    // but inconsistent with loggedIn=false. The underlying Supabase
+    // session is untouched by design during a quick-switch logout, so
+    // once the user explicitly picks a profile on the Continue screen
+    // the very next refresh cycle re-populates both from that session
+    // anyway — nulling them here is safe and keeps the exposed state
+    // internally consistent in the meantime.
+    _setCurrentUser(null);
+    _setCurrentEmail(null);
     return;
   }
 
@@ -653,6 +721,13 @@ Future<void> _checkAuthenticationState() async {
       _setCurrentRole(null);
       _setLoginProvider(null);
       _setPendingDeletionRestore(pending: false);
+      // ✅ FIX: was missing — _pendingDeletionRestore got cleared here
+      // but _pendingReactivation didn't. If the session naturally
+      // expired/was revoked elsewhere (not via logout()/
+      // logoutForContinue(), which already clear this) while a
+      // reactivation prompt was pending, this flag could survive
+      // stale into a logged-out state for the rest of the app session.
+      _setPendingReactivation(false);
       return;
     }
 
@@ -783,6 +858,17 @@ Future<void> _checkAuthenticationState() async {
             _setPendingDeletionRestore(pending: false);
             _setPendingReactivation(false);
           }
+        } else {
+          // ✅ FIX: previously this branch did nothing at all. If the
+          // `profiles` row unexpectedly comes back null (data
+          // inconsistency, replication lag, etc.) while a pending
+          // restore/reactivation flag was already set from an earlier
+          // cycle, that flag had no path to ever get cleared here —
+          // it would stay stuck until an explicit logout(). Clearing
+          // both defensively keeps this branch consistent with every
+          // other outcome of this profile check.
+          _setPendingDeletionRestore(pending: false);
+          _setPendingReactivation(false);
         }
       }
 
@@ -953,17 +1039,25 @@ Future<void> _checkAuthenticationState() async {
   }
 
   void _resetToSafeState() {
-    _setLoggedIn(false);
-    _setEmailVerified(false);
-    _setProfileCompleted(false);
-    _setRoles([]);
-    _setCurrentRole(null);
-    _setHasLocalProfile(false);
-    _setRememberMeEnabled(false);
-    _setLoginProvider(null);
-    _setCurrentEmail(null);
-    _setPendingDeletionRestore(pending: false);
-    _setPendingReactivation(false);
+    // ✅ Same batching principle as logout()/logoutForContinue() — one
+    // notifyListeners() instead of ~10 back-to-back ones.
+    _loggedIn = false;
+    _emailVerified = false;
+    _profileCompleted = false;
+    _roles = [];
+    _currentRole = null;
+    _hasLocalProfile = false;
+    _rememberMeEnabled = false;
+    _loginProvider = null;
+    _currentEmail = null;
+    // ✅ FIX (unchanged from before): also clear _currentUser here so
+    // no stale user object survives a reset to a logged-out state.
+    _currentUser = null;
+    _pendingDeletionRestore = false;
+    _deletionRestoreDueDate = null;
+    _deletionRestoreDaysRemaining = null;
+    _pendingReactivation = false;
+    notifyListeners();
   }
 
   /// Email verification error handler
