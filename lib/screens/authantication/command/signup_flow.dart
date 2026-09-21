@@ -20,6 +20,37 @@ class _SignupFlowState extends State<SignupFlow> {
   Widget build(BuildContext context) {
     debugPrint('SignupFlow building, isLoading: $_isLoading');
 
+    // ============================================================
+    // ✅ FIX: the browser's native back button pops the pushed
+    // '/data-consent' route through the browser history/URL, not
+    // through GoRouter's normal pop() call. That means the Future
+    // returned by `context.push()` in _navigateToDataConsent() never
+    // completes in that case, so its `finally` block (which used to
+    // be the ONLY place resetting `_isLoading`) never runs — the
+    // button and spinner stay stuck forever.
+    //
+    // This screen's build() is called again whenever the route above
+    // it is popped and it becomes the current/visible route, no
+    // matter how that pop happened (in-app back OR browser back). So
+    // we use that as a reliable safety net: if this route is current
+    // again and we're still marked as loading, reset it right after
+    // this frame.
+    // ============================================================
+    final isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
+    if (isCurrentRoute && _isLoading) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _isLoading) {
+          debugPrint(
+            'SignupFlow: route is current again but still loading — '
+            'auto-resetting (likely a browser back-button pop)',
+          );
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      });
+    }
+
     // ✅ AppTheme colors from context extensions
     final backgroundColor = context.backgroundColor;
 
@@ -107,6 +138,10 @@ class _SignupFlowState extends State<SignupFlow> {
     } catch (e) {
       debugPrint('Navigation error: $e');
     } finally {
+      // ✅ Still kept as the primary path — this fires correctly for
+      // every normal pop (in-app back, successful registration, etc).
+      // The build()-time check above is only a safety net for the
+      // browser-back case where this finally block doesn't run.
       if (mounted) {
         setState(() {
           _isLoading = false;

@@ -219,6 +219,13 @@ class _DataConsentScreenState extends State<DataConsentScreen>
 
     return Scaffold(
       backgroundColor: backgroundColor,
+      // ✅ Create-account button now lives in a static bottomNavigationBar
+      // (same pattern as CreateSalonScreen), centered, instead of scrolling
+      // away with the rest of the content.
+      bottomNavigationBar: _buildBottomBar(
+        isDark: isDark,
+        primaryColor: primaryColor,
+      ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -677,58 +684,9 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                 const SizedBox(height: 16),
                               ],
 
-                              // Continue Button
-                              SizedBox(
-                                width: double.infinity,
-                                height: 52,
-                                child: ElevatedButton(
-                                  onPressed: _isContinueEnabled
-                                      ? _handleContinue
-                                      : null,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: _isContinueEnabled
-                                        ? primaryColor
-                                        : (isDark
-                                            ? Colors.white12
-                                            : Colors.grey.shade300),
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                        vertical: 16),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                  ),
-                                  child: _isLoading
-                                      ? const SizedBox(
-                                          width: 22,
-                                          height: 22,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white,
-                                          ),
-                                        )
-                                      : Row(
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.center,
-                                          children: [
-                                            const Icon(Icons.check_circle,
-                                                size: 20),
-                                            const SizedBox(width: 8),
-                                            const Text(
-                                              'Create Account',
-                                              style: TextStyle(
-                                                fontSize: 16,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                ),
-                              ),
-
-                              const SizedBox(height: 16),
-
                               // Cancel Button
+                              // (Create Account button moved to the static
+                              // bottomNavigationBar below, like CreateSalonScreen)
                               Center(
                                 child: TextButton(
                                   onPressed:
@@ -742,6 +700,11 @@ class _DataConsentScreenState extends State<DataConsentScreen>
                                   ),
                                 ),
                               ),
+
+                              // Small bottom padding so the last scrolled
+                              // content doesn't sit flush against the
+                              // static bottom bar.
+                              const SizedBox(height: 8),
                             ],
                           ),
                         ),
@@ -752,6 +715,80 @@ class _DataConsentScreenState extends State<DataConsentScreen>
               ),
             );
           },
+        ),
+      ),
+    );
+  }
+
+  // ==================== STATIC BOTTOM BAR (Create Account) ====================
+  Widget _buildBottomBar({
+    required bool isDark,
+    required Color primaryColor,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 52,
+          child: Center(
+            child: ElevatedButton(
+              onPressed: _isContinueEnabled ? _handleContinue : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _isContinueEnabled
+                    ? primaryColor
+                    : (isDark ? Colors.white12 : Colors.grey.shade300),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  vertical: 14,
+                  horizontal: 28,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: _isLoading
+                  ? const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Text('Creating...'),
+                      ],
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.check_circle, size: 20),
+                        SizedBox(width: 8),
+                        Text(
+                          'Create Account',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
         ),
       ),
     );
