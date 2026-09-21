@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/owner/add_services.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/services/currency_service.dart';
+import 'package:flutter_application_1/widgets/currency_prefix.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ServiceManagementScreen extends StatefulWidget {
@@ -35,6 +37,21 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   List<Map<String, dynamic>> _genders = [];
   List<Map<String, dynamic>> _ageCategories = [];
 
+  // ✅ Currency Service (singleton)
+  final CurrencyService _currencyService = CurrencyService.instance;
+
+  // ✅ Salon currency code (loaded from DB)
+  String _salonCurrencyCode = 'LKR';
+
+  // ✅ Currency getters (from CurrencyService)
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
+
+  String get _salonPriceHint => _currencyService.getHint(_salonCurrencyCode);
+
+  bool get _currencyUsesDecimals =>
+      _currencyService.getInfo(_salonCurrencyCode).decimals > 0;
+
   // For expansion state - track expanded services
   final Set<int> _expandedServices = {};
 
@@ -65,6 +82,62 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     _scrollController.dispose();
     super.dispose();
   }
+
+  // ============================================
+  // ✅ CURRENCY HELPERS
+  // ============================================
+
+  /// Format price with salon currency
+  String _formatPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
+
+  /// Validate price for currency decimals
+  String? _validatePriceForCurrency(String priceText) {
+    if (priceText.isEmpty) return null;
+
+    final price = double.tryParse(priceText);
+    if (price == null) return 'Please enter a valid number';
+    if (price <= 0) return 'Price must be greater than 0';
+
+    // ✅ Currency-aware decimal validation
+    if (!_currencyUsesDecimals && priceText.contains('.')) {
+      final decimalPart = priceText.split('.').last;
+      if (decimalPart.isNotEmpty && int.tryParse(decimalPart) != 0) {
+        return '$_salonCurrencyCode does not use decimals';
+      }
+    }
+
+    return null;
+  }
+
+  /// Load salon currency from DB
+  Future<void> _loadSalonCurrency() async {
+    try {
+      final response = await supabase
+          .from('salons')
+          .select('currency_code')
+          .eq('id', widget.salonId)
+          .single();
+
+      if (!mounted) return;
+
+      setState(() {
+        _salonCurrencyCode = response['currency_code'] as String? ?? 'LKR';
+      });
+
+      debugPrint('✅ Salon currency loaded: $_salonCurrencyCode');
+    } catch (e) {
+      debugPrint('Error loading salon currency: $e');
+    }
+  }
+
+  // ============================================
+  // DATA LOADING
+  // ============================================
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
@@ -146,6 +219,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         return;
       }
 
+      // ✅ STEP 4: Load salon currency
+      await _loadSalonCurrency();
+
       // Load categories
       final categoriesResponse = await supabase
           .from('salon_categories')
@@ -219,7 +295,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       final serviceIds = services.map<int>((s) => s['id'] as int).toList();
 
       // ✅ STEP 3: Load ALL variants for these services in ONE query
-      //    WITHOUT any join syntax — just get raw data
       final variantsResponse = await supabase
           .from('service_variants')
           .select('''
@@ -345,7 +420,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // ADD VARIANT DIALOG
+  // ✅ ADD VARIANT DIALOG (WITH CURRENCY)
   // ============================================
 
   void _showAddVariantDialog(Map<String, dynamic> service) {
@@ -357,16 +432,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     String? durationError;
 
     void validatePrice() {
-      final price = double.tryParse(priceController.text.trim());
-      if (priceController.text.trim().isEmpty) {
-        priceError = null;
-      } else if (price == null) {
-        priceError = 'Please enter a valid number';
-      } else if (price <= 0) {
-        priceError = 'Price must be greater than 0';
-      } else {
-        priceError = null;
-      }
+      priceError = _validatePriceForCurrency(priceController.text.trim());
     }
 
     void validateDuration() {
@@ -582,12 +648,13 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
                   Row(
                     children: [
+                      // ✅ Price field with dynamic currency
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Price (Rs.)',
+                              'Price ($_salonCurrencySymbol)',
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
@@ -597,19 +664,28 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                             const SizedBox(height: 8),
                             TextFormField(
                               controller: priceController,
-                              keyboardType: TextInputType.number,
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
                               style: TextStyle(
                                 color: isDark ? Colors.white : Colors.black87,
                               ),
                               decoration: InputDecoration(
-                                hintText: 'e.g., 1500',
+                                hintText: _salonPriceHint,
                                 hintStyle: TextStyle(
                                   color: isDark ? Colors.white70 : Colors.grey,
                                 ),
-                                prefixIcon: const Icon(
-                                  Icons.currency_rupee,
-                                  color: Colors.grey,
-                                  size: 20,
+                                // ✅ CurrencyPrefix instead of hardcoded icon
+                                prefixIcon: CurrencyPrefix(
+                                  symbol: _salonCurrencySymbol,
+                                  type: CurrencyDisplayType.text,
+                                  color: isDark ? Colors.white70 : Colors.grey,
+                                  fontSize: 16,
+                                ),
+                                prefixIconConstraints: const BoxConstraints(
+                                  minWidth: 50,
+                                  minHeight: 20,
                                 ),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12),
@@ -798,16 +874,20 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // EDIT VARIANT DIALOG
+  // ✅ EDIT VARIANT DIALOG (WITH CURRENCY)
   // ============================================
 
   void _showEditVariantDialog(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
   ) {
-    final priceController = TextEditingController(
-      text: variant['price'].toString(),
-    );
+    // ✅ Clean price display (no .0 for LKR)
+    final double priceValue = (variant['price'] as num).toDouble();
+    final String initialPriceText = _currencyUsesDecimals
+        ? priceValue.toString()
+        : priceValue.toInt().toString();
+
+    final priceController = TextEditingController(text: initialPriceText);
     final durationController = TextEditingController(
       text: variant['duration'].toString(),
     );
@@ -815,16 +895,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     String? durationError;
 
     void validatePrice() {
-      final price = double.tryParse(priceController.text.trim());
-      if (priceController.text.trim().isEmpty) {
-        priceError = null;
-      } else if (price == null) {
-        priceError = 'Please enter a valid number';
-      } else if (price <= 0) {
-        priceError = 'Price must be greater than 0';
-      } else {
-        priceError = null;
-      }
+      priceError = _validatePriceForCurrency(priceController.text.trim());
     }
 
     void validateDuration() {
@@ -954,25 +1025,35 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
+                      // ✅ Price field with dynamic currency
                       Expanded(
                         child: TextFormField(
                           controller: priceController,
-                          keyboardType: TextInputType.number,
+                          keyboardType:
+                              const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
                           style: TextStyle(
                             color: isDark ? Colors.white : Colors.black87,
                           ),
                           decoration: InputDecoration(
-                            labelText: 'Price (Rs.)',
+                            labelText: 'Price ($_salonCurrencySymbol)',
                             labelStyle: TextStyle(
                               color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            prefixIcon: const Icon(
-                              Icons.currency_rupee,
-                              size: 20,
-                              color: Colors.grey,
+                            // ✅ CurrencyPrefix instead of hardcoded icon
+                            prefixIcon: CurrencyPrefix(
+                              symbol: _salonCurrencySymbol,
+                              type: CurrencyDisplayType.text,
+                              color: isDark ? Colors.white70 : Colors.grey,
+                              fontSize: 14,
+                            ),
+                            prefixIconConstraints: const BoxConstraints(
+                              minWidth: 50,
+                              minHeight: 20,
                             ),
                             filled: true,
                             fillColor: isDark
@@ -1113,7 +1194,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // DELETE VARIANT
+  // ✅ DELETE VARIANT (WITH CURRENCY)
   // ============================================
 
   Future<void> _deleteVariant(
@@ -1190,8 +1271,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
+                    // ✅ Dynamic currency
                     Text(
-                      'Rs. ${variant['price']} | ${variant['duration']} mins',
+                      '${_formatPrice(variant['price'])} | ${variant['duration']} mins',
                       style: TextStyle(
                         fontSize: 13,
                         color: isDark ? Colors.white60 : Colors.black87,
@@ -2033,8 +2115,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 4),
+                                    // ✅ Dynamic currency format
                                     Text(
-                                      'Rs. ${variant['price']} | ${variant['duration']} mins',
+                                      '${_formatPrice(variant['price'])} | ${variant['duration']} mins',
                                       style: TextStyle(
                                         fontSize: 12,
                                         color: isDark
@@ -2382,8 +2465,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                           : Colors.black87,
                                     ),
                                   ),
+                                  // ✅ Dynamic currency format
                                   Text(
-                                    'Rs. ${variant['price']} | ${variant['duration']} mins',
+                                    '${_formatPrice(variant['price'])} | ${variant['duration']} mins',
                                     style: TextStyle(
                                       fontSize: 11,
                                       color: isDark
@@ -2439,9 +2523,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   // WEB VIEW
   // ============================================
 
-  // Sliver version used inside CustomScrollView so the search bar and the
-  // grid/list share ONE scrollable — this is what prevents the
-  // "not enough height" RenderFlex overflow on short screens.
   Widget _buildWebViewSliver() {
     final filteredServices = _filteredServices;
     final isDark = context.isDarkMode;
@@ -2480,8 +2561,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   // MOBILE VIEW
   // ============================================
 
-  // Sliver version used inside CustomScrollView (same reasoning as
-  // _buildWebViewSliver above).
   Widget _buildMobileViewSliver() {
     final filteredServices = _filteredServices;
     final isDark = context.isDarkMode;
@@ -2510,8 +2589,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     );
   }
 
-  // Shared empty state, sized to fit whatever remaining space is given
-  // (mainAxisSize.min + a scroll view so it never hard-overflows).
   Widget _buildEmptyState(bool isDark) {
     return Center(
       child: SingleChildScrollView(
@@ -2651,8 +2728,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         child: _isLoading
             ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
             : isWeb
-            ? _buildWebLayout()
-            : _buildMobileLayout(),
+                ? _buildWebLayout()
+                : _buildMobileLayout(),
       ),
     );
   }
@@ -2665,9 +2742,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       child: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 1200),
-          // CustomScrollView puts the search bar and the grid on ONE
-          // scrollable, so a short/narrow viewport just scrolls instead
-          // of forcing a fixed-height Column to overflow.
           child: CustomScrollView(
             slivers: [
               SliverToBoxAdapter(child: _buildSearchAndFilter()),

@@ -46,7 +46,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   final CurrencyService _currencyService = CurrencyService.instance;
 
   // ==================== HARDCODED GENDER LIST ====================
-  // ✅ Gender is a fixed system list — users select ONE, never add/edit.
   static const List<Map<String, dynamic>> _hardcodedGenders = [
     {'id': 1, 'display_name': 'Male'},
     {'id': 2, 'display_name': 'Female'},
@@ -60,13 +59,12 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   int? _editingCategoryId;
 
   int? _variantTargetServiceIndex;
-  // ✅ Selected gender id (single-select, from hardcoded list)
   int? _selectedGenderId;
   int? _selectedAgeCategoryId;
 
   // ==================== DATA ====================
   List<Map<String, dynamic>> _categories = [];
-  List<Map<String, dynamic>> _genders = []; // ✅ always the hardcoded list
+  List<Map<String, dynamic>> _genders = [];
   List<Map<String, dynamic>> _ageCategories = [];
   List<Map<String, dynamic>> _globalAgeCategories = [];
   List<Map<String, dynamic>> _globalCategories = [];
@@ -187,11 +185,39 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   final supabase = Supabase.instance.client;
 
+  // ============================================
+  // ✅ CURRENCY GETTERS
+  // ============================================
   String get _salonCurrencySymbol =>
       _currencyService.getSymbol(_salonCurrencyCode);
 
   bool get _currencyUsesDecimals =>
       _currencyService.getInfo(_salonCurrencyCode).decimals > 0;
+
+  // ✅ NEW: Price hint for input field
+  String get _salonPriceHint => _currencyService.getHint(_salonCurrencyCode);
+
+  // ✅ NEW: Example prices for hierarchy guide card
+  String get _examplePrice {
+    if (_currencyUsesDecimals) {
+      return '$_salonCurrencySymbol${15.00}';
+    }
+    return '$_salonCurrencySymbol${1500}';
+  }
+
+  String get _examplePriceFemale {
+    if (_currencyUsesDecimals) {
+      return '$_salonCurrencySymbol${18.00}';
+    }
+    return '$_salonCurrencySymbol${1800}';
+  }
+
+  String get _examplePriceChild {
+    if (_currencyUsesDecimals) {
+      return '$_salonCurrencySymbol${4.00}';
+    }
+    return '$_salonCurrencySymbol${400}';
+  }
 
   bool get _hasAtLeastOneVariantField =>
       _selectedGenderId != null ||
@@ -204,7 +230,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     super.initState();
     _ageMinController.text = '0';
     _ageMaxController.text = '100';
-    // ✅ Seed the gender list from the hardcoded list
     _genders = List<Map<String, dynamic>>.from(_hardcodedGenders);
     _loadData();
     _loadSalonCurrency();
@@ -262,6 +287,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       setState(() {
         _salonCurrencyCode = response['currency_code'] as String? ?? 'LKR';
       });
+
+      debugPrint('✅ Salon currency loaded: $_salonCurrencyCode');
     } catch (e) {
       debugPrint('Error loading salon currency: $e');
     }
@@ -281,13 +308,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return;
     }
     final bool exists = _addedServices.asMap().entries.any(
-          (e) =>
-              e.value['name'].toString().toLowerCase() == name.toLowerCase() &&
-              e.key != _editingServiceIndex,
-        );
+      (e) =>
+          e.value['name'].toString().toLowerCase() == name.toLowerCase() &&
+          e.key != _editingServiceIndex,
+    );
     setState(() {
-      _serviceNameError =
-          exists ? 'A service with this name already exists' : null;
+      _serviceNameError = exists
+          ? 'A service with this name already exists'
+          : null;
     });
   }
 
@@ -303,8 +331,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           c['id'] != _editingCategoryId,
     );
     setState(() {
-      _categoryNameError =
-          exists ? 'A category with this name already exists' : null;
+      _categoryNameError = exists
+          ? 'A category with this name already exists'
+          : null;
     });
   }
 
@@ -318,8 +347,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           (a) =>
               a['display_name'].toString().toLowerCase() == name.toLowerCase(),
         );
-        _ageNameError =
-            exists ? 'This age category already exists' : null;
+        _ageNameError = exists ? 'This age category already exists' : null;
       }
 
       final minStr = _ageMinController.text.trim();
@@ -368,6 +396,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return;
     }
 
+    // ✅ Currency-aware decimal validation
     if (!_currencyUsesDecimals && priceText.contains('.')) {
       final decimalPart = priceText.split('.').last;
       if (decimalPart.isNotEmpty && int.tryParse(decimalPart) != 0) {
@@ -414,10 +443,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .eq('is_active', true)
           .order('display_order');
 
-      // ✅ Genders are NOT loaded from DB — hardcoded list is used.
-      //    (Previously we loaded from `salon_genders`, but now we use
-      //    the fixed `_hardcodedGenders` list.)
-
       final ageResponse = await supabase
           .from('salon_age_categories')
           .select(
@@ -443,7 +468,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         globalCategoriesResponse = await supabase
             .from('categories')
             .select(
-                'id, display_name, description, icon_name, color, display_order')
+              'id, display_name, description, icon_name, color, display_order',
+            )
             .eq('is_active', true)
             .order('display_order');
       } catch (e) {
@@ -453,11 +479,12 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       setState(() {
         _categories = List<Map<String, dynamic>>.from(categoriesResponse);
         _ageCategories = List<Map<String, dynamic>>.from(ageResponse);
-        _globalAgeCategories =
-            List<Map<String, dynamic>>.from(globalAgeResponse);
-        _globalCategories =
-            List<Map<String, dynamic>>.from(globalCategoriesResponse);
-        // ✅ Ensure gender list is the hardcoded one
+        _globalAgeCategories = List<Map<String, dynamic>>.from(
+          globalAgeResponse,
+        );
+        _globalCategories = List<Map<String, dynamic>>.from(
+          globalCategoriesResponse,
+        );
         _genders = List<Map<String, dynamic>>.from(_hardcodedGenders);
 
         if (_categories.isNotEmpty && _selectedCategoryId == null) {
@@ -482,7 +509,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     }
   }
 
-  /// ✅ Map a gender display name (e.g. "Male") to its hardcoded id.
   int? _genderIdFromName(String? name) {
     if (name == null || name.isEmpty) return null;
     final match = _hardcodedGenders.firstWhere(
@@ -492,7 +518,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     return match.isNotEmpty ? match['id'] as int? : null;
   }
 
-  /// ✅ Get the display name for a hardcoded gender id.
   String _genderNameFromId(int? id) {
     if (id == null) return 'Any';
     final match = _hardcodedGenders.firstWhere(
@@ -522,18 +547,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       }
       final uniqueServices = uniqueByName.values.toList();
 
-      final serviceIds =
-          uniqueServices.map<int>((s) => s['id'] as int).toList();
+      final serviceIds = uniqueServices
+          .map<int>((s) => s['id'] as int)
+          .toList();
 
       final variantsResponse = await supabase
           .from('service_variants')
           .select(
-              'id, service_id, price, duration, salon_gender_id, salon_age_category_id')
+            'id, service_id, price, duration, salon_gender_id, salon_age_category_id',
+          )
           .inFilter('service_id', serviceIds)
           .eq('is_active', true);
 
-      // ✅ Fetch salon_genders to resolve the DB gender_id → display_name
-      //    (salon_genders rows reference the system gender list).
       final salonGenderIdToName = <int, String>{};
       try {
         final salonGenderRows = await supabase
@@ -541,8 +566,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             .select('id, display_name')
             .eq('salon_id', widget.salonId);
         for (var g in salonGenderRows) {
-          salonGenderIdToName[g['id'] as int] =
-              (g['display_name'] ?? 'Any').toString();
+          salonGenderIdToName[g['id'] as int] = (g['display_name'] ?? 'Any')
+              .toString();
         }
       } catch (e) {
         debugPrint('Could not load salon genders map: $e');
@@ -559,15 +584,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         final rawGenderId = v['salon_gender_id'] as int?;
         final ageId = v['salon_age_category_id'] as int?;
 
-        // ✅ Map stored salon_gender_id → display_name → hardcoded id
         final storedGenderName = rawGenderId != null
             ? (salonGenderIdToName[rawGenderId] ?? 'Any')
             : 'Any';
         final genderId = _genderIdFromName(storedGenderName);
 
         final genderName = _genderNameFromId(genderId);
-        final ageName =
-            ageId != null ? (ageIdToName[ageId] ?? 'Any') : 'Any';
+        final ageName = ageId != null ? (ageIdToName[ageId] ?? 'Any') : 'Any';
 
         final priceNum = (v['price'] as num?)?.toDouble();
 
@@ -622,7 +645,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .eq('service_id', widget.serviceId!)
           .eq('is_active', true);
 
-      // ✅ Fetch salon_genders to resolve stored id → display_name
       final salonGenderIdToName = <int, String>{};
       try {
         final salonGenderRows = await supabase
@@ -630,8 +652,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             .select('id, display_name')
             .eq('salon_id', widget.salonId);
         for (var g in salonGenderRows) {
-          salonGenderIdToName[g['id'] as int] =
-              (g['display_name'] ?? 'Any').toString();
+          salonGenderIdToName[g['id'] as int] = (g['display_name'] ?? 'Any')
+              .toString();
         }
       } catch (e) {
         debugPrint('Could not load salon genders map: $e');
@@ -656,11 +678,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   'max_age': 0,
                 },
               )
-            : {
-                'display_name': 'Any',
-                'min_age': 0,
-                'max_age': 0,
-              };
+            : {'display_name': 'Any', 'min_age': 0, 'max_age': 0};
 
         final priceNum = (v['price'] as num?)?.toDouble();
 
@@ -717,7 +735,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .eq('service_id', serviceId)
           .eq('is_active', true);
 
-      // ✅ Resolve stored salon_gender_id → display_name
       final salonGenderIdToName = <int, String>{};
       try {
         final salonGenderRows = await supabase
@@ -725,8 +742,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             .select('id, display_name')
             .eq('salon_id', widget.salonId);
         for (var g in salonGenderRows) {
-          salonGenderIdToName[g['id'] as int] =
-              (g['display_name'] ?? 'Any').toString();
+          salonGenderIdToName[g['id'] as int] = (g['display_name'] ?? 'Any')
+              .toString();
         }
       } catch (e) {
         debugPrint('Could not load salon genders map: $e');
@@ -747,8 +764,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             : 'Any';
         final genderId = _genderIdFromName(storedGenderName);
 
-        final ageName =
-            ageId != null ? (ageIdToName[ageId] ?? 'Any') : 'Any';
+        final ageName = ageId != null ? (ageIdToName[ageId] ?? 'Any') : 'Any';
 
         final priceNum = (v['price'] as num?)?.toDouble();
 
@@ -828,6 +844,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     });
   }
 
+  // ✅ Format price for display (currency-aware)
   String _formatPriceDisplay(Map<String, dynamic> v) {
     final priceSet = v['price_set'] == true;
     final price = (v['price'] as num?)?.toDouble() ?? 0.0;
@@ -882,13 +899,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             .eq('id', _editingCategoryId!);
 
         setState(() {
-          final idx =
-              _categories.indexWhere((c) => c['id'] == _editingCategoryId);
+          final idx = _categories.indexWhere(
+            (c) => c['id'] == _editingCategoryId,
+          );
           if (idx >= 0) {
-            _categories[idx] = {
-              ..._categories[idx],
-              ...data,
-            };
+            _categories[idx] = {..._categories[idx], ...data};
           }
           _editingCategoryId = null;
           _newCategoryNameController.clear();
@@ -897,8 +912,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           _selectedCategoryColor = _categoryColorOptions.first['hex'];
           _categoryNameError = null;
         });
-
-
       } else {
         data['display_order'] = _categories.length;
 
@@ -917,8 +930,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           _selectedCategoryColor = _categoryColorOptions.first['hex'];
           _categoryNameError = null;
         });
-
-
       }
     } catch (e) {
       _showSnackBar('Error saving category: $e', Colors.red);
@@ -1008,8 +1019,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             _variantTargetServiceIndex = null;
           }
         });
-
-
       }
     } catch (e) {
       _showSnackBar('Error deleting category: $e', Colors.red);
@@ -1088,8 +1097,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         _ageMinError = null;
         _ageMaxError = null;
       });
-
-
     } catch (e) {
       _showSnackBar('Error adding age category: $e', Colors.red);
     } finally {
@@ -1121,8 +1128,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
     final variants = isEditing
         ? List<Map<String, dynamic>>.from(
-            (_addedServices[_editingServiceIndex]['variants'] as List)
-                .map((v) => Map<String, dynamic>.from(v)),
+            (_addedServices[_editingServiceIndex]['variants'] as List).map(
+              (v) => Map<String, dynamic>.from(v),
+            ),
           )
         : <Map<String, dynamic>>[];
 
@@ -1151,11 +1159,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _serviceNameError = null;
       _variantTargetServiceIndex = null;
     });
-
-    // _showSnackBar(
-    //   'Service ${isEditing ? 'updated' : 'added'}. You can add variants next (optional).',
-    //   AppTheme.primary,
-    // );
   }
 
   void _editAddedService(int index) {
@@ -1206,7 +1209,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   Future<void> _confirmDeleteServiceFromDb(
-      int serviceId, int localIndex, String serviceName) async {
+    int serviceId,
+    int localIndex,
+    String serviceName,
+  ) async {
     final confirmed = await _showConfirmDialog(
       title: 'Delete Service?',
       message:
@@ -1308,11 +1314,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return;
     }
 
-    // ✅ Gender comes from the hardcoded list, resolved by id → name
     final genderName = _genderNameFromId(_selectedGenderId);
     final ageName = _selectedAgeCategoryId != null
         ? _getAgeCategoryDisplayName(
-            _ageCategories.firstWhere((a) => a['id'] == _selectedAgeCategoryId))
+            _ageCategories.firstWhere((a) => a['id'] == _selectedAgeCategoryId),
+          )
         : 'Any';
 
     final service = _addedServices[_variantTargetServiceIndex!];
@@ -1357,8 +1363,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _durationExpanded = false;
       _priceExpanded = false;
     });
-
-
   }
 
   void _editVariant(int serviceIndex, int variantIndex) {
@@ -1378,12 +1382,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _variantPriceController.text = (!priceSet || price == 0)
           ? ''
           : (_currencyUsesDecimals
-              ? price.toString()
-              : price.toInt().toString());
+                ? price.toString()
+                : price.toInt().toString());
 
       final duration = (v['duration'] as num).toInt();
-      _variantDurationController.text =
-          duration == 0 ? '' : duration.toString();
+      _variantDurationController.text = duration == 0
+          ? ''
+          : duration.toString();
 
       _genderExpanded = true;
       _ageExpanded = true;
@@ -1414,7 +1419,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
     if (variant['from_db'] == true && variant['variant_id'] != null) {
       _confirmRemoveDbVariant(
-          serviceIndex, variantIndex, variant['variant_id'] as int);
+        serviceIndex,
+        variantIndex,
+        variant['variant_id'] as int,
+      );
     } else {
       setState(() {
         (service['variants'] as List).removeAt(variantIndex);
@@ -1423,7 +1431,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   Future<void> _confirmRemoveDbVariant(
-      int serviceIndex, int variantIndex, int variantId) async {
+    int serviceIndex,
+    int variantIndex,
+    int variantId,
+  ) async {
     final confirmed = await _showConfirmDialog(
       title: 'Delete Variant?',
       message: 'This will permanently remove this variant from the salon.',
@@ -1432,10 +1443,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     if (confirmed == true) {
       setState(() => _isLoading = true);
       try {
-        await supabase
-            .from('service_variants')
-            .delete()
-            .eq('id', variantId);
+        await supabase.from('service_variants').delete().eq('id', variantId);
 
         setState(() {
           final service = _addedServices[serviceIndex];
@@ -1458,8 +1466,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           title,
           style: TextStyle(
@@ -1469,9 +1476,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         ),
         content: Text(
           message,
-          style: TextStyle(
-            color: _isDark ? Colors.white70 : Colors.grey[700],
-          ),
+          style: TextStyle(color: _isDark ? Colors.white70 : Colors.grey[700]),
         ),
         actions: [
           TextButton(
@@ -1501,14 +1506,16 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     }
 
     final totalVariantsPreview = _addedServices.fold<int>(
-        0, (sum, s) => sum + (s['variants'] as List).length);
+      0,
+      (sum, s) => sum + (s['variants'] as List).length,
+    );
 
     final confirmed = await _showSaveConfirmDialog(
       title: widget.isEditing ? 'Update Service?' : 'Save Services?',
       message: widget.isEditing
           ? 'This will save your changes to "${_addedServices.isNotEmpty ? _addedServices.first['name'] : ''}" to the database.'
           : 'This will save ${_addedServices.length} service${_addedServices.length == 1 ? '' : 's'} '
-              'and $totalVariantsPreview variant${totalVariantsPreview == 1 ? '' : 's'} to the database.',
+                'and $totalVariantsPreview variant${totalVariantsPreview == 1 ? '' : 's'} to the database.',
     );
 
     if (confirmed != true) return;
@@ -1524,8 +1531,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           title,
           style: TextStyle(
@@ -1535,9 +1541,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         ),
         content: Text(
           message,
-          style: TextStyle(
-            color: _isDark ? Colors.white70 : Colors.grey[700],
-          ),
+          style: TextStyle(color: _isDark ? Colors.white70 : Colors.grey[700]),
         ),
         actions: [
           TextButton(
@@ -1557,16 +1561,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
-  /// ✅ Ensure the hardcoded genders exist in `salon_genders` for this
-  /// salon, and return a map of {display_name (lowercase) → salon_gender_id}.
-  ///
-  /// This is required because `service_variants.salon_gender_id` references
-  /// `salon_genders.id`. The user picks from the hardcoded gender list,
-  /// but we still need a row in `salon_genders` for each gender we use.
   Future<Map<String, int>> _ensureSalonGenders() async {
     final Map<String, int> byNameLower = {};
 
-    // 1) Load existing salon_genders for this salon
     final existing = await supabase
         .from('salon_genders')
         .select('id, display_name')
@@ -1577,7 +1574,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       byNameLower[name.trim().toLowerCase()] = g['id'] as int;
     }
 
-    // 2) Insert any missing hardcoded genders
     int nextOrder = existing.length;
     for (final hg in _hardcodedGenders) {
       final name = (hg['display_name'] as String).trim();
@@ -1628,10 +1624,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         }
       }
 
-      // ✅ Ensure all hardcoded genders exist in `salon_genders` for this
-      //    salon, and build a {name(lower) → salon_gender_id} map.
-      final Map<String, int> genderIdByNameLower =
-          await _ensureSalonGenders();
+      final Map<String, int> genderIdByNameLower = await _ensureSalonGenders();
 
       final existingServicesResponse = await supabase
           .from('services')
@@ -1640,8 +1633,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
       final Map<String, int> existingServiceIdByName = {};
       for (var s in existingServicesResponse) {
-        existingServiceIdByName[
-                (s['name'] as String).trim().toLowerCase()] =
+        existingServiceIdByName[(s['name'] as String).trim().toLowerCase()] =
             s['id'] as int;
       }
 
@@ -1659,15 +1651,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           serviceId = localId;
           usedServiceIds.add(serviceId);
 
-          await supabase.from('services').update({
-            'name': svcName,
-            'description': (service['description'] as String).isEmpty
-                ? null
-                : service['description'],
-            'category_id': service['category_id'],
-            'icon_name': service['icon_name'],
-            'updated_at': DateTime.now().toIso8601String(),
-          }).eq('id', serviceId);
+          await supabase
+              .from('services')
+              .update({
+                'name': svcName,
+                'description': (service['description'] as String).isEmpty
+                    ? null
+                    : service['description'],
+                'category_id': service['category_id'],
+                'icon_name': service['icon_name'],
+                'updated_at': DateTime.now().toIso8601String(),
+              })
+              .eq('id', serviceId);
 
           await supabase
               .from('service_variants')
@@ -1679,15 +1674,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           serviceId = widget.serviceId!;
           usedServiceIds.add(serviceId);
 
-          await supabase.from('services').update({
-            'name': svcName,
-            'description': (service['description'] as String).isEmpty
-                ? null
-                : service['description'],
-            'category_id': service['category_id'],
-            'icon_name': service['icon_name'],
-            'updated_at': DateTime.now().toIso8601String(),
-          }).eq('id', serviceId);
+          await supabase
+              .from('services')
+              .update({
+                'name': svcName,
+                'description': (service['description'] as String).isEmpty
+                    ? null
+                    : service['description'],
+                'category_id': service['category_id'],
+                'icon_name': service['icon_name'],
+                'updated_at': DateTime.now().toIso8601String(),
+              })
+              .eq('id', serviceId);
         } else {
           final existingId = existingServiceIdByName[svcNameLower];
 
@@ -1695,16 +1693,19 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             serviceId = existingId;
             usedServiceIds.add(serviceId);
 
-            await supabase.from('services').update({
-              'name': svcName,
-              'description': (service['description'] as String).isEmpty
-                  ? null
-                  : service['description'],
-              'category_id': service['category_id'],
-              'icon_name': service['icon_name'],
-              'is_active': true,
-              'updated_at': DateTime.now().toIso8601String(),
-            }).eq('id', serviceId);
+            await supabase
+                .from('services')
+                .update({
+                  'name': svcName,
+                  'description': (service['description'] as String).isEmpty
+                      ? null
+                      : service['description'],
+                  'category_id': service['category_id'],
+                  'icon_name': service['icon_name'],
+                  'is_active': true,
+                  'updated_at': DateTime.now().toIso8601String(),
+                })
+                .eq('id', serviceId);
 
             await supabase
                 .from('service_variants')
@@ -1736,12 +1737,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
         final variants = service['variants'] as List;
         for (final v in variants) {
-          // ✅ Resolve gender name → salon_gender_id (ensuring the row
-          //    exists in `salon_genders`).
           final genderName = (v['gender_name'] as String? ?? 'Any').trim();
           final genderKey = genderName.toLowerCase();
-          final resolvedGenderId =
-              genderName == 'Any' ? null : genderIdByNameLower[genderKey];
+          final resolvedGenderId = genderName == 'Any'
+              ? null
+              : genderIdByNameLower[genderKey];
 
           final variantData = {
             'service_id': serviceId,
@@ -1796,7 +1796,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             });
           }
         }
-      }       
+      }
 
       if (!mounted) return;
 
@@ -1903,8 +1903,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 color: color.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(icon,
-                  color: color, size: isMainHeader ? 22 : 18),
+              child: Icon(icon, color: color, size: isMainHeader ? 22 : 18),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -1965,34 +1964,34 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
-  // HIERARCHY GUIDE
+  // ✅ HIERARCHY GUIDE (FIXED - NO HARDCODED "Rs.")
   // ============================================
   Widget _buildHierarchyGuideCard() {
     final isDark = _isDark;
 
     Widget levelLabel(String text, Color color) => Container(
-          width: 66,
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          alignment: Alignment.center,
-          child: Text(
-            text,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
-          ),
-        );
+      width: 66,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        text,
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
 
     Widget arrow(Color color) => Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Icon(Icons.arrow_forward, size: 12, color: color),
-        );
+      padding: const EdgeInsets.symmetric(horizontal: 6),
+      child: Icon(Icons.arrow_forward, size: 12, color: color),
+    );
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -2000,9 +1999,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: AppTheme.primary.withValues(alpha: 0.25),
-        ),
+        side: BorderSide(color: AppTheme.primary.withValues(alpha: 0.25)),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -2017,8 +2014,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Icon(Icons.account_tree,
-                      color: AppTheme.primary, size: 20),
+                  child: Icon(
+                    Icons.account_tree,
+                    color: AppTheme.primary,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -2045,13 +2045,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             const SizedBox(height: 12),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                    color: isDark ? Colors.grey[700]! : Colors.grey[200]!),
+                  color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -2060,8 +2060,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     children: [
                       levelLabel('Category', Colors.orange),
                       arrow(Colors.orange),
-                      const Icon(Icons.folder,
-                          size: 15, color: Colors.orange),
+                      const Icon(Icons.folder, size: 15, color: Colors.orange),
                       const SizedBox(width: 8),
                       Text(
                         'Hair',
@@ -2088,8 +2087,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         ),
                       ),
                       const SizedBox(width: 4),
-                      const Icon(Icons.content_cut,
-                          size: 13, color: Colors.blue),
+                      const Icon(
+                        Icons.content_cut,
+                        size: 13,
+                        color: Colors.blue,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         'Hair Cut',
@@ -2101,37 +2103,34 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       ),
                     ],
                   ),
-                  Padding(
-                    padding: const EdgeInsets.only(left: 20, top: 3),
-                    child: Row(
-                      children: [
-                        levelLabel('Variant', Colors.purple),
-                        arrow(Colors.purple),
-                        Text(
-                          '│  ├─ ①',
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      levelLabel('Variant', Colors.purple),
+                      arrow(Colors.purple),
+                      Text(
+                        '│  ├─ ①',
+                        style: TextStyle(
+                          fontFamily: 'monospace',
+                          fontSize: 11,
+                          color: isDark ? Colors.white38 : Colors.grey[400],
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          // ✅ DYNAMIC CURRENCY
+                          'Male • Adult   $_examplePrice • 30 min',
                           style: TextStyle(
-                            fontFamily: 'monospace',
                             fontSize: 11,
-                            color: isDark
-                                ? Colors.white38
-                                : Colors.grey[400],
+                            color: isDark ? Colors.white70 : Colors.grey[700],
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            'Male • Adult   Rs.1500 • 30 min',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color:
-                                  isDark ? Colors.white70 : Colors.grey[700],
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+
                   Padding(
                     padding: const EdgeInsets.only(left: 20, top: 2),
                     child: Row(
@@ -2142,19 +2141,17 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                           style: TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 11,
-                            color: isDark
-                                ? Colors.white38
-                                : Colors.grey[400],
+                            color: isDark ? Colors.white38 : Colors.grey[400],
                           ),
                         ),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            'Female • Adult  Rs.1800 • 45 min',
+                            // ✅ DYNAMIC CURRENCY
+                            'Female • Child  $_examplePriceFemale • 45 min',
                             style: TextStyle(
                               fontSize: 11,
-                              color:
-                                  isDark ? Colors.white70 : Colors.grey[700],
+                              color: isDark ? Colors.white70 : Colors.grey[700],
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -2176,8 +2173,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         ),
                       ),
                       const SizedBox(width: 4),
-                      const Icon(Icons.water_drop,
-                          size: 13, color: Colors.blue),
+                      const Icon(
+                        Icons.water_drop,
+                        size: 13,
+                        color: Colors.blue,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         'Hair Wash',
@@ -2199,9 +2199,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                           style: TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 11,
-                            color: isDark
-                                ? Colors.white38
-                                : Colors.grey[400],
+                            color: isDark ? Colors.white38 : Colors.grey[400],
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -2210,8 +2208,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                             'Any • Any   Free • —',
                             style: TextStyle(
                               fontSize: 11,
-                              color:
-                                  isDark ? Colors.white70 : Colors.grey[700],
+                              color: isDark ? Colors.white70 : Colors.grey[700],
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -2229,19 +2226,17 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                           style: TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 11,
-                            color: isDark
-                                ? Colors.white38
-                                : Colors.grey[400],
+                            color: isDark ? Colors.white38 : Colors.grey[400],
                           ),
                         ),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            'Male • Child  Rs.400 • 10 min',
+                            // ✅ DYNAMIC CURRENCY
+                            'Male • Child  $_examplePriceChild • 10 min',
                             style: TextStyle(
                               fontSize: 11,
-                              color:
-                                  isDark ? Colors.white70 : Colors.grey[700],
+                              color: isDark ? Colors.white70 : Colors.grey[700],
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -2256,9 +2251,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline,
-                    size: 13,
-                    color: isDark ? Colors.white38 : Colors.grey[500]),
+                Icon(
+                  Icons.info_outline,
+                  size: 13,
+                  color: isDark ? Colors.white38 : Colors.grey[500],
+                ),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -2321,55 +2318,67 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         },
         fieldViewBuilder:
             (context, textController, focusNode, onFieldSubmitted) {
-          if (textController.text != _newCategoryNameController.text) {
-            textController.text = _newCategoryNameController.text;
-          }
-          _newCategoryNameController.addListener(() {
-            if (textController.text != _newCategoryNameController.text) {
-              textController.text = _newCategoryNameController.text;
-            }
-          });
+              if (textController.text != _newCategoryNameController.text) {
+                textController.text = _newCategoryNameController.text;
+              }
+              _newCategoryNameController.addListener(() {
+                if (textController.text != _newCategoryNameController.text) {
+                  textController.text = _newCategoryNameController.text;
+                }
+              });
 
-          return TextFormField(
-            controller: textController,
-            focusNode: focusNode,
-            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-            decoration: InputDecoration(
-              labelText: 'Category Name *',
-              hintText: 'e.g., Hair, Nails, Spa',
-              hintStyle:
-                  TextStyle(color: isDark ? Colors.white70 : Colors.grey),
-              prefixIcon: Icon(Icons.category,
-                  size: 18, color: isDark ? Colors.white70 : Colors.grey),
-              suffixIcon: suggestions.isNotEmpty
-                  ? Icon(Icons.arrow_drop_down,
-                      color: isDark ? Colors.white70 : Colors.grey)
-                  : null,
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10)),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(
-                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(
-                    color: AppTheme.primary, width: 2),
-              ),
-              filled: true,
-              fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              errorText: _categoryNameError,
-              errorMaxLines: 2,
-            ),
-            onChanged: (value) {
-              _newCategoryNameController.text = value;
-              _validateCategoryName();
+              return TextFormField(
+                controller: textController,
+                focusNode: focusNode,
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                decoration: InputDecoration(
+                  labelText: 'Category Name *',
+                  hintText: 'e.g., Hair, Nails, Spa',
+                  hintStyle: TextStyle(
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
+                  prefixIcon: Icon(
+                    Icons.category,
+                    size: 18,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
+                  suffixIcon: suggestions.isNotEmpty
+                      ? Icon(
+                          Icons.arrow_drop_down,
+                          color: isDark ? Colors.white70 : Colors.grey,
+                        )
+                      : null,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(
+                      color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(
+                      color: AppTheme.primary,
+                      width: 2,
+                    ),
+                  ),
+                  filled: true,
+                  fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  errorText: _categoryNameError,
+                  errorMaxLines: 2,
+                ),
+                onChanged: (value) {
+                  _newCategoryNameController.text = value;
+                  _validateCategoryName();
+                },
+              );
             },
-          );
-        },
       ),
     );
   }
@@ -2404,269 +2413,269 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     final isEditingCat = _editingCategoryId != null;
 
     Widget addCategoryForm() => Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isEditingCat
-                  ? Colors.orange.withValues(alpha: 0.5)
-                  : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
-              width: isEditingCat ? 1.5 : 1,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isEditingCat
+              ? Colors.orange.withValues(alpha: 0.5)
+              : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
+          width: isEditingCat ? 1.5 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  Icon(
-                    isEditingCat ? Icons.edit : Icons.add_circle_outline,
-                    size: 18,
-                    color: isEditingCat ? Colors.orange : Colors.green,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    isEditingCat ? 'Edit Category' : 'Add New Category',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (isEditingCat)
-                    TextButton(
-                      onPressed: _cancelEditCategory,
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: Size.zero,
-                      ),
-                      child: const Text(
-                        'Cancel',
-                        style:
-                            TextStyle(fontSize: 11, color: Colors.red),
-                      ),
-                    ),
-                ],
+              Icon(
+                isEditingCat ? Icons.edit : Icons.add_circle_outline,
+                size: 18,
+                color: isEditingCat ? Colors.orange : Colors.green,
               ),
-              const SizedBox(height: 12),
-              _buildCategoryNameSuggestionField(),
-              TextFormField(
-                controller: _newCategoryDescriptionController,
-                maxLines: 2,
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
-                decoration: InputDecoration(
-                  labelText: 'Description (optional)',
-                  hintText: 'e.g., Hair cutting and styling',
-                  prefixIcon: Icon(Icons.description,
-                      size: 18,
-                      color: isDark ? Colors.white70 : Colors.grey),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(
-                        color:
-                            isDark ? Colors.grey[700]! : Colors.grey[300]!),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(
-                        color: AppTheme.primary, width: 2),
-                  ),
-                  filled: true,
-                  fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
+              const SizedBox(width: 8),
+              Text(
+                isEditingCat ? 'Edit Category' : 'Add New Category',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
-              const SizedBox(height: 8),
-              _buildIconPicker(),
-              const SizedBox(height: 8),
-              _buildColorPicker(),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _isLoading ? null : _addOrUpdateCategory,
-                  icon: Icon(
-                      isEditingCat ? Icons.save : Icons.add,
-                      size: 18),
-                  label:
-                      Text(isEditingCat ? 'Update Category' : 'Add Category'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        isEditingCat ? Colors.orange : Colors.green,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
+              const Spacer(),
+              if (isEditingCat)
+                TextButton(
+                  onPressed: _cancelEditCategory,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
                   ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontSize: 11, color: Colors.red),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          _buildCategoryNameSuggestionField(),
+          TextFormField(
+            controller: _newCategoryDescriptionController,
+            maxLines: 2,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            decoration: InputDecoration(
+              labelText: 'Description (optional)',
+              hintText: 'e.g., Hair cutting and styling',
+              prefixIcon: Icon(
+                Icons.description,
+                size: 18,
+                color: isDark ? Colors.white70 : Colors.grey,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _buildIconPicker(),
+          const SizedBox(height: 8),
+          _buildColorPicker(),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _isLoading ? null : _addOrUpdateCategory,
+              icon: Icon(isEditingCat ? Icons.save : Icons.add, size: 18),
+              label: Text(isEditingCat ? 'Update Category' : 'Add Category'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: isEditingCat ? Colors.orange : Colors.green,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    Widget categoriesList() => Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.list, size: 18, color: Colors.blue),
+              const SizedBox(width: 8),
+              Text(
+                'Categories (${_categories.length})',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
             ],
           ),
-        );
-
-    Widget categoriesList() => Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.list, size: 18, color: Colors.blue),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Categories (${_categories.length})',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                ],
+          const SizedBox(height: 12),
+          if (_categories.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(height: 12),
-              if (_categories.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Center(
-                    child: Column(
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.inbox,
+                      size: 36,
+                      color: isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No categories yet',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _categories.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final cat = _categories[index];
+                final catId = cat['id'];
+                final isSelected = _selectedCategoryId == catId;
+                final isBeingEdited = _editingCategoryId == catId;
+
+                return Material(
+                  color: isSelected
+                      ? AppTheme.primary.withValues(alpha: 0.08)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  clipBehavior: Clip.antiAlias,
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 0,
+                    ),
+                    dense: true,
+                    leading: CircleAvatar(
+                      radius: 16,
+                      backgroundColor: _hexToColor(
+                        cat['color'] ?? '#FF6B8B',
+                      ).withValues(alpha: 0.15),
+                      child: Icon(
+                        _iconFromName(cat['icon_name']),
+                        size: 14,
+                        color: _hexToColor(cat['color'] ?? '#FF6B8B'),
+                      ),
+                    ),
+                    title: Text(
+                      _getCategoryDisplayName(cat),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isSelected || isBeingEdited
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                        color: isBeingEdited
+                            ? Colors.orange
+                            : (isSelected
+                                  ? AppTheme.primary
+                                  : (isDark ? Colors.white : Colors.black87)),
+                      ),
+                    ),
+                    subtitle: (cat['description'] ?? '').toString().isNotEmpty
+                        ? Text(
+                            cat['description'],
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        : null,
+                    onTap: () => setState(() => _selectedCategoryId = catId),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.inbox,
-                            size: 36,
-                            color:
-                                isDark ? Colors.white30 : Colors.grey[400]),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No categories yet',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color:
-                                isDark ? Colors.white70 : Colors.grey[500],
+                        IconButton(
+                          icon: const Icon(
+                            Icons.edit,
+                            size: 16,
+                            color: Colors.blue,
                           ),
+                          onPressed: () => _editCategory(index),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          tooltip: 'Edit',
                         ),
+                        const SizedBox(width: 6),
+                        IconButton(
+                          icon: Icon(
+                            Icons.delete_outline,
+                            size: 16,
+                            color: isDark ? Colors.red[300] : Colors.red,
+                          ),
+                          onPressed: () => _deleteCategory(index),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          tooltip: 'Delete',
+                        ),
+                        if (isSelected) ...[
+                          const SizedBox(width: 6),
+                          const Icon(
+                            Icons.check_circle,
+                            color: AppTheme.primary,
+                            size: 18,
+                          ),
+                        ],
                       ],
                     ),
                   ),
-                )
-              else
-                ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _categories.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final cat = _categories[index];
-                    final catId = cat['id'];
-                    final isSelected = _selectedCategoryId == catId;
-                    final isBeingEdited = _editingCategoryId == catId;
-
-                    return Material(
-                      color: isSelected
-                          ? AppTheme.primary.withValues(alpha: 0.08)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(8),
-                      clipBehavior: Clip.antiAlias,
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 0),
-                        dense: true,
-                        leading: CircleAvatar(
-                          radius: 16,
-                          backgroundColor:
-                              _hexToColor(cat['color'] ?? '#FF6B8B')
-                                  .withValues(alpha: 0.15),
-                          child: Icon(
-                            _iconFromName(cat['icon_name']),
-                            size: 14,
-                            color: _hexToColor(cat['color'] ?? '#FF6B8B'),
-                          ),
-                        ),
-                        title: Text(
-                          _getCategoryDisplayName(cat),
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: isSelected || isBeingEdited
-                                ? FontWeight.w600
-                                : FontWeight.normal,
-                            color: isBeingEdited
-                                ? Colors.orange
-                                : (isSelected
-                                    ? AppTheme.primary
-                                    : (isDark
-                                        ? Colors.white
-                                        : Colors.black87)),
-                          ),
-                        ),
-                        subtitle: (cat['description'] ?? '')
-                                .toString()
-                                .isNotEmpty
-                            ? Text(
-                                cat['description'],
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? Colors.white60
-                                      : Colors.grey[600],
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              )
-                            : null,
-                        onTap: () => setState(
-                            () => _selectedCategoryId = catId),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit,
-                                  size: 16, color: Colors.blue),
-                              onPressed: () => _editCategory(index),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              tooltip: 'Edit',
-                            ),
-                            const SizedBox(width: 6),
-                            IconButton(
-                              icon: Icon(Icons.delete_outline,
-                                  size: 16,
-                                  color: isDark
-                                      ? Colors.red[300]
-                                      : Colors.red),
-                              onPressed: () => _deleteCategory(index),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              tooltip: 'Delete',
-                            ),
-                            if (isSelected) ...[
-                              const SizedBox(width: 6),
-                              const Icon(Icons.check_circle,
-                                  color: AppTheme.primary, size: 18),
-                            ],
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-            ],
-          ),
-        );
+                );
+              },
+            ),
+        ],
+      ),
+    );
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -2686,8 +2695,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     color: Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.category,
-                      color: Colors.orange, size: 20),
+                  child: const Icon(
+                    Icons.category,
+                    color: Colors.orange,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Text(
@@ -2700,8 +2712,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 ),
                 const Spacer(),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
@@ -2709,9 +2723,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   child: Text(
                     '${_categories.length} items',
                     style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.orange,
-                        fontWeight: FontWeight.w500),
+                      fontSize: 12,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ],
@@ -2771,9 +2786,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   decoration: BoxDecoration(
                     color: isSelected
                         ? color.withValues(alpha: 0.15)
-                        : (isDark
-                            ? const Color(0xFF1E1E1E)
-                            : Colors.white),
+                        : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: isSelected
@@ -2835,8 +2848,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           children: _categoryColorOptions.map((opt) {
             final isSelected = _selectedCategoryColor == opt['hex'];
             return GestureDetector(
-              onTap: () =>
-                  setState(() => _selectedCategoryColor = opt['hex']),
+              onTap: () => setState(() => _selectedCategoryColor = opt['hex']),
               child: Container(
                 width: 26,
                 height: 26,
@@ -2849,8 +2861,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   boxShadow: isSelected
                       ? [
                           BoxShadow(
-                            color: (opt['color'] as Color)
-                                .withValues(alpha: 0.5),
+                            color: (opt['color'] as Color).withValues(
+                              alpha: 0.5,
+                            ),
                             blurRadius: 4,
                           ),
                         ]
@@ -2891,470 +2904,494 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     final categorySelected = _selectedCategoryId != null;
 
     Widget serviceForm() => Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.add_circle_outline,
-                      size: 18, color: Colors.green),
-                  const SizedBox(width: 8),
-                  Text(
-                    _editingServiceIndex >= 0
-                        ? 'Edit Service'
-                        : 'Add New Service',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (_editingServiceIndex >= 0)
-                    TextButton(
-                      onPressed: _cancelEditingService,
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: Size.zero,
-                      ),
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(fontSize: 11, color: Colors.red),
-                      ),
-                    ),
-                ],
+              const Icon(
+                Icons.add_circle_outline,
+                size: 18,
+                color: Colors.green,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(width: 8),
               Text(
-                'Select Category *',
+                _editingServiceIndex >= 0 ? 'Edit Service' : 'Add New Service',
                 style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white70 : Colors.grey[700],
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
-              const SizedBox(height: 6),
-              if (_categories.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                        color: Colors.orange.withValues(alpha: 0.3)),
+              const Spacer(),
+              if (_editingServiceIndex >= 0)
+                TextButton(
+                  onPressed: _cancelEditingService,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
                   ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.info_outline,
-                          color: Colors.orange, size: 16),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Add at least one category above first',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color:
-                                isDark ? Colors.white70 : Colors.grey[700],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                DropdownButtonFormField<int>(
-                  initialValue: _selectedCategoryId,
-                  isExpanded: true,
-                  style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black87),
-                  decoration: InputDecoration(
-                    prefixIcon: Icon(Icons.category,
-                        size: 18,
-                        color: isDark ? Colors.white70 : Colors.grey),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(
-                          color: isDark
-                              ? Colors.grey[700]!
-                              : Colors.grey[300]!),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                          color: AppTheme.primary, width: 2),
-                    ),
-                    filled: true,
-                    fillColor:
-                        isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                  ),
-                  items: _categories.map((cat) {
-                    return DropdownMenuItem<int>(
-                      value: cat['id'] as int,
-                      child: Text(
-                        _getCategoryDisplayName(cat),
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            color:
-                                isDark ? Colors.white : Colors.black87),
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (v) =>
-                      setState(() => _selectedCategoryId = v),
-                ),
-              if (categorySelected) ...[
-                const SizedBox(height: 12),
-                Text(
-                  'Service Name *',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : Colors.grey[700],
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontSize: 11, color: Colors.red),
                   ),
                 ),
-                const SizedBox(height: 6),
-                TextFormField(
-                  controller: _serviceNameController,
-                  style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black87),
-                  decoration: InputDecoration(
-                    hintText: 'e.g., Hair Cut, Facial',
-                    prefixIcon: Icon(Icons.build,
-                        size: 18,
-                        color: isDark ? Colors.white70 : Colors.grey),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(
-                          color: isDark
-                              ? Colors.grey[700]!
-                              : Colors.grey[300]!),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                          color: AppTheme.primary, width: 2),
-                    ),
-                    filled: true,
-                    fillColor:
-                        isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                    errorText: _serviceNameError,
-                    errorMaxLines: 2,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Description',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : Colors.grey[700],
-                  ),
-                ),
-                const SizedBox(height: 6),
-                TextFormField(
-                  controller: _serviceDescriptionController,
-                  maxLines: 2,
-                  style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black87),
-                  decoration: InputDecoration(
-                    hintText: 'Describe this service...',
-                    prefixIcon: Icon(Icons.description,
-                        size: 18,
-                        color: isDark ? Colors.white70 : Colors.grey),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(
-                          color: isDark
-                              ? Colors.grey[700]!
-                              : Colors.grey[300]!),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                          color: AppTheme.primary, width: 2),
-                    ),
-                    filled: true,
-                    fillColor:
-                        isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 10),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                _buildIconPicker(),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _saveCurrentService,
-                    icon: Icon(
-                        _editingServiceIndex >= 0 ? Icons.save : Icons.add,
-                        size: 18),
-                    label: Text(_editingServiceIndex >= 0
-                        ? 'Update Service'
-                        : 'Add Service'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-              ] else ...[
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.05)
-                        : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.info_outline,
-                          size: 14,
-                          color:
-                              isDark ? Colors.white60 : Colors.grey[600]),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Select a category to continue',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color:
-                                isDark ? Colors.white60 : Colors.grey[600],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
             ],
           ),
-        );
-
-    Widget servicesList() => Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+          const SizedBox(height: 12),
+          Text(
+            'Select Category *',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white70 : Colors.grey[700],
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+          const SizedBox(height: 6),
+          if (_categories.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+              ),
+              child: Row(
                 children: [
-                  const Icon(Icons.list, size: 18, color: Colors.blue),
+                  const Icon(
+                    Icons.info_outline,
+                    color: Colors.orange,
+                    size: 16,
+                  ),
                   const SizedBox(width: 8),
-                  Text(
-                    'Services (${_addedServices.length})',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
+                  Expanded(
+                    child: Text(
+                      'Add at least one category above first',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white70 : Colors.grey[700],
+                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              if (_addedServices.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            )
+          else
+            DropdownButtonFormField<int>(
+              initialValue: _selectedCategoryId,
+              isExpanded: true,
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              decoration: InputDecoration(
+                prefixIcon: Icon(
+                  Icons.category,
+                  size: 18,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+              items: _categories.map((cat) {
+                return DropdownMenuItem<int>(
+                  value: cat['id'] as int,
+                  child: Text(
+                    _getCategoryDisplayName(cat),
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                );
+              }).toList(),
+              onChanged: (v) => setState(() => _selectedCategoryId = v),
+            ),
+          if (categorySelected) ...[
+            const SizedBox(height: 12),
+            Text(
+              'Service Name *',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : Colors.grey[700],
+              ),
+            ),
+            const SizedBox(height: 6),
+            TextFormField(
+              controller: _serviceNameController,
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              decoration: InputDecoration(
+                hintText: 'e.g., Hair Cut, Facial',
+                prefixIcon: Icon(
+                  Icons.build,
+                  size: 18,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                errorText: _serviceNameError,
+                errorMaxLines: 2,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Description',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : Colors.grey[700],
+              ),
+            ),
+            const SizedBox(height: 6),
+            TextFormField(
+              controller: _serviceDescriptionController,
+              maxLines: 2,
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              decoration: InputDecoration(
+                hintText: 'Describe this service...',
+                prefixIcon: Icon(
+                  Icons.description,
+                  size: 18,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                  ),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
+                ),
+                filled: true,
+                fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            _buildIconPicker(),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _saveCurrentService,
+                icon: Icon(
+                  _editingServiceIndex >= 0 ? Icons.save : Icons.add,
+                  size: 18,
+                ),
+                label: Text(
+                  _editingServiceIndex >= 0 ? 'Update Service' : 'Add Service',
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Center(
-                    child: Column(
+                ),
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 14,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Select a category to continue',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    Widget servicesList() => Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.list, size: 18, color: Colors.blue),
+              const SizedBox(width: 8),
+              Text(
+                'Services (${_addedServices.length})',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_addedServices.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.inbox,
+                      size: 36,
+                      color: isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No services yet',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _addedServices.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final service = _addedServices[index];
+                final variants = service['variants'] as List;
+                final isFromDb = service['from_db'] == true;
+                final isSelected = _variantTargetServiceIndex == index;
+                final isBeingEdited = _editingServiceIndex == index;
+
+                final pricedCount = variants
+                    .where((v) => v['price_set'] == true)
+                    .length;
+
+                return Material(
+                  color: isSelected
+                      ? Colors.purple.withValues(alpha: 0.08)
+                      : (isBeingEdited
+                            ? Colors.orange.withValues(alpha: 0.08)
+                            : Colors.transparent),
+                  borderRadius: BorderRadius.circular(8),
+                  clipBehavior: Clip.antiAlias,
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 0,
+                    ),
+                    dense: true,
+                    leading: Stack(
                       children: [
-                        Icon(Icons.inbox,
-                            size: 36,
-                            color:
-                                isDark ? Colors.white30 : Colors.grey[400]),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No services yet',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color:
-                                isDark ? Colors.white70 : Colors.grey[500],
+                        CircleAvatar(
+                          radius: 16,
+                          backgroundColor: isSelected
+                              ? Colors.purple.withValues(alpha: 0.15)
+                              : Colors.orange.withValues(alpha: 0.15),
+                          child: Icon(
+                            _iconFromName(service['icon_name']),
+                            size: 14,
+                            color: isSelected ? Colors.purple : Colors.orange,
                           ),
                         ),
+                        if (isFromDb)
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: Colors.green,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 1.5,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    title: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            service['name'] as String,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: isSelected || isBeingEdited
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                              color: isSelected
+                                  ? Colors.purple
+                                  : (isBeingEdited
+                                        ? Colors.orange
+                                        : (isDark
+                                              ? Colors.white
+                                              : Colors.black87)),
+                            ),
+                          ),
+                        ),
+                        if (isFromDb)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              'SAVED',
+                              style: TextStyle(
+                                fontSize: 8,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.green,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    subtitle: Text(
+                      '${_getCategoryById(service['category_id'] as int?)?['display_name'] ?? '—'} • ${variants.length} variant${variants.length == 1 ? '' : 's'}'
+                      '${variants.isNotEmpty ? ' • $pricedCount priced' : ''}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(
+                            Icons.edit,
+                            size: 16,
+                            color: Colors.blue,
+                          ),
+                          onPressed: () => _editAddedService(index),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          tooltip: 'Edit',
+                        ),
+                        const SizedBox(width: 6),
+                        IconButton(
+                          icon: Icon(
+                            Icons.delete_outline,
+                            size: 16,
+                            color: isDark ? Colors.red[300] : Colors.red,
+                          ),
+                          onPressed: () => _removeAddedService(index),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          tooltip: 'Delete',
+                        ),
+                        if (isSelected) ...[
+                          const SizedBox(width: 6),
+                          const Icon(
+                            Icons.check_circle,
+                            color: Colors.purple,
+                            size: 18,
+                          ),
+                        ],
                       ],
                     ),
                   ),
-                )
-              else
-                ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: _addedServices.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final service = _addedServices[index];
-                    final variants = service['variants'] as List;
-                    final isFromDb = service['from_db'] == true;
-                    final isSelected = _variantTargetServiceIndex == index;
-                    final isBeingEdited = _editingServiceIndex == index;
-
-                    final pricedCount = variants
-                        .where((v) => v['price_set'] == true)
-                        .length;
-
-                    return Material(
-                      color: isSelected
-                          ? Colors.purple.withValues(alpha: 0.08)
-                          : (isBeingEdited
-                              ? Colors.orange.withValues(alpha: 0.08)
-                              : Colors.transparent),
-                      borderRadius: BorderRadius.circular(8),
-                      clipBehavior: Clip.antiAlias,
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 4, vertical: 0),
-                        dense: true,
-                        leading: Stack(
-                          children: [
-                            CircleAvatar(
-                              radius: 16,
-                              backgroundColor: isSelected
-                                  ? Colors.purple.withValues(alpha: 0.15)
-                                  : Colors.orange.withValues(alpha: 0.15),
-                              child: Icon(
-                                _iconFromName(service['icon_name']),
-                                size: 14,
-                                color: isSelected
-                                    ? Colors.purple
-                                    : Colors.orange,
-                              ),
-                            ),
-                            if (isFromDb)
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: Container(
-                                  width: 10,
-                                  height: 10,
-                                  decoration: BoxDecoration(
-                                    color: Colors.green,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                        color: Colors.white, width: 1.5),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        title: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                service['name'] as String,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: isSelected || isBeingEdited
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  color: isSelected
-                                      ? Colors.purple
-                                      : (isBeingEdited
-                                          ? Colors.orange
-                                          : (isDark
-                                              ? Colors.white
-                                              : Colors.black87)),
-                                ),
-                              ),
-                            ),
-                            if (isFromDb)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color:
-                                      Colors.green.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Text(
-                                  'SAVED',
-                                  style: TextStyle(
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.green,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                        subtitle: Text(
-                          '${_getCategoryById(service['category_id'] as int?)?['display_name'] ?? '—'} • ${variants.length} variant${variants.length == 1 ? '' : 's'}'
-                          '${variants.isNotEmpty ? ' • $pricedCount priced' : ''}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color:
-                                isDark ? Colors.white60 : Colors.grey[600],
-                          ),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: const Icon(Icons.edit,
-                                  size: 16, color: Colors.blue),
-                              onPressed: () => _editAddedService(index),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              tooltip: 'Edit',
-                            ),
-                            const SizedBox(width: 6),
-                            IconButton(
-                              icon: Icon(Icons.delete_outline,
-                                  size: 16,
-                                  color:
-                                      isDark ? Colors.red[300] : Colors.red),
-                              onPressed: () => _removeAddedService(index),
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              tooltip: 'Delete',
-                            ),
-                            if (isSelected) ...[
-                              const SizedBox(width: 6),
-                              const Icon(Icons.check_circle,
-                                  color: Colors.purple, size: 18),
-                            ],
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-            ],
-          ),
-        );
+                );
+              },
+            ),
+        ],
+      ),
+    );
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -3374,8 +3411,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     color: Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.build,
-                      color: Colors.orange, size: 20),
+                  child: const Icon(
+                    Icons.build,
+                    color: Colors.orange,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Text(
@@ -3388,8 +3428,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 ),
                 const Spacer(),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.orange.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
@@ -3397,9 +3439,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   child: Text(
                     '${_addedServices.length} items',
                     style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.orange,
-                        fontWeight: FontWeight.w500),
+                      fontSize: 12,
+                      color: Colors.orange,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
               ],
@@ -3445,8 +3488,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           padding: const EdgeInsets.all(16),
           child: Column(
             children: [
-              Icon(Icons.info_outline,
-                  color: isDark ? Colors.white60 : Colors.grey, size: 32),
+              Icon(
+                Icons.info_outline,
+                color: isDark ? Colors.white60 : Colors.grey,
+                size: 32,
+              ),
               const SizedBox(height: 8),
               Text(
                 'Add a service first',
@@ -3482,566 +3528,564 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     final isEditingVariant = _editingVariantIndex >= 0;
 
     Widget variantForm() => Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isEditingVariant
-                  ? Colors.orange.withValues(alpha: 0.5)
-                  : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
-              width: isEditingVariant ? 1.5 : 1,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isEditingVariant
+              ? Colors.orange.withValues(alpha: 0.5)
+              : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
+          width: isEditingVariant ? 1.5 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                isEditingVariant ? Icons.edit : Icons.add_circle_outline,
+                size: 18,
+                color: isEditingVariant ? Colors.orange : Colors.green,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                isEditingVariant ? 'Edit Variant' : 'Add New Variant',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const Spacer(),
+              if (isEditingVariant)
+                TextButton(
+                  onPressed: _cancelEditVariant,
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                  ),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(fontSize: 11, color: Colors.red),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            isEditingVariant
+                ? 'Update the fields below'
+                : 'All fields optional — fill at least one to add',
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? Colors.white60 : Colors.grey[600],
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    isEditingVariant ? Icons.edit : Icons.add_circle_outline,
-                    size: 18,
-                    color: isEditingVariant ? Colors.orange : Colors.green,
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    isEditingVariant ? 'Edit Variant' : 'Add New Variant',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const Spacer(),
-                  if (isEditingVariant)
-                    TextButton(
-                      onPressed: _cancelEditVariant,
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: Size.zero,
-                      ),
-                      child: const Text(
-                        'Cancel',
-                        style:
-                            TextStyle(fontSize: 11, color: Colors.red),
-                      ),
-                    ),
-                ],
+          const SizedBox(height: 12),
+
+          Text(
+            'Select Service *',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white70 : Colors.grey[700],
+            ),
+          ),
+          const SizedBox(height: 6),
+          DropdownButtonFormField<int>(
+            initialValue: _variantTargetServiceIndex,
+            isExpanded: true,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            decoration: InputDecoration(
+              hintText: 'Choose a service...',
+              prefixIcon: Icon(
+                Icons.build,
+                size: 18,
+                color: isDark ? Colors.white70 : Colors.grey,
               ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              ),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+            ),
+            items: _addedServices.asMap().entries.map((entry) {
+              final idx = entry.key;
+              final svc = entry.value;
+              final vCount = (svc['variants'] as List).length;
+              return DropdownMenuItem<int>(
+                value: idx,
+                child: Text(
+                  '${svc['name']} • $vCount variant${vCount == 1 ? '' : 's'}',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              );
+            }).toList(),
+            onChanged: (v) async {
+              setState(() {
+                _variantTargetServiceIndex = v;
+                _editingVariantIndex = -1;
+                _selectedGenderId = null;
+                _selectedAgeCategoryId = null;
+                _variantPriceController.clear();
+                _variantDurationController.clear();
+                _priceError = null;
+                _durationError = null;
+                _genderExpanded = false;
+                _ageExpanded = false;
+                _durationExpanded = false;
+                _priceExpanded = false;
+              });
+
+              if (v != null) {
+                final svc = _addedServices[v];
+                if (svc['from_db'] == true && svc['id'] != null) {
+                  await _loadVariantsForService(v);
+                }
+              }
+            },
+          ),
+
+          if (selectedService != null) ...[
+            const SizedBox(height: 12),
+
+            _buildExpandableHeader(
+              title: 'Gender',
+              icon: Icons.wc,
+              color: Colors.blue,
+              isExpanded: _genderExpanded,
+              subtitle: _selectedGenderId != null
+                  ? _genderNameFromId(_selectedGenderId)
+                  : 'Tap to select gender (optional)',
+              onTap: () => setState(() => _genderExpanded = !_genderExpanded),
+            ),
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 200),
+              crossFadeState: _genderExpanded
+                  ? CrossFadeState.showFirst
+                  : CrossFadeState.showSecond,
+              firstChild: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: _buildGenderChips(),
+              ),
+              secondChild: const SizedBox(width: double.infinity),
+            ),
+            const SizedBox(height: 8),
+
+            _buildExpandableHeader(
+              title: 'Age Category',
+              icon: Icons.timeline,
+              color: Colors.green,
+              isExpanded: _ageExpanded,
+              subtitle: _selectedAgeCategoryId != null
+                  ? _getAgeCategoryDisplayName(
+                      _ageCategories.firstWhere(
+                        (a) => a['id'] == _selectedAgeCategoryId,
+                        orElse: () => {
+                          'display_name': 'Selected',
+                          'min_age': 0,
+                          'max_age': 0,
+                        },
+                      ),
+                    )
+                  : 'Tap to type or pick an age category (optional)',
+              onTap: () => setState(() => _ageExpanded = !_ageExpanded),
+            ),
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 200),
+              crossFadeState: _ageExpanded
+                  ? CrossFadeState.showFirst
+                  : CrossFadeState.showSecond,
+              firstChild: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: _buildAgeTypingForm(),
+              ),
+              secondChild: const SizedBox(width: double.infinity),
+            ),
+            const SizedBox(height: 8),
+
+            _buildExpandableHeader(
+              title: 'Duration',
+              icon: Icons.timer,
+              color: Colors.orange,
+              isExpanded: _durationExpanded,
+              subtitle: _variantDurationController.text.isNotEmpty
+                  ? '${_variantDurationController.text} mins'
+                  : 'Tap to enter duration (optional)',
+              onTap: () =>
+                  setState(() => _durationExpanded = !_durationExpanded),
+            ),
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 200),
+              crossFadeState: _durationExpanded
+                  ? CrossFadeState.showFirst
+                  : CrossFadeState.showSecond,
+              firstChild: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: _buildDurationField(),
+              ),
+              secondChild: const SizedBox(width: double.infinity),
+            ),
+            const SizedBox(height: 8),
+
+            // ✅ PRICE HEADER - Dynamic currency
+            _buildExpandableHeader(
+              title: 'Price',
+              icon: Icons.attach_money,
+              color: Colors.teal,
+              isExpanded: _priceExpanded,
+              subtitle: _variantPriceController.text.isNotEmpty
+                  ? '$_salonCurrencySymbol${_variantPriceController.text}'
+                  : 'Tap to enter price (optional — add later)',
+              onTap: () => setState(() => _priceExpanded = !_priceExpanded),
+            ),
+            AnimatedCrossFade(
+              duration: const Duration(milliseconds: 200),
+              crossFadeState: _priceExpanded
+                  ? CrossFadeState.showFirst
+                  : CrossFadeState.showSecond,
+              firstChild: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: _buildPriceField(),
+              ),
+              secondChild: const SizedBox(width: double.infinity),
+            ),
+
+            const SizedBox(height: 14),
+
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: (canAddVariant || isEditingVariant)
+                    ? _saveVariant
+                    : null,
+                icon: Icon(isEditingVariant ? Icons.save : Icons.add, size: 18),
+                label: Text(
+                  isEditingVariant ? 'Update Variant' : 'Add Variant',
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isEditingVariant
+                      ? Colors.orange
+                      : (canAddVariant
+                            ? Colors.purple
+                            : (isDark ? Colors.grey[800] : Colors.grey[300])),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+            if (!canAddVariant && !isEditingVariant) ...[
               const SizedBox(height: 6),
               Text(
-                isEditingVariant
-                    ? 'Update the fields below'
-                    : 'All fields optional — fill at least one to add',
+                'Fill at least one field to enable',
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 11,
                   color: isDark ? Colors.white60 : Colors.grey[600],
                 ),
               ),
-              const SizedBox(height: 12),
-
-              Text(
-                'Select Service *',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white70 : Colors.grey[700],
-                ),
+            ],
+          ] else ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
               ),
-              const SizedBox(height: 6),
-              DropdownButtonFormField<int>(
-                initialValue: _variantTargetServiceIndex,
-                isExpanded: true,
-                style: TextStyle(
-                    color: isDark ? Colors.white : Colors.black87),
-                decoration: InputDecoration(
-                  hintText: 'Choose a service...',
-                  prefixIcon: Icon(Icons.build,
-                      size: 18,
-                      color: isDark ? Colors.white70 : Colors.grey),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(
-                        color:
-                            isDark ? Colors.grey[700]! : Colors.grey[300]!),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 14,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(
-                        color: AppTheme.primary, width: 2),
-                  ),
-                  filled: true,
-                  fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                ),
-                items: _addedServices.asMap().entries.map((entry) {
-                  final idx = entry.key;
-                  final svc = entry.value;
-                  final vCount = (svc['variants'] as List).length;
-                  return DropdownMenuItem<int>(
-                    value: idx,
+                  const SizedBox(width: 8),
+                  Expanded(
                     child: Text(
-                      '${svc['name']} • $vCount variant${vCount == 1 ? '' : 's'}',
-                      overflow: TextOverflow.ellipsis,
+                      'Select a service to add variants',
                       style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87),
-                    ),
-                  );
-                }).toList(),
-                onChanged: (v) async {
-                  setState(() {
-                    _variantTargetServiceIndex = v;
-                    _editingVariantIndex = -1;
-                    _selectedGenderId = null;
-                    _selectedAgeCategoryId = null;
-                    _variantPriceController.clear();
-                    _variantDurationController.clear();
-                    _priceError = null;
-                    _durationError = null;
-                    _genderExpanded = false;
-                    _ageExpanded = false;
-                    _durationExpanded = false;
-                    _priceExpanded = false;
-                  });
-
-                  if (v != null) {
-                    final svc = _addedServices[v];
-                    if (svc['from_db'] == true && svc['id'] != null) {
-                      await _loadVariantsForService(v);
-                    }
-                  }
-                },
-              ),
-
-              if (selectedService != null) ...[
-                const SizedBox(height: 12),
-
-                _buildExpandableHeader(
-                  title: 'Gender',
-                  icon: Icons.wc,
-                  color: Colors.blue,
-                  isExpanded: _genderExpanded,
-                  subtitle: _selectedGenderId != null
-                      ? _genderNameFromId(_selectedGenderId)
-                      : 'Tap to select gender (optional)',
-                  onTap: () => setState(
-                      () => _genderExpanded = !_genderExpanded),
-                ),
-                AnimatedCrossFade(
-                  duration: const Duration(milliseconds: 200),
-                  crossFadeState: _genderExpanded
-                      ? CrossFadeState.showFirst
-                      : CrossFadeState.showSecond,
-                  firstChild: Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: _buildGenderChips(),
-                  ),
-                  secondChild: const SizedBox(width: double.infinity),
-                ),
-                const SizedBox(height: 8),
-
-                _buildExpandableHeader(
-                  title: 'Age Category',
-                  icon: Icons.timeline,
-                  color: Colors.green,
-                  isExpanded: _ageExpanded,
-                  subtitle: _selectedAgeCategoryId != null
-                      ? _getAgeCategoryDisplayName(
-                          _ageCategories.firstWhere(
-                            (a) => a['id'] == _selectedAgeCategoryId,
-                            orElse: () => {
-                              'display_name': 'Selected',
-                              'min_age': 0,
-                              'max_age': 0,
-                            },
-                          ),
-                        )
-                      : 'Tap to type or pick an age category (optional)',
-                  onTap: () =>
-                      setState(() => _ageExpanded = !_ageExpanded),
-                ),
-                AnimatedCrossFade(
-                  duration: const Duration(milliseconds: 200),
-                  crossFadeState: _ageExpanded
-                      ? CrossFadeState.showFirst
-                      : CrossFadeState.showSecond,
-                  firstChild: Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: _buildAgeTypingForm(),
-                  ),
-                  secondChild: const SizedBox(width: double.infinity),
-                ),
-                const SizedBox(height: 8),
-
-                _buildExpandableHeader(
-                  title: 'Duration',
-                  icon: Icons.timer,
-                  color: Colors.orange,
-                  isExpanded: _durationExpanded,
-                  subtitle: _variantDurationController.text.isNotEmpty
-                      ? '${_variantDurationController.text} mins'
-                      : 'Tap to enter duration (optional)',
-                  onTap: () => setState(
-                      () => _durationExpanded = !_durationExpanded),
-                ),
-                AnimatedCrossFade(
-                  duration: const Duration(milliseconds: 200),
-                  crossFadeState: _durationExpanded
-                      ? CrossFadeState.showFirst
-                      : CrossFadeState.showSecond,
-                  firstChild: Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: _buildDurationField(),
-                  ),
-                  secondChild: const SizedBox(width: double.infinity),
-                ),
-                const SizedBox(height: 8),
-
-                _buildExpandableHeader(
-                  title: 'Price',
-                  icon: Icons.attach_money,
-                  color: Colors.teal,
-                  isExpanded: _priceExpanded,
-                  subtitle: _variantPriceController.text.isNotEmpty
-                      ? '$_salonCurrencySymbol${_variantPriceController.text}'
-                      : 'Tap to enter price (optional — add later)',
-                  onTap: () =>
-                      setState(() => _priceExpanded = !_priceExpanded),
-                ),
-                AnimatedCrossFade(
-                  duration: const Duration(milliseconds: 200),
-                  crossFadeState: _priceExpanded
-                      ? CrossFadeState.showFirst
-                      : CrossFadeState.showSecond,
-                  firstChild: Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: _buildPriceField(),
-                  ),
-                  secondChild: const SizedBox(width: double.infinity),
-                ),
-
-                const SizedBox(height: 14),
-
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: (canAddVariant || isEditingVariant)
-                        ? _saveVariant
-                        : null,
-                    icon: Icon(
-                        isEditingVariant ? Icons.save : Icons.add,
-                        size: 18),
-                    label: Text(isEditingVariant
-                        ? 'Update Variant'
-                        : 'Add Variant'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: isEditingVariant
-                          ? Colors.orange
-                          : (canAddVariant
-                              ? Colors.purple
-                              : (isDark
-                                  ? Colors.grey[800]
-                                  : Colors.grey[300])),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-                if (!canAddVariant && !isEditingVariant) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    'Fill at least one field to enable',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isDark ? Colors.white60 : Colors.grey[600],
+                        fontSize: 11,
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
                     ),
                   ),
                 ],
-              ] else ...[
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.05)
-                        : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+
+    Widget variantsList() => Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.list, size: 18, color: Colors.blue),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  selectedService != null
+                      ? 'Variants — ${selectedService['name']}'
+                      : 'Added Variants',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
-                  child: Row(
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (_isLoadingVariants)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else if (variants.isNotEmpty && selectedService != null)
+                TextButton(
+                  onPressed: () => setState(
+                    () => (selectedService['variants'] as List).clear(),
+                  ),
+                  style: TextButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    minimumSize: Size.zero,
+                  ),
+                  child: Text(
+                    'Clear All',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? Colors.red[300] : Colors.red,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (selectedService == null)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.tune,
+                      size: 36,
+                      color: isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Select a service to view its variants',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (_isLoadingVariants)
+            Container(
+              padding: const EdgeInsets.all(20),
+              child: const Center(child: CircularProgressIndicator()),
+            )
+          else if (variants.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Center(
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.inbox,
+                      size: 36,
+                      color: isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'No variants added yet',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white70 : Colors.grey[500],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: variants.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final v = variants[index];
+                final duration = (v['duration'] as num).toInt();
+                final priceDisplay = _formatPriceDisplay(v);
+                final priceNotSet = _isPriceNotSet(v);
+                final durationDisplay = duration == 0 ? '—' : '$duration min';
+                final isFromDb = v['from_db'] == true;
+                final isBeingEdited = _editingVariantIndex == index;
+
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  leading: Stack(
                     children: [
-                      Icon(Icons.info_outline,
-                          size: 14,
-                          color:
-                              isDark ? Colors.white60 : Colors.grey[600]),
-                      const SizedBox(width: 8),
-                      Expanded(
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: isBeingEdited
+                            ? Colors.orange.withValues(alpha: 0.15)
+                            : Colors.purple.withValues(alpha: 0.15),
                         child: Text(
-                          'Select a service to add variants',
+                          '${index + 1}',
                           style: TextStyle(
-                            fontSize: 11,
-                            color:
-                                isDark ? Colors.white60 : Colors.grey[600],
+                            fontSize: 12,
+                            color: isBeingEdited
+                                ? Colors.orange
+                                : Colors.purple,
                           ),
+                        ),
+                      ),
+                      if (isFromDb)
+                        Positioned(
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            width: 10,
+                            height: 10,
+                            decoration: BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: Colors.white,
+                                width: 1.5,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  title: Text(
+                    '${v['gender_name']} • ${v['age_category_name']}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: isBeingEdited
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      color: isBeingEdited
+                          ? Colors.orange
+                          : (isDark ? Colors.white : Colors.black87),
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Row(
+                    children: [
+                      Text(
+                        priceDisplay,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontStyle: priceNotSet
+                              ? FontStyle.italic
+                              : FontStyle.normal,
+                          color: priceNotSet
+                              ? (isDark ? Colors.white38 : Colors.grey[500])
+                              : (isDark ? Colors.white60 : Colors.grey[600]),
+                          fontWeight: priceNotSet
+                              ? FontWeight.normal
+                              : FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        ' • $durationDisplay',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? Colors.white60 : Colors.grey[600],
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
-            ],
-          ),
-        );
-
-    Widget variantsList() => Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.list, size: 18, color: Colors.blue),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      selectedService != null
-                          ? 'Variants — ${selectedService['name']}'
-                          : 'Added Variants',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  if (_isLoadingVariants)
-                    const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  else if (variants.isNotEmpty && selectedService != null)
-                    TextButton(
-                      onPressed: () => setState(() =>
-                          (selectedService['variants'] as List).clear()),
-                      style: TextButton.styleFrom(
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(
+                          Icons.edit,
+                          size: 16,
+                          color: Colors.blue,
+                        ),
+                        onPressed: () =>
+                            _editVariant(_variantTargetServiceIndex!, index),
                         padding: EdgeInsets.zero,
-                        minimumSize: Size.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Edit',
                       ),
-                      child: Text(
-                        'Clear All',
-                        style: TextStyle(
-                          fontSize: 11,
+                      const SizedBox(width: 6),
+                      IconButton(
+                        icon: Icon(
+                          Icons.delete_outline,
+                          size: 16,
                           color: isDark ? Colors.red[300] : Colors.red,
                         ),
+                        onPressed: () =>
+                            _removeVariant(_variantTargetServiceIndex!, index),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        tooltip: 'Delete',
                       ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (selectedService == null)
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                    borderRadius: BorderRadius.circular(10),
+                    ],
                   ),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(Icons.tune,
-                            size: 36,
-                            color:
-                                isDark ? Colors.white30 : Colors.grey[400]),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Select a service to view its variants',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color:
-                                isDark ? Colors.white70 : Colors.grey[500],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else if (_isLoadingVariants)
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  child: const Center(child: CircularProgressIndicator()),
-                )
-              else if (variants.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        Icon(Icons.inbox,
-                            size: 36,
-                            color:
-                                isDark ? Colors.white30 : Colors.grey[400]),
-                        const SizedBox(height: 8),
-                        Text(
-                          'No variants added yet',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color:
-                                isDark ? Colors.white70 : Colors.grey[500],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: variants.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final v = variants[index];
-                    final duration = (v['duration'] as num).toInt();
-                    final priceDisplay = _formatPriceDisplay(v);
-                    final priceNotSet = _isPriceNotSet(v);
-                    final durationDisplay =
-                        duration == 0 ? '—' : '$duration min';
-                    final isFromDb = v['from_db'] == true;
-                    final isBeingEdited = _editingVariantIndex == index;
-
-                    return ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      dense: true,
-                      leading: Stack(
-                        children: [
-                          CircleAvatar(
-                            radius: 16,
-                            backgroundColor: isBeingEdited
-                                ? Colors.orange.withValues(alpha: 0.15)
-                                : Colors.purple.withValues(alpha: 0.15),
-                            child: Text(
-                              '${index + 1}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isBeingEdited
-                                    ? Colors.orange
-                                    : Colors.purple,
-                              ),
-                            ),
-                          ),
-                          if (isFromDb)
-                            Positioned(
-                              right: 0,
-                              bottom: 0,
-                              child: Container(
-                                width: 10,
-                                height: 10,
-                                decoration: BoxDecoration(
-                                  color: Colors.green,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                      color: Colors.white, width: 1.5),
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      title: Text(
-                        '${v['gender_name']} • ${v['age_category_name']}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: isBeingEdited
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                          color: isBeingEdited
-                              ? Colors.orange
-                              : (isDark ? Colors.white : Colors.black87),
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      subtitle: Row(
-                        children: [
-                          Text(
-                            priceDisplay,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontStyle: priceNotSet
-                                  ? FontStyle.italic
-                                  : FontStyle.normal,
-                              color: priceNotSet
-                                  ? (isDark
-                                      ? Colors.white38
-                                      : Colors.grey[500])
-                                  : (isDark
-                                      ? Colors.white60
-                                      : Colors.grey[600]),
-                              fontWeight: priceNotSet
-                                  ? FontWeight.normal
-                                  : FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            ' • $durationDisplay',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: isDark
-                                  ? Colors.white60
-                                  : Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit,
-                                size: 16, color: Colors.blue),
-                            onPressed: () => _editVariant(
-                                _variantTargetServiceIndex!, index),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            tooltip: 'Edit',
-                          ),
-                          const SizedBox(width: 6),
-                          IconButton(
-                            icon: Icon(Icons.delete_outline,
-                                size: 16,
-                                color:
-                                    isDark ? Colors.red[300] : Colors.red),
-                            onPressed: () => _removeVariant(
-                                _variantTargetServiceIndex!, index),
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            tooltip: 'Delete',
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-            ],
-          ),
-        );
+                );
+              },
+            ),
+        ],
+      ),
+    );
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -4063,7 +4107,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   ? 'Tap to collapse'
                   : 'Tap to expand and manage variants',
               onTap: () => setState(
-                  () => _variantsSectionExpanded = !_variantsSectionExpanded),
+                () => _variantsSectionExpanded = !_variantsSectionExpanded,
+              ),
             ),
             AnimatedCrossFade(
               duration: const Duration(milliseconds: 250),
@@ -4149,8 +4194,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     color: Colors.indigo.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.account_tree,
-                      color: Colors.indigo, size: 20),
+                  child: const Icon(
+                    Icons.account_tree,
+                    color: Colors.indigo,
+                    size: 20,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Text(
@@ -4175,18 +4223,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 child: Center(
                   child: Column(
                     children: [
-                      Icon(Icons.inbox,
-                          size: 40,
-                          color:
-                              isDark ? Colors.white30 : Colors.grey[400]),
+                      Icon(
+                        Icons.inbox,
+                        size: 40,
+                        color: isDark ? Colors.white30 : Colors.grey[400],
+                      ),
                       const SizedBox(height: 8),
                       Text(
                         'Nothing added yet',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
-                          color:
-                              isDark ? Colors.white70 : Colors.grey[600],
+                          color: isDark ? Colors.white70 : Colors.grey[600],
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -4195,8 +4243,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 11,
-                          color:
-                              isDark ? Colors.white38 : Colors.grey[500],
+                          color: isDark ? Colors.white38 : Colors.grey[500],
                         ),
                       ),
                     ],
@@ -4209,7 +4256,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 final block = blockEntry.value;
                 final isLastBlock =
                     blockIndex == categoryBlocks.length - 1 &&
-                        orphanServices.isEmpty;
+                    orphanServices.isEmpty;
 
                 return _buildSummaryCategoryBlock(
                   block: block,
@@ -4378,7 +4425,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   const SizedBox(width: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 5, vertical: 1),
+                      horizontal: 5,
+                      vertical: 1,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.green.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(4),
@@ -4507,9 +4556,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.price_change_outlined,
-                      size: 10,
-                      color: isDark ? Colors.white38 : Colors.grey[500]),
+                  Icon(
+                    Icons.price_change_outlined,
+                    size: 10,
+                    color: isDark ? Colors.white38 : Colors.grey[500],
+                  ),
                   const SizedBox(width: 3),
                   Text(
                     priceDisplay,
@@ -4540,8 +4591,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               ),
             ),
           const SizedBox(width: 6),
-          Icon(Icons.timer_outlined,
-              size: 11, color: isDark ? Colors.white38 : Colors.grey[500]),
+          Icon(
+            Icons.timer_outlined,
+            size: 11,
+            color: isDark ? Colors.white38 : Colors.grey[500],
+          ),
           const SizedBox(width: 3),
           Text(
             durationDisplay,
@@ -4590,9 +4644,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     color: Colors.grey.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(Icons.help_outline,
-                      size: 16,
-                      color: isDark ? Colors.white60 : Colors.grey[600]),
+                  child: Icon(
+                    Icons.help_outline,
+                    size: 16,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -4627,15 +4683,33 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   String _toCircledNumber(int n) {
     const circled = [
-      '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩',
-      '⑪', '⑫', '⑬', '⑭', '⑮', '⑯', '⑰', '⑱', '⑲', '⑳',
+      '①',
+      '②',
+      '③',
+      '④',
+      '⑤',
+      '⑥',
+      '⑦',
+      '⑧',
+      '⑨',
+      '⑩',
+      '⑪',
+      '⑫',
+      '⑬',
+      '⑭',
+      '⑮',
+      '⑯',
+      '⑰',
+      '⑱',
+      '⑲',
+      '⑳',
     ];
     if (n >= 1 && n <= circled.length) return circled[n - 1];
     return '($n)';
   }
 
   // ============================================
-  // GENDER CHIPS (single-select from hardcoded list)
+  // GENDER CHIPS
   // ============================================
   Widget _buildGenderChips() {
     final isDark = _isDark;
@@ -4672,7 +4746,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-            color: isDark ? Colors.grey[700]! : Colors.grey[200]!),
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4702,14 +4777,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   ),
                 ),
                 selected: isSelected,
-                // ✅ Single-select: tapping the same chip again deselects it
                 onSelected: (selected) {
                   setState(() {
                     _selectedGenderId = selected ? id : null;
                   });
                 },
-                backgroundColor:
-                    isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                backgroundColor: isDark
+                    ? const Color(0xFF2A2A2A)
+                    : Colors.white,
                 selectedColor: Colors.blue.withValues(alpha: 0.2),
                 checkmarkColor: Colors.blue,
                 shape: StadiumBorder(
@@ -4742,7 +4817,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-            color: isDark ? Colors.grey[700]! : Colors.grey[200]!),
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4750,8 +4826,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           if (_ageCategories.isNotEmpty) ...[
             Row(
               children: [
-                Icon(Icons.check_circle,
-                    size: 14, color: Colors.green[400]),
+                Icon(Icons.check_circle, size: 14, color: Colors.green[400]),
                 const SizedBox(width: 6),
                 Text(
                   'Existing Age Categories (${_ageCategories.length})',
@@ -4778,24 +4853,25 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               children: _ageCategories.map((a) {
                 final isSelected = _selectedAgeCategoryId == a['id'];
                 return GestureDetector(
-                  onTap: () => setState(() =>
-                      _selectedAgeCategoryId = isSelected ? null : a['id']),
+                  onTap: () => setState(
+                    () => _selectedAgeCategoryId = isSelected ? null : a['id'],
+                  ),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: isSelected
                           ? Colors.green.withValues(alpha: 0.15)
                           : (isDark
-                              ? const Color(0xFF2A2A2A)
-                              : Colors.grey[100]),
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.grey[100]),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
                         color: isSelected
                             ? Colors.green
-                            : (isDark
-                                ? Colors.grey[700]!
-                                : Colors.grey[300]!),
+                            : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
                       ),
                     ),
                     child: Text(
@@ -4833,8 +4909,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 );
                 return;
               }
-              setState(() =>
-                  _addAgeCategoryFormExpanded = !_addAgeCategoryFormExpanded);
+              setState(
+                () =>
+                    _addAgeCategoryFormExpanded = !_addAgeCategoryFormExpanded,
+              );
             },
           ),
 
@@ -4868,36 +4946,42 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                           controller: _ageMinController,
                           keyboardType: TextInputType.number,
                           style: TextStyle(
-                              color:
-                                  isDark ? Colors.white : Colors.black87),
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
                           decoration: InputDecoration(
                             labelText: 'Min Age',
                             hintText: '0',
-                            prefixIcon: Icon(Icons.numbers,
-                                size: 18,
-                                color: isDark
-                                    ? Colors.white70
-                                    : Colors.grey),
+                            prefixIcon: Icon(
+                              Icons.numbers,
+                              size: 18,
+                              color: isDark ? Colors.white70 : Colors.grey,
+                            ),
                             border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10)),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(10),
                               borderSide: BorderSide(
-                                  color: isDark
-                                      ? Colors.grey[700]!
-                                      : Colors.grey[300]!),
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(10),
                               borderSide: const BorderSide(
-                                  color: AppTheme.primary, width: 2),
+                                color: AppTheme.primary,
+                                width: 2,
+                              ),
                             ),
                             filled: true,
                             fillColor: isDark
                                 ? const Color(0xFF2A2A2A)
                                 : Colors.white,
                             contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 10),
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                             errorText: _ageMinError,
                             errorMaxLines: 2,
                             isDense: true,
@@ -4910,36 +4994,42 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                           controller: _ageMaxController,
                           keyboardType: TextInputType.number,
                           style: TextStyle(
-                              color:
-                                  isDark ? Colors.white : Colors.black87),
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
                           decoration: InputDecoration(
                             labelText: 'Max Age',
                             hintText: '100',
-                            prefixIcon: Icon(Icons.numbers,
-                                size: 18,
-                                color: isDark
-                                    ? Colors.white70
-                                    : Colors.grey),
+                            prefixIcon: Icon(
+                              Icons.numbers,
+                              size: 18,
+                              color: isDark ? Colors.white70 : Colors.grey,
+                            ),
                             border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(10)),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(10),
                               borderSide: BorderSide(
-                                  color: isDark
-                                      ? Colors.grey[700]!
-                                      : Colors.grey[300]!),
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(10),
                               borderSide: const BorderSide(
-                                  color: AppTheme.primary, width: 2),
+                                color: AppTheme.primary,
+                                width: 2,
+                              ),
                             ),
                             filled: true,
                             fillColor: isDark
                                 ? const Color(0xFF2A2A2A)
                                 : Colors.white,
                             contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 10),
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                             errorText: _ageMaxError,
                             errorMaxLines: 2,
                             isDense: true,
@@ -4961,7 +5051,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                               width: 16,
                               height: 16,
                               child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white),
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
                           : const Icon(Icons.save, size: 16),
                       label: const Text('Save Age Category to Salon'),
@@ -4970,7 +5062,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10)),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                     ),
                   ),
@@ -4987,8 +5080,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   Widget _buildAgeNameSuggestionField() {
     final isDark = _isDark;
 
-    final suggestions =
-        _globalAgeCategories.map((a) => a['display_name'] as String).toList();
+    final suggestions = _globalAgeCategories
+        .map((a) => a['display_name'] as String)
+        .toList();
 
     return Autocomplete<String>(
       optionsBuilder: (TextEditingValue textEditingValue) {
@@ -5011,8 +5105,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           _ageDisplayNameController.text = selection;
         }
       },
-      fieldViewBuilder:
-          (context, textController, focusNode, onFieldSubmitted) {
+      fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
         if (textController.text != _ageDisplayNameController.text) {
           textController.text = _ageDisplayNameController.text;
         }
@@ -5029,28 +5122,34 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           decoration: InputDecoration(
             labelText: 'Age Category Name *',
             hintText: 'e.g., Adult, Child, Senior',
-            prefixIcon: Icon(Icons.visibility,
-                size: 18, color: isDark ? Colors.white70 : Colors.grey),
+            prefixIcon: Icon(
+              Icons.visibility,
+              size: 18,
+              color: isDark ? Colors.white70 : Colors.grey,
+            ),
             suffixIcon: suggestions.isNotEmpty
-                ? Icon(Icons.arrow_drop_down,
-                    color: isDark ? Colors.white70 : Colors.grey)
+                ? Icon(
+                    Icons.arrow_drop_down,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  )
                 : null,
-            border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10)),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
               borderSide: BorderSide(
-                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide:
-                  const BorderSide(color: AppTheme.primary, width: 2),
+              borderSide: const BorderSide(color: AppTheme.primary, width: 2),
             ),
             filled: true,
             fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
             errorText: _ageNameError,
             errorMaxLines: 2,
             isDense: true,
@@ -5072,14 +5171,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       style: TextStyle(color: isDark ? Colors.white : Colors.black87),
       decoration: InputDecoration(
         hintText: 'e.g., 30',
-        prefixIcon: Icon(Icons.timer,
-            size: 18, color: isDark ? Colors.white70 : Colors.grey),
+        prefixIcon: Icon(
+          Icons.timer,
+          size: 18,
+          color: isDark ? Colors.white70 : Colors.grey,
+        ),
         suffixText: 'mins',
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(
-              color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
+            color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+          ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
@@ -5087,14 +5190,17 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         ),
         filled: true,
         fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
         errorText: _durationError,
         errorMaxLines: 2,
       ),
     );
   }
 
+  // ✅ PRICE FIELD - Dynamic currency + hint
   Widget _buildPriceField() {
     final isDark = _isDark;
     return TextFormField(
@@ -5102,20 +5208,23 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       style: TextStyle(color: isDark ? Colors.white : Colors.black87),
       decoration: InputDecoration(
-        hintText: 'Leave empty to set later',
+        hintText: _salonPriceHint,
         prefixIcon: CurrencyPrefix(
           symbol: _salonCurrencySymbol,
           type: CurrencyDisplayType.text,
           color: isDark ? Colors.white70 : Colors.grey,
           fontSize: 16,
         ),
-        prefixIconConstraints:
-            const BoxConstraints(minWidth: 50, minHeight: 20),
+        prefixIconConstraints: const BoxConstraints(
+          minWidth: 50,
+          minHeight: 20,
+        ),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: BorderSide(
-              color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
+            color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+          ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
@@ -5123,8 +5232,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         ),
         filled: true,
         fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
         errorText: _priceError,
         errorMaxLines: 2,
       ),
@@ -5160,7 +5271,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 height: 24,
                 width: 24,
                 child: CircularProgressIndicator(
-                    color: Colors.white, strokeWidth: 2),
+                  color: Colors.white,
+                  strokeWidth: 2,
+                ),
               )
             : Row(
                 mainAxisSize: MainAxisSize.min,
@@ -5174,9 +5287,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    widget.isEditing
-                        ? 'Update Service'
-                        : 'Save All Services',
+                    widget.isEditing ? 'Update Service' : 'Save All Services',
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
@@ -5209,8 +5320,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           widget.barberName != null
               ? '${widget.isEditing ? 'Edit' : 'Add'} Service - ${widget.barberName}'
               : widget.isEditing
-                  ? 'Edit Service'
-                  : 'Add New Service',
+              ? 'Edit Service'
+              : 'Add New Service',
           style: const TextStyle(color: Colors.white),
         ),
         backgroundColor: accentColor,
