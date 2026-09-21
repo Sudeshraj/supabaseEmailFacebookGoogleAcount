@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/widgets/currency_prefix.dart';
@@ -46,6 +45,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   // ==================== SERVICES ====================
   final CurrencyService _currencyService = CurrencyService.instance;
 
+  // ==================== HARDCODED GENDER LIST ====================
+  // ✅ Gender is a fixed system list — users select ONE, never add/edit.
+  static const List<Map<String, dynamic>> _hardcodedGenders = [
+    {'id': 1, 'display_name': 'Male'},
+    {'id': 2, 'display_name': 'Female'},
+    {'id': 3, 'display_name': 'Unisex'},
+  ];
+
   // ==================== SELECTED ====================
   int? _selectedCategoryId;
   String? _selectedIcon;
@@ -53,14 +60,16 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   int? _editingCategoryId;
 
   int? _variantTargetServiceIndex;
+  // ✅ Selected gender id (single-select, from hardcoded list)
   int? _selectedGenderId;
   int? _selectedAgeCategoryId;
 
   // ==================== DATA ====================
   List<Map<String, dynamic>> _categories = [];
-  List<Map<String, dynamic>> _genders = [];
+  List<Map<String, dynamic>> _genders = []; // ✅ always the hardcoded list
   List<Map<String, dynamic>> _ageCategories = [];
   List<Map<String, dynamic>> _globalAgeCategories = [];
+  List<Map<String, dynamic>> _globalCategories = [];
 
   final List<Map<String, dynamic>> _addedServices = [];
   final Set<int> _dbServiceIds = {};
@@ -96,8 +105,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   bool _ageExpanded = false;
   bool _durationExpanded = false;
   bool _priceExpanded = false;
-
-  // ✅ NEW: "Add New Age Category" arrow inside the age typing form
   bool _addAgeCategoryFormExpanded = false;
 
   // ==================== ICON SUGGESTIONS ====================
@@ -166,7 +173,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     },
   ];
 
-  // ==================== CATEGORY COLOR OPTIONS ====================
   final List<Map<String, dynamic>> _categoryColorOptions = [
     {'hex': '#FF6B8B', 'color': const Color(0xFFFF6B8B)},
     {'hex': '#4CAF50', 'color': const Color(0xFF4CAF50)},
@@ -181,7 +187,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   final supabase = Supabase.instance.client;
 
-  // ==================== CURRENCY GETTERS ====================
   String get _salonCurrencySymbol =>
       _currencyService.getSymbol(_salonCurrencyCode);
 
@@ -199,6 +204,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     super.initState();
     _ageMinController.text = '0';
     _ageMaxController.text = '100';
+    // ✅ Seed the gender list from the hardcoded list
+    _genders = List<Map<String, dynamic>>.from(_hardcodedGenders);
     _loadData();
     _loadSalonCurrency();
     _selectedIcon = _iconSuggestions.first['name'];
@@ -407,12 +414,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .eq('is_active', true)
           .order('display_order');
 
-      final gendersResponse = await supabase
-          .from('salon_genders')
-          .select('id, display_name, display_order, is_active')
-          .eq('salon_id', widget.salonId)
-          .eq('is_active', true)
-          .order('display_order');
+      // ✅ Genders are NOT loaded from DB — hardcoded list is used.
+      //    (Previously we loaded from `salon_genders`, but now we use
+      //    the fixed `_hardcodedGenders` list.)
 
       final ageResponse = await supabase
           .from('salon_age_categories')
@@ -434,19 +438,32 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         debugPrint('Could not load global age categories: $e');
       }
 
+      List<dynamic> globalCategoriesResponse = [];
+      try {
+        globalCategoriesResponse = await supabase
+            .from('categories')
+            .select(
+                'id, display_name, description, icon_name, color, display_order')
+            .eq('is_active', true)
+            .order('display_order');
+      } catch (e) {
+        debugPrint('Could not load global categories: $e');
+      }
+
       setState(() {
         _categories = List<Map<String, dynamic>>.from(categoriesResponse);
-        _genders = List<Map<String, dynamic>>.from(gendersResponse);
         _ageCategories = List<Map<String, dynamic>>.from(ageResponse);
         _globalAgeCategories =
             List<Map<String, dynamic>>.from(globalAgeResponse);
+        _globalCategories =
+            List<Map<String, dynamic>>.from(globalCategoriesResponse);
+        // ✅ Ensure gender list is the hardcoded one
+        _genders = List<Map<String, dynamic>>.from(_hardcodedGenders);
 
         if (_categories.isNotEmpty && _selectedCategoryId == null) {
           _selectedCategoryId = _categories.first['id'] as int;
         }
 
-        // ✅ Auto-expand the "Add New Age Category" form ONLY IF there are
-        // no existing age categories. Otherwise, keep it collapsed.
         _addAgeCategoryFormExpanded = _ageCategories.isEmpty;
       });
 
@@ -463,6 +480,26 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         _showSnackBar('Error loading data: $e', Colors.red);
       }
     }
+  }
+
+  /// ✅ Map a gender display name (e.g. "Male") to its hardcoded id.
+  int? _genderIdFromName(String? name) {
+    if (name == null || name.isEmpty) return null;
+    final match = _hardcodedGenders.firstWhere(
+      (g) => (g['display_name'] as String).toLowerCase() == name.toLowerCase(),
+      orElse: () => {},
+    );
+    return match.isNotEmpty ? match['id'] as int? : null;
+  }
+
+  /// ✅ Get the display name for a hardcoded gender id.
+  String _genderNameFromId(int? id) {
+    if (id == null) return 'Any';
+    final match = _hardcodedGenders.firstWhere(
+      (g) => g['id'] == id,
+      orElse: () => {'display_name': 'Any'},
+    );
+    return match['display_name'] as String? ?? 'Any';
   }
 
   Future<void> _loadExistingServicesFromDb() async {
@@ -495,10 +532,22 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .inFilter('service_id', serviceIds)
           .eq('is_active', true);
 
-      final genderIdToName = <int, String>{};
-      for (var g in _genders) {
-        genderIdToName[g['id'] as int] = _getGenderDisplayName(g);
+      // ✅ Fetch salon_genders to resolve the DB gender_id → display_name
+      //    (salon_genders rows reference the system gender list).
+      final salonGenderIdToName = <int, String>{};
+      try {
+        final salonGenderRows = await supabase
+            .from('salon_genders')
+            .select('id, display_name')
+            .eq('salon_id', widget.salonId);
+        for (var g in salonGenderRows) {
+          salonGenderIdToName[g['id'] as int] =
+              (g['display_name'] ?? 'Any').toString();
+        }
+      } catch (e) {
+        debugPrint('Could not load salon genders map: $e');
       }
+
       final ageIdToName = <int, String>{};
       for (var a in _ageCategories) {
         ageIdToName[a['id'] as int] = _getAgeCategoryDisplayName(a);
@@ -507,12 +556,16 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       final Map<int, List<Map<String, dynamic>>> variantsByService = {};
       for (var v in variantsResponse) {
         final sid = v['service_id'] as int;
-        final genderId = v['salon_gender_id'] as int?;
+        final rawGenderId = v['salon_gender_id'] as int?;
         final ageId = v['salon_age_category_id'] as int?;
 
-        final genderName = genderId != null
-            ? (genderIdToName[genderId] ?? 'Any')
+        // ✅ Map stored salon_gender_id → display_name → hardcoded id
+        final storedGenderName = rawGenderId != null
+            ? (salonGenderIdToName[rawGenderId] ?? 'Any')
             : 'Any';
+        final genderId = _genderIdFromName(storedGenderName);
+
+        final genderName = _genderNameFromId(genderId);
         final ageName =
             ageId != null ? (ageIdToName[ageId] ?? 'Any') : 'Any';
 
@@ -528,6 +581,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           'duration': (v['duration'] as num?)?.toInt() ?? 0,
           'variant_id': v['id'],
           'from_db': true,
+          'stored_gender_id': rawGenderId,
         });
       }
 
@@ -568,17 +622,31 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .eq('service_id', widget.serviceId!)
           .eq('is_active', true);
 
+      // ✅ Fetch salon_genders to resolve stored id → display_name
+      final salonGenderIdToName = <int, String>{};
+      try {
+        final salonGenderRows = await supabase
+            .from('salon_genders')
+            .select('id, display_name')
+            .eq('salon_id', widget.salonId);
+        for (var g in salonGenderRows) {
+          salonGenderIdToName[g['id'] as int] =
+              (g['display_name'] ?? 'Any').toString();
+        }
+      } catch (e) {
+        debugPrint('Could not load salon genders map: $e');
+      }
+
       final variants = <Map<String, dynamic>>[];
       for (var v in variantsResponse) {
-        final genderId = v['salon_gender_id'] as int?;
+        final rawGenderId = v['salon_gender_id'] as int?;
         final ageId = v['salon_age_category_id'] as int?;
 
-        final gender = genderId != null
-            ? _genders.firstWhere(
-                (g) => g['id'] == genderId,
-                orElse: () => {'display_name': 'Any'},
-              )
-            : {'display_name': 'Any'};
+        final storedGenderName = rawGenderId != null
+            ? (salonGenderIdToName[rawGenderId] ?? 'Any')
+            : 'Any';
+        final genderId = _genderIdFromName(storedGenderName);
+
         final ageCat = ageId != null
             ? _ageCategories.firstWhere(
                 (a) => a['id'] == ageId,
@@ -598,7 +666,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
         variants.add({
           'gender_id': genderId,
-          'gender_name': _getGenderDisplayName(gender),
+          'gender_name': _genderNameFromId(genderId),
           'age_category_id': ageId,
           'age_category_name': _getAgeCategoryDisplayName(ageCat),
           'price': priceNum ?? 0.0,
@@ -606,6 +674,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           'duration': (v['duration'] as num?)?.toInt() ?? 0,
           'variant_id': v['id'],
           'from_db': true,
+          'stored_gender_id': rawGenderId,
         });
       }
 
@@ -648,10 +717,21 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .eq('service_id', serviceId)
           .eq('is_active', true);
 
-      final genderIdToName = <int, String>{};
-      for (var g in _genders) {
-        genderIdToName[g['id'] as int] = _getGenderDisplayName(g);
+      // ✅ Resolve stored salon_gender_id → display_name
+      final salonGenderIdToName = <int, String>{};
+      try {
+        final salonGenderRows = await supabase
+            .from('salon_genders')
+            .select('id, display_name')
+            .eq('salon_id', widget.salonId);
+        for (var g in salonGenderRows) {
+          salonGenderIdToName[g['id'] as int] =
+              (g['display_name'] ?? 'Any').toString();
+        }
+      } catch (e) {
+        debugPrint('Could not load salon genders map: $e');
       }
+
       final ageIdToName = <int, String>{};
       for (var a in _ageCategories) {
         ageIdToName[a['id'] as int] = _getAgeCategoryDisplayName(a);
@@ -659,12 +739,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
       final loaded = <Map<String, dynamic>>[];
       for (var v in variantsResponse) {
-        final genderId = v['salon_gender_id'] as int?;
+        final rawGenderId = v['salon_gender_id'] as int?;
         final ageId = v['salon_age_category_id'] as int?;
 
-        final genderName = genderId != null
-            ? (genderIdToName[genderId] ?? 'Any')
+        final storedGenderName = rawGenderId != null
+            ? (salonGenderIdToName[rawGenderId] ?? 'Any')
             : 'Any';
+        final genderId = _genderIdFromName(storedGenderName);
+
         final ageName =
             ageId != null ? (ageIdToName[ageId] ?? 'Any') : 'Any';
 
@@ -672,7 +754,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
         loaded.add({
           'gender_id': genderId,
-          'gender_name': genderName,
+          'gender_name': _genderNameFromId(genderId),
           'age_category_id': ageId,
           'age_category_name': ageName,
           'price': priceNum ?? 0.0,
@@ -680,6 +762,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           'duration': (v['duration'] as num?)?.toInt() ?? 0,
           'variant_id': v['id'],
           'from_db': true,
+          'stored_gender_id': rawGenderId,
         });
       }
 
@@ -815,7 +898,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           _categoryNameError = null;
         });
 
-        _showSnackBar('Category "$displayName" updated', AppTheme.primary);
+
       } else {
         data['display_order'] = _categories.length;
 
@@ -835,7 +918,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           _categoryNameError = null;
         });
 
-        _showSnackBar('Category "$displayName" added', AppTheme.primary);
+
       }
     } catch (e) {
       _showSnackBar('Error saving category: $e', Colors.red);
@@ -926,7 +1009,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           }
         });
 
-        _showSnackBar('Category removed', Colors.orange);
+
       }
     } catch (e) {
       _showSnackBar('Error deleting category: $e', Colors.red);
@@ -1006,10 +1089,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         _ageMaxError = null;
       });
 
-      _showSnackBar(
-        'Age category "$displayName" added to salon',
-        Colors.green,
-      );
+
     } catch (e) {
       _showSnackBar('Error adding age category: $e', Colors.red);
     } finally {
@@ -1072,10 +1152,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _variantTargetServiceIndex = null;
     });
 
-    _showSnackBar(
-      'Service ${isEditing ? 'updated' : 'added'}. You can add variants next (optional).',
-      AppTheme.primary,
-    );
+    // _showSnackBar(
+    //   'Service ${isEditing ? 'updated' : 'added'}. You can add variants next (optional).',
+    //   AppTheme.primary,
+    // );
   }
 
   void _editAddedService(int index) {
@@ -1228,10 +1308,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return;
     }
 
-    final genderName = _selectedGenderId != null
-        ? _getGenderDisplayName(
-            _genders.firstWhere((g) => g['id'] == _selectedGenderId))
-        : 'Any';
+    // ✅ Gender comes from the hardcoded list, resolved by id → name
+    final genderName = _genderNameFromId(_selectedGenderId);
     final ageName = _selectedAgeCategoryId != null
         ? _getAgeCategoryDisplayName(
             _ageCategories.firstWhere((a) => a['id'] == _selectedAgeCategoryId))
@@ -1280,10 +1358,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _priceExpanded = false;
     });
 
-    _showSnackBar(
-      isEditingExistingVariant ? 'Variant updated' : 'Variant added',
-      AppTheme.primary,
-    );
+
   }
 
   void _editVariant(int serviceIndex, int variantIndex) {
@@ -1419,12 +1494,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   // ============================================
   // SAVE ALL SERVICES TO DB
   // ============================================
-
-  /// ✅ Entry point for the Save button.
-  /// Shows a confirm dialog FIRST. The actual DB save (and the screen
-  /// refresh that follows it) only happens if the user taps "Save" on
-  /// the confirm dialog. If they cancel/close it, nothing is saved and
-  /// nothing is refreshed — the screen stays exactly as it was.
   Future<void> _saveAllServices() async {
     if (_addedServices.isEmpty) {
       _showSnackBar('Please add at least one service', Colors.orange);
@@ -1442,15 +1511,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               'and $totalVariantsPreview variant${totalVariantsPreview == 1 ? '' : 's'} to the database.',
     );
 
-    // ❌ User cancelled/closed the dialog — do NOT save, do NOT refresh.
     if (confirmed != true) return;
 
-    // ✅ User confirmed — perform the actual save, then refresh.
     await _performSaveAllServices();
   }
 
-  /// A dedicated confirm dialog for the save action (separate from the
-  /// destructive-delete dialog styling of [_showConfirmDialog]).
   Future<bool?> _showSaveConfirmDialog({
     required String title,
     required String message,
@@ -1492,8 +1557,54 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
-  /// Actually writes everything to the database. Only ever called after
-  /// the user has confirmed via [_showSaveConfirmDialog].
+  /// ✅ Ensure the hardcoded genders exist in `salon_genders` for this
+  /// salon, and return a map of {display_name (lowercase) → salon_gender_id}.
+  ///
+  /// This is required because `service_variants.salon_gender_id` references
+  /// `salon_genders.id`. The user picks from the hardcoded gender list,
+  /// but we still need a row in `salon_genders` for each gender we use.
+  Future<Map<String, int>> _ensureSalonGenders() async {
+    final Map<String, int> byNameLower = {};
+
+    // 1) Load existing salon_genders for this salon
+    final existing = await supabase
+        .from('salon_genders')
+        .select('id, display_name')
+        .eq('salon_id', widget.salonId);
+
+    for (var g in existing) {
+      final name = (g['display_name'] ?? '').toString();
+      byNameLower[name.trim().toLowerCase()] = g['id'] as int;
+    }
+
+    // 2) Insert any missing hardcoded genders
+    int nextOrder = existing.length;
+    for (final hg in _hardcodedGenders) {
+      final name = (hg['display_name'] as String).trim();
+      final key = name.toLowerCase();
+      if (byNameLower.containsKey(key)) continue;
+
+      try {
+        final inserted = await supabase
+            .from('salon_genders')
+            .insert({
+              'salon_id': widget.salonId,
+              'display_name': name,
+              'display_order': nextOrder,
+              'is_active': true,
+            })
+            .select('id')
+            .single();
+        byNameLower[key] = inserted['id'] as int;
+        nextOrder++;
+      } catch (e) {
+        debugPrint('Could not insert salon gender "$name": $e');
+      }
+    }
+
+    return byNameLower;
+  }
+
   Future<void> _performSaveAllServices() async {
     setState(() => _isLoading = true);
 
@@ -1516,6 +1627,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           return;
         }
       }
+
+      // ✅ Ensure all hardcoded genders exist in `salon_genders` for this
+      //    salon, and build a {name(lower) → salon_gender_id} map.
+      final Map<String, int> genderIdByNameLower =
+          await _ensureSalonGenders();
 
       final existingServicesResponse = await supabase
           .from('services')
@@ -1620,9 +1736,16 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
         final variants = service['variants'] as List;
         for (final v in variants) {
+          // ✅ Resolve gender name → salon_gender_id (ensuring the row
+          //    exists in `salon_genders`).
+          final genderName = (v['gender_name'] as String? ?? 'Any').trim();
+          final genderKey = genderName.toLowerCase();
+          final resolvedGenderId =
+              genderName == 'Any' ? null : genderIdByNameLower[genderKey];
+
           final variantData = {
             'service_id': serviceId,
-            'salon_gender_id': v['gender_id'],
+            'salon_gender_id': resolvedGenderId,
             'salon_age_category_id': v['age_category_id'],
             'price': v['price_set'] == true ? v['price'] : null,
             'duration': ((v['duration'] as num?)?.toInt() ?? 0) == 0
@@ -1673,23 +1796,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             });
           }
         }
-      }
-
-      if (!mounted) return;
-
-      final totalVariants = _addedServices.fold<int>(
-          0, (sum, s) => sum + (s['variants'] as List).length);
-
-      await showCustomAlert(
-        context: context,
-        title: widget.isEditing ? "✅ Service Updated!" : "🎉 Services Saved!",
-        message: widget.isEditing
-            ? "${_addedServices.first['name']} has been updated successfully.\n\n"
-                "✅ $totalVariants variant${totalVariants == 1 ? '' : 's'} saved"
-            : "${_addedServices.length} service${_addedServices.length == 1 ? '' : 's'} added/updated successfully.\n\n"
-                "✅ $totalVariants variant${totalVariants == 1 ? '' : 's'} saved",
-        isError: false,
-      );
+      }       
 
       if (!mounted) return;
 
@@ -1858,7 +1965,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
-  // HIERARCHY GUIDE (explains Category → Service → Variant)
+  // HIERARCHY GUIDE
   // ============================================
   Widget _buildHierarchyGuideCard() {
     final isDark = _isDark;
@@ -1949,7 +2056,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Category
                   Row(
                     children: [
                       levelLabel('Category', Colors.orange),
@@ -1968,7 +2074,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     ],
                   ),
                   const SizedBox(height: 6),
-                  // Service 1
                   Row(
                     children: [
                       levelLabel('Service', Colors.blue),
@@ -1996,7 +2101,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       ),
                     ],
                   ),
-                  // Variant 1a
                   Padding(
                     padding: const EdgeInsets.only(left: 20, top: 3),
                     child: Row(
@@ -2028,7 +2132,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       ],
                     ),
                   ),
-                  // Variant 1b
                   Padding(
                     padding: const EdgeInsets.only(left: 20, top: 2),
                     child: Row(
@@ -2060,7 +2163,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  // Service 2
                   Row(
                     children: [
                       const SizedBox(width: 72),
@@ -2087,7 +2189,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       ),
                     ],
                   ),
-                  // Variant 2a
                   Padding(
                     padding: const EdgeInsets.only(left: 20, top: 3),
                     child: Row(
@@ -2118,7 +2219,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       ],
                     ),
                   ),
-                  // Variant 2b
                   Padding(
                     padding: const EdgeInsets.only(left: 20, top: 2),
                     child: Row(
@@ -2179,6 +2279,123 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
+  // CATEGORY NAME — Autocomplete suggestions
+  // ============================================
+  Widget _buildCategoryNameSuggestionField() {
+    final isDark = _isDark;
+
+    final suggestionSet = <String>{};
+    for (final c in _globalCategories) {
+      final name = c['display_name']?.toString();
+      if (name != null && name.isNotEmpty) suggestionSet.add(name);
+    }
+    for (final c in _categories) {
+      final name = c['display_name']?.toString();
+      if (name != null && name.isNotEmpty) suggestionSet.add(name);
+    }
+    final suggestions = suggestionSet.toList();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Autocomplete<String>(
+        optionsBuilder: (TextEditingValue textEditingValue) {
+          if (textEditingValue.text.isEmpty) {
+            return const Iterable<String>.empty();
+          }
+          final query = textEditingValue.text.toLowerCase();
+          return suggestions.where(
+            (option) => option.toLowerCase().contains(query),
+          );
+        },
+        onSelected: (String selection) {
+          final found = _globalCategories.firstWhere(
+            (c) => c['display_name'] == selection,
+            orElse: () => {},
+          );
+          if (found.isNotEmpty) {
+            _autoFillCategory(found);
+          } else {
+            _newCategoryNameController.text = selection;
+            _validateCategoryName();
+          }
+        },
+        fieldViewBuilder:
+            (context, textController, focusNode, onFieldSubmitted) {
+          if (textController.text != _newCategoryNameController.text) {
+            textController.text = _newCategoryNameController.text;
+          }
+          _newCategoryNameController.addListener(() {
+            if (textController.text != _newCategoryNameController.text) {
+              textController.text = _newCategoryNameController.text;
+            }
+          });
+
+          return TextFormField(
+            controller: textController,
+            focusNode: focusNode,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            decoration: InputDecoration(
+              labelText: 'Category Name *',
+              hintText: 'e.g., Hair, Nails, Spa',
+              hintStyle:
+                  TextStyle(color: isDark ? Colors.white70 : Colors.grey),
+              prefixIcon: Icon(Icons.category,
+                  size: 18, color: isDark ? Colors.white70 : Colors.grey),
+              suffixIcon: suggestions.isNotEmpty
+                  ? Icon(Icons.arrow_drop_down,
+                      color: isDark ? Colors.white70 : Colors.grey)
+                  : null,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10)),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(
+                    color: AppTheme.primary, width: 2),
+              ),
+              filled: true,
+              fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              errorText: _categoryNameError,
+              errorMaxLines: 2,
+            ),
+            onChanged: (value) {
+              _newCategoryNameController.text = value;
+              _validateCategoryName();
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  void _autoFillCategory(Map<String, dynamic> selected) {
+    setState(() {
+      _newCategoryNameController.text =
+          selected['display_name']?.toString() ?? '';
+      _newCategoryDescriptionController.text =
+          selected['description']?.toString() ?? '';
+
+      final iconName = selected['icon_name']?.toString();
+      if (iconName != null && iconName.isNotEmpty) {
+        _selectedIcon = iconName;
+      }
+
+      final colorHex = selected['color']?.toString();
+      if (colorHex != null && colorHex.isNotEmpty) {
+        _selectedCategoryColor = colorHex;
+      }
+
+      _validateCategoryName();
+    });
+  }
+
+  // ============================================
   // CATEGORIES SECTION
   // ============================================
   Widget _buildCategoriesSection() {
@@ -2234,39 +2451,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              TextFormField(
-                controller: _newCategoryNameController,
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
-                onChanged: (_) => _validateCategoryName(),
-                decoration: InputDecoration(
-                  labelText: 'Category Name *',
-                  hintText: 'e.g., Hair, Nails, Spa',
-                  prefixIcon: Icon(Icons.category,
-                      size: 18,
-                      color: isDark ? Colors.white70 : Colors.grey),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10)),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: BorderSide(
-                        color:
-                            isDark ? Colors.grey[700]! : Colors.grey[300]!),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(
-                        color: AppTheme.primary, width: 2),
-                  ),
-                  filled: true,
-                  fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                  errorText: _categoryNameError,
-                  errorMaxLines: 2,
-                ),
-              ),
-              const SizedBox(height: 8),
+              _buildCategoryNameSuggestionField(),
               TextFormField(
                 controller: _newCategoryDescriptionController,
                 maxLines: 2,
@@ -3440,10 +3625,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                   color: Colors.blue,
                   isExpanded: _genderExpanded,
                   subtitle: _selectedGenderId != null
-                      ? _genders.firstWhere(
-                          (g) => g['id'] == _selectedGenderId,
-                          orElse: () => {'display_name': 'Selected'},
-                        )['display_name']
+                      ? _genderNameFromId(_selectedGenderId)
                       : 'Tap to select gender (optional)',
                   onTap: () => setState(
                       () => _genderExpanded = !_genderExpanded),
@@ -4453,7 +4635,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
-  // GENDER CHIPS
+  // GENDER CHIPS (single-select from hardcoded list)
   // ============================================
   Widget _buildGenderChips() {
     final isDark = _isDark;
@@ -4472,7 +4654,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'No genders available for this salon',
+                'No genders available',
                 style: TextStyle(
                   fontSize: 11,
                   color: isDark ? Colors.white70 : Colors.grey[700],
@@ -4492,40 +4674,55 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         border: Border.all(
             color: isDark ? Colors.grey[700]! : Colors.grey[200]!),
       ),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: _genders.map((gender) {
-          final id = gender['id'] as int;
-          final isSelected = _selectedGenderId == id;
-          final displayName = _getGenderDisplayName(gender);
-          return FilterChip(
-            label: Text(
-              displayName,
-              style: TextStyle(
-                color: isSelected
-                    ? Colors.blue
-                    : (isDark ? Colors.white70 : Colors.grey[700]),
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Select one gender',
+            style: TextStyle(
+              fontSize: 10,
+              color: isDark ? Colors.white38 : Colors.grey[500],
             ),
-            selected: isSelected,
-            onSelected: (selected) {
-              setState(() {
-                _selectedGenderId = selected ? id : null;
-              });
-            },
-            backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-            selectedColor: Colors.blue.withValues(alpha: 0.2),
-            checkmarkColor: Colors.blue,
-            shape: StadiumBorder(
-              side: BorderSide(
-                color: isSelected
-                    ? Colors.blue
-                    : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
-              ),
-            ),
-          );
-        }).toList(),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _genders.map((gender) {
+              final id = gender['id'] as int;
+              final isSelected = _selectedGenderId == id;
+              final displayName = _getGenderDisplayName(gender);
+              return FilterChip(
+                label: Text(
+                  displayName,
+                  style: TextStyle(
+                    color: isSelected
+                        ? Colors.blue
+                        : (isDark ? Colors.white70 : Colors.grey[700]),
+                  ),
+                ),
+                selected: isSelected,
+                // ✅ Single-select: tapping the same chip again deselects it
+                onSelected: (selected) {
+                  setState(() {
+                    _selectedGenderId = selected ? id : null;
+                  });
+                },
+                backgroundColor:
+                    isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                selectedColor: Colors.blue.withValues(alpha: 0.2),
+                checkmarkColor: Colors.blue,
+                shape: StadiumBorder(
+                  side: BorderSide(
+                    color: isSelected
+                        ? Colors.blue
+                        : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
@@ -4536,8 +4733,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   Widget _buildAgeTypingForm() {
     final isDark = _isDark;
 
-    // ✅ Auto-expand if there are NO existing age categories
-    //    (this is derived, not stateful — the manual toggle works too)
     final shouldAutoExpand = _ageCategories.isEmpty;
     final isAddFormExpanded = _addAgeCategoryFormExpanded || shouldAutoExpand;
 
@@ -4552,7 +4747,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ✅ Existing age categories section
           if (_ageCategories.isNotEmpty) ...[
             Row(
               children: [
@@ -4623,7 +4817,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             const SizedBox(height: 14),
           ],
 
-          // ✅ Expandable "Add New Age Category" header with arrow
           _buildExpandableHeader(
             title: 'Add New Age Category',
             icon: Icons.add_circle_outline,
@@ -4633,8 +4826,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 ? 'Tap to collapse'
                 : 'Tap to add a new age category',
             onTap: () {
-              // ✅ Don't allow collapsing when auto-expanded (no existing
-              //    categories) — user must add at least one.
               if (shouldAutoExpand) {
                 _showSnackBar(
                   'Add at least one age category to continue',
@@ -4647,7 +4838,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             },
           ),
 
-          // ✅ Expanded content
           AnimatedCrossFade(
             duration: const Duration(milliseconds: 200),
             crossFadeState: isAddFormExpanded
