@@ -2409,58 +2409,62 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // BOTTOM NAV (EDIT MODE)
+  // STEP ACTIONS (EDIT MODE) — lives at the bottom of the scroll
+  // content (not a fixed bottomNavigationBar). Both buttons share
+  // the row width via Expanded so they never overlap on mobile.
   // ============================================
 
-  Widget _buildBottomNavBar() {
+  Widget _buildStepActions() {
     final isDark = _isDark;
     final isLastStep = _currentStep == 2;
     final canProceed = _canProceedFromStep(_currentStep);
     final busy = _isSaving || _isUploadingLogo || _isUploadingCover;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
-              blurRadius: 8,
-              offset: const Offset(0, -2)),
-        ],
-      ),
-      child: SafeArea(
-        top: false,
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
         child: Row(
           children: [
             if (_currentStep > 0) ...[
               Expanded(
-                child: OutlinedButton.icon(
+                child: OutlinedButton(
                   onPressed:
                       busy ? null : () => setState(() => _currentStep--),
-                  icon: const Icon(Icons.arrow_back, size: 18),
-                  label: const Text('Back'),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     side: BorderSide(
-                        color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
+                      color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                    ),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.arrow_back, size: 18),
+                        SizedBox(width: 6),
+                        Text('Back'),
+                      ],
+                    ),
                   ),
                 ),
               ),
               const SizedBox(width: 12),
             ],
             Expanded(
-              flex: 2,
+              flex: _currentStep > 0 ? 2 : 1,
               child: ElevatedButton(
                 onPressed: busy
                     ? null
                     : () {
                         if (!canProceed) {
                           _showSnackBar(
-                              _stepRequirementMessage(_currentStep),
-                              Colors.orange);
+                            _stepRequirementMessage(_currentStep),
+                            Colors.orange,
+                          );
                           return;
                         }
                         if (isLastStep) {
@@ -2481,7 +2485,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 child: busy
                     ? Row(
@@ -2491,29 +2496,40 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(
-                                color: Colors.white, strokeWidth: 2),
+                              color: Colors.white,
+                              strokeWidth: 2,
+                            ),
                           ),
                           const SizedBox(width: 10),
-                          Text(_isUploadingLogo || _isUploadingCover
-                              ? 'Uploading...'
-                              : 'Saving...'),
+                          Flexible(
+                            child: Text(
+                              _isUploadingLogo || _isUploadingCover
+                                  ? 'Uploading...'
+                                  : 'Saving...',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
                         ],
                       )
-                    : Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            isLastStep ? 'Save Changes' : 'Continue',
-                            style: const TextStyle(
-                                fontSize: 16, fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(width: 8),
-                          Icon(
-                              isLastStep
-                                  ? Icons.save
-                                  : Icons.arrow_forward,
-                              size: 20),
-                        ],
+                    : FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              isLastStep ? 'Save Changes' : 'Continue',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(
+                              isLastStep ? Icons.save : Icons.arrow_forward,
+                              size: 20,
+                            ),
+                          ],
+                        ),
                       ),
               ),
             ),
@@ -2621,12 +2637,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           ],
         ],
       ),
-      // ✅ The nav bar lives outside the scrolling body (Scaffold sizes it
-      // safely on its own), so the body never has to fit a fixed-height
-      // bar plus content inside a constrained Expanded — it can just be
-      // one long scrollable Column. That makes it impossible for this
-      // screen to hard-overflow, no matter how short the viewport is.
-      bottomNavigationBar: _isEditMode ? _buildBottomNavBar() : null,
+      // ✅ No fixed bottomNavigationBar anymore — the Continue/Save
+      // action row now lives at the bottom of the scrollable content
+      // (see _buildStepActions), so it never overlaps other content
+      // on narrow/mobile screens and stays responsive.
       body: SafeArea(
         child: Container(
           color: isDark ? const Color(0xFF121212) : Colors.grey[50],
@@ -2645,6 +2659,16 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           ? _buildStepContent()
                           : _buildViewContent(),
                     ),
+                    if (_isEditMode)
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          isWeb ? 32 : 16,
+                          0,
+                          isWeb ? 32 : 16,
+                          isWeb ? 32 : 16,
+                        ),
+                        child: _buildStepActions(),
+                      ),
                   ],
                 ),
               ),

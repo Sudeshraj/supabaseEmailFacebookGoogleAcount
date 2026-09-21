@@ -1815,45 +1815,30 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== BOTTOM NAVIGATION ====================
+  // ==================== STEP ACTIONS ====================
+  // ✅ Lives at the bottom of the scroll content (not a fixed
+  // bottomNavigationBar). Both buttons share the row width via
+  // Expanded so they never overlap on mobile/narrow screens, and
+  // the row itself is centered on wider (web) screens.
 
-Widget _buildBottomNavBar() {
-  final isDark = _isDark;
-  final isLastStep = _currentStep == 2;
-  final canProceed = _canProceedFromStep(_currentStep);
-  final busy = _isLoading || _isUploadingLogo || _isUploadingCover;
+  Widget _buildStepActions() {
+    final isDark = _isDark;
+    final isLastStep = _currentStep == 2;
+    final canProceed = _canProceedFromStep(_currentStep);
+    final busy = _isLoading || _isUploadingLogo || _isUploadingCover;
 
-  return Container(
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
-          blurRadius: 8,
-          offset: const Offset(0, -2),
-        ),
-      ],
-    ),
-    child: SafeArea(
-      top: false,
-      child: SizedBox(
-        height: 52,
-        child: Stack(
-          alignment: Alignment.center,
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: Row(
           children: [
-            if (_currentStep > 0)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: busy ? null : () => setState(() => _currentStep--),
-                  icon: const Icon(Icons.arrow_back, size: 18),
-                  label: const Text('Back'),
+            if (_currentStep > 0) ...[
+              Expanded(
+                child: OutlinedButton(
+                  onPressed:
+                      busy ? null : () => setState(() => _currentStep--),
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      vertical: 14,
-                      horizontal: 20,
-                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                     side: BorderSide(
                       color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
                     ),
@@ -1861,10 +1846,23 @@ Widget _buildBottomNavBar() {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.arrow_back, size: 18),
+                        SizedBox(width: 6),
+                        Text('Back'),
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            Align(
-              alignment: Alignment.center,
+              const SizedBox(width: 12),
+            ],
+            Expanded(
+              flex: _currentStep > 0 ? 2 : 1,
               child: ElevatedButton(
                 onPressed: busy
                     ? null
@@ -1892,10 +1890,7 @@ Widget _buildBottomNavBar() {
                       ? AppTheme.primary
                       : (isDark ? Colors.grey[800] : Colors.grey[300]),
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 14,
-                    horizontal: 28,
-                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1913,40 +1908,45 @@ Widget _buildBottomNavBar() {
                             ),
                           ),
                           const SizedBox(width: 10),
-                          Text(
-                            _isUploadingLogo || _isUploadingCover
-                                ? 'Uploading...'
-                                : 'Creating...',
+                          Flexible(
+                            child: Text(
+                              _isUploadingLogo || _isUploadingCover
+                                  ? 'Uploading...'
+                                  : 'Creating...',
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                         ],
                       )
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            isLastStep ? 'Create Salon' : 'Continue',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                    : FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              isLastStep ? 'Create Salon' : 'Continue',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Icon(
-                            isLastStep
-                                ? Icons.check_circle
-                                : Icons.arrow_forward,
-                            size: 20,
-                          ),
-                        ],
+                            const SizedBox(width: 8),
+                            Icon(
+                              isLastStep
+                                  ? Icons.check_circle
+                                  : Icons.arrow_forward,
+                              size: 20,
+                            ),
+                          ],
+                        ),
                       ),
               ),
             ),
           ],
         ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   // ==================== BUILD ====================
 
@@ -2007,12 +2007,10 @@ Widget _buildBottomNavBar() {
           tooltip: 'Back',
         ),
       ),
-      // ✅ The nav bar lives outside the scrolling body (Scaffold sizes it
-      // safely on its own), so the body never has to fit a fixed-height
-      // bar plus content inside a constrained Expanded — it can just be
-      // one long scrollable Column. That makes it impossible for this
-      // screen to hard-overflow, no matter how short the viewport is.
-      bottomNavigationBar: _buildBottomNavBar(),
+      // ✅ No fixed bottomNavigationBar anymore — the Continue/Create
+      // Salon action row now lives at the bottom of the scrollable
+      // content (see _buildStepActions), so it never overlaps other
+      // content on narrow/mobile screens and stays responsive.
       body: SafeArea(
         child: Container(
           color: isDark ? const Color(0xFF121212) : Colors.grey[50],
@@ -2029,6 +2027,15 @@ Widget _buildBottomNavBar() {
                     Padding(
                       padding: EdgeInsets.all(isWeb ? 32 : 16),
                       child: _buildStepContent(),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        isWeb ? 32 : 16,
+                        0,
+                        isWeb ? 32 : 16,
+                        isWeb ? 32 : 16,
+                      ),
+                      child: _buildStepActions(),
                     ),
                   ],
                 ),
