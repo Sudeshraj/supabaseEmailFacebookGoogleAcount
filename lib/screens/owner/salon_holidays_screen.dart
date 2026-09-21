@@ -1002,51 +1002,76 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
             ),
           );
         },
-      ).toList(), // ✅ ඉතිරි වෙනවා - මෙය Column එකේ children එකට යන නිසා toList() අවශ්‍යයි
+      ).toList(),
     );
   }
 
+  // ✅ FIXED: The empty state now scrolls and sizes itself to the available
+  // space instead of forcing a fixed-size Column into a tighter area — this
+  // was the cause of the "RenderFlex overflowed by 6.0 pixels" error.
   Widget _buildEmptyState(bool isWeb) {
     final isDark = context.isDarkMode;
 
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.beach_access,
-            size: isWeb ? 80 : 64,
-            color: isDark ? Colors.white30 : Colors.grey[400],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No holidays added yet',
-            style: TextStyle(
-              fontSize: 18,
-              color: isDark ? Colors.white60 : Colors.grey,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.beach_access,
+                      size: isWeb ? 72 : 56,
+                      color: isDark ? Colors.white30 : Colors.grey[400],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'No holidays added yet',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: isDark ? Colors.white60 : Colors.grey,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Add holidays to mark days when salon is closed',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white70 : Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton.icon(
+                      onPressed: _addHoliday,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add Holiday'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Add holidays to mark days when salon is closed',
-            style: TextStyle(
-              fontSize: 14,
-              color: isDark ? Colors.white70 : Colors.grey[600],
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: _addHoliday,
-            icon: const Icon(Icons.add),
-            label: const Text('Add Holiday'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
