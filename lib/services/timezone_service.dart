@@ -510,7 +510,7 @@ class TimezoneService {
     }
   }
 
-  // ==================== PUBLIC GETTERS ====================
+  // ==================== PUBLIC GETTERS (CURRENT TIMEZONE) ====================
 
   static String getTimezoneFlag() {
     for (var entry in countryTimezones.entries) {
@@ -541,6 +541,80 @@ class TimezoneService {
   static String getFullTimezoneDisplay() {
     return '${getTimezoneFlag()} ${getTimezoneDisplayName()} (${getUtcOffsetString()})';
   }
+
+  // ==================== ✅ PUBLIC GETTERS (FOR ANY TIMEZONE) ====================
+  // ✅ NEW: මේවා ඕන barber_schedule_screen එකේ _getTimezoneDisplay() එකට
+  //    Salon timezone එකේ info පෙන්නන්න
+
+  /// Get flag for a specific timezone (e.g., '🇱🇰' for 'Asia/Colombo')
+  static String getTimezoneFlagFor(String timezone) {
+    for (var entry in countryTimezones.entries) {
+      for (var tz in entry.value) {
+        if (tz['timezone'] == timezone) {
+          return tz['flag']!;
+        }
+      }
+    }
+    return '🌍';
+  }
+
+  /// Get display name for a specific timezone (e.g., 'Sri Lanka' for 'Asia/Colombo')
+  static String getTimezoneNameFor(String timezone) {
+    for (var entry in countryTimezones.entries) {
+      for (var tz in entry.value) {
+        if (tz['timezone'] == timezone) {
+          return tz['name']!;
+        }
+      }
+    }
+    // Fallback: derive from timezone string
+    if (timezone.contains('/')) {
+      return timezone.split('/').last.replaceAll('_', ' ');
+    }
+    return timezone;
+  }
+
+  /// Get UTC offset string for a specific timezone (e.g., 'UTC+5:30')
+  static String getUtcOffsetFor(String timezone) {
+    try {
+      final location = tz.getLocation(timezone);
+      final tzNow = tz.TZDateTime.now(location);
+      final offset = tzNow.timeZoneOffset;
+      final hours = offset.inHours;
+      final minutes = offset.inMinutes.abs() % 60;
+      final sign = hours >= 0 ? '+' : '';
+      return 'UTC$sign$hours:${minutes.toString().padLeft(2, '0')}';
+    } catch (e) {
+      debugPrint('❌ Error getting UTC offset for $timezone: $e');
+      return 'UTC+0:00';
+    }
+  }
+
+  /// Get full display for a specific timezone (flag + name + offset)
+  /// e.g., '🇱🇰 Sri Lanka (UTC+5:30)'
+  static String getFullTimezoneDisplayFor(String timezone) {
+    final flag = getTimezoneFlagFor(timezone);
+    final name = getTimezoneNameFor(timezone);
+    final offset = getUtcOffsetFor(timezone);
+    return '$flag $name ($offset)';
+  }
+
+  /// Get country code for a specific timezone
+  static String getCountryCodeFor(String timezone) {
+    for (var entry in countryTimezones.entries) {
+      for (var tz in entry.value) {
+        if (tz['timezone'] == timezone) {
+          return entry.key;
+        }
+      }
+    }
+    if (timezone.contains('/')) {
+      return timezone.split('/').first;
+    }
+    return 'INT';
+  }
+
+  // ==================== SET / UPDATE TIMEZONE ====================
 
   /// ✅ FIX: දැන් දෙකම keys save කරනවා (sync)
   static Future<void> setTimezone(String timezone) async {
@@ -591,6 +665,8 @@ class TimezoneService {
       debugPrint('🔄 Reset to device timezone: $deviceTimezone');
     }
   }
+
+  // ==================== LIST HELPERS ====================
 
   static List<Map<String, String>> getTimezonesForCountry(String countryCode) {
     return countryTimezones[countryCode] ?? countryTimezones['LK']!;
@@ -1192,7 +1268,9 @@ class TimezoneService {
     return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
   }
 
-    static TimeOfDay convertTimeOfDayBetweenTimezones(
+  /// ✅ Convert a TimeOfDay from one timezone to another
+  /// Useful when displaying salon times in user's timezone
+  static TimeOfDay convertTimeOfDayBetweenTimezones(
     TimeOfDay time, {
     required String fromTimezone,
     required String toTimezone,

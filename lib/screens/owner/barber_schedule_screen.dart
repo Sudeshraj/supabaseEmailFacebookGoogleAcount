@@ -128,15 +128,17 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   // ============================================
-  // TIMEZONE INITIALIZATION
+  // ✅ TIMEZONE INITIALIZATION
+  //    1st: User timezone from LOCAL STORAGE
+  //    2nd: Fallback to DEVICE timezone
   // ============================================
-
   Future<void> _initializeTimezones() async {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    _userTimezone =
-        prefs.getString('user_timezone') ??
+
+    // ✅ User timezone - Local storage → Device (fallback)
+    _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
         TimezoneService.getCurrentTimezone();
 
     debugPrint('✅ User timezone: $_userTimezone');
@@ -145,13 +147,20 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   // ============================================
-  // TIMEZONE CONVERSION
+  // ✅ TIMEZONE CONVERSION HELPERS
   // ============================================
 
+  /// Format UTC time to LOCAL time (using SALON timezone)
   String _formatUtcToLocalTime(String? utcTime) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
+
+    // ✅ Salon timezone use කරන්න (fallback: user timezone)
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : TimezoneService.getCurrentTimezone();
+
     try {
-      return TimezoneService.utcToLocalTimeRecurring(utcTime);
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(utcTime, tz);
     } catch (e) {
       try {
         final parts = utcTime.split(':');
@@ -170,8 +179,70 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return TimezoneService.utcToTimeOfDayWithTimezone(utcTime, _salonTimezone);
   }
 
-  String _getTimezoneDisplay() {
-    return TimezoneService.getFullTimezoneDisplay();
+  /// ✅ Get salon timezone display (flag + name + offset)
+  String _getSalonTimezoneDisplay() {
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : TimezoneService.getCurrentTimezone();
+    return TimezoneService.getFullTimezoneDisplayFor(tz);
+  }
+
+  /// ✅ Get user timezone display (flag + name + offset)
+  String _getUserTimezoneDisplay() {
+    return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
+  }
+
+  /// ✅ Check if salon timezone and user timezone are the same
+  bool get _isSameTimezone {
+    return _salonTimezone.isEmpty || _userTimezone.isEmpty
+        ? true
+        : _salonTimezone == _userTimezone;
+  }
+
+  // ============================================
+  // ✅ CONVERT SALON TIME → USER TIME (Reference)
+  // ============================================
+
+  /// Convert a TimeOfDay from salon timezone to user timezone
+  /// Useful for showing "in your time" reference
+  TimeOfDay _convertSalonTimeToUserTime(TimeOfDay salonTime) {
+    if (_isSameTimezone) return salonTime;
+    return TimezoneService.convertTimeOfDayBetweenTimezones(
+      salonTime,
+      fromTimezone: _salonTimezone,
+      toTimezone: _userTimezone,
+    );
+  }
+
+  /// Format a TimeOfDay for display (e.g., "9:30 AM")
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour =
+        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
+  /// ✅ Convert UTC time string directly to user timezone display
+  /// This is the shortcut version for schedule items
+  String _formatUtcToUserTime(String? utcTime) {
+    if (utcTime == null || utcTime.isEmpty) return '--:--';
+    if (_isSameTimezone) return '';
+
+    try {
+      // 1) UTC → Salon TimeOfDay
+      final salonTime = TimezoneService.utcToTimeOfDayWithTimezone(
+        utcTime,
+        _salonTimezone,
+      );
+      // 2) Salon → User TimeOfDay
+      final userTime = _convertSalonTimeToUserTime(salonTime);
+      // 3) Format
+      return _formatTimeOfDay(userTime);
+    } catch (e) {
+      debugPrint('❌ Error in _formatUtcToUserTime: $e');
+      return '';
+    }
   }
 
   // ============================================
@@ -787,17 +858,15 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               ),
             )
           : _barbers.isEmpty
-          ? _buildEmptyState(padding)
-          : SafeArea(
-              child: _isWeb
-                  ? _buildWebView(padding, screenWidth)
-                  : _buildMobileView(),
-            ),
+              ? _buildEmptyState(padding)
+              : SafeArea(
+                  child: _isWeb
+                      ? _buildWebView(padding, screenWidth)
+                      : _buildMobileView(),
+                ),
     );
   }
 
-  // ✅ FIXED: was overflowing when the available height was small.
-  // Now scrollable + centered with a minimum height.
   Widget _buildEmptyState(double padding) {
     final double pad = math.max(padding, 16);
     return LayoutBuilder(
@@ -852,43 +921,130 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
+  // ============================================
+  // ✅ TIMEZONE INFO CARD - Shows Salon + User + Salon Hours (in user's time)
+  // ============================================
   Widget _buildTimezoneInfoCard() {
+    final bool isSame = _isSameTimezone;
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              Icons.access_time,
-              size: 16,
-              color: _isDark ? Colors.white70 : Colors.grey,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                '⏰ Times shown in: ${_getTimezoneDisplay()}',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _isDark ? Colors.white60 : Colors.grey,
+            // ✅ Salon timezone (main display)
+            Row(
+              children: [
+                Icon(
+                  Icons.store,
+                  size: 16,
+                  color: AppTheme.primary,
                 ),
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Salon times: ${_getSalonTimezoneDisplay()}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: _isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            if (_salonTimezone.isNotEmpty && _salonTimezone != _userTimezone)
+
+            // ✅ User timezone (only if DIFFERENT from salon)
+            if (!isSame) ...[
+              const SizedBox(height: 8),
               Container(
-                margin: const EdgeInsets.only(left: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12),
+                  color: Colors.orange.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.3),
+                  ),
                 ),
-                child: Text(
-                  'Salon: ${_salonTimezone.split('/').last}',
-                  style: const TextStyle(fontSize: 10, color: Colors.orange),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.person,
+                      size: 14,
+                      color: Colors.orange[700],
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'You are in: ${_getUserTimezoneDisplay()}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.orange[700],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Times shown are for salon location',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontStyle: FontStyle.italic,
+                              color: _isDark
+                                  ? Colors.white60
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ),
+
+              // ✅ NEW: Salon hours converted to user's time
+              if (_salonOpenTimeLocal != null &&
+                  _salonCloseTimeLocal != null) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.05),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: Colors.blue.withValues(alpha: 0.2),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.swap_horiz,
+                        size: 14,
+                        color: _isDark ? Colors.blue[300] : Colors.blue[700],
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Salon hours: ${_formatTimeOfDay(_convertSalonTimeToUserTime(_salonOpenTimeLocal!))} - ${_formatTimeOfDay(_convertSalonTimeToUserTime(_salonCloseTimeLocal!))} (Your time)',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color:
+                                _isDark ? Colors.blue[300] : Colors.blue[700],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
           ],
         ),
       ),
@@ -949,13 +1105,12 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             ),
           ),
           const SizedBox(height: 24),
-          // ✅ FIXED: fixed card height (mainAxisExtent) instead of aspect ratio,
-          // so cards never get too short on narrow/short windows.
           GridView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: screenWidth > 1200 ? 3 : (screenWidth > 700 ? 2 : 1),
+              crossAxisCount:
+                  screenWidth > 1200 ? 3 : (screenWidth > 700 ? 2 : 1),
               mainAxisExtent: 420,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
@@ -1090,8 +1245,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     List<Map<String, dynamic>> specialSchedules,
     List<Map<String, dynamic>> specialBreaks,
   ) {
-    final bool isEmpty =
-        schedules.isEmpty &&
+    final bool isEmpty = schedules.isEmpty &&
         breaks.isEmpty &&
         specialSchedules.isEmpty &&
         specialBreaks.isEmpty;
@@ -1257,12 +1411,19 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
+  // ============================================
+  // ✅ SPECIAL SCHEDULE ITEM (with user time reference)
+  // ============================================
   Widget _buildSpecialScheduleItem(Map<String, dynamic> schedule) {
     final date = DateTime.parse(schedule['schedule_date']);
     final startTime = _formatTime(schedule['start_time']);
     final endTime = _formatTime(schedule['end_time']);
     final isWorking = schedule['is_working'] ?? true;
     final reason = schedule['reason'] ?? 'Special day';
+
+    // ✅ User time reference
+    final userStartTime = _formatUtcToUserTime(schedule['start_time']);
+    final userEndTime = _formatUtcToUserTime(schedule['end_time']);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -1300,13 +1461,28 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             ),
           ),
           Expanded(
-            flex: 2,
-            child: Text(
-              '$startTime - $endTime',
-              style: TextStyle(
-                fontSize: 11,
-                color: _isDark ? Colors.white70 : Colors.black87,
-              ),
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$startTime - $endTime',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _isDark ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+                // ✅ User time reference
+                if (userStartTime.isNotEmpty && userEndTime.isNotEmpty)
+                  Text(
+                    'Your time: $userStartTime - $userEndTime',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontStyle: FontStyle.italic,
+                      color: _isDark ? Colors.blue[300] : Colors.blue[700],
+                    ),
+                  ),
+              ],
             ),
           ),
           if (!isWorking)
@@ -1339,6 +1515,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
+  // ============================================
+  // ✅ SPECIAL BREAK ITEM (with user time reference)
+  // ============================================
   Widget _buildSpecialBreakItem(Map<String, dynamic> breakItem) {
     final date = DateTime.parse(breakItem['break_date']);
     final startTime = _formatTime(breakItem['start_time']);
@@ -1348,6 +1527,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       (b) => b['id'] == breakType,
       orElse: () => _breakTypes.last,
     );
+
+    // ✅ User time reference
+    final userStartTime = _formatUtcToUserTime(breakItem['start_time']);
+    final userEndTime = _formatUtcToUserTime(breakItem['end_time']);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -1383,13 +1566,28 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             ),
           ),
           Expanded(
-            flex: 2,
-            child: Text(
-              '$startTime - $endTime',
-              style: TextStyle(
-                fontSize: 11,
-                color: _isDark ? Colors.white70 : Colors.black87,
-              ),
+            flex: 3,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$startTime - $endTime',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _isDark ? Colors.white70 : Colors.black87,
+                  ),
+                ),
+                // ✅ User time reference
+                if (userStartTime.isNotEmpty && userEndTime.isNotEmpty)
+                  Text(
+                    'Your time: $userStartTime - $userEndTime',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontStyle: FontStyle.italic,
+                      color: _isDark ? Colors.blue[300] : Colors.blue[700],
+                    ),
+                  ),
+              ],
             ),
           ),
           _smallIconButton(
@@ -1409,6 +1607,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
+  // ============================================
+  // ✅ SCHEDULE ITEM (with user time reference)
+  // ============================================
   Widget _buildScheduleItem(Map<String, dynamic> schedule) {
     final dayName = _dayNames[schedule['day_of_week']] ?? 'Unknown';
     final startTime = _formatTime(schedule['start_time']);
@@ -1416,6 +1617,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     final isWorking = schedule['is_working'] ?? true;
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
+
+    // ✅ User time reference
+    final userStartTime = _formatUtcToUserTime(schedule['start_time']);
+    final userEndTime = _formatUtcToUserTime(schedule['end_time']);
+    final hasUserTime = userStartTime.isNotEmpty && userEndTime.isNotEmpty;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -1464,15 +1670,30 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           ),
           Expanded(
             flex: isMobile ? 4 : 3,
-            child: Text(
-              '$startTime - $endTime',
-              style: TextStyle(
-                fontSize: isMobile ? 10 : 11,
-                color: isWorking
-                    ? (_isDark ? Colors.white70 : Colors.grey[700])
-                    : (_isDark ? Colors.white70 : Colors.grey[500]),
-                decoration: isWorking ? null : TextDecoration.lineThrough,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '$startTime - $endTime',
+                  style: TextStyle(
+                    fontSize: isMobile ? 10 : 11,
+                    color: isWorking
+                        ? (_isDark ? Colors.white70 : Colors.grey[700])
+                        : (_isDark ? Colors.white70 : Colors.grey[500]),
+                    decoration: isWorking ? null : TextDecoration.lineThrough,
+                  ),
+                ),
+                // ✅ User time reference
+                if (hasUserTime && isWorking)
+                  Text(
+                    'Your time: $userStartTime - $userEndTime',
+                    style: TextStyle(
+                      fontSize: isMobile ? 9 : 10,
+                      fontStyle: FontStyle.italic,
+                      color: _isDark ? Colors.blue[300] : Colors.blue[700],
+                    ),
+                  ),
+              ],
             ),
           ),
           SizedBox(
@@ -1506,6 +1727,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
+  // ============================================
+  // ✅ BREAK ITEM (with user time reference)
+  // ============================================
   Widget _buildBreakItem(Map<String, dynamic> breakItem) {
     final dayName = _dayNames[breakItem['day_of_week']] ?? 'Unknown';
     final startTime = _formatTime(breakItem['start_time']);
@@ -1517,6 +1741,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
     final screenWidth = MediaQuery.of(context).size.width;
     final isMobile = screenWidth < 600;
+
+    // ✅ User time reference
+    final userStartTime = _formatUtcToUserTime(breakItem['start_time']);
+    final userEndTime = _formatUtcToUserTime(breakItem['end_time']);
+    final hasUserTime = userStartTime.isNotEmpty && userEndTime.isNotEmpty;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -1578,6 +1807,16 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                     color: Colors.orange,
                   ),
                 ),
+                // ✅ User time reference
+                if (hasUserTime)
+                  Text(
+                    'Your time: $userStartTime - $userEndTime',
+                    style: TextStyle(
+                      fontSize: isMobile ? 9 : 10,
+                      fontStyle: FontStyle.italic,
+                      color: _isDark ? Colors.blue[300] : Colors.blue[700],
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1658,8 +1897,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
-  // ✅ FIXED: the bottom sheet now refreshes after add / edit / delete / toggle
-  // (previously it showed stale data because lists were captured once).
   void _showBarberScheduleDialog(Map<String, dynamic> barber) {
     showModalBottomSheet(
       context: context,
@@ -1694,7 +1931,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                       decoration: BoxDecoration(
                         border: Border(
                           bottom: BorderSide(
-                            color: _isDark ? Colors.white12 : Colors.grey[200]!,
+                            color:
+                                _isDark ? Colors.white12 : Colors.grey[200]!,
                             width: 0.5,
                           ),
                         ),
@@ -1976,7 +2214,6 @@ class _TimeRangeRow extends StatelessWidget {
       isDark: isDark,
     );
 
-    // ✅ Column on mobile (two pickers side by side overflow on phones)
     if (!context.isWeb) {
       return Column(
         children: [startField, const SizedBox(height: 12), endField],
@@ -2226,9 +2463,8 @@ class _DayChips extends StatelessWidget {
             ),
           ),
           selected: isSelected,
-          onSelected: isAvailable
-              ? (selected) => onSelected(day['id'] as int)
-              : null,
+          onSelected:
+              isAvailable ? (selected) => onSelected(day['id'] as int) : null,
           backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
           selectedColor: AppTheme.primary.withValues(alpha: 0.2),
           checkmarkColor: AppTheme.primary,
@@ -2448,8 +2684,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
           isDark: widget.isDark,
           confirmLabel: 'Add Schedule',
           isLoading: _isLoading,
-          onConfirm:
-              (_selectedDay != null &&
+          onConfirm: (_selectedDay != null &&
                   _startTime != null &&
                   _endTime != null &&
                   !_isLoading)
@@ -2462,7 +2697,8 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
 
   Future<void> _saveSchedule() async {
     if (!_isEndAfterStart(_startTime!, _endTime!)) {
-      _showDialogError(context, widget.isDark, 'End time must be after start time');
+      _showDialogError(
+          context, widget.isDark, 'End time must be after start time');
       return;
     }
 
@@ -2577,7 +2813,8 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
 
   Future<void> _updateSchedule() async {
     if (!_isEndAfterStart(_startTime, _endTime)) {
-      _showDialogError(context, widget.isDark, 'End time must be after start time');
+      _showDialogError(
+          context, widget.isDark, 'End time must be after start time');
       return;
     }
 
@@ -2717,8 +2954,7 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
           isDark: widget.isDark,
           confirmLabel: 'Add Break',
           isLoading: _isLoading,
-          onConfirm:
-              (_selectedDay != null &&
+          onConfirm: (_selectedDay != null &&
                   _startTime != null &&
                   _endTime != null &&
                   !_isLoading)
@@ -2731,7 +2967,8 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
 
   Future<void> _saveBreak() async {
     if (!_isEndAfterStart(_startTime!, _endTime!)) {
-      _showDialogError(context, widget.isDark, 'End time must be after start time');
+      _showDialogError(
+          context, widget.isDark, 'End time must be after start time');
       return;
     }
 
@@ -2846,7 +3083,8 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
 
   Future<void> _updateBreak() async {
     if (!_isEndAfterStart(_startTime, _endTime)) {
-      _showDialogError(context, widget.isDark, 'End time must be after start time');
+      _showDialogError(
+          context, widget.isDark, 'End time must be after start time');
       return;
     }
 
@@ -2965,8 +3203,7 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
           isDark: widget.isDark,
           confirmLabel: 'Add Special Schedule',
           isLoading: _isLoading,
-          onConfirm:
-              (_selectedDate != null &&
+          onConfirm: (_selectedDate != null &&
                   _startTime != null &&
                   _endTime != null &&
                   !_isLoading)
@@ -2979,7 +3216,8 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
 
   Future<void> _saveSpecialSchedule() async {
     if (!_isEndAfterStart(_startTime!, _endTime!)) {
-      _showDialogError(context, widget.isDark, 'End time must be after start time');
+      _showDialogError(
+          context, widget.isDark, 'End time must be after start time');
       return;
     }
 
@@ -3110,7 +3348,8 @@ class _EditSpecialScheduleDialogState
 
   Future<void> _updateSpecialSchedule() async {
     if (!_isEndAfterStart(_startTime, _endTime)) {
-      _showDialogError(context, widget.isDark, 'End time must be after start time');
+      _showDialogError(
+          context, widget.isDark, 'End time must be after start time');
       return;
     }
 
@@ -3174,7 +3413,6 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
   String _selectedBreakType = 'lunch';
   bool _isLoading = false;
 
-  // ✅ FIXED: default times were never set for special breaks
   @override
   void initState() {
     super.initState();
@@ -3229,8 +3467,7 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
           isDark: widget.isDark,
           confirmLabel: 'Add Special Break',
           isLoading: _isLoading,
-          onConfirm:
-              (_selectedDate != null &&
+          onConfirm: (_selectedDate != null &&
                   _startTime != null &&
                   _endTime != null &&
                   !_isLoading)
@@ -3243,7 +3480,8 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
 
   Future<void> _saveSpecialBreak() async {
     if (!_isEndAfterStart(_startTime!, _endTime!)) {
-      _showDialogError(context, widget.isDark, 'End time must be after start time');
+      _showDialogError(
+          context, widget.isDark, 'End time must be after start time');
       return;
     }
 
@@ -3359,7 +3597,8 @@ class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
 
   Future<void> _updateSpecialBreak() async {
     if (!_isEndAfterStart(_startTime, _endTime)) {
-      _showDialogError(context, widget.isDark, 'End time must be after start time');
+      _showDialogError(
+          context, widget.isDark, 'End time must be after start time');
       return;
     }
 
@@ -3415,9 +3654,8 @@ class _TimePickerFieldState extends State<_TimePickerField> {
   }
 
   String _formatTimeForDisplay(TimeOfDay time) {
-    final hour = time.hour == 0
-        ? 12
-        : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final hour =
+        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.hour >= 12 ? 'PM' : 'AM';
     return '$hour:$minute $period';
@@ -3531,9 +3769,6 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
     super.initState();
     _initializeTime();
 
-    // ✅ FIXED: wheels now start at the selected value
-    // (before, they always started at the first item while the header
-    // showed the real value).
     _hourController = FixedExtentScrollController(
       initialItem: hours12.indexOf(_selectedHour).clamp(0, hours12.length - 1),
     );
@@ -3651,9 +3886,8 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: widget.isDark
-                            ? Colors.grey[800]
-                            : Colors.grey[200],
+                        color:
+                            widget.isDark ? Colors.grey[800] : Colors.grey[200],
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
@@ -3704,9 +3938,8 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                       onPressed: _cancelTime,
                       style: TextButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        foregroundColor: widget.isDark
-                            ? Colors.white60
-                            : Colors.black87,
+                        foregroundColor:
+                            widget.isDark ? Colors.white60 : Colors.black87,
                       ),
                       child: const Text('Cancel'),
                     ),
@@ -3779,7 +4012,6 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                   if (i < 0 || i >= items.length) return null;
                   final item = items[i];
                   final isSelected = item == selectedValue;
-                  // ✅ tap an item to jump to it (helps with mouse on web)
                   return GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onTap: () => controller.animateToItem(
@@ -3793,14 +4025,13 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
                         item.toString(),
                         style: TextStyle(
                           fontSize: 20,
-                          fontWeight: isSelected
-                              ? FontWeight.bold
-                              : FontWeight.normal,
+                          fontWeight:
+                              isSelected ? FontWeight.bold : FontWeight.normal,
                           color: isSelected
                               ? AppTheme.primary
                               : (widget.isDark
-                                    ? Colors.white70
-                                    : Colors.grey[800]),
+                                  ? Colors.white70
+                                  : Colors.grey[800]),
                         ),
                       ),
                     ),
