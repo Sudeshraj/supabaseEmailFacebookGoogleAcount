@@ -2,11 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/notification_service.dart';
 import '../../services/timezone_service.dart';
 import '../../widgets/customer_choice_dialog.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
+
+// ✅ Safe initial letter for an avatar placeholder
+String _safeInitial(String? name) {
+  final s = (name ?? '').trim();
+  return s.isEmpty ? '?' : s[0].toUpperCase();
+}
 
 class BarberLeavesScreen extends StatefulWidget {
   final String? salonId;
@@ -26,7 +33,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   List<Map<String, dynamic>> _leaves = [];
   Map<String, Map<String, dynamic>> _barberProfiles = {};
 
-  // Salon working hours (stored in UTC, will be converted to local for display)
+  // ============================================
+  // ✅ TIMEZONE VARIABLES
+  // ============================================
+  String _salonTimezone = '';
+  String _userTimezone = '';
+
+  // Salon working hours (stored in UTC)
   String? _salonOpenTimeUtc;
   String? _salonCloseTimeUtc;
   List<Map<String, dynamic>> _holidays = [];
@@ -63,12 +76,115 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     super.dispose();
   }
 
+  // ============================================
+  // ✅ INITIALIZE - User timezone + Load data
+  // ============================================
   Future<void> _initializeAndLoad() async {
     await TimezoneService.initialize();
+
+    // ✅ User timezone - Local storage → Device (fallback)
+    final prefs = await SharedPreferences.getInstance();
+    _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
+        TimezoneService.getCurrentTimezone();
+
+    debugPrint('✅ User timezone: $_userTimezone');
+
     await _loadData();
   }
 
-  // ==================== CORRECT TIMEZONE HELPER METHODS ====================
+  // ============================================
+  // ✅ TIMEZONE HELPERS
+  // ============================================
+
+  /// Check if salon and user timezone are the same
+  bool get _isSameTimezone {
+    return _salonTimezone.isEmpty || _userTimezone.isEmpty
+        ? true
+        : _salonTimezone == _userTimezone;
+  }
+
+  /// Format UTC time to SALON local time
+  String _formatUtcToSalonTime(String? utcTimeStr) {
+    if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
+    
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : TimezoneService.getCurrentTimezone();
+
+    try {
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
+        utcTimeStr,
+        tz,
+      );
+    } catch (e) {
+      debugPrint('❌ Error formatting UTC to salon time: $e');
+      return utcTimeStr;
+    }
+  }
+
+  /// Convert a TimeOfDay from salon timezone to user timezone
+  TimeOfDay _convertSalonTimeToUserTime(TimeOfDay salonTime) {
+    if (_isSameTimezone) return salonTime;
+    return TimezoneService.convertTimeOfDayBetweenTimezones(
+      salonTime,
+      fromTimezone: _salonTimezone,
+      toTimezone: _userTimezone,
+    );
+  }
+
+  /// Format a TimeOfDay for display (e.g., "9:30 AM")
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour =
+        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
+  /// ✅ Format UTC time to USER timezone (for reference)
+  String _formatUtcToUserTime(String? utcTimeStr) {
+    if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
+    if (_isSameTimezone) return '';
+
+    try {
+      // 1) UTC → Salon TimeOfDay
+      final salonTime = TimezoneService.utcToTimeOfDayWithTimezone(
+        utcTimeStr,
+        _salonTimezone,
+      );
+      // 2) Salon → User TimeOfDay
+      final userTime = _convertSalonTimeToUserTime(salonTime);
+      // 3) Format
+      return _formatTimeOfDay(userTime);
+    } catch (e) {
+      debugPrint('❌ Error in _formatUtcToUserTime: $e');
+      return '';
+    }
+  }
+
+  /// ✅ Get salon timezone display
+  String _getSalonTimezoneDisplay() {
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : TimezoneService.getCurrentTimezone();
+    return TimezoneService.getFullTimezoneDisplayFor(tz);
+  }
+
+  /// ✅ Get user timezone display
+  String _getUserTimezoneDisplay() {
+    return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
+  }
+
+  String _getTimezoneFlag() {
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : TimezoneService.getCurrentTimezone();
+    return TimezoneService.getTimezoneFlagFor(tz);
+  }
+
+  // ============================================
+  // DATE CONVERSION HELPERS
+  // ============================================
 
   String _localDateToUtcDateString(DateTime localDate) {
     try {
@@ -87,9 +203,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   DateTime _utcDateStringToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
-      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
+      final localDateTime =
+          TimezoneService.utcToLocalDateTimeForDateWithTimezone(
         '12:00:00',
         utcDateTime,
+        _salonTimezone.isNotEmpty
+            ? _salonTimezone
+            : TimezoneService.getCurrentTimezone(),
       );
       return DateTime(
         localDateTime.year,
@@ -104,16 +224,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   String _formatDateForDb(DateTime date) {
     return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-  }
-
-  String _getDisplayTime(String? utcTimeStr) {
-    if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
-    try {
-      return TimezoneService.utcToLocalTimeRecurring(utcTimeStr);
-    } catch (e) {
-      debugPrint('❌ Error getting display time: $e');
-      return utcTimeStr;
-    }
   }
 
   String _formatDateForDisplay(DateTime date) {
@@ -149,20 +259,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  String _formatTimeForDisplayFromUtc(String? timeStr) {
-    if (timeStr == null) return '';
-    try {
-      return TimezoneService.utcToLocalTimeRecurring(timeStr);
-    } catch (e) {
-      debugPrint('Error formatting time from UTC: $e');
-      return timeStr;
-    }
-  }
-
-  String _getTimezoneFlag() {
-    return TimezoneService.getCurrentFlag();
-  }
-
   bool _isHoliday(String utcDateStr) {
     final localDate = _utcDateStringToLocalDate(utcDateStr);
     final localDateStr = _formatDateForDb(localDate);
@@ -186,21 +282,28 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     return holiday['name'];
   }
 
-  // ==================== DATA LOADING ====================
+  // ============================================
+  // DATA LOADING
+  // ============================================
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
 
     try {
+      // ✅ Load salon data INCLUDING timezone
       final salonResponse = await supabase
           .from('salons')
-          .select('open_time, close_time')
+          .select('open_time, close_time, timezone')
           .eq('id', int.parse(widget.salonId!))
           .maybeSingle();
 
       if (salonResponse != null) {
         _salonOpenTimeUtc = salonResponse['open_time'];
         _salonCloseTimeUtc = salonResponse['close_time'];
+        _salonTimezone = salonResponse['timezone']?.toString() ??
+            TimezoneService.getCurrentTimezone();
+
+        debugPrint('✅ Salon timezone loaded: $_salonTimezone');
       }
 
       final holidaysResponse = await supabase
@@ -226,7 +329,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             )
         ''')
           .eq('salon_id', int.parse(widget.salonId!))
-          .eq('status', 'active')  
+          .eq('status', 'active')
           .eq('profiles.user_roles.role_id', 2)
           .eq('profiles.user_roles.status', 'active');
 
@@ -376,7 +479,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  // ==================== CUSTOMER CHOICE HANDLING ====================
+  // ============================================
+  // CUSTOMER CHOICE HANDLING (unchanged logic)
+  // ============================================
 
   Future<void> _handleAffectedAppointment(
     Map<String, dynamic> appointment,
@@ -390,7 +495,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       final startTimeUtc = appointment['start_time'];
 
       final localDate = _utcDateStringToLocalDate(utcDateStr);
-      final timeFormatted = _getDisplayTime(startTimeUtc);
+      // ✅ Use salon time
+      final timeFormatted = _formatUtcToSalonTime(startTimeUtc);
       final dateFormatted = _formatDateForDisplay(localDate);
 
       final customer = await supabase
@@ -558,9 +664,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         }
       }
 
-      final availableBarberIds = barberIds
-          .where((id) => id != excludeBarberId)
-          .toList();
+      final availableBarberIds =
+          barberIds.where((id) => id != excludeBarberId).toList();
 
       if (availableBarberIds.isEmpty) return null;
 
@@ -695,9 +800,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     try {
       final duration = await _getVariantDuration(appointment['variant_id']);
 
-      DateTime nextLocalDate = _utcDateStringToLocalDate(
-        appointment['appointment_date'],
-      ).add(const Duration(days: 1));
+      DateTime nextLocalDate =
+          _utcDateStringToLocalDate(appointment['appointment_date'])
+              .add(const Duration(days: 1));
 
       while (await _isHolidayDate(nextLocalDate) ||
           nextLocalDate.weekday == DateTime.sunday) {
@@ -867,7 +972,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  // ==================== LEAVE APPROVAL WITH REASSIGN ====================
+  // ============================================
+  // LEAVE APPROVAL WITH REASSIGN
+  // ============================================
 
   Future<void> _approveLeaveWithReassign(
     int leaveId,
@@ -897,7 +1004,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       String startTime = '00:00:00';
       String endTime = '23:59:59';
 
-      if (leaveType == 'half_day') {
+      if (leaveType == 'half_day' || leaveType == 'short_leave') {
         final leaveRecord = await supabase
             .from('barber_leaves')
             .select('start_time, end_time')
@@ -926,7 +1033,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .eq('appointment_date', utcDateStr)
           .eq('status', 'confirmed');
 
-      if (leaveType == 'half_day') {
+      if (leaveType == 'half_day' || leaveType == 'short_leave') {
         appointmentsQuery = appointmentsQuery
             .gte('start_time', startTime)
             .lte('end_time', endTime);
@@ -941,7 +1048,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Leave approved. No appointments affected.'),
+            content: const Text('Leave approved. No appointments affected.'),
             backgroundColor: _isDark ? Colors.green[800] : Colors.green,
           ),
         );
@@ -1013,47 +1120,49 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             color: _isDark ? Colors.white : Colors.black87,
           ),
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Please provide a reason for rejecting this leave request:',
-              style: context.bodyMedium.copyWith(
-                color: _isDark ? Colors.white70 : Colors.black87,
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: reasonController,
-              maxLines: 3,
-              style: TextStyle(
-                color: _isDark ? Colors.white : Colors.black87,
-              ),
-              decoration: InputDecoration(
-                hintText: 'Enter reason...',
-                hintStyle: TextStyle(
-                  color: _isDark ? Colors.white70 : Colors.grey[500],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Please provide a reason for rejecting this leave request:',
+                style: context.bodyMedium.copyWith(
+                  color: _isDark ? Colors.white70 : Colors.black87,
                 ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(
-                    color: _isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: reasonController,
+                maxLines: 3,
+                style: TextStyle(
+                  color: _isDark ? Colors.white : Colors.black87,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Enter reason...',
+                  hintStyle: TextStyle(
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(
-                    color: AppTheme.primary,
-                    width: 2,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide(
+                      color: _isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                    ),
                   ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(
+                      color: AppTheme.primary,
+                      width: 2,
+                    ),
+                  ),
+                  fillColor: _isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                  filled: true,
                 ),
-                fillColor: _isDark ? const Color(0xFF2A2A2A) : Colors.white,
-                filled: true,
+                autofocus: true,
               ),
-              autofocus: true,
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -1145,7 +1254,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  // ==================== HELPER METHODS ====================
+  // ============================================
+  // HELPER METHODS
+  // ============================================
 
   String _getLeaveTypeIcon(String type) {
     switch (type) {
@@ -1190,7 +1301,109 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  // ==================== FILTER WIDGETS ====================
+  // ============================================
+  // TIMEZONE INFO CARD
+  // ============================================
+  Widget _buildTimezoneInfoCard() {
+    final bool isSame = _isSameTimezone;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ✅ Salon timezone (main display)
+          Row(
+            children: [
+              Icon(
+                Icons.store,
+                size: 16,
+                color: AppTheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Salon times: ${_getSalonTimezoneDisplay()}',
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ),
+            ],
+          ),
+
+          // ✅ User timezone (only if DIFFERENT)
+          if (!isSame) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.person,
+                    size: 14,
+                    color: Colors.orange[700],
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'You are in: ${_getUserTimezoneDisplay()}',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange[700],
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Times shown are for salon location',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontStyle: FontStyle.italic,
+                            color: _isDark
+                                ? Colors.white60
+                                : Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ============================================
+  // FILTER WIDGETS
+  // ============================================
 
   Widget _buildBarberFilter() {
     final isDark = _isDark;
@@ -1199,6 +1412,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       height: 50,
       child: DropdownButtonFormField<String>(
         initialValue: _selectedBarberId,
+        isExpanded: true,
         decoration: InputDecoration(
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
@@ -1225,6 +1439,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         ),
         hint: Text(
           'All Barbers',
+          overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: isDark ? Colors.white60 : Colors.grey[600],
           ),
@@ -1238,6 +1453,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             value: null,
             child: Text(
               'All Barbers',
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: isDark ? Colors.white : Colors.black87,
               ),
@@ -1248,6 +1464,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               value: b['id'] as String,
               child: Text(
                 b['name'] as String,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: isDark ? Colors.white : Colors.black87,
                 ),
@@ -1277,23 +1494,37 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           firstDate: today,
           lastDate: now.add(const Duration(days: 365)),
           builder: (context, child) {
-            return Theme(
-              data: Theme.of(context).copyWith(
-                colorScheme: ColorScheme(
-                  brightness: isDark ? Brightness.dark : Brightness.light,
-                  primary: AppTheme.primary,
-                  onPrimary: Colors.white,
-                  secondary: AppTheme.primary,
-                  onSecondary: Colors.white,
-                  error: Colors.red,
-                  onError: Colors.white,
-                  surface: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                  onSurface: isDark ? Colors.white : Colors.black87,
-                ), dialogTheme: DialogThemeData(backgroundColor: isDark
-                    ? const Color(0xFF1E1E1E)
-                    : Colors.white),
+            // ✅ Clamp text scaling — the default CalendarDatePicker's
+            // month header is sized for a 1.0 text scale; on devices/
+            // browsers with a larger system font scale it grows a few
+            // pixels taller than the fixed-height month grid allows,
+            // which is what causes the "overflowed by N pixels on the
+            // bottom" RenderFlex error inside _MonthPicker.
+            return MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: const TextScaler.linear(1.0),
               ),
-              child: child!,
+              child: Theme(
+                data: Theme.of(context).copyWith(
+                  colorScheme: ColorScheme(
+                    brightness: isDark ? Brightness.dark : Brightness.light,
+                    primary: AppTheme.primary,
+                    onPrimary: Colors.white,
+                    secondary: AppTheme.primary,
+                    onSecondary: Colors.white,
+                    error: Colors.red,
+                    onError: Colors.white,
+                    surface: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                    onSurface: isDark ? Colors.white : Colors.black87,
+                  ),
+                  dialogTheme: DialogThemeData(
+                    backgroundColor: isDark
+                        ? const Color(0xFF1E1E1E)
+                        : Colors.white,
+                  ),
+                ),
+                child: child!,
+              ),
             );
           },
         );
@@ -1324,6 +1555,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                 _selectedLocalDate != null
                     ? _formatDateForPicker(_selectedLocalDate!)
                     : 'Select Date',
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: _selectedLocalDate != null
                       ? (isDark ? Colors.white : Colors.black)
@@ -1359,6 +1591,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       height: 50,
       child: DropdownButtonFormField<String>(
         initialValue: _selectedType,
+        isExpanded: true,
         decoration: InputDecoration(
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
@@ -1388,16 +1621,16 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           color: isDark ? Colors.white : Colors.black87,
         ),
         items: const [
-          DropdownMenuItem<String>(value: 'all', child: Text('All Types')),
-          DropdownMenuItem<String>(value: 'full_day', child: Text('Full Day')),
-          DropdownMenuItem<String>(value: 'half_day', child: Text('Half Day')),
+          DropdownMenuItem<String>(value: 'all', child: Text('All Types', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(value: 'full_day', child: Text('Full Day', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(value: 'half_day', child: Text('Half Day', overflow: TextOverflow.ellipsis)),
           DropdownMenuItem<String>(
             value: 'emergency',
-            child: Text('Emergency'),
+            child: Text('Emergency', overflow: TextOverflow.ellipsis),
           ),
           DropdownMenuItem<String>(
             value: 'short_leave',
-            child: Text('Short Leave'),
+            child: Text('Short Leave', overflow: TextOverflow.ellipsis),
           ),
         ],
         onChanged: (String? value) {
@@ -1418,6 +1651,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       height: 50,
       child: DropdownButtonFormField<String>(
         initialValue: _selectedStatus,
+        isExpanded: true,
         decoration: InputDecoration(
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 12,
@@ -1447,10 +1681,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           color: isDark ? Colors.white : Colors.black87,
         ),
         items: const [
-          DropdownMenuItem<String>(value: 'all', child: Text('All Status')),
-          DropdownMenuItem<String>(value: 'pending', child: Text('Pending')),
-          DropdownMenuItem<String>(value: 'approved', child: Text('Approved')),
-          DropdownMenuItem<String>(value: 'rejected', child: Text('Rejected')),
+          DropdownMenuItem<String>(value: 'all', child: Text('All Status', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(value: 'pending', child: Text('Pending', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(value: 'approved', child: Text('Approved', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(value: 'rejected', child: Text('Rejected', overflow: TextOverflow.ellipsis)),
         ],
         onChanged: (String? value) {
           if (mounted) {
@@ -1468,92 +1702,78 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     final isDark = _isDark;
 
     return Container(
+      constraints: const BoxConstraints(maxWidth: 130),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: statusColor.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
-      child: DropdownButton<String>(
-        value: status,
-        icon: Icon(Icons.arrow_drop_down, color: statusColor, size: 16),
-        iconSize: 16,
-        elevation: 8,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          color: statusColor,
-        ),
-        underline: Container(),
-        dropdownColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        onChanged: (String? newValue) {
-          if (newValue != null && newValue != leave['status']) {
-            if (newValue == 'rejected') {
-              _showRejectReasonDialog(leave['id'], leave);
-            } else if (newValue == 'approved') {
-              _approveLeaveWithReassign(
-                leave['id'],
-                leave['barber_id'],
-                leave['leave_date'],
-                leave['leave_type'] ?? 'full_day',
-              );
-            } else {
-              _updateLeaveStatus(leave['id'], newValue);
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: status,
+          isDense: true,
+          icon: Icon(Icons.arrow_drop_down, color: statusColor, size: 16),
+          iconSize: 16,
+          elevation: 8,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: statusColor,
+          ),
+          underline: const SizedBox.shrink(),
+          dropdownColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          onChanged: (String? newValue) {
+            if (newValue != null && newValue != leave['status']) {
+              if (newValue == 'rejected') {
+                _showRejectReasonDialog(leave['id'], leave);
+              } else if (newValue == 'approved') {
+                _approveLeaveWithReassign(
+                  leave['id'],
+                  leave['barber_id'],
+                  leave['leave_date'],
+                  leave['leave_type'] ?? 'full_day',
+                );
+              } else {
+                _updateLeaveStatus(leave['id'], newValue);
+              }
             }
-          }
-        },
-        items: [
-          DropdownMenuItem(
-            value: 'pending',
-            child: Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: Colors.orange,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text('Pending', style: TextStyle(fontSize: 11)),
-              ],
+          },
+          items: const [
+            DropdownMenuItem(
+              value: 'pending',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _StatusDot(color: Colors.orange),
+                  SizedBox(width: 4),
+                  Text('Pending', style: TextStyle(fontSize: 11)),
+                ],
+              ),
             ),
-          ),
-          DropdownMenuItem(
-            value: 'approved',
-            child: Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: Colors.green,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text('Approved', style: TextStyle(fontSize: 11)),
-              ],
+            DropdownMenuItem(
+              value: 'approved',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _StatusDot(color: Colors.green),
+                  SizedBox(width: 4),
+                  Text('Approved', style: TextStyle(fontSize: 11)),
+                ],
+              ),
             ),
-          ),
-          DropdownMenuItem(
-            value: 'rejected',
-            child: Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text('Rejected', style: TextStyle(fontSize: 11)),
-              ],
+            DropdownMenuItem(
+              value: 'rejected',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _StatusDot(color: Colors.red),
+                  SizedBox(width: 4),
+                  Text('Rejected', style: TextStyle(fontSize: 11)),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1653,6 +1873,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       builder: (context) => _AddEditLeaveDialog(
         barbers: _barbers,
         salonId: widget.salonId!,
+        salonTimezone: _salonTimezone,
+        userTimezone: _userTimezone,
         salonOpenTimeUtc: _salonOpenTimeUtc,
         salonCloseTimeUtc: _salonCloseTimeUtc,
         holidays: _holidays,
@@ -1676,6 +1898,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       builder: (context) => _AddEditLeaveDialog(
         barbers: _barbers,
         salonId: widget.salonId!,
+        salonTimezone: _salonTimezone,
+        userTimezone: _userTimezone,
         salonOpenTimeUtc: _salonOpenTimeUtc,
         salonCloseTimeUtc: _salonCloseTimeUtc,
         leaveToEdit: leave,
@@ -1767,118 +1991,101 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  // ==================== MAIN BUILD ====================
+  // ============================================
+  // MAIN BUILD
+  // ============================================
 
-@override
-Widget build(BuildContext context) {
-  final screenWidth = MediaQuery.of(context).size.width;
-  _isWeb = screenWidth > 800;
-  _isDark = context.isDarkMode;
-  final double padding = _isWeb ? 24.0 : 16.0;
+  @override
+  Widget build(BuildContext context) {
+    final screenWidth = MediaQuery.of(context).size.width;
+    _isWeb = screenWidth > 800;
+    _isDark = context.isDarkMode;
+    final double padding = _isWeb ? 24.0 : 16.0;
 
-  return Scaffold(
-    backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
-    appBar: AppBar(
-      title: Row(
-        children: [
-          Text(
-            'Barber Leaves',
-            style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
+    return Scaffold(
+      backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
+      appBar: AppBar(
+        titleSpacing: 0,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Flexible(
+              child: Text(
+                'Barber Leaves',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                _getTimezoneFlag(),
+                style: const TextStyle(fontSize: 12, color: Colors.white),
+              ),
+            ),
+          ],
+        ),
+        backgroundColor: AppTheme.primary,
+        foregroundColor: Colors.white,
+        centerTitle: _isWeb,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+          tooltip: 'Back',
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.white),
+            onPressed: _loadData,
+            tooltip: 'Refresh',
           ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              _getTimezoneFlag(),
-              style: const TextStyle(fontSize: 12, color: Colors.white),
-            ),
+          IconButton(
+            icon: const Icon(Icons.calendar_today, color: Colors.white),
+            onPressed: () {
+              context.push('/owner/salon/holidays?salonId=${widget.salonId}');
+            },
+            tooltip: 'Manage Holidays',
           ),
         ],
       ),
-      backgroundColor: AppTheme.primary,
-      foregroundColor: Colors.white,
-      centerTitle: _isWeb,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back, color: Colors.white),
-        onPressed: () => Navigator.pop(context),
-        tooltip: 'Back',
+      floatingActionButton: FloatingActionButton(
+        onPressed: _addLeave,
+        backgroundColor: AppTheme.primary,
+        foregroundColor: Colors.white,
+        child: const Icon(Icons.add),
       ),
-      actions: [
-        IconButton(
-          icon: Icon(Icons.refresh, color: Colors.white),
-          onPressed: _loadData,
-          tooltip: 'Refresh',
-        ),
-        IconButton(
-          icon: Icon(Icons.calendar_today, color: Colors.white),
-          onPressed: () {
-            context.push('/owner/salon/holidays?salonId=${widget.salonId}');
-          },
-          tooltip: 'Manage Holidays',
-        ),
-      ],
-    ),
-    
-    floatingActionButton: FloatingActionButton(
-      onPressed: _addLeave,
-      backgroundColor: AppTheme.primary,
-      foregroundColor: Colors.white,
-      child: const Icon(Icons.add),
-    ),
-    // ✅ Edge-to-Edge with SafeArea
-    body: SafeArea(
-      child: _isWeb ? _buildWebLayout(padding) : _buildMobileLayout(padding),
-    ),
-  );
-}
-
-  // ==================== WEB LAYOUT ====================
-
-  Widget _buildWebLayout(double padding) {
-    return Column(
-      children: [
-        _buildFiltersSection(true, padding),
-        Expanded(
-          child: Scrollbar(
-            controller: _scrollController,
-            thumbVisibility: true,
-            trackVisibility: true,
-            thickness: 8.0,
-            radius: const Radius.circular(10),
-            scrollbarOrientation: ScrollbarOrientation.right,
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.all(padding),
-              child: _buildMainContent(true, padding),
+      body: SafeArea(
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Column(
+                children: [
+                  // ✅ Timezone info card
+                  Padding(
+                    padding: EdgeInsets.all(_isWeb ? padding : 12),
+                    child: _buildTimezoneInfoCard(),
+                  ),
+                  _buildFiltersSection(_isWeb, padding),
+                ],
+              ),
             ),
-          ),
+            SliverFillRemaining(
+              hasScrollBody: true,
+              child: _buildMainContent(_isWeb, padding),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
-
-  // ==================== MOBILE LAYOUT ====================
-
-  Widget _buildMobileLayout(double padding) {
-    return Column(
-      children: [
-        _buildFiltersSection(false, padding),
-        Expanded(
-          child: _buildMainContent(false, padding),
-        ),
-      ],
-    );
-  }
-
-  // ==================== FILTERS SECTION ====================
 
   Widget _buildFiltersSection(bool isWeb, double padding) {
     final isDark = _isDark;
@@ -1920,6 +2127,7 @@ Widget build(BuildContext context) {
               ],
             )
           : Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 _buildBarberFilter(),
                 const SizedBox(height: 8),
@@ -1939,7 +2147,10 @@ Widget build(BuildContext context) {
                       child: ElevatedButton.icon(
                         onPressed: _applyFilters,
                         icon: const Icon(Icons.filter_alt),
-                        label: const Text('Apply'),
+                        label: const Text(
+                          'Apply',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.primary,
                           foregroundColor: Colors.white,
@@ -1953,23 +2164,51 @@ Widget build(BuildContext context) {
     );
   }
 
-  // ==================== MAIN CONTENT ====================
+  Widget _scrollableCentered(Widget child) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight > 0 ? constraints.maxHeight : 0,
+            ),
+            child: Center(child: child),
+          ),
+        );
+      },
+    );
+  }
 
   Widget _buildMainContent(bool isWeb, double padding) {
     final isDark = _isDark;
 
     if (_isLoading) {
-      return Center(
-        child: CircularProgressIndicator(color: AppTheme.primary),
+      return _scrollableCentered(
+        Padding(
+          padding: EdgeInsets.all(padding),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: AppTheme.primary),
+              const SizedBox(height: 16),
+              Text(
+                'Loading...',
+                style: TextStyle(
+                  color: isDark ? Colors.white60 : Colors.grey,
+                ),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
     if (_barbers.isEmpty) {
-      return Center(
-        child: Padding(
+      return _scrollableCentered(
+        Padding(
           padding: EdgeInsets.all(padding),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.person_off,
@@ -1987,6 +2226,7 @@ Widget build(BuildContext context) {
               const SizedBox(height: 8),
               Text(
                 'Add barbers first to manage leaves',
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   color: isDark ? Colors.white70 : Colors.grey[600],
                 ),
@@ -2007,11 +2247,11 @@ Widget build(BuildContext context) {
     }
 
     if (_leaves.isEmpty) {
-      return Center(
-        child: Padding(
+      return _scrollableCentered(
+        Padding(
           padding: EdgeInsets.all(padding),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 Icons.beach_access,
@@ -2029,6 +2269,7 @@ Widget build(BuildContext context) {
               const SizedBox(height: 8),
               Text(
                 'Use + button to add leave for barbers',
+                textAlign: TextAlign.center,
                 style: TextStyle(
                   color: isDark ? Colors.white70 : Colors.grey[600],
                 ),
@@ -2040,11 +2281,22 @@ Widget build(BuildContext context) {
     }
 
     return isWeb
-        ? _buildWebContent()
+        ? Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            trackVisibility: true,
+            thickness: 8.0,
+            radius: const Radius.circular(10),
+            scrollbarOrientation: ScrollbarOrientation.right,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.all(padding),
+              child: _buildWebContent(),
+            ),
+          )
         : _buildMobileContent();
   }
-
-  // ==================== WEB CONTENT ====================
 
   Widget _buildWebContent() {
     return Column(
@@ -2059,8 +2311,6 @@ Widget build(BuildContext context) {
     );
   }
 
-  // ==================== MOBILE CONTENT ====================
-
   Widget _buildMobileContent() {
     return ListView.builder(
       padding: const EdgeInsets.all(16),
@@ -2072,8 +2322,6 @@ Widget build(BuildContext context) {
     );
   }
 
-  // ==================== STATS CARD ====================
-
   Widget _buildStatsCard() {
     final isDark = _isDark;
 
@@ -2081,47 +2329,50 @@ Widget build(BuildContext context) {
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            _buildStatItem(
-              'Total',
-              _leaves.length.toString(),
-              Icons.event_note,
-            ),
-            Container(
-              width: 1,
-              height: 40,
-              color: isDark ? Colors.grey[800]! : Colors.grey[300],
-            ),
-            _buildStatItem(
-              'Pending',
-              _leaves.where((l) => l['status'] == 'pending').length.toString(),
-              Icons.pending,
-              Colors.orange,
-            ),
-            Container(
-              width: 1,
-              height: 40,
-              color: isDark ? Colors.grey[800]! : Colors.grey[300],
-            ),
-            _buildStatItem(
-              'Approved',
-              _leaves.where((l) => l['status'] == 'approved').length.toString(),
-              Icons.check_circle,
-              Colors.green,
-            ),
-            Container(
-              width: 1,
-              height: 40,
-              color: isDark ? Colors.grey[800]! : Colors.grey[300],
-            ),
-            _buildStatItem(
-              'Rejected',
-              _leaves.where((l) => l['status'] == 'rejected').length.toString(),
-              Icons.cancel,
-              Colors.red,
-            ),
-          ],
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _buildStatItem(
+                'Total',
+                _leaves.length.toString(),
+                Icons.event_note,
+              ),
+              VerticalDivider(
+                width: 1,
+                thickness: 1,
+                color: isDark ? Colors.grey[800]! : Colors.grey[300],
+              ),
+              _buildStatItem(
+                'Pending',
+                _leaves.where((l) => l['status'] == 'pending').length.toString(),
+                Icons.pending,
+                Colors.orange,
+              ),
+              VerticalDivider(
+                width: 1,
+                thickness: 1,
+                color: isDark ? Colors.grey[800]! : Colors.grey[300],
+              ),
+              _buildStatItem(
+                'Approved',
+                _leaves.where((l) => l['status'] == 'approved').length.toString(),
+                Icons.check_circle,
+                Colors.green,
+              ),
+              VerticalDivider(
+                width: 1,
+                thickness: 1,
+                color: isDark ? Colors.grey[800]! : Colors.grey[300],
+              ),
+              _buildStatItem(
+                'Rejected',
+                _leaves.where((l) => l['status'] == 'rejected').length.toString(),
+                Icons.cancel,
+                Colors.red,
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2139,34 +2390,38 @@ Widget build(BuildContext context) {
     return Expanded(
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 20, color: accentColor),
           const SizedBox(width: 8),
-          Column(
-            children: [
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black87,
+          Flexible(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  value,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
-              ),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: isDark ? Colors.white60 : Colors.grey[600],
+                Text(
+                  label,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
     );
   }
-
-  // ==================== WEB TABLE ====================
 
   Widget _buildWebTableHeader() {
     final isDark = _isDark;
@@ -2183,6 +2438,7 @@ Widget build(BuildContext context) {
             flex: 2,
             child: Text(
               'Barber',
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : Colors.black87,
@@ -2193,6 +2449,7 @@ Widget build(BuildContext context) {
             flex: 2,
             child: Text(
               'Date',
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : Colors.black87,
@@ -2203,6 +2460,7 @@ Widget build(BuildContext context) {
             flex: 2,
             child: Text(
               'Type',
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : Colors.black87,
@@ -2213,6 +2471,7 @@ Widget build(BuildContext context) {
             flex: 2,
             child: Text(
               'Time',
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : Colors.black87,
@@ -2223,6 +2482,7 @@ Widget build(BuildContext context) {
             flex: 3,
             child: Text(
               'Reason',
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : Colors.black87,
@@ -2233,6 +2493,7 @@ Widget build(BuildContext context) {
             flex: 1,
             child: Text(
               'Status',
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : Colors.black87,
@@ -2244,6 +2505,7 @@ Widget build(BuildContext context) {
             flex: 3,
             child: Text(
               'Actions',
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 color: isDark ? Colors.white : Colors.black87,
@@ -2261,6 +2523,8 @@ Widget build(BuildContext context) {
     final barberId = leave['barber_id'] as String;
     final profile = _barberProfiles[barberId] ?? {};
     final barberName = profile['full_name'] ?? 'Unknown';
+    final avatarUrl = profile['avatar_url'];
+    final hasAvatar = avatarUrl != null && avatarUrl.toString().isNotEmpty;
     final leaveDate = _formatDateForDisplayFromUtc(leave['leave_date']);
     final leaveType = leave['leave_type'] ?? 'full_day';
     final status = leave['status'] ?? 'pending';
@@ -2270,14 +2534,20 @@ Widget build(BuildContext context) {
     final holidayName = _getHolidayName(leave['leave_date']);
 
     String timeDisplay = '';
+    String? userTimeDisplay;
     if (leaveType == 'full_day' || leaveType == 'emergency') {
       timeDisplay = 'All Day';
-    } else if (leaveType == 'half_day') {
-      timeDisplay =
-          '${_formatTimeForDisplayFromUtc(leave['start_time'])} - ${_formatTimeForDisplayFromUtc(leave['end_time'])}';
-    } else if (leaveType == 'short_leave') {
-      timeDisplay =
-          '${_formatTimeForDisplayFromUtc(leave['start_time'])} - ${_formatTimeForDisplayFromUtc(leave['end_time'])}';
+    } else if (leaveType == 'half_day' || leaveType == 'short_leave') {
+      final startSalon = _formatUtcToSalonTime(leave['start_time']);
+      final endSalon = _formatUtcToSalonTime(leave['end_time']);
+      timeDisplay = '$startSalon - $endSalon';
+
+      // ✅ User time reference
+      final userStart = _formatUtcToUserTime(leave['start_time']);
+      final userEnd = _formatUtcToUserTime(leave['end_time']);
+      if (userStart.isNotEmpty && userEnd.isNotEmpty) {
+        userTimeDisplay = '$userStart - $userEnd';
+      }
     }
 
     return Container(
@@ -2294,168 +2564,206 @@ Widget build(BuildContext context) {
               : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
         ),
       ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 2,
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
-                  backgroundImage: profile['avatar_url'] != null
-                      ? NetworkImage(profile['avatar_url'])
-                      : null,
-                  child: profile['avatar_url'] == null
-                      ? Text(
-                          barberName[0].toUpperCase(),
-                          style: TextStyle(
-                            color: AppTheme.primary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                          ),
-                        )
-                      : null,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    barberName,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              flex: 2,
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 16,
+                    backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                    backgroundImage: hasAvatar
+                        ? NetworkImage(avatarUrl.toString())
+                        : null,
+                    child: !hasAvatar
+                        ? Text(
+                            _safeInitial(barberName),
+                            style: TextStyle(
+                              color: AppTheme.primary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          )
+                        : null,
                   ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  leaveDate,
-                  style: TextStyle(
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                if (isHoliday && holidayName != null)
-                  Text(
-                    '⚠️ $holidayName',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: Colors.orange,
-                      fontWeight: FontWeight.w500,
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      barberName,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Row(
-              children: [
-                Text(
-                  _getLeaveTypeIcon(leaveType),
-                  style: const TextStyle(fontSize: 14),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _getLeaveTypeName(leaveType),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            flex: 2,
-            child: Text(
-              timeDisplay,
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.white70 : Colors.black87,
+                ],
               ),
             ),
-          ),
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  reason,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? Colors.white70 : Colors.grey[700],
+            Expanded(
+              flex: 2,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    leaveDate,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (status == 'rejected' && rejectionReason != null) ...[
-                  const SizedBox(height: 2),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'Rejected: $rejectionReason',
-                      style: TextStyle(
+                  if (isHoliday && holidayName != null)
+                    Text(
+                      '⚠️ $holidayName',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
                         fontSize: 10,
-                        color: Colors.red,
-                        fontStyle: FontStyle.italic,
+                        color: Colors.orange,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 2,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _getLeaveTypeIcon(leaveType),
+                    style: const TextStyle(fontSize: 14),
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      _getLeaveTypeName(leaveType),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
                     ),
                   ),
                 ],
-              ],
+              ),
             ),
-          ),
-          Expanded(
-            flex: 1,
-            child: Center(child: _buildStatusCell(leave, status)),
-          ),
-          Expanded(
-            flex: 3,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  icon: Icon(Icons.edit, color: isDark ? Colors.blue[300] : Colors.blue),
-                  onPressed: () => _editLeave(leave),
-                  tooltip: 'Edit',
-                ),
-                IconButton(
-                  icon: Icon(Icons.delete, color: isDark ? Colors.red[300] : Colors.red),
-                  onPressed: () => _deleteLeave(leave),
-                  tooltip: 'Delete',
-                ),
-              ],
+            Expanded(
+              flex: 2,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    timeDisplay,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white70 : Colors.black87,
+                    ),
+                  ),
+                  // ✅ User time reference
+                  if (userTimeDisplay != null)
+                    Text(
+                      'Your time: $userTimeDisplay',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontStyle: FontStyle.italic,
+                        color: isDark ? Colors.blue[300] : Colors.blue[700],
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-        ],
+            Expanded(
+              flex: 3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    reason,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white70 : Colors.grey[700],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (status == 'rejected' && rejectionReason != null) ...[
+                    const SizedBox(height: 2),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 4,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'Rejected: $rejectionReason',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.red,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Expanded(
+              flex: 1,
+              child: Center(child: _buildStatusCell(leave, status)),
+            ),
+            Expanded(
+              flex: 3,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      Icons.edit,
+                      color: isDark ? Colors.blue[300] : Colors.blue,
+                    ),
+                    onPressed: () => _editLeave(leave),
+                    tooltip: 'Edit',
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.delete,
+                      color: isDark ? Colors.red[300] : Colors.red,
+                    ),
+                    onPressed: () => _deleteLeave(leave),
+                    tooltip: 'Delete',
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
-
-  // ==================== MOBILE LEAVE CARD ====================
 
   Widget _buildMobileLeaveCard(Map<String, dynamic> leave) {
     final isDark = _isDark;
     final barberId = leave['barber_id'] as String;
     final profile = _barberProfiles[barberId] ?? {};
     final barberName = profile['full_name'] ?? 'Unknown';
+    final avatarUrl = profile['avatar_url'];
+    final hasAvatar = avatarUrl != null && avatarUrl.toString().isNotEmpty;
     final leaveDate = _formatDateForDisplayFromUtc(leave['leave_date']);
     final leaveType = leave['leave_type'] ?? 'full_day';
     final status = leave['status'] ?? 'pending';
@@ -2465,14 +2773,20 @@ Widget build(BuildContext context) {
     final holidayName = _getHolidayName(leave['leave_date']);
 
     String timeDisplay = '';
+    String? userTimeDisplay;
     if (leaveType == 'full_day' || leaveType == 'emergency') {
       timeDisplay = 'All Day';
-    } else if (leaveType == 'half_day') {
-      timeDisplay =
-          '${_formatTimeForDisplayFromUtc(leave['start_time'])} - ${_formatTimeForDisplayFromUtc(leave['end_time'])}';
-    } else if (leaveType == 'short_leave') {
-      timeDisplay =
-          '${_formatTimeForDisplayFromUtc(leave['start_time'])} - ${_formatTimeForDisplayFromUtc(leave['end_time'])}';
+    } else if (leaveType == 'half_day' || leaveType == 'short_leave') {
+      final startSalon = _formatUtcToSalonTime(leave['start_time']);
+      final endSalon = _formatUtcToSalonTime(leave['end_time']);
+      timeDisplay = '$startSalon - $endSalon';
+
+      // ✅ User time reference
+      final userStart = _formatUtcToUserTime(leave['start_time']);
+      final userEnd = _formatUtcToUserTime(leave['end_time']);
+      if (userStart.isNotEmpty && userEnd.isNotEmpty) {
+        userTimeDisplay = '$userStart - $userEnd';
+      }
     }
 
     return Card(
@@ -2480,132 +2794,167 @@ Widget build(BuildContext context) {
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile(
-            contentPadding: const EdgeInsets.all(12),
-            leading: CircleAvatar(
-              radius: 24,
-              backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
-              backgroundImage: profile['avatar_url'] != null
-                  ? NetworkImage(profile['avatar_url'])
-                  : null,
-              child: profile['avatar_url'] == null
-                  ? Text(
-                      barberName[0].toUpperCase(),
-                      style: TextStyle(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    )
-                  : null,
-            ),
-            title: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    barberName,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                ),
-                _buildStatusCell(leave, status),
-              ],
-            ),
-            subtitle: Column(
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.calendar_today,
-                      size: 14,
-                      color: isDark ? Colors.white60 : Colors.grey[600],
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      leaveDate,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white70 : Colors.grey[800],
-                      ),
-                    ),
-                  ],
-                ),
-                if (isHoliday && holidayName != null) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    '⚠️ $holidayName',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: Colors.orange,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Text(
-                      _getLeaveTypeIcon(leaveType),
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      _getLeaveTypeName(leaveType),
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white70 : Colors.grey[800],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (timeDisplay.isNotEmpty)
-                      Expanded(
-                        child: Text(
-                          '• $timeDisplay',
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                  backgroundImage: hasAvatar
+                      ? NetworkImage(avatarUrl.toString())
+                      : null,
+                  child: !hasAvatar
+                      ? Text(
+                          _safeInitial(barberName),
                           style: TextStyle(
-                            fontSize: 12,
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              barberName,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          _buildStatusCell(leave, status),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.calendar_today,
+                            size: 14,
                             color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              leaveDate,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark ? Colors.white70 : Colors.grey[800],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (isHoliday && holidayName != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '⚠️ $holidayName',
                           overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.orange,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
+                      ],
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Text(
+                            _getLeaveTypeIcon(leaveType),
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _getLeaveTypeName(leaveType),
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDark ? Colors.white70 : Colors.grey[800],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          if (timeDisplay.isNotEmpty)
+                            Expanded(
+                              child: Text(
+                                '• $timeDisplay',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark ? Colors.white60 : Colors.grey[600],
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
-                Text(
-                  reason,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? Colors.white70 : Colors.grey[700],
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (status == 'rejected' && rejectionReason != null) ...[
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 6,
-                      vertical: 3,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'Rejected: $rejectionReason',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: Colors.red,
-                        fontStyle: FontStyle.italic,
+                      // ✅ User time reference
+                      if (userTimeDisplay != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            'Your time: $userTimeDisplay',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontStyle: FontStyle.italic,
+                              color: isDark ? Colors.blue[300] : Colors.blue[700],
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        reason,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white70 : Colors.grey[700],
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
+                      if (status == 'rejected' && rejectionReason != null) ...[
+                        const SizedBox(height: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'Rejected: $rejectionReason',
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 2,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.red,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ],
+                ),
               ],
             ),
           ),
@@ -2620,14 +2969,21 @@ Widget build(BuildContext context) {
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  icon: Icon(Icons.edit, color: isDark ? Colors.blue[300] : Colors.blue),
+                  icon: Icon(
+                    Icons.edit,
+                    color: isDark ? Colors.blue[300] : Colors.blue,
+                  ),
                   onPressed: () => _editLeave(leave),
                   tooltip: 'Edit',
                 ),
                 IconButton(
-                  icon: Icon(Icons.delete, color: isDark ? Colors.red[300] : Colors.red),
+                  icon: Icon(
+                    Icons.delete,
+                    color: isDark ? Colors.red[300] : Colors.red,
+                  ),
                   onPressed: () => _deleteLeave(leave),
                   tooltip: 'Delete',
                 ),
@@ -2640,11 +2996,28 @@ Widget build(BuildContext context) {
   }
 }
 
+// Small helper widget used inside status dropdown items above.
+class _StatusDot extends StatelessWidget {
+  final Color color;
+  const _StatusDot({required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 8,
+      height: 8,
+      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    );
+  }
+}
+
 // ==================== ADD/EDIT LEAVE DIALOG ====================
 
 class _AddEditLeaveDialog extends StatefulWidget {
   final List<Map<String, dynamic>> barbers;
   final String salonId;
+  final String salonTimezone;
+  final String userTimezone;
   final String? salonOpenTimeUtc;
   final String? salonCloseTimeUtc;
   final Map<String, dynamic>? leaveToEdit;
@@ -2653,6 +3026,8 @@ class _AddEditLeaveDialog extends StatefulWidget {
   const _AddEditLeaveDialog({
     required this.barbers,
     required this.salonId,
+    required this.salonTimezone,
+    required this.userTimezone,
     this.salonOpenTimeUtc,
     this.salonCloseTimeUtc,
     this.leaveToEdit,
@@ -2689,6 +3064,13 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   late bool _isWeb;
   late bool _isDark;
 
+  /// Check if salon and user timezone are the same
+  bool get _isSameTimezone {
+    return widget.salonTimezone.isEmpty || widget.userTimezone.isEmpty
+        ? true
+        : widget.salonTimezone == widget.userTimezone;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -2721,11 +3103,36 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     super.dispose();
   }
 
+  // ============================================
+  // ✅ TIMEZONE HELPERS
+  // ============================================
+
+  /// Format TimeOfDay
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour =
+        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
+  /// Convert salon TimeOfDay to user TimeOfDay
+  TimeOfDay _convertSalonTimeToUserTime(TimeOfDay salonTime) {
+    if (_isSameTimezone) return salonTime;
+    return TimezoneService.convertTimeOfDayBetweenTimezones(
+      salonTime,
+      fromTimezone: widget.salonTimezone,
+      toTimezone: widget.userTimezone,
+    );
+  }
+
   void _parseSalonHours() {
     if (widget.salonOpenTimeUtc != null) {
       try {
-        final localOpenTimeStr = TimezoneService.utcToLocalTimeRecurring(
+        final localOpenTimeStr =
+            TimezoneService.utcToLocalTimeRecurringWithTimezone(
           widget.salonOpenTimeUtc!,
+          widget.salonTimezone,
         );
         final openParts = localOpenTimeStr.split(' ');
         final timeParts = openParts[0].split(':');
@@ -2744,8 +3151,10 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
     if (widget.salonCloseTimeUtc != null) {
       try {
-        final localCloseTimeStr = TimezoneService.utcToLocalTimeRecurring(
+        final localCloseTimeStr =
+            TimezoneService.utcToLocalTimeRecurringWithTimezone(
           widget.salonCloseTimeUtc!,
+          widget.salonTimezone,
         );
         final timeParts = localCloseTimeStr.split(' ');
         final hourMinute = timeParts[0].split(':');
@@ -2774,9 +3183,11 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     if (leave['leave_date'] != null) {
       try {
         final utcDate = DateTime.parse(leave['leave_date']);
-        _selectedLocalDate = TimezoneService.utcToLocalDateTimeForDate(
+        _selectedLocalDate =
+            TimezoneService.utcToLocalDateTimeForDateWithTimezone(
           '12:00:00',
           utcDate,
+          widget.salonTimezone,
         );
         _checkHoliday(_selectedLocalDate!);
       } catch (e) {
@@ -2786,11 +3197,15 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
     if (leave['start_time'] != null && leave['end_time'] != null) {
       try {
-        final localStartStr = TimezoneService.utcToLocalTimeRecurring(
+        final localStartStr =
+            TimezoneService.utcToLocalTimeRecurringWithTimezone(
           leave['start_time'],
+          widget.salonTimezone,
         );
-        final localEndStr = TimezoneService.utcToLocalTimeRecurring(
+        final localEndStr =
+            TimezoneService.utcToLocalTimeRecurringWithTimezone(
           leave['end_time'],
+          widget.salonTimezone,
         );
 
         _startLocalTime = _parseTimeString(localStartStr);
@@ -2843,9 +3258,11 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   DateTime _utcDateStringToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
-      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
+      final localDateTime =
+          TimezoneService.utcToLocalDateTimeForDateWithTimezone(
         '12:00:00',
         utcDateTime,
+        widget.salonTimezone,
       );
       return DateTime(
         localDateTime.year,
@@ -2876,7 +3293,10 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     try {
       final timeString =
           '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}';
-      return TimezoneService.localToUtcTimeRecurring(timeString);
+      return TimezoneService.localToUtcTimeRecurringWithTimezone(
+        timeString,
+        widget.salonTimezone,
+      );
     } catch (e) {
       debugPrint('Error converting local time to UTC: $e');
       return '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}:00';
@@ -2892,6 +3312,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     return Dialog(
       backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
       child: Container(
         width: _isWeb ? 600 : screenWidth * 0.95,
         constraints: BoxConstraints(
@@ -2901,7 +3322,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           mainAxisSize: MainAxisSize.min,
           children: [
             _buildDialogHeader(),
-            Expanded(
+            Flexible(
               child: SingleChildScrollView(
                 padding: EdgeInsets.all(_isWeb ? 24 : 16),
                 child: Column(
@@ -2914,7 +3335,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                     if (_isHoliday && !_isEditMode) _buildHolidayWarning(),
                     const SizedBox(height: 16),
                     _buildLeaveTypeSelector(),
-                    if (_leaveType == 'half_day' || _leaveType == 'short_leave')
+                    if (_leaveType == 'half_day' ||
+                        _leaveType == 'short_leave')
                       _buildTimeSection(),
                     const SizedBox(height: 16),
                     _buildReasonField(),
@@ -2946,12 +3368,15 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             color: Colors.white,
           ),
           const SizedBox(width: 8),
-          Text(
-            _isEditMode ? 'Edit Leave' : 'Add Leave',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
+          Flexible(
+            child: Text(
+              _isEditMode ? 'Edit Leave' : 'Add Leave',
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
             ),
           ),
           const Spacer(),
@@ -2962,7 +3387,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
-              TimezoneService.getCurrentFlag(),
+              TimezoneService.getTimezoneFlagFor(widget.salonTimezone),
               style: const TextStyle(fontSize: 10, color: Colors.white),
             ),
           ),
@@ -2974,28 +3399,27 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   Widget _buildErrorMessage() {
     return Container(
       padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Colors.red.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.error_outline, color: Colors.red, size: 20),
+          const Icon(Icons.error_outline, color: Colors.red, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               _errorMessage!,
-              style: TextStyle(color: Colors.red, fontSize: 13),
+              style: const TextStyle(color: Colors.red, fontSize: 13),
             ),
           ),
         ],
       ),
     );
   }
-
-  // ==================== CONTINUE WITH REST OF DIALOG BUILDERS ====================
-  // (Same as before but with dark mode support - keeping it concise)
 
   Widget _buildBarberSelector() {
     final isDark = _isDark;
@@ -3013,6 +3437,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         const SizedBox(height: 8),
         DropdownButtonFormField<String>(
           initialValue: _selectedBarberId,
+          isExpanded: true,
           decoration: InputDecoration(
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
@@ -3039,6 +3464,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           ),
           hint: Text(
             'Choose barber',
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               color: isDark ? Colors.white60 : Colors.grey[600],
             ),
@@ -3052,6 +3478,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
               value: b['id'] as String,
               child: Text(
                 b['name'] as String,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: isDark ? Colors.white : Colors.black87,
                 ),
@@ -3095,23 +3522,37 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
               firstDate: today,
               lastDate: now.add(const Duration(days: 365)),
               builder: (context, child) {
-                return Theme(
-                  data: Theme.of(context).copyWith(
-                    colorScheme: ColorScheme(
-                      brightness: isDark ? Brightness.dark : Brightness.light,
-                      primary: AppTheme.primary,
-                      onPrimary: Colors.white,
-                      secondary: AppTheme.primary,
-                      onSecondary: Colors.white,
-                      error: Colors.red,
-                      onError: Colors.white,
-                      surface: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                      onSurface: isDark ? Colors.white : Colors.black87,
-                    ), dialogTheme: DialogThemeData(backgroundColor: isDark
-                        ? const Color(0xFF1E1E1E)
-                        : Colors.white),
+                // ✅ Clamp text scaling to prevent the CalendarDatePicker's
+                // fixed-height month grid from overflowing (the "2.0 / 9.0
+                // pixels on the bottom" RenderFlex error inside
+                // _MonthPicker) when the system/browser font scale is
+                // above 1.0.
+                return MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: const TextScaler.linear(1.0),
                   ),
-                  child: child!,
+                  child: Theme(
+                    data: Theme.of(context).copyWith(
+                      colorScheme: ColorScheme(
+                        brightness:
+                            isDark ? Brightness.dark : Brightness.light,
+                        primary: AppTheme.primary,
+                        onPrimary: Colors.white,
+                        secondary: AppTheme.primary,
+                        onSecondary: Colors.white,
+                        error: Colors.red,
+                        onError: Colors.white,
+                        surface:
+                            isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                        onSurface: isDark ? Colors.white : Colors.black87,
+                      ),
+                      dialogTheme: DialogThemeData(
+                        backgroundColor:
+                            isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                      ),
+                    ),
+                    child: child!,
+                  ),
                 );
               },
             );
@@ -3124,7 +3565,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             }
           },
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
               border: Border.all(
                 color: _isHoliday && !_isEditMode
@@ -3150,6 +3592,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         _selectedLocalDate != null
@@ -3157,21 +3600,27 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                                 'EEEE, MMM d, yyyy',
                               ).format(_selectedLocalDate!)
                             : 'Select date',
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: _selectedLocalDate != null
                               ? (isDark ? Colors.white : Colors.black)
-                              : (isDark ? Colors.white70 : Colors.grey[500]),
+                              : (isDark
+                                  ? Colors.white70
+                                  : Colors.grey[500]),
                           fontWeight: _isHoliday && !_isEditMode
                               ? FontWeight.w500
                               : FontWeight.normal,
                         ),
                       ),
-                      if (_isHoliday && !_isEditMode && _holidayName != null)
+                      if (_isHoliday &&
+                          !_isEditMode &&
+                          _holidayName != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 4),
                           child: Text(
                             '⚠️ $_holidayName - Salon closed',
-                            style: TextStyle(
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
                               fontSize: 11,
                               color: Colors.orange,
                               fontWeight: FontWeight.w500,
@@ -3199,10 +3648,11 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           borderRadius: BorderRadius.circular(8),
           border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
         ),
-        child: Row(
+        child: const Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(Icons.info_outline, size: 16, color: Colors.orange),
-            const SizedBox(width: 8),
+            SizedBox(width: 8),
             Expanded(
               child: Text(
                 'The salon is closed on this day due to holiday. '
@@ -3246,7 +3696,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
               Icons.access_time,
               Colors.blue,
             ),
-            _buildTypeChip('Emergency', 'emergency', Icons.warning, Colors.red),
+            _buildTypeChip(
+                'Emergency', 'emergency', Icons.warning, Colors.red),
             _buildTypeChip(
               'Short Leave',
               'short_leave',
@@ -3276,6 +3727,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           const SizedBox(width: 4),
           Text(
             label,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
               fontSize: 12,
               color: isSelected
@@ -3292,7 +3744,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           _errorMessage = null;
         });
       },
-      backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+      backgroundColor:
+          isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
       selectedColor: color,
       checkmarkColor: Colors.white,
       showCheckmark: false,
@@ -3318,29 +3771,49 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           _buildSalonHoursInfo(),
         Container(
           margin: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: _buildTimePicker(
-                  label: 'Start Time',
-                  time: _startLocalTime,
-                  onTimeSelected: (TimeOfDay newTime) {
-                    setState(() => _startLocalTime = newTime);
-                  },
+          child: _isWeb
+              ? Row(
+                  children: [
+                    Expanded(
+                      child: _buildTimePicker(
+                        label: 'Start Time',
+                        time: _startLocalTime,
+                        onTimeSelected: (TimeOfDay newTime) {
+                          setState(() => _startLocalTime = newTime);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _buildTimePicker(
+                        label: 'End Time',
+                        time: _endLocalTime,
+                        onTimeSelected: (TimeOfDay newTime) {
+                          setState(() => _endLocalTime = newTime);
+                        },
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
+                  children: [
+                    _buildTimePicker(
+                      label: 'Start Time',
+                      time: _startLocalTime,
+                      onTimeSelected: (TimeOfDay newTime) {
+                        setState(() => _startLocalTime = newTime);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    _buildTimePicker(
+                      label: 'End Time',
+                      time: _endLocalTime,
+                      onTimeSelected: (TimeOfDay newTime) {
+                        setState(() => _endLocalTime = newTime);
+                      },
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildTimePicker(
-                  label: 'End Time',
-                  time: _endLocalTime,
-                  onTimeSelected: (TimeOfDay newTime) {
-                    setState(() => _endLocalTime = newTime);
-                  },
-                ),
-              ),
-            ],
-          ),
         ),
         if (_leaveType == 'short_leave')
           _buildInfoCard(
@@ -3359,6 +3832,10 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   }
 
   Widget _buildSalonHoursInfo() {
+    final userStart = _convertSalonTimeToUserTime(_minLocalTime!);
+    final userEnd = _convertSalonTimeToUserTime(_maxLocalTime!);
+    final hasUserTime = !_isSameTimezone;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(8),
@@ -3366,16 +3843,37 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         color: Colors.blue.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info, size: 16, color: Colors.blue),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Salon hours: ${_formatTimeOfDay(_minLocalTime!)} - ${_formatTimeOfDay(_maxLocalTime!)}',
-              style: TextStyle(fontSize: 12, color: Colors.blue),
-            ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.info, size: 16, color: Colors.blue),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Salon hours: ${_formatTimeOfDay(_minLocalTime!)} - ${_formatTimeOfDay(_maxLocalTime!)}',
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12, color: Colors.blue),
+                ),
+              ),
+            ],
           ),
+          // ✅ User time reference
+          if (hasUserTime)
+            Padding(
+              padding: const EdgeInsets.only(top: 4, left: 24),
+              child: Text(
+                'Your time: ${_formatTimeOfDay(userStart)} - ${_formatTimeOfDay(userEnd)}',
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontStyle: FontStyle.italic,
+                  color: _isDark ? Colors.blue[300] : Colors.blue[700],
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -3393,6 +3891,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 8),
@@ -3433,6 +3932,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         }
       },
       child: Container(
+        width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         decoration: BoxDecoration(
           border: Border.all(
@@ -3443,9 +3943,11 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               label,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
                 color: isDark ? Colors.white60 : Colors.grey[600],
@@ -3454,6 +3956,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             const SizedBox(height: 4),
             Text(
               _formatTimeOfDay(time),
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontWeight: FontWeight.w500,
                 color: isDark ? Colors.white : Colors.black87,
@@ -3504,7 +4007,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+              borderSide:
+                  const BorderSide(color: AppTheme.primary, width: 2),
             ),
             fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
             filled: true,
@@ -3545,8 +4049,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           ),
           const SizedBox(width: 12),
           ElevatedButton(
-            onPressed:
-                _selectedBarberId != null &&
+            onPressed: _selectedBarberId != null &&
                     _selectedLocalDate != null &&
                     !_isLoading &&
                     (!_isHoliday || _isEditMode)
@@ -3555,7 +4058,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
             ),
             child: _isLoading
                 ? const SizedBox(
@@ -3571,12 +4075,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         ],
       ),
     );
-  }
-
-  String _formatTimeOfDay(TimeOfDay time) {
-    final hour = time.hourOfPeriod == 0 ? 12 : time.hourOfPeriod;
-    final period = time.period == DayPeriod.am ? 'AM' : 'PM';
-    return '$hour:${time.minute.toString().padLeft(2, '0')} $period';
   }
 
   Future<void> _saveLeave() async {
@@ -3595,14 +4093,17 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       }
 
       if (_leaveType == 'half_day' || _leaveType == 'short_leave') {
-        final startMinutes = _startLocalTime.hour * 60 + _startLocalTime.minute;
+        final startMinutes =
+            _startLocalTime.hour * 60 + _startLocalTime.minute;
         final endMinutes = _endLocalTime.hour * 60 + _endLocalTime.minute;
 
         if (_minLocalTime != null) {
-          final minMinutes = _minLocalTime!.hour * 60 + _minLocalTime!.minute;
+          final minMinutes =
+              _minLocalTime!.hour * 60 + _minLocalTime!.minute;
           if (startMinutes < minMinutes) {
             setState(() {
-              _errorMessage = 'Start time cannot be before salon opening time';
+              _errorMessage =
+                  'Start time cannot be before salon opening time';
               _isLoading = false;
             });
             return;
@@ -3610,10 +4111,12 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         }
 
         if (_maxLocalTime != null) {
-          final maxMinutes = _maxLocalTime!.hour * 60 + _maxLocalTime!.minute;
+          final maxMinutes =
+              _maxLocalTime!.hour * 60 + _maxLocalTime!.minute;
           if (endMinutes > maxMinutes) {
             setState(() {
-              _errorMessage = 'End time cannot be after salon closing time';
+              _errorMessage =
+                  'End time cannot be after salon closing time';
               _isLoading = false;
             });
             return;
@@ -3649,7 +4152,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           }
           if (durationMinutes < 15) {
             setState(() {
-              _errorMessage = 'Short leave must be at least 15 minutes';
+              _errorMessage =
+                  'Short leave must be at least 15 minutes';
               _isLoading = false;
             });
             return;
@@ -3669,7 +4173,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
         if (existingLeave != null) {
           setState(() {
-            _errorMessage = 'This barber already has a leave on this date.';
+            _errorMessage =
+                'This barber already has a leave on this date.';
             _isLoading = false;
           });
           return;
@@ -3735,7 +4240,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       if (e.toString().contains('duplicate key') ||
           e.toString().contains('23505')) {
         setState(() {
-          _errorMessage = 'This barber already has a leave on this date.';
+          _errorMessage =
+              'This barber already has a leave on this date.';
           _isLoading = false;
         });
       } else {
