@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/notification_service.dart';
 import '../../services/timezone_service.dart';
+import '../../services/currency_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
 
@@ -19,6 +20,12 @@ class OwnerOffersScreen extends StatefulWidget {
 class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   final supabase = Supabase.instance.client;
   final NotificationService _notificationService = NotificationService();
+
+  // ============================================
+  // ✅ CURRENCY SERVICE
+  // ============================================
+  final CurrencyService _currencyService = CurrencyService.instance;
+  String _salonCurrencyCode = 'LKR';
 
   List<Map<String, dynamic>> _offers = [];
   bool _isLoading = true;
@@ -48,6 +55,13 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   // ============================================
   late bool _isDark;
 
+  // ============================================
+  // ✅ CURRENCY GETTERS
+  // ============================================
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
+
+
   @override
   void initState() {
     super.initState();
@@ -68,6 +82,19 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   }
 
   // ============================================
+  // ✅ CURRENCY HELPER METHOD
+  // ============================================
+
+  /// Format price with salon currency (with proper comma separator)
+  String _formatPrice(dynamic amount) {
+    if (amount == null) return '$_salonCurrencySymbol 0';
+    return _currencyService.format(
+      price: amount,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
+
+  // ============================================
   // TIMEZONE INITIALIZATION
   // ============================================
 
@@ -76,7 +103,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
 
     final prefs = await SharedPreferences.getInstance();
     _userTimezone =
-        prefs.getString('cached_timezone') ??
+        prefs.getString(TimezoneService.kUserTimezone) ??
         TimezoneService.getCurrentTimezone();
     await TimezoneService.setTimezone(_userTimezone);
 
@@ -171,7 +198,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           .from('user_roles')
           .select('status')
           .eq('user_id', user.id)
-          .eq('role_id', 1)
+          .eq('role_id', 3)
           .maybeSingle();
 
       if (ownerCheck == null || ownerCheck['status'] != 'active') {
@@ -213,10 +240,11 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         }
       }
 
+      // ✅ STEP 1: Load salon with currency_code
       if (widget.salonId != null && widget.salonId!.isNotEmpty) {
         final salonResult = await supabase
             .from('salons')
-            .select('id, name')
+            .select('id, name, currency_code')
             .eq('id', int.parse(widget.salonId!))
             .eq('owner_id', user.id)
             .maybeSingle();
@@ -225,7 +253,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           setState(() {
             _currentSalonId = salonResult['id'] as int;
             _currentSalonName = salonResult['name'];
+            _salonCurrencyCode =
+                salonResult['currency_code'] as String? ?? 'LKR';
           });
+          debugPrint('✅ Salon currency: $_salonCurrencyCode');
           await _loadOffers();
           return;
         }
@@ -233,7 +264,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
 
       final salonResult = await supabase
           .from('salons')
-          .select('id, name')
+          .select('id, name, currency_code')
           .eq('owner_id', user.id)
           .maybeSingle();
 
@@ -251,7 +282,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       setState(() {
         _currentSalonId = salonResult['id'] as int;
         _currentSalonName = salonResult['name'];
+        _salonCurrencyCode = salonResult['currency_code'] as String? ?? 'LKR';
       });
+
+      debugPrint('✅ Salon currency: $_salonCurrencyCode');
 
       await _loadOffers();
     } catch (e) {
@@ -333,6 +367,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       builder: (context) => OfferFormDialog(
         isEditing: false,
         sendNotificationToFollowers: _sendNotificationToFollowers,
+        currencyCode: _salonCurrencyCode,
         onNotificationToggle: (value) {
           _sendNotificationToFollowers = value;
         },
@@ -351,6 +386,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         isEditing: true,
         offer: offer,
         sendNotificationToFollowers: false,
+        currencyCode: _salonCurrencyCode,
         onNotificationToggle: (value) {},
       ),
     );
@@ -459,11 +495,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
 
       debugPrint('📊 Found ${followers.length} active followers');
 
+      // ✅ Use dynamic currency with proper formatting
       String discountText = '';
       if (offer['discount_type'] == 'percentage') {
         discountText = '${offer['discount_value']}% OFF';
       } else if (offer['discount_type'] == 'fixed') {
-        discountText = '₹${offer['discount_value']} OFF';
+        discountText = '${_formatPrice(offer['discount_value'])} OFF';
       } else {
         discountText = 'FREE SERVICE';
       }
@@ -744,12 +781,16 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     }
   }
 
+  // ============================================
+  // ✅ DISCOUNT TEXT WITH DYNAMIC CURRENCY (using _formatPrice)
+  // ============================================
   String _getDiscountText(Map<String, dynamic> offer) {
     switch (offer['discount_type']) {
       case 'percentage':
         return '${offer['discount_value']}% OFF';
       case 'fixed':
-        return '₹${offer['discount_value']} OFF';
+        // ✅ Use _formatPrice() for proper formatting with commas
+        return '${_formatPrice(offer['discount_value'])} OFF';
       default:
         return 'FREE SERVICE';
     }
@@ -893,19 +934,19 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         child: _isLoading && _offers.isEmpty
             ? _buildLoadingState()
             : _hasError
-            ? _buildErrorState()
-            : isWeb
-            ? _buildWebLayout()
-            : _buildMobileLayout(),
+                ? _buildErrorState()
+                : isWeb
+                    ? _buildWebLayout()
+                    : _buildMobileLayout(),
       ),
       floatingActionButton:
           _showFloatingButton && !_isLoading && !_hasError && _offers.isNotEmpty
-          ? FloatingActionButton(
-              onPressed: _createOffer,
-              backgroundColor: AppTheme.primary,
-              child: const Icon(Icons.add, color: Colors.white),
-            )
-          : null,
+              ? FloatingActionButton(
+                  onPressed: _createOffer,
+                  backgroundColor: AppTheme.primary,
+                  child: const Icon(Icons.add, color: Colors.white),
+                )
+              : null,
     );
   }
 
@@ -932,7 +973,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                   const SizedBox(height: 16),
                   _buildStatsCard(),
                   const SizedBox(height: 16),
-                  // ✅ Quick Actions Card - Fixed
                   _buildQuickActionsCard(),
                 ],
               ),
@@ -1106,8 +1146,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
               ),
             ),
             const SizedBox(height: 12),
-
-            // ✅ Button 1: Create Offer
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
@@ -1124,10 +1162,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 8),
-
-            // ✅ Button 2: Refresh
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -1146,10 +1181,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 8),
-
-            // ✅ Button 3: View All Offers
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
@@ -1424,8 +1456,8 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                 _selectedFilter == 'active'
                     ? Icons.local_offer_outlined
                     : _selectedFilter == 'expired'
-                    ? Icons.timer_off_outlined
-                    : Icons.add_circle_outline,
+                        ? Icons.timer_off_outlined
+                        : Icons.add_circle_outline,
                 size: isSmallScreen ? 60 : 80,
                 color: AppTheme.primary.withValues(alpha: 0.5),
               ),
@@ -1740,10 +1772,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                           usageLimitText.contains('♾️')
                               ? Icons.unpublished
                               : usageLimitText.contains('🔴')
-                              ? Icons.cancel
-                              : usageLimitText.contains('⚠️')
-                              ? Icons.warning_amber
-                              : Icons.people,
+                                  ? Icons.cancel
+                                  : usageLimitText.contains('⚠️')
+                                      ? Icons.warning_amber
+                                      : Icons.people,
                           size: 12,
                           color: usageLimitColor,
                         ),
@@ -1793,9 +1825,8 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
                         value: usedCount / usageLimit,
-                        backgroundColor: isDark
-                            ? Colors.grey[800]
-                            : Colors.grey[200],
+                        backgroundColor:
+                            isDark ? Colors.grey[800] : Colors.grey[200],
                         color: usageLimitColor,
                         minHeight: 6,
                       ),
@@ -1814,9 +1845,11 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                     _buildActionButton(
                       onPressed: () =>
                           _toggleOfferStatus(offer['id'], offer['is_active']),
-                      icon: offer['is_active'] ? Icons.pause : Icons.play_arrow,
+                      icon:
+                          offer['is_active'] ? Icons.pause : Icons.play_arrow,
                       label: offer['is_active'] ? 'Deactivate' : 'Activate',
-                      color: offer['is_active'] ? Colors.orange : Colors.green,
+                      color:
+                          offer['is_active'] ? Colors.orange : Colors.green,
                     ),
                     const SizedBox(width: 8),
                     _buildActionButton(
@@ -1840,17 +1873,18 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                         offer['is_active'] ? Icons.pause : Icons.play_arrow,
                         size: 20,
                       ),
-                      color: offer['is_active'] ? Colors.orange : Colors.green,
+                      color:
+                          offer['is_active'] ? Colors.orange : Colors.green,
                       tooltip: offer['is_active'] ? 'Deactivate' : 'Activate',
                     ),
                     IconButton(
                       onPressed: () => _editOffer(offer),
-                      icon: Icon(Icons.edit, size: 20, color: Colors.blue),
+                      icon: const Icon(Icons.edit, size: 20, color: Colors.blue),
                       tooltip: 'Edit',
                     ),
                     IconButton(
                       onPressed: () => _deleteOffer(offer['id']),
-                      icon: Icon(Icons.delete, size: 20, color: Colors.red),
+                      icon: const Icon(Icons.delete, size: 20, color: Colors.red),
                       tooltip: 'Delete',
                     ),
                   ],
@@ -1953,7 +1987,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
 }
 
 // ============================================================
-// Offer Form Dialog with Time Range
+// ✅ Offer Form Dialog with Currency Support
 // ============================================================
 
 class OfferFormDialog extends StatefulWidget {
@@ -1961,6 +1995,7 @@ class OfferFormDialog extends StatefulWidget {
   final Map<String, dynamic>? offer;
   final bool sendNotificationToFollowers;
   final Function(bool) onNotificationToggle;
+  final String currencyCode;
 
   const OfferFormDialog({
     super.key,
@@ -1968,6 +2003,7 @@ class OfferFormDialog extends StatefulWidget {
     this.offer,
     required this.sendNotificationToFollowers,
     required this.onNotificationToggle,
+    required this.currencyCode,
   });
 
   @override
@@ -1976,6 +2012,9 @@ class OfferFormDialog extends StatefulWidget {
 
 class _OfferFormDialogState extends State<OfferFormDialog> {
   final _formKey = GlobalKey<FormState>();
+
+  // ✅ Currency Service
+  final CurrencyService _currencyService = CurrencyService.instance;
 
   late TextEditingController _titleController;
   late TextEditingController _descriptionController;
@@ -1994,6 +2033,16 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
   TimeOfDay? _validToTime;
 
   late bool _isDark;
+
+  // ============================================
+  // ✅ CURRENCY GETTERS (using _currencyUsesDecimals)
+  // ============================================
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(widget.currencyCode);
+
+  /// ✅ Check if current currency uses decimals (for validation)
+  bool get _currencyUsesDecimals =>
+      _currencyService.getInfo(widget.currencyCode).decimals > 0;
 
   @override
   void initState() {
@@ -2156,7 +2205,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     if (_formKey.currentState!.validate()) {
       if (_validTo.isBefore(_validFrom)) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
+          const SnackBar(
             content: Text(
               'End date must be after start date',
               style: TextStyle(color: Colors.white),
@@ -2170,7 +2219,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
       if (_hasTimeRestriction) {
         if (_validFromTime == null || _validToTime == null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
+            const SnackBar(
               content: Text(
                 'Please select both start and end times',
                 style: TextStyle(color: Colors.white),
@@ -2430,7 +2479,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                           Expanded(
                             child: ChoiceChip(
                               label: Text(
-                                'Fixed ₹',
+                                'Fixed $_salonCurrencySymbol',
                                 style: TextStyle(
                                   color: _discountType == 'fixed'
                                       ? AppTheme.primary
@@ -2507,7 +2556,7 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                                 : 'e.g., 500',
                             prefixText: _discountType == 'percentage'
                                 ? '% '
-                                : '₹ ',
+                                : '$_salonCurrencySymbol ',
                             prefixStyle: TextStyle(
                               color: isDark ? Colors.white60 : Colors.grey,
                             ),
@@ -2559,6 +2608,16 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                             }
                             if (_discountType == 'percentage' && number > 100) {
                               return 'Percentage cannot exceed 100%';
+                            }
+                            // ✅ NEW: Currency-aware decimal validation
+                            if (_discountType == 'fixed' &&
+                                !_currencyUsesDecimals &&
+                                value.contains('.')) {
+                              final decimalPart = value.split('.').last;
+                              if (decimalPart.isNotEmpty &&
+                                  int.tryParse(decimalPart) != 0) {
+                                return '${widget.currencyCode} does not use decimals';
+                              }
                             }
                             return null;
                           },

@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../utils/ip_helper.dart';
 import '../../services/timezone_service.dart';
+import '../../services/currency_service.dart';
 import '../../extensions/context_extensions.dart';
 
 final RouteObserver<ModalRoute<void>> routeObserver =
@@ -23,6 +24,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     with RouteAware, AutomaticKeepAliveClientMixin {
   // ==================== CONTROLLERS ====================
   final TextEditingController _searchController = TextEditingController();
+
+  // ==================== SERVICES ====================
+  final CurrencyService _currencyService = CurrencyService.instance;
 
   // ==================== DATA LISTS ====================
   List<Map<String, dynamic>> _searchResults = [];
@@ -43,6 +47,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   String _salonOpenTimeUtc = '09:00:00';
   String _salonCloseTimeUtc = '18:00:00';
 
+  // ==================== CURRENCY VARIABLES ====================
+  String _salonCurrencyCode = 'LKR';
+
   // ==================== UI STATES ====================
   bool _isLoading = true;
   bool _isSearching = false;
@@ -50,20 +57,27 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   bool _isLoadingServices = true;
   bool _isLoadingSalonData = false;
 
+  // Set right before/after showing any dialog on this route so that
+  // RouteAware.didPopNext (fired when the dialog route is popped) does not
+  // trigger a full data refresh — dialogs are not "returning to this page"
+  // navigation events.
+  bool _isDialogShowing = false;
+
   // ==================== IP ADDRESS ====================
   String? _currentIp;
   bool _isLoadingIp = false;
 
   // ==================== EXPANSION STATE ====================
   final Set<String> _expandedServices = {};
+  // Tracks which service ids we've already applied a default expand/collapse
+  // state to, so subsequent reloads (e.g. after a dialog closes) don't stomp
+  // on the user's manual expand/collapse choices.
+  Set<String> _knownServiceIds = {};
 
   // ==================== CATEGORY TAB STATE ====================
   String? _selectedCategoryTab;
 
   // ==================== BARBER ASSIGNED SERVICES ====================
-  // Tracks which services/variants are already assigned to the currently
-  // selected barber, so we can disable just those items instead of
-  // disabling the whole barber.
   Set<int> _barberAssignedVariantIds = {};
   Set<String> _barberAssignedServiceIds = {};
   bool _isLoadingBarberServices = false;
@@ -77,18 +91,33 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ==================== RESPONSIVE HELPERS ====================
   late bool _isWeb;
 
-  // ✅ Alternating card colors - using theme-aware alpha blending
-  // These are palette variations; base colors come from AppTheme.primary
+  // ✅ Alternating card colors
   final List<Color> _cardColorTints = [
-    const Color(0xFFE3F2FD), // Light Blue tint
-    const Color(0xFFFCE4EC), // Light Pink tint
-    const Color(0xFFE8F5E9), // Light Green tint
-    const Color(0xFFFFF3E0), // Light Orange tint
-    const Color(0xFFF3E5F5), // Light Purple tint
-    const Color(0xFFE0F7FA), // Light Cyan tint
-    const Color(0xFFFFEBEE), // Light Red tint
-    const Color(0xFFE8EAF6), // Light Indigo tint
+    const Color(0xFFE3F2FD),
+    const Color(0xFFFCE4EC),
+    const Color(0xFFE8F5E9),
+    const Color(0xFFFFF3E0),
+    const Color(0xFFF3E5F5),
+    const Color(0xFFE0F7FA),
+    const Color(0xFFFFEBEE),
+    const Color(0xFFE8EAF6),
   ];
+
+  // ==================== ✅ CURRENCY GETTERS ====================
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
+
+
+  // ==================== ✅ CURRENCY HELPERS ====================
+
+  /// Format price with salon currency (e.g., "Rs. 1500" / "$ 15.00")
+  /// ✅ Used in variant cards for consistent display
+  String _formatPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
 
   // ==================== COMPUTED PROPERTIES ====================
   int get _totalSelectedItems {
@@ -141,6 +170,12 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   @override
   void didPopNext() {
+    // A dialog opened on this route (e.g. the "Confirm Add Barber" dialog)
+    // also triggers didPopNext when it is dismissed. That is not a real
+    // "came back to this screen" navigation, so skip the refresh in that
+    // case — otherwise every dialog interaction would reload all data and
+    // collapse any expanded service cards.
+    if (_isDialogShowing) return;
     _refreshData();
   }
 
@@ -190,7 +225,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // LOAD SALON TIMEZONE AND HOURS
+  // ✅ LOAD SALON TIMEZONE, HOURS & CURRENCY
   // ============================================================
 
   Future<void> _loadSalonTimezoneAndHours() async {
@@ -200,7 +235,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       final salonIdInt = int.parse(_selectedSalonId!);
       final response = await supabase
           .from('salons')
-          .select('open_time, close_time, timezone')
+          .select('open_time, close_time, timezone, currency_code')
           .eq('id', salonIdInt)
           .single();
 
@@ -208,15 +243,18 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         _salonTimezone = response['timezone'] ?? 'Asia/Colombo';
         _salonOpenTimeUtc = response['open_time'] ?? '09:00:00';
         _salonCloseTimeUtc = response['close_time'] ?? '18:00:00';
+        _salonCurrencyCode = response['currency_code'] as String? ?? 'LKR';
       });
 
       debugPrint('✅ Loaded salon timezone: $_salonTimezone');
+      debugPrint('✅ Loaded salon currency: $_salonCurrencyCode');
     } catch (e) {
       debugPrint('❌ Error loading salon timezone: $e');
       setState(() {
         _salonTimezone = 'Asia/Colombo';
         _salonOpenTimeUtc = '09:00:00';
         _salonCloseTimeUtc = '18:00:00';
+        _salonCurrencyCode = 'LKR';
       });
     }
   }
@@ -518,7 +556,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       final response = await supabase
           .from('salons')
           .select(
-            'id, name, address, logo_url, is_active, open_time, close_time, timezone',
+            'id, name, address, logo_url, is_active, open_time, close_time, timezone, currency_code',
           )
           .eq('owner_id', userId)
           .eq('is_active', true)
@@ -572,7 +610,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // LOAD BARBER'S ALREADY-ASSIGNED SERVICES (for this salon)
+  // LOAD BARBER'S ALREADY-ASSIGNED SERVICES
   // ============================================================
 
   Future<void> _loadBarberAssignedServices(String barberId) async {
@@ -974,13 +1012,29 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           _services = processedServices;
           _isLoadingServices = false;
           _isLoading = false;
-          _expandedServices.clear();
+
+          // Preserve the user's manual expand/collapse choices across
+          // reloads. Only newly-seen services get the default
+          // (expanded-if-has-variants) treatment; services we already know
+          // about keep whatever state the user left them in.
+          final currentServiceIds = processedServices
+              .map((s) => s['id'] as String)
+              .toSet();
+
+          _expandedServices.removeWhere(
+            (id) => !currentServiceIds.contains(id),
+          );
+
           for (var service in processedServices) {
             final serviceId = service['id'] as String;
-            if (service['hasVariants'] == true) {
+            final hasVariants = service['hasVariants'] == true;
+            final isNewService = !_knownServiceIds.contains(serviceId);
+            if (hasVariants && isNewService) {
               _expandedServices.add(serviceId);
             }
           }
+
+          _knownServiceIds = currentServiceIds;
         });
       }
     } catch (e) {
@@ -1038,8 +1092,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // ============================================================
 
   void _toggleSelection(String serviceId, [int? variantId]) {
-    // Guard: never allow toggling a service/variant already assigned to
-    // the selected barber.
     if (variantId != null && _isVariantAssigned(variantId)) return;
     if (variantId == null && _barberAssignedServiceIds.contains(serviceId)) {
       return;
@@ -1261,20 +1313,18 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     final textColor = context.textColor;
     final secondaryTextColor = context.secondaryTextColor;
 
+    _isDialogShowing = true;
     final confirm = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        // Fully custom Dialog — full manual control over layout so
-        // Flutter's internal AlertDialog / OverflowBar sizing quirks
-        // (which can silently force extra height on narrow screens)
-        // never cause an overflow again.
         final screenHeight = MediaQuery.of(dialogContext).size.height;
         final maxDialogHeight = screenHeight * 0.85;
 
         return Dialog(
           backgroundColor: context.backgroundColor,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 24,
             vertical: 24,
@@ -1284,16 +1334,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               maxHeight: maxDialogHeight,
               maxWidth: _isWeb ? 450 : 420,
             ),
-            // ✅ The ENTIRE dialog (title + content + actions) scrolls as
-            // one unit. This is the only 100%-safe approach: even if the
-            // available height is smaller than the title+actions' own
-            // minimum size, the dialog just scrolls instead of overflowing.
             child: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ---------- TITLE ----------
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
                     child: Row(
@@ -1326,7 +1371,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                       ],
                     ),
                   ),
-                  // ---------- CONTENT (plain — outer scrollview handles scrolling) ----------
                   Padding(
                     padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
                     child: Column(
@@ -1403,60 +1447,61 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                       ],
                     ),
                   ),
-                  // ---------- ACTIONS (fixed row, always horizontal) ----------
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextButton(
-                          onPressed: () =>
-                              Navigator.pop(dialogContext, false),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          child: Text(
-                            'Cancel',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: secondaryTextColor,
+                  Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextButton(
+                            onPressed: () =>
+                                Navigator.pop(dialogContext, false),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                            child: Text(
+                              'Cancel',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: secondaryTextColor,
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () => Navigator.pop(dialogContext, true),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: primaryColor,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: () =>
+                                Navigator.pop(dialogContext, true),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: primaryColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
                             ),
-                          ),
-                          child: const Text(
-                            'Confirm Add',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                            child: const Text(
+                              'Confirm Add',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
         );
       },
     );
+    _isDialogShowing = false;
 
     if (confirm != true) return;
     if (mounted) setState(() => _isLoading = true);
@@ -1657,6 +1702,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           'salon_id': salonIdInt,
           'salon_name': _selectedSalonDetails?['name'],
           'salon_timezone': _salonTimezone,
+          'salon_currency': _salonCurrencyCode,
           'selected_services_count': _totalSelectedItems,
           'selected_services': selectedServicesList,
           'device_timezone': _deviceTimezone,
@@ -1674,14 +1720,25 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           '• $createdCount schedules created\n'
           '• Lunch breaks configured\n'
           '• $servicesAddedCount services, $variantsAddedCount variants added\n'
-          '• Salon timezone: ${_salonTimezone.split('/').last}',
+          '• Salon timezone: ${_salonTimezone.split('/').last}\n'
+          '• Currency: $_salonCurrencyCode ($_salonCurrencySymbol)',
           context.successColor,
         );
 
         setState(() {
           _selectedBarberId = null;
           _selectedItems.clear();
-          _expandedServices.clear();
+          // Restore the default expand state (services with variants
+          // expanded) rather than collapsing every card — matches what the
+          // user sees on a normal load, instead of an abrupt "everything
+          // closed" reset.
+          _expandedServices
+            ..clear()
+            ..addAll(
+              _services
+                  .where((s) => s['hasVariants'] == true)
+                  .map((s) => s['id'] as String),
+            );
           _searchController.clear();
           _searchResults = [];
           _isSearching = false;
@@ -1827,7 +1884,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     final isFullyAssigned =
         _selectedBarberId != null && _isServiceFullyAssigned(service);
 
-    // Use theme card color with tint
     final tintColor = isDark
         ? cardColor.withValues(alpha: 0.3)
         : _cardColorTints[index % _cardColorTints.length].withValues(
@@ -1851,6 +1907,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Container(
               padding: const EdgeInsets.all(16),
@@ -2004,6 +2061,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   if (hasVariants) ...[
                     if (isExpanded) ...[
@@ -2112,6 +2170,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     );
   }
 
+  // ============================================
+  // ✅ VARIANT CARD - Uses _formatPrice() helper
+  // ============================================
   Widget _buildVariantCard(String serviceId, Map<String, dynamic> variant) {
     final isDark = context.isDarkMode;
     final primaryColor = context.primaryColor;
@@ -2137,8 +2198,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             color: isAssigned
                 ? (isDark ? Colors.grey[850] : Colors.grey[200])
                 : isSelected
-                ? primaryColor.withValues(alpha: 0.1)
-                : cardColor.withValues(alpha: 0.7),
+                    ? primaryColor.withValues(alpha: 0.1)
+                    : cardColor.withValues(alpha: 0.7),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: (isSelected && !isAssigned) ? primaryColor : dividerColor,
@@ -2163,8 +2224,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                       : variant['gender_name'].toLowerCase().contains(
                           'female',
                         )
-                      ? Icons.female
-                      : Icons.people,
+                          ? Icons.female
+                          : Icons.people,
                   color: (isSelected && !isAssigned)
                       ? primaryColor
                       : secondaryTextColor,
@@ -2221,24 +2282,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                       spacing: 8,
                       runSpacing: 2,
                       children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.currency_rupee,
-                              size: 12,
-                              color: secondaryTextColor,
-                            ),
-                            const SizedBox(width: 2),
-                            Text(
-                              '${variant['price']}',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: secondaryTextColor,
-                              ),
-                            ),
-                          ],
+                        // ✅ Price with salon currency - uses _formatPrice()
+                        Text(
+                          _formatPrice(variant['price']),
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: secondaryTextColor,
+                          ),
                         ),
                         Row(
                           mainAxisSize: MainAxisSize.min,
@@ -2453,18 +2504,23 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           ),
         ),
         if (_isWeb)
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 400,
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-              childAspectRatio: 0.9,
-            ),
-            itemCount: servicesToShow.length,
-            itemBuilder: (context, index) =>
-                _buildServiceCard(servicesToShow[index], index),
+          // NOTE: A fixed-aspect-ratio GridView forces every card into the
+          // same height, but a card's real height depends on how many
+          // variants it has and whether it's expanded — that mismatch is
+          // exactly what caused the "RenderFlex overflowed" error. Wrap lets
+          // each card size itself naturally (rows just grow to fit their
+          // tallest card), so nothing overflows regardless of how many
+          // variants are shown or expanded.
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            children: [
+              for (int index = 0; index < servicesToShow.length; index++)
+                SizedBox(
+                  width: 380,
+                  child: _buildServiceCard(servicesToShow[index], index),
+                ),
+            ],
           )
         else
           ListView.builder(
@@ -2480,7 +2536,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   Widget _buildSalonSection() {
     final isWeb = context.isWeb;
-    final isDark = context.isDarkMode; // ✅ Keep this
+    final isDark = context.isDarkMode;
     final primaryColor = context.primaryColor;
     final textColor = context.textColor;
     final cardColor = context.cardColor;
@@ -2529,12 +2585,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                   padding: const EdgeInsets.all(32),
                   child: Column(
                     children: [
-                      // ✅ Use isDark for progress indicator
                       CircularProgressIndicator(
                         color: isDark ? primaryColor : primaryColor,
                       ),
                       const SizedBox(height: 12),
-                      // ✅ Use isDark for text color
                       Text(
                         'Loading salons...',
                         style: TextStyle(color: textColor),
@@ -2573,7 +2627,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       decoration: BoxDecoration(
         color: cardColor,
         borderRadius: BorderRadius.circular(12),
-        // ✅ Use isDark for border color
         border: Border.all(
           color: isDark
               ? Colors.orange.withValues(alpha: 0.4)
@@ -2586,7 +2639,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           Icon(
             Icons.warning_amber_rounded,
             size: 48,
-            // ✅ Use isDark for icon color
             color: isDark ? Colors.orange[300] : Colors.orange[700],
           ),
           const SizedBox(height: 12),
@@ -2632,6 +2684,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
     return InkWell(
       onTap: () async {
+        // Already on this salon — nothing to do, and re-running the load
+        // would otherwise flash a loading state for no reason.
+        if (_selectedSalonId == salon['id'].toString()) return;
+
         if (mounted) {
           setState(() {
             _selectedSalonId = salon['id'].toString();
@@ -2644,6 +2700,13 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             _selectedCategoryTab = null;
             _barberAssignedVariantIds = {};
             _barberAssignedServiceIds = {};
+            // Switching salons is a genuinely fresh context, so it's fine
+            // (and expected) to reset the expand state and show a clean
+            // loading state instead of the previous salon's stale cards.
+            _expandedServices.clear();
+            _knownServiceIds = {};
+            _services = [];
+            _isLoadingServices = true;
           });
         }
         await _loadSalonTimezoneAndHours();
@@ -2948,10 +3011,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          // ℹ️ Informational only — no longer disables the barber tile.
-          // Selecting an existing barber now lets you add any services
-          // they don't already have (those specific ones get disabled
-          // further down, in the services list).
           if (alreadyInSalon)
             Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -3095,8 +3154,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(horizontal: isWeb ? 0 : 16, vertical: 8),
-      // ✅ On web, don't force the button to stretch full width — align it
-      // and let minimumSize control its (small, fixed) size instead.
       alignment: isWeb ? Alignment.centerLeft : null,
       child: ElevatedButton(
         onPressed: _isLoading ? null : _addBarber,
@@ -3225,7 +3282,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             ),
         ],
       ),
-      // ✅ EDGE-TO-EDGE: SafeArea added
       body: SafeArea(
         child: isLoading
             ? Center(
@@ -3244,8 +3300,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 ),
               )
             : _isWeb
-            ? _buildWebLayout()
-            : _buildMobileLayout(),
+                ? _buildWebLayout()
+                : _buildMobileLayout(),
       ),
     );
   }

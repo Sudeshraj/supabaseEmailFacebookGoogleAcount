@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
+import '../../services/currency_service.dart';
 
 class AddBarberServiceScreen extends StatefulWidget {
   final String salonId;
@@ -25,11 +26,17 @@ class AddBarberServiceScreen extends StatefulWidget {
 class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   final supabase = Supabase.instance.client;
 
+  // ==================== ✅ CURRENCY SERVICE ====================
+  final CurrencyService _currencyService = CurrencyService.instance;
+
   bool _isLoading = true;
   bool _isSaving = false;
   List<Map<String, dynamic>> _services = [];
   final Map<String, Set<int>> _selectedVariants = {};
   int? _salonBarberId;
+
+  // ==================== ✅ CURRENCY STATE ====================
+  String _salonCurrencyCode = 'LKR';
 
   // For search/filter
   final TextEditingController _searchController = TextEditingController();
@@ -71,6 +78,32 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     const Color(0xFF1A237E), // Dark Indigo
   ];
 
+  // ==================== ✅ CURRENCY HELPERS ====================
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
+
+
+  /// Format price with salon currency
+  String _formatPrice(dynamic price) {
+    if (price == null) return '$_salonCurrencySymbol 0';
+    return _currencyService.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
+
+  /// Format price range (min - max)
+  String _formatPriceRange(dynamic minPrice, dynamic maxPrice) {
+    if (minPrice == null || maxPrice == null) {
+      return '${_salonCurrencySymbol}0';
+    }
+    // Same price නම් එකයි පෙන්නන්නේ
+    if (minPrice == maxPrice) {
+      return _formatPrice(minPrice);
+    }
+    return '${_formatPrice(minPrice)} - ${_formatPrice(maxPrice)}';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -104,6 +137,25 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
 
     try {
       final salonIdInt = int.parse(widget.salonId);
+
+      // ==================== ✅ STEP 0: Load salon currency ====================
+      try {
+        final salonCurrencyResponse = await supabase
+            .from('salons')
+            .select('currency_code')
+            .eq('id', salonIdInt)
+            .single();
+
+        if (mounted) {
+          setState(() {
+            _salonCurrencyCode =
+                salonCurrencyResponse['currency_code'] as String? ?? 'LKR';
+          });
+        }
+        debugPrint('✅ Salon currency loaded: $_salonCurrencyCode');
+      } catch (e) {
+        debugPrint('⚠️ Could not load salon currency, using LKR: $e');
+      }
 
       // ✅ STEP 1: Check if barber has active role in user_roles
       final barberRoleCheck = await supabase
@@ -589,6 +641,36 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           tooltip: 'Back',
         ),
         actions: [
+          // ✅ Currency badge (optional)
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _salonCurrencySymbol,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  _salonCurrencyCode,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.9),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
           if (selectedCount > 0)
             Container(
               margin: const EdgeInsets.only(right: 8),
@@ -642,8 +724,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                   child: _filteredServices.isEmpty
                       ? _buildEmptyState()
                       : _isWeb
-                      ? _buildWebView(padding, selectedCount)
-                      : _buildMobileView(padding, selectedCount),
+                          ? _buildWebView(padding, selectedCount)
+                          : _buildMobileView(padding, selectedCount),
                 ),
               ],
             ),
@@ -895,7 +977,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   }
 
   // ============================================================
-  // ✅ WEB SERVICE CARD
+  // ✅ WEB SERVICE CARD (with dynamic currency)
   // ============================================================
   Widget _buildServiceCardWeb(Map<String, dynamic> service, int index) {
     final isDark = _isDark;
@@ -1038,9 +1120,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // ✅ FIX: Dynamic price range
                       if (hasVariants && !isCompletelyAssigned) ...[
                         Text(
-                          'Rs. ${service['minPrice']} - ${service['maxPrice']}',
+                          _formatPriceRange(
+                            service['minPrice'],
+                            service['maxPrice'],
+                          ),
                           style: TextStyle(
                             fontSize: 11,
                             color: isDark ? Colors.white60 : Colors.grey[700],
@@ -1172,8 +1258,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                                           : Colors.grey[800]),
                                               ),
                                             ),
+                                            // ✅ FIX: Dynamic price
                                             Text(
-                                              'Rs. ${variant['price']} • ${variant['duration']} min',
+                                              '${_formatPrice(variant['price'])} • ${variant['duration']} min',
                                               style: TextStyle(
                                                 fontSize: 9,
                                                 color: isDark
@@ -1241,11 +1328,11 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   }
 
   // ============================================================
-  // ✅ MOBILE VIEW
+  // ✅ MOBILE VIEW (with dynamic currency)
   // ============================================================
   Widget _buildMobileView(double padding, int selectedCount) {
     final isDark = _isDark;
-    final accentColor = AppTheme.primary; // ✅ එක වතාවක් පමණයි
+    final accentColor = AppTheme.primary;
 
     return ListView.builder(
       padding: EdgeInsets.all(padding),
@@ -1264,7 +1351,6 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         final cardColor = isDark
             ? _cardColorsDark[index % _cardColorsDark.length]
             : _cardColorsLight[index % _cardColorsLight.length];
-        // ✅ Remove duplicate accentColor
 
         final isCompletelyAssigned = !hasVariants
             ? isFullServiceAssigned
@@ -1277,7 +1363,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
             borderRadius: BorderRadius.circular(12),
             side: BorderSide(
               color: isFullServiceSelected || selectedVariantCount > 0
-                  ? accentColor // ✅ Use outer accentColor
+                  ? accentColor
                   : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
               width: isFullServiceSelected || selectedVariantCount > 0 ? 2 : 1,
             ),
@@ -1312,7 +1398,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                             child: Center(
                               child: Icon(
                                 _getIconForName(service['icon_name']),
-                                color: accentColor, // ✅ Use outer accentColor
+                                color: accentColor,
                                 size: 18,
                               ),
                             ),
@@ -1387,8 +1473,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                               onChanged: isCompletelyAssigned
                                   ? null
                                   : (_) => _toggleFullService(serviceId),
-                              activeColor:
-                                  accentColor, // ✅ Use outer accentColor
+                              activeColor: accentColor,
                               visualDensity: VisualDensity.compact,
                             ),
                           if (hasVariants)
@@ -1398,7 +1483,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                   : Icons.expand_more,
                               size: 20,
                               color: selectedVariantCount > 0
-                                  ? accentColor // ✅ Use outer accentColor
+                                  ? accentColor
                                   : (isDark ? Colors.white70 : Colors.grey),
                             ),
                         ],
@@ -1423,16 +1508,14 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                             margin: const EdgeInsets.only(bottom: 6),
                             decoration: BoxDecoration(
                               color: isSelected
-                                  ? accentColor.withValues(
-                                      alpha: 0.05,
-                                    ) // ✅ Use outer accentColor
+                                  ? accentColor.withValues(alpha: 0.05)
                                   : (isDark
                                         ? const Color(0xFF2A2A2A)
                                         : Colors.white.withValues(alpha: 0.7)),
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
                                 color: isSelected
-                                    ? accentColor // ✅ Use outer accentColor
+                                    ? accentColor
                                     : (isDark
                                           ? Colors.grey[700]!
                                           : Colors.grey[200]!),
@@ -1449,8 +1532,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                     ? null
                                     : (_) =>
                                           _toggleVariant(serviceId, variantId),
-                                activeColor:
-                                    accentColor, // ✅ Use outer accentColor
+                                activeColor: accentColor,
                                 visualDensity: VisualDensity.compact,
                               ),
                               title: Text(
@@ -1465,8 +1547,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
+                              // ✅ FIX: Dynamic price
                               subtitle: Text(
-                                'Rs. ${variant['price']} • ${variant['duration']} min',
+                                '${_formatPrice(variant['price'])} • ${variant['duration']} min',
                                 style: TextStyle(
                                   fontSize: 10,
                                   color: isDark
