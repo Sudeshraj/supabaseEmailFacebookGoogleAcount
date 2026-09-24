@@ -35,6 +35,20 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
+  // ✅ SMALL HELPERS (safe avatar / initial)
+  // ============================================================
+  String _initial(String? name) {
+    final n = (name ?? '').trim();
+    return n.isEmpty ? '?' : n[0].toUpperCase();
+  }
+
+  String? _avatarUrl(Map<String, dynamic> barber) {
+    final a = barber['avatar'];
+    if (a is String && a.trim().isNotEmpty) return a;
+    return null;
+  }
+
+  // ============================================================
   // ✅ LOAD DATA
   // ============================================================
   Future<void> _loadData() async {
@@ -53,23 +67,13 @@ class _BarberListScreenState extends State<BarberListScreen> {
     try {
       final salonIdInt = int.parse(widget.salonId!);
 
-      var query = supabase
+      // ✅ Filter is applied AFTER the real status is calculated
+      // (blocked status comes from profiles, not from salon_barbers)
+      final salonBarbersResponse = await supabase
           .from('salon_barbers')
           .select('id, barber_id, status, joined_at')
-          .eq('salon_id', salonIdInt);
-
-      if (_selectedFilter == 'active') {
-        query = query.eq('status', 'active');
-      } else if (_selectedFilter == 'inactive') {
-        query = query.eq('status', 'inactive');
-      } else if (_selectedFilter == 'deleted') {
-        query = query.eq('status', 'deleted');
-      }
-
-      final salonBarbersResponse = await query.order(
-        'joined_at',
-        ascending: false,
-      );
+          .eq('salon_id', salonIdInt)
+          .order('joined_at', ascending: false);
 
       if (salonBarbersResponse.isEmpty) {
         if (mounted) {
@@ -149,9 +153,16 @@ class _BarberListScreenState extends State<BarberListScreen> {
         });
       }
 
+      // ✅ Apply selected filter on the real status
+      final filteredList = _selectedFilter == 'all' || _selectedFilter == null
+          ? combinedList
+          : combinedList
+                .where((b) => b['status'] == _selectedFilter)
+                .toList();
+
       if (mounted) {
         setState(() {
-          _barbers = combinedList;
+          _barbers = filteredList;
         });
       }
     } catch (e) {
@@ -305,6 +316,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
     }
   }
 
+  // ============================================================
+  // ✅ CONFIRM DIALOG (used by Deactivate / Delete / Restore)
+  // FIX: scrollable: true  -> no more RenderFlex overflow
+  // ============================================================
   Future<bool?> _showConfirmDialog({
     required String title,
     required String message,
@@ -313,7 +328,8 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }) {
     return showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
+        scrollable: true, // ✅ FIX
         backgroundColor: context.cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
@@ -329,14 +345,14 @@ class _BarberListScreenState extends State<BarberListScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(
               'Cancel',
               style: TextStyle(color: context.secondaryTextColor),
             ),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: confirmColor,
               foregroundColor: Colors.white,
@@ -505,14 +521,16 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
   // ============================================================
   // ✅ EMPTY STATE
+  // FIX: wrapped in SingleChildScrollView (small height safe)
   // ============================================================
   Widget _buildEmptyState() {
     final isWeb = context.isWeb;
 
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
@@ -789,12 +807,14 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
   // ============================================================
   // ✅ DESKTOP BARBER ROW - Proper Design
+  // FIX: Actions use Wrap (no horizontal overflow)
   // ============================================================
   Widget _buildDesktopBarberRow(Map<String, dynamic> barber, int index) {
     final status = barber['status'] ?? 'active';
     final statusColor = _getStatusColor(status);
     final statusText = _getStatusText(status);
     final statusIcon = _getStatusIcon(status);
+    final avatarUrl = _avatarUrl(barber);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -823,12 +843,12 @@ class _BarberListScreenState extends State<BarberListScreen> {
                     CircleAvatar(
                       radius: 24,
                       backgroundColor: statusColor.withValues(alpha: 0.15),
-                      backgroundImage: barber['avatar'] != null
-                          ? NetworkImage(barber['avatar'])
+                      backgroundImage: avatarUrl != null
+                          ? NetworkImage(avatarUrl)
                           : null,
-                      child: barber['avatar'] == null
+                      child: avatarUrl == null
                           ? Text(
-                              barber['name'][0].toUpperCase(),
+                              _initial(barber['name']),
                               style: TextStyle(
                                 color: statusColor,
                                 fontWeight: FontWeight.bold,
@@ -897,6 +917,8 @@ class _BarberListScreenState extends State<BarberListScreen> {
             flex: 3,
             child: Text(
               barber['phone'] ?? 'No phone',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 13,
                 color: barber['phone'] == 'No phone'
@@ -911,10 +933,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
             flex: 2,
             child: Text(
               _formatDate(barber['joined_at']),
-              style: TextStyle(
-                fontSize: 13,
-                color: context.textColor,
-              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 13, color: context.textColor),
             ),
           ),
 
@@ -966,12 +987,16 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   children: [
                     Icon(statusIcon, color: statusColor, size: 12),
                     const SizedBox(width: 4),
-                    Text(
-                      statusText,
-                      style: TextStyle(
-                        color: statusColor,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 11,
+                    Flexible(
+                      child: Text(
+                        statusText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
                       ),
                     ),
                   ],
@@ -980,11 +1005,12 @@ class _BarberListScreenState extends State<BarberListScreen> {
             ),
           ),
 
-          // ✅ Actions
+          // ✅ Actions (Wrap = never overflows horizontally)
           Expanded(
             flex: 4,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 _buildDesktopActionButton(
                   icon: Icons.edit,
@@ -1102,19 +1128,40 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
   // ============================================================
   // ✅ TABLET VIEW
+  // FIX: GridView with fixed childAspectRatio (1.0) overflowed the cards.
+  // Now a Wrap is used, so every card takes the height it needs.
   // ============================================================
   Widget _buildTabletView() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(20),
-      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-        maxCrossAxisExtent: 400,
-        crossAxisSpacing: 16,
-        mainAxisSpacing: 16,
-        childAspectRatio: 1.0,
-      ),
-      itemCount: _barbers.length,
-      itemBuilder: (context, index) {
-        return _buildBarberCard(_barbers[index]);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const double pagePadding = 20;
+        const double spacing = 16;
+        const double maxCardWidth = 400;
+
+        final available = (constraints.maxWidth - pagePadding * 2).clamp(
+          1.0,
+          double.infinity,
+        );
+        final columns = (available / maxCardWidth).ceil().clamp(1, 4).toInt();
+        final cardWidth = (available - spacing * (columns - 1)) / columns;
+
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(pagePadding),
+          child: Wrap(
+            spacing: spacing,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.start,
+            children: _barbers
+                .map(
+                  (barber) => SizedBox(
+                    width: cardWidth,
+                    child: _buildBarberCard(barber),
+                  ),
+                )
+                .toList(),
+          ),
+        );
       },
     );
   }
@@ -1124,6 +1171,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ============================================================
   Widget _buildMobileView() {
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
       itemCount: _barbers.length,
       itemBuilder: (context, index) {
@@ -1134,12 +1182,16 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
   // ============================================================
   // ✅ BARBER CARD - Proper Design
+  // FIX: Border(left only) + borderRadius throws
+  //      "A borderRadius can only be given for a uniform Border".
+  //      Now the coloured left bar is drawn with ClipRRect + Stack.
   // ============================================================
   Widget _buildBarberCard(Map<String, dynamic> barber) {
     final status = barber['status'] ?? 'active';
     final statusColor = _getStatusColor(status);
     final statusText = _getStatusText(status);
     final statusIcon = _getStatusIcon(status);
+    final avatarUrl = _avatarUrl(barber);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1149,277 +1201,294 @@ class _BarberListScreenState extends State<BarberListScreen> {
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: context.dividerColor),
       ),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          border: Border(left: BorderSide(color: statusColor, width: 4)),
-        ),
-        child: Column(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
           children: [
-            // ✅ Header - Avatar + Name + Status
+            // ✅ Coloured status bar on the left
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: Container(width: 4, color: statusColor),
+            ),
             Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
+              padding: const EdgeInsets.only(left: 4),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Stack(
-                    children: [
-                      CircleAvatar(
-                        radius: 28,
-                        backgroundColor: statusColor.withValues(alpha: 0.15),
-                        backgroundImage: barber['avatar'] != null
-                            ? NetworkImage(barber['avatar'])
-                            : null,
-                        child: barber['avatar'] == null
-                            ? Text(
-                                barber['name'][0].toUpperCase(),
-                                style: TextStyle(
-                                  color: statusColor,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 22,
+                  // ✅ Header - Avatar + Name + Status
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Stack(
+                          children: [
+                            CircleAvatar(
+                              radius: 28,
+                              backgroundColor: statusColor.withValues(
+                                alpha: 0.15,
+                              ),
+                              backgroundImage: avatarUrl != null
+                                  ? NetworkImage(avatarUrl)
+                                  : null,
+                              child: avatarUrl == null
+                                  ? Text(
+                                      _initial(barber['name']),
+                                      style: TextStyle(
+                                        color: statusColor,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 22,
+                                      ),
+                                    )
+                                  : null,
+                            ),
+                            if (status != 'active')
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: BoxDecoration(
+                                    color: statusColor,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: context.cardColor,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    statusIcon,
+                                    color: Colors.white,
+                                    size: 12,
+                                  ),
                                 ),
-                              )
-                            : null,
-                      ),
-                      if (status != 'active')
-                        Positioned(
-                          bottom: 0,
-                          right: 0,
-                          child: Container(
-                            padding: const EdgeInsets.all(3),
-                            decoration: BoxDecoration(
-                              color: statusColor,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: context.cardColor,
-                                width: 2,
+                              ),
+                          ],
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                barber['name'],
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 17,
+                                  color: context.textColor,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                barber['email'],
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: context.secondaryTextColor,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 8),
+                              // ✅ Wrap instead of Row (no horizontal overflow)
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                children: [
+                                  _buildStatusChip(
+                                    statusColor,
+                                    statusIcon,
+                                    statusText,
+                                  ),
+                                  _buildServiceChip(barber['service_count']),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // ✅ Divider
+                  Divider(height: 1, color: context.dividerColor),
+
+                  // ✅ Info Row - Phone + Joined
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.phone,
+                                size: 14,
+                                color: context.secondaryTextColor,
+                              ),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  barber['phone'] ?? 'No phone',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: barber['phone'] == 'No phone'
+                                        ? context.secondaryTextColor
+                                        : context.textColor,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          width: 1,
+                          height: 20,
+                          color: context.dividerColor,
+                        ),
+                        const SizedBox(width: 12),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.calendar_today,
+                              size: 12,
+                              color: context.secondaryTextColor,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              _formatDate(barber['joined_at']),
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: context.secondaryTextColor,
                               ),
                             ),
-                            child: Icon(
-                              statusIcon,
-                              color: Colors.white,
-                              size: 12,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          barber['name'],
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 17,
-                            color: context.textColor,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          barber['email'],
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: context.secondaryTextColor,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            _buildStatusChip(
-                              statusColor,
-                              statusIcon,
-                              statusText,
-                            ),
-                            const SizedBox(width: 8),
-                            _buildServiceChip(barber['service_count']),
                           ],
                         ),
                       ],
                     ),
                   ),
-                ],
-              ),
-            ),
 
-            // ✅ Divider
-            Divider(height: 1, color: context.dividerColor),
+                  // ✅ Divider
+                  Divider(height: 1, color: context.dividerColor),
 
-            // ✅ Info Row - Phone + Joined
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 12,
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Row(
+                  // ✅ Action Buttons
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.center,
                       children: [
-                        Icon(
-                          Icons.phone,
-                          size: 14,
-                          color: context.secondaryTextColor,
+                        _buildActionChip(
+                          icon: Icons.edit,
+                          label: 'Services',
+                          color: Colors.blue,
+                          onTap: () => _editBarberServices(barber),
                         ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            barber['phone'] ?? 'No phone',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: barber['phone'] == 'No phone'
-                                  ? context.secondaryTextColor
-                                  : context.textColor,
+                        _buildActionChip(
+                          icon: Icons.schedule,
+                          label: 'Schedule',
+                          color: Colors.teal,
+                          onTap: () => _viewSchedule(barber),
+                        ),
+                        _buildActionChip(
+                          icon: Icons.beach_access,
+                          label: 'Leaves',
+                          color: Colors.orange,
+                          onTap: () => _viewLeaves(barber),
+                        ),
+                        if (status == 'active')
+                          _buildActionChip(
+                            icon: Icons.pause_circle,
+                            label: 'Deactivate',
+                            color: AppTheme.warning,
+                            onTap: () => _deactivateBarber(
+                              barber['salon_barber_id'],
+                              barber['name'],
+                              barber['id'],
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    width: 1,
-                    height: 20,
-                    color: context.dividerColor,
-                  ),
-                  const SizedBox(width: 12),
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.calendar_today,
-                        size: 12,
-                        color: context.secondaryTextColor,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _formatDate(barber['joined_at']),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: context.secondaryTextColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // ✅ Divider
-            Divider(height: 1, color: context.dividerColor),
-
-            // ✅ Action Buttons - Grid Layout
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                alignment: WrapAlignment.center,
-                children: [
-                  _buildActionChip(
-                    icon: Icons.edit,
-                    label: 'Services',
-                    color: Colors.blue,
-                    onTap: () => _editBarberServices(barber),
-                  ),
-                  _buildActionChip(
-                    icon: Icons.schedule,
-                    label: 'Schedule',
-                    color: Colors.teal,
-                    onTap: () => _viewSchedule(barber),
-                  ),
-                  _buildActionChip(
-                    icon: Icons.beach_access,
-                    label: 'Leaves',
-                    color: Colors.orange,
-                    onTap: () => _viewLeaves(barber),
-                  ),
-                  if (status == 'active')
-                    _buildActionChip(
-                      icon: Icons.pause_circle,
-                      label: 'Deactivate',
-                      color: AppTheme.warning,
-                      onTap: () => _deactivateBarber(
-                        barber['salon_barber_id'],
-                        barber['name'],
-                        barber['id'],
-                      ),
-                    ),
-                  if (status == 'inactive') ...[
-                    _buildActionChip(
-                      icon: Icons.play_circle,
-                      label: 'Activate',
-                      color: AppTheme.success,
-                      onTap: () => _activateBarber(
-                        barber['salon_barber_id'],
-                        barber['name'],
-                        barber['id'],
-                      ),
-                    ),
-                    _buildActionChip(
-                      icon: Icons.delete,
-                      label: 'Delete',
-                      color: AppTheme.error,
-                      onTap: () => _deleteBarber(
-                        barber['salon_barber_id'],
-                        barber['name'],
-                        barber['id'],
-                      ),
-                    ),
-                  ],
-                  if (status == 'deleted')
-                    _buildActionChip(
-                      icon: Icons.restore,
-                      label: 'Restore',
-                      color: Colors.blue,
-                      onTap: () => _restoreBarber(
-                        barber['salon_barber_id'],
-                        barber['name'],
-                        barber['id'],
-                      ),
-                    ),
-                  if (status == 'blocked')
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.purple.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Colors.purple.withValues(alpha: 0.3),
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.block,
-                            size: 14,
-                            color: context.isDarkMode
-                                ? Colors.purple[300]
-                                : Colors.purple,
+                        if (status == 'inactive') ...[
+                          _buildActionChip(
+                            icon: Icons.play_circle,
+                            label: 'Activate',
+                            color: AppTheme.success,
+                            onTap: () => _activateBarber(
+                              barber['salon_barber_id'],
+                              barber['name'],
+                              barber['id'],
+                            ),
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Blocked',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: context.isDarkMode
-                                  ? Colors.purple[300]
-                                  : Colors.purple,
-                              fontWeight: FontWeight.w500,
+                          _buildActionChip(
+                            icon: Icons.delete,
+                            label: 'Delete',
+                            color: AppTheme.error,
+                            onTap: () => _deleteBarber(
+                              barber['salon_barber_id'],
+                              barber['name'],
+                              barber['id'],
                             ),
                           ),
                         ],
-                      ),
+                        if (status == 'deleted')
+                          _buildActionChip(
+                            icon: Icons.restore,
+                            label: 'Restore',
+                            color: Colors.blue,
+                            onTap: () => _restoreBarber(
+                              barber['salon_barber_id'],
+                              barber['name'],
+                              barber['id'],
+                            ),
+                          ),
+                        if (status == 'blocked')
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.purple.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: Colors.purple.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.block,
+                                  size: 14,
+                                  color: context.isDarkMode
+                                      ? Colors.purple[300]
+                                      : Colors.purple,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Blocked',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: context.isDarkMode
+                                        ? Colors.purple[300]
+                                        : Colors.purple,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
+                  ),
                 ],
               ),
             ),
@@ -1578,15 +1647,17 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
   // ============================================================
   // ✅ FILTER DIALOG
+  // FIX: scrollable: true  -> no more RenderFlex overflow
   // ============================================================
   void _showFilterDialog() {
-    String tempFilter = _selectedFilter!;
+    String tempFilter = _selectedFilter ?? 'all';
 
     showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
+      builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
+            scrollable: true, // ✅ FIX
             backgroundColor: context.cardColor,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
@@ -1595,11 +1666,14 @@ class _BarberListScreenState extends State<BarberListScreen> {
               children: [
                 Icon(Icons.filter_list, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                Text(
-                  'Filter Barbers',
-                  style: TextStyle(
-                    color: context.textColor,
-                    fontWeight: FontWeight.bold,
+                Flexible(
+                  child: Text(
+                    'Filter Barbers',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: context.textColor,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
@@ -1651,7 +1725,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () => Navigator.pop(dialogContext),
                 child: Text(
                   'Cancel',
                   style: TextStyle(color: context.secondaryTextColor),
@@ -1662,7 +1736,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   setState(() {
                     _selectedFilter = tempFilter;
                   });
-                  Navigator.pop(context);
+                  Navigator.pop(dialogContext);
                   _loadData();
                 },
                 style: ElevatedButton.styleFrom(
@@ -1726,7 +1800,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   title,
                   style: TextStyle(
                     fontSize: 14,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.w600
+                        : FontWeight.normal,
                     color: context.textColor,
                   ),
                 ),

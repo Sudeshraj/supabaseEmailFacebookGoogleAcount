@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -13,6 +15,28 @@ import '../../theme/app_theme.dart';
 String _safeInitial(String? name) {
   final s = (name ?? '').trim();
   return s.isEmpty ? '?' : s[0].toUpperCase();
+}
+
+// ✅ Lets a built-in dialog (e.g. the date picker) scroll instead of
+// overflowing when the browser viewport is very short (for example when
+// DevTools is docked at the bottom). On normal viewports it does nothing.
+class _ShortViewportGuard extends StatelessWidget {
+  final Widget child;
+
+  const _ShortViewportGuard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final double height = MediaQuery.of(context).size.height;
+    if (height >= 420) return child;
+
+    return SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: height),
+        child: Center(child: child),
+      ),
+    );
+  }
 }
 
 class BarberLeavesScreen extends StatefulWidget {
@@ -160,26 +184,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       debugPrint('❌ Error in _formatUtcToUserTime: $e');
       return '';
     }
-  }
-
-  /// ✅ Get salon timezone display
-  String _getSalonTimezoneDisplay() {
-    final tz = _salonTimezone.isNotEmpty
-        ? _salonTimezone
-        : TimezoneService.getCurrentTimezone();
-    return TimezoneService.getFullTimezoneDisplayFor(tz);
-  }
-
-  /// ✅ Get user timezone display
-  String _getUserTimezoneDisplay() {
-    return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
-  }
-
-  String _getTimezoneFlag() {
-    final tz = _salonTimezone.isNotEmpty
-        ? _salonTimezone
-        : TimezoneService.getCurrentTimezone();
-    return TimezoneService.getTimezoneFlagFor(tz);
   }
 
   // ============================================
@@ -1302,106 +1306,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   // ============================================
-  // TIMEZONE INFO CARD
-  // ============================================
-  Widget _buildTimezoneInfoCard() {
-    final bool isSame = _isSameTimezone;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _isDark ? Colors.grey[700]! : Colors.grey[200]!,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // ✅ Salon timezone (main display)
-          Row(
-            children: [
-              Icon(
-                Icons.store,
-                size: 16,
-                color: AppTheme.primary,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Salon times: ${_getSalonTimezoneDisplay()}',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: _isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-              ),
-            ],
-          ),
-
-          // ✅ User timezone (only if DIFFERENT)
-          if (!isSame) ...[
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.orange.withValues(alpha: 0.3),
-                ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.person,
-                    size: 14,
-                    color: Colors.orange[700],
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'You are in: ${_getUserTimezoneDisplay()}',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.orange[700],
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Times shown are for salon location',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontStyle: FontStyle.italic,
-                            color: _isDark
-                                ? Colors.white60
-                                : Colors.grey[600],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // ============================================
   // FILTER WIDGETS
   // ============================================
 
@@ -1500,6 +1404,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             // pixels taller than the fixed-height month grid allows,
             // which is what causes the "overflowed by N pixels on the
             // bottom" RenderFlex error inside _MonthPicker.
+            //
+            // ✅ _ShortViewportGuard — when the browser viewport is very
+            // short (e.g. DevTools docked at the bottom) the picker gets
+            // scrollable instead of overflowing.
             return MediaQuery(
               data: MediaQuery.of(context).copyWith(
                 textScaler: const TextScaler.linear(1.0),
@@ -1523,7 +1431,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                         : Colors.white,
                   ),
                 ),
-                child: child!,
+                child: _ShortViewportGuard(child: child!),
               ),
             );
           },
@@ -2006,32 +1914,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         titleSpacing: 0,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Flexible(
-              child: Text(
-                'Barber Leaves',
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                _getTimezoneFlag(),
-                style: const TextStyle(fontSize: 12, color: Colors.white),
-              ),
-            ),
-          ],
+        title: const Text(
+          'Barber Leaves',
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
@@ -2042,11 +1931,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           tooltip: 'Back',
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _loadData,
-            tooltip: 'Refresh',
-          ),
           IconButton(
             icon: const Icon(Icons.calendar_today, color: Colors.white),
             onPressed: () {
@@ -2066,16 +1950,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
-              child: Column(
-                children: [
-                  // ✅ Timezone info card
-                  Padding(
-                    padding: EdgeInsets.all(_isWeb ? padding : 12),
-                    child: _buildTimezoneInfoCard(),
-                  ),
-                  _buildFiltersSection(_isWeb, padding),
-                ],
-              ),
+              child: _buildFiltersSection(_isWeb, padding),
             ),
             SliverFillRemaining(
               hasScrollBody: true,
@@ -3305,9 +3180,41 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenSize = MediaQuery.of(context).size;
+    final screenWidth = screenSize.width;
     _isWeb = screenWidth > 800;
     _isDark = context.isDarkMode;
+
+    // ✅ Dialog insetPadding is 24 top + 24 bottom
+    final double maxDialogHeight = math.max(
+      0.0,
+      math.min(screenSize.height * 0.9, screenSize.height - 48),
+    );
+
+    // ✅ Header + actions + a little body space need roughly this much.
+    // On a very short viewport we scroll EVERYTHING (header, body, actions)
+    // so the Column can never overflow.
+    final bool isCompact = maxDialogHeight < 360;
+
+    final Widget body = Padding(
+      padding: EdgeInsets.all(_isWeb ? 24 : 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_errorMessage != null) _buildErrorMessage(),
+          _buildBarberSelector(),
+          const SizedBox(height: 16),
+          _buildDateSelector(),
+          if (_isHoliday && !_isEditMode) _buildHolidayWarning(),
+          const SizedBox(height: 16),
+          _buildLeaveTypeSelector(),
+          if (_leaveType == 'half_day' || _leaveType == 'short_leave')
+            _buildTimeSection(),
+          const SizedBox(height: 16),
+          _buildReasonField(),
+        ],
+      ),
+    );
 
     return Dialog(
       backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
@@ -3315,38 +3222,30 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
       child: Container(
         width: _isWeb ? 600 : screenWidth * 0.95,
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.9,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _buildDialogHeader(),
-            Flexible(
-              child: SingleChildScrollView(
-                padding: EdgeInsets.all(_isWeb ? 24 : 16),
+        constraints: BoxConstraints(maxHeight: maxDialogHeight),
+        child: isCompact
+            // Very short viewport: everything scrolls together
+            ? SingleChildScrollView(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_errorMessage != null) _buildErrorMessage(),
-                    _buildBarberSelector(),
-                    const SizedBox(height: 16),
-                    _buildDateSelector(),
-                    if (_isHoliday && !_isEditMode) _buildHolidayWarning(),
-                    const SizedBox(height: 16),
-                    _buildLeaveTypeSelector(),
-                    if (_leaveType == 'half_day' ||
-                        _leaveType == 'short_leave')
-                      _buildTimeSection(),
-                    const SizedBox(height: 16),
-                    _buildReasonField(),
+                    _buildDialogHeader(),
+                    body,
+                    _buildDialogActions(),
                   ],
                 ),
+              )
+            // Normal viewport: sticky header/actions, scrolling body
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildDialogHeader(),
+                  Flexible(
+                    child: SingleChildScrollView(child: body),
+                  ),
+                  _buildDialogActions(),
+                ],
               ),
-            ),
-            _buildDialogActions(),
-          ],
-        ),
       ),
     );
   }
@@ -3377,18 +3276,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
               ),
-            ),
-          ),
-          const Spacer(),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              TimezoneService.getTimezoneFlagFor(widget.salonTimezone),
-              style: const TextStyle(fontSize: 10, color: Colors.white),
             ),
           ),
         ],
@@ -3527,6 +3414,10 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                 // pixels on the bottom" RenderFlex error inside
                 // _MonthPicker) when the system/browser font scale is
                 // above 1.0.
+                //
+                // ✅ _ShortViewportGuard — when the browser viewport is very
+                // short (e.g. DevTools docked at the bottom) the picker gets
+                // scrollable instead of overflowing.
                 return MediaQuery(
                   data: MediaQuery.of(context).copyWith(
                     textScaler: const TextScaler.linear(1.0),
@@ -3551,7 +3442,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                             isDark ? const Color(0xFF1E1E1E) : Colors.white,
                       ),
                     ),
-                    child: child!,
+                    child: _ShortViewportGuard(child: child!),
                   ),
                 );
               },
