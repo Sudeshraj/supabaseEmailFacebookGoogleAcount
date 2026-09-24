@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/services/currency_service.dart';
 
 class ReportsScreen extends StatefulWidget {
   final String? salonId;
@@ -18,6 +19,14 @@ class ReportsScreen extends StatefulWidget {
 
 class _ReportsScreenState extends State<ReportsScreen> {
   final supabase = Supabase.instance.client;
+
+  // ==================== ✅ CURRENCY SERVICE ====================
+  final CurrencyService _currencyService = CurrencyService.instance;
+  String _salonCurrencyCode = 'LKR';
+
+  // ✅ Currency getter
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
 
   // Report data
   bool _isLoading = true;
@@ -66,6 +75,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
     super.dispose();
   }
 
+  // ============================================================
+  // ✅ CURRENCY HELPERS
+  // ============================================================
+
+  /// Format price with salon currency
+  String _formatPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
+
   void _initializeDateRange() {
     final now = DateTime.now();
     switch (_dateRange) {
@@ -106,15 +127,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
         return;
       }
 
+      // ✅ Load salon name AND currency
       if (widget.salonId != null) {
         final salonResponse = await supabase
             .from('salons')
-            .select('name')
+            .select('name, currency_code')
             .eq('id', int.parse(widget.salonId!))
             .maybeSingle();
 
         if (salonResponse != null) {
           _salonName = salonResponse['name'];
+          _salonCurrencyCode =
+              salonResponse['currency_code'] as String? ?? 'LKR';
+
+          debugPrint('✅ Salon currency: $_salonCurrencyCode');
         }
       }
 
@@ -136,9 +162,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // ============================================================
   Future<void> _loadOwnerReports(String ownerId) async {
     try {
-      final salonId = widget.salonId != null
-          ? int.parse(widget.salonId!)
-          : null;
+      final salonId =
+          widget.salonId != null ? int.parse(widget.salonId!) : null;
 
       if (salonId == null) {
         setState(() {
@@ -273,19 +298,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
         (a, b) => (b['count'] as int).compareTo(a['count'] as int),
       );
 
-      final chartData =
-          dailyData.entries
-              .map((e) => <String, dynamic>{'date': e.key, 'count': e.value})
-              .toList()
-            ..sort(
-              (a, b) => (a['date'] as String).compareTo(b['date'] as String),
-            );
+      final chartData = dailyData.entries
+          .map((e) => <String, dynamic>{'date': e.key, 'count': e.value})
+          .toList()
+        ..sort(
+          (a, b) => (a['date'] as String).compareTo(b['date'] as String),
+        );
 
-      final serviceStats =
-          serviceData.entries
-              .map((e) => <String, dynamic>{'service': e.key, 'count': e.value})
-              .toList()
-            ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+      final serviceStats = serviceData.entries
+          .map((e) => <String, dynamic>{'service': e.key, 'count': e.value})
+          .toList()
+        ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
 
       setState(() {
         _reportData = processedData;
@@ -316,9 +339,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // ============================================================
   Future<void> _loadBarberReports(String barberId) async {
     try {
-      final salonId = widget.salonId != null
-          ? int.parse(widget.salonId!)
-          : null;
+      final salonId =
+          widget.salonId != null ? int.parse(widget.salonId!) : null;
 
       final startStr = DateFormat('yyyy-MM-dd').format(_startDate!);
       final endStr = DateFormat('yyyy-MM-dd').format(_endDate!);
@@ -419,19 +441,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
         });
       }
 
-      final chartData =
-          dailyData.entries
-              .map((e) => <String, dynamic>{'date': e.key, 'count': e.value})
-              .toList()
-            ..sort(
-              (a, b) => (a['date'] as String).compareTo(b['date'] as String),
-            );
+      final chartData = dailyData.entries
+          .map((e) => <String, dynamic>{'date': e.key, 'count': e.value})
+          .toList()
+        ..sort(
+          (a, b) => (a['date'] as String).compareTo(b['date'] as String),
+        );
 
-      final serviceStats =
-          serviceData.entries
-              .map((e) => <String, dynamic>{'service': e.key, 'count': e.value})
-              .toList()
-            ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+      final serviceStats = serviceData.entries
+          .map((e) => <String, dynamic>{'service': e.key, 'count': e.value})
+          .toList()
+        ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
 
       setState(() {
         _reportData = processedData;
@@ -494,7 +514,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           children: [
             Text(
               widget.role == 'barber' ? 'My Reports' : 'Reports',
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -521,8 +541,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
           tooltip: 'Back',
         ),
         actions: [
+          // ✅ Currency badge
+          if (!_isLoading && _errorMessage == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _salonCurrencyCode,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadData,
           ),
         ],
@@ -544,36 +589,38 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ),
             )
           : _errorMessage != null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 64,
-                    color: _isDark ? Colors.white30 : Colors.grey[400],
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 64,
+                        color: _isDark ? Colors.white30 : Colors.grey[400],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _errorMessage!,
+                        style: TextStyle(
+                          color: _isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: _loadData,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Retry'),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    style: TextStyle(
-                      color: _isDark ? Colors.white60 : Colors.grey[600],
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _loadData,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            )
-          : SafeArea(child: _isWeb ? _buildWebLayout() : _buildMobileLayout()),
+                )
+              : SafeArea(
+                  child: _isWeb ? _buildWebLayout() : _buildMobileLayout(),
+                ),
     );
   }
 
@@ -686,8 +733,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               color: isSelected
                                   ? Colors.white
                                   : (isDark
-                                        ? Colors.white70
-                                        : Colors.grey[700]),
+                                      ? Colors.white70
+                                      : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -744,8 +791,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               color: isSelected
                                   ? Colors.white
                                   : (isDark
-                                        ? Colors.white70
-                                        : Colors.grey[700]),
+                                      ? Colors.white70
+                                      : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -778,7 +825,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 children: [
                   Text(
                     '${DateFormat('MMM dd, yyyy').format(_startDate!)} - ${DateFormat('MMM dd, yyyy').format(_endDate!)}',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 12,
                       color: AppTheme.primary,
                       fontWeight: FontWeight.w500,
@@ -793,7 +840,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
-  // BUILD SUMMARY CARDS
+  // ✅ BUILD SUMMARY CARDS (with salon currency)
+  // Mobile එකේ Revenue card එකේ icon text hide කරනවා
   // ============================================================
   Widget _buildSummaryCards() {
     final total = _summaryData['total_appointments'] ?? 0;
@@ -803,6 +851,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final cancelled = _summaryData['cancelled'] ?? 0;
     final noShow = _summaryData['no_show'] ?? 0;
 
+    // ✅ Mobile එකේද?
+    final isMobile = MediaQuery.of(context).size.width < 600;
+
     final cards = [
       _buildSummaryCard(
         title: 'Total Appointments',
@@ -810,11 +861,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
         icon: Icons.calendar_today,
         color: Colors.blue,
       ),
+      // ✅ Revenue - uses salon currency
+      // Mobile එකේ: icon text hide (duplicate නෑ)
+      // Web/Tablet: icon text පෙන්නනවා
       _buildSummaryCard(
         title: 'Revenue',
-        value: 'Rs. $revenue',
+        value: _formatPrice(revenue),
         icon: Icons.attach_money,
+        iconText: _salonCurrencySymbol,        // ✅ NEW
         color: Colors.green,
+        hideIconTextOnMobile: isMobile,        // ✅ Mobile එකේ hide
       ),
       _buildSummaryCard(
         title: 'Completed',
@@ -862,13 +918,20 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
+  // ✅ UPDATED: Supports iconText (text icon like "Rs.") + hideIconTextOnMobile
   Widget _buildSummaryCard({
     required String title,
     required String value,
-    required IconData icon,
+    IconData? icon,                          // ← Optional
+    String? iconText,                        // ← NEW: Text icon
     required Color color,
+    bool hideIconTextOnMobile = false,       // ← NEW
   }) {
     final isDark = _isDark;
+
+    // ✅ Icon or Text icon?
+    final hasIconText = iconText != null;
+    final shouldShowIcon = !(hasIconText && hideIconTextOnMobile);
 
     return Card(
       elevation: 2,
@@ -885,17 +948,33 @@ class _ReportsScreenState extends State<ReportsScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 4),
+            // ✅ Icon or Text icon
+            if (shouldShowIcon)
+              hasIconText
+                  ? Text(
+                      iconText,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                      ),
+                    )
+                  : Icon(icon, color: color, size: 24),
+            if (shouldShowIcon) const SizedBox(height: 4),
+            // Value
             Text(
               value,
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: isDark ? color : color,
+                color: color,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 2),
+            // Title
             Text(
               title,
               style: TextStyle(
@@ -920,13 +999,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
       return Card(
         elevation: 2,
         color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
-          width: 1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+            width: 1,
+          ),
         ),
-      ),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -973,8 +1052,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       );
     }
 
-    final maxValue =
-        _chartData.fold(0, (max, item) {
+    final maxValue = _chartData.fold(0, (max, item) {
           final val = item['count'] as int? ?? 0;
           return val > max ? val : max;
         }) +
@@ -1161,9 +1239,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: FractionallySizedBox(
-                          widthFactor:
-                              count /
-                              (_reportData.isNotEmpty ? _reportData.length : 1),
+                          widthFactor: count /
+                              (_reportData.isNotEmpty
+                                  ? _reportData.length
+                                  : 1),
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
@@ -1309,7 +1388,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       ),
                       child: Text(
                         '$count',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           color: AppTheme.primary,
@@ -1327,7 +1406,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
-  // BUILD REPORT TABLE
+  // ✅ BUILD REPORT TABLE (with salon currency)
   // ============================================================
   Widget _buildReportTable() {
     final isDark = _isDark;
@@ -1336,13 +1415,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
       return Card(
         elevation: 2,
         color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
-          width: 1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+            width: 1,
+          ),
         ),
-      ),
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
@@ -1481,15 +1560,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
+                          // ✅ Price - uses salon currency
                           SizedBox(
-                            width: 60,
+                            width: 100,
                             child: Text(
-                              'Rs. ${item['price'] ?? 0}',
-                              style: TextStyle(
+                              _formatPrice(item['price'] ?? 0),
+                              style: const TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
                                 color: AppTheme.primary,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           const SizedBox(width: 8),

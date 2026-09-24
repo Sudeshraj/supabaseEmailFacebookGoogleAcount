@@ -6,7 +6,8 @@ class CurrencyService {
   static final CurrencyService instance = CurrencyService._();
 
   // ============================================
-  // SUPPORTED CURRENCIES MAP
+  // ✅ SUPPORTED CURRENCIES MAP
+  // ✅ ALL CURRENCIES NOW USE 2 DECIMALS
   // ============================================
   static const Map<String, CurrencyInfo> _currencies = {
     'LKR': CurrencyInfo(
@@ -14,8 +15,8 @@ class CurrencyService {
       symbol: 'Rs.',
       name: 'Sri Lankan Rupee',
       icon: Icons.currency_rupee,
-      decimals: 0,
-      hint: 'e.g., 1500',
+      decimals: 2,                          // ✅ Changed from 0 to 2
+      hint: 'e.g., 1500.00',                // ✅ Changed hint
     ),
     'USD': CurrencyInfo(
       code: 'USD',
@@ -30,8 +31,8 @@ class CurrencyService {
       symbol: '₹',
       name: 'Indian Rupee',
       icon: Icons.currency_rupee,
-      decimals: 0,
-      hint: 'e.g., 800',
+      decimals: 2,                          // ✅ Changed from 0 to 2
+      hint: 'e.g., 800.00',                 // ✅ Changed hint
     ),
     'GBP': CurrencyInfo(
       code: 'GBP',
@@ -86,8 +87,8 @@ class CurrencyService {
       symbol: '¥',
       name: 'Japanese Yen',
       icon: Icons.currency_yen,
-      decimals: 0,
-      hint: 'e.g., 1500',
+      decimals: 2,                          // ✅ Changed from 0 to 2
+      hint: 'e.g., 1500.00',                // ✅ Changed hint
     ),
     'CNY': CurrencyInfo(
       code: 'CNY',
@@ -134,24 +135,24 @@ class CurrencyService {
       symbol: '₨',
       name: 'Pakistani Rupee',
       icon: Icons.currency_rupee,
-      decimals: 0,
-      hint: 'e.g., 2800',
+      decimals: 2,                          // ✅ Changed from 0 to 2
+      hint: 'e.g., 2800.00',                // ✅ Changed hint
     ),
     'BDT': CurrencyInfo(
       code: 'BDT',
       symbol: '৳',
       name: 'Bangladeshi Taka',
       icon: Icons.currency_rupee,
-      decimals: 0,
-      hint: 'e.g., 1100',
+      decimals: 2,                          // ✅ Changed from 0 to 2
+      hint: 'e.g., 1100.00',                // ✅ Changed hint
     ),
     'NPR': CurrencyInfo(
       code: 'NPR',
       symbol: 'रू',
       name: 'Nepalese Rupee',
       icon: Icons.currency_rupee,
-      decimals: 0,
-      hint: 'e.g., 1300',
+      decimals: 2,                          // ✅ Changed from 0 to 2
+      hint: 'e.g., 1300.00',                // ✅ Changed hint
     ),
   };
 
@@ -167,22 +168,24 @@ class CurrencyService {
     return _currencies[currencyCode.toUpperCase()] ?? _currencies['LKR']!;
   }
 
-  /// Price එක format කරනවා (Rs. 1,500 / $ 15.00)
+  /// Price එක format කරනවා (Rs. 1,500.00 / $ 15.00)
   String format({
     required dynamic price,
     required String? currencyCode,
     bool withSymbol = true,
     bool withComma = true,
   }) {
-    if (price == null) return withSymbol ? '${getInfo(currencyCode).symbol} 0' : '0';
+    if (price == null) {
+      return withSymbol ? '${getInfo(currencyCode).symbol} 0.00' : '0.00';
+    }
 
     final info = getInfo(currencyCode);
     final double value = (price as num).toDouble();
 
-    // Decimal places
+    // Decimal places (දැන් හැම එකකටම 2)
     String formatted = value.toStringAsFixed(info.decimals);
 
-    // Comma separator (1,500 / 15.00)
+    // Comma separator (1,500.00 / 15.00)
     if (withComma) {
       final parts = formatted.split('.');
       final intPart = parts[0];
@@ -197,21 +200,21 @@ class CurrencyService {
         buffer.write(intPart[i]);
       }
 
-      formatted = decPart.isEmpty ? buffer.toString() : '${buffer.toString()}.$decPart';
+      formatted =
+          decPart.isEmpty ? buffer.toString() : '${buffer.toString()}.$decPart';
     }
 
     return withSymbol ? '${info.symbol} $formatted' : formatted;
   }
 
-  /// ළඟම තියෙන ගානට round කරනවා (LKR: 1500, USD: 15.00)
+  /// ළඟම තියෙන ගානට round කරනවා (LKR: 1500.00, USD: 15.00)
+  /// දැන් හැම එකකටම 2 decimals
   double roundForCurrency({
     required double amount,
     required String? currencyCode,
   }) {
     final info = getInfo(currencyCode);
-    if (info.decimals == 0) {
-      return amount.roundToDouble();
-    }
+    // ✅ දැන් හැමවෙලාවෙම 2 decimals
     return double.parse(amount.toStringAsFixed(info.decimals));
   }
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
+import 'package:flutter_application_1/services/currency_service.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
@@ -30,6 +31,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   final PermissionService _permissionService = PermissionService();
   final PermissionManager _permissionManager = PermissionManager();
 
+  // ==================== ✅ CURRENCY SERVICE ====================
+  final CurrencyService _currencyService = CurrencyService.instance;
+  String _salonCurrencyCode = 'LKR';
+
+  // ✅ Currency getter
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
+
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
 
@@ -40,6 +49,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   bool _isActive = true;
   bool _isCheckingStatus = true;
+
   // Dashboard data
   int _completedToday = 0;
   int _pendingBookings = 0;
@@ -61,7 +71,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // Notification count
   int _unreadNotificationCount = 0;
 
-  // ✅ Android 16: Responsive screen variables
+  // ✅ Responsive screen variables
   bool _isLargeScreen = false;
   bool _isTablet = false;
   bool _isWeb = false;
@@ -78,6 +88,18 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   final supabase = Supabase.instance.client;
 
   final ScrollController _scrollController = ScrollController();
+
+  // ============================================================
+  // ✅ CURRENCY HELPERS
+  // ============================================================
+
+  /// Format price with salon currency
+  String _formatPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
 
   @override
   void initState() {
@@ -102,13 +124,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     if (route is PageRoute) {
       routeObserver.subscribe(this, route);
     }
-    // _checkScreenSize();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _checkScreenSize();
     });
   }
 
-  // ✅ Android 16: Check screen size for responsive layout
+  // ✅ Check screen size for responsive layout
   void _checkScreenSize() {
     final size = MediaQuery.of(context).size;
     final isLarge = size.width > 800 || size.height > 800;
@@ -183,34 +204,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         debugPrint('✅ Owner role already active');
       }
 
-      // for (var roleId in [2, 3]) {
-      //   final check = await supabase
-      //       .from('user_roles')
-      //       .select('id, status')
-      //       .eq('user_id', userId)
-      //       .eq('role_id', roleId)
-      //       .maybeSingle();
-
-      //   if (check == null) {
-      //     await supabase.from('user_roles').insert({
-      //       'user_id': userId,
-      //       'role_id': roleId,
-      //       'status': 'active',
-      //     });
-      //     debugPrint('✅ Role $roleId created');
-      //   } else if (check['status'] != 'active') {
-      //     await supabase
-      //         .from('user_roles')
-      //         .update({
-      //           'status': 'active',
-      //           'updated_at': DateTime.now().toIso8601String(),
-      //         })
-      //         .eq('user_id', userId)
-      //         .eq('role_id', roleId);
-      //     debugPrint('✅ Role $roleId activated');
-      //   }
-      // }
-
       await supabase.auth.refreshSession();
       debugPrint('✅ Session refreshed');
     } catch (e) {
@@ -219,7 +212,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ PROFILE IMAGE - Navigates to Profile Screen
+  // ✅ PROFILE IMAGE
   // ============================================================
 
   Widget _buildProfileImage() {
@@ -293,7 +286,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       clipBehavior: Clip.none,
       children: [
         IconButton(
-          icon: Icon(
+          icon: const Icon(
             Icons.notifications_outlined,
             size: 22,
             color: Colors.white,
@@ -559,7 +552,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.store, size: 14, color: Colors.white),
+            const Icon(Icons.store, size: 14, color: Colors.white),
             const SizedBox(width: 4),
             Flexible(
               child: Text(
@@ -897,7 +890,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           child: Center(
             child: Text(
               number,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
                 color: AppTheme.primary,
@@ -1118,14 +1111,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showNoSalonSelectedDialog();
       return;
     }
-    // if (_ownerSalons.length == 1) {
-    //   final salon = _ownerSalons.first;
-    //   context.push(
-    //     '/owner/services?salonId=${salon['id']}&salonName=${Uri.encodeComponent(salon['name'])}',
-    //   );
-    // } else {
-    //   _showSalonSelectionDialogForServices();
-    // }
     final salon = _ownerSalons.firstWhere(
       (s) => s['id'].toString() == _selectedSalonId,
       orElse: () => _ownerSalons.first,
@@ -1334,7 +1319,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         }
       }
 
-      // ✅ active බව confirm උනා
       if (mounted) setState(() => _isActive = true);
 
       final profileResponse = await supabase
@@ -1356,7 +1340,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     } catch (e) {
       debugPrint('Error loading user profile: $e');
     } finally {
-      // ✅ first check එක complete උනා කියලා mark කරන්න
       if (mounted && _isCheckingStatus) {
         setState(() => _isCheckingStatus = false);
       }
@@ -1390,7 +1373,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       final response = await supabase
           .from('salons')
           .select(
-            'id, name, address, phone, email, description, is_active, created_at, updated_at, logo_url, cover_url, open_time, close_time, timezone',
+            'id, name, address, phone, email, description, is_active, created_at, updated_at, logo_url, cover_url, open_time, close_time, timezone, currency_code',
           )
           .eq('owner_id', userId)
           .eq('is_active', true)
@@ -1405,25 +1388,23 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           if (_ownerSalons.isNotEmpty) {
             _hasSalon = true;
 
-            // ✅ Case 1: No salon selected yet → pick the first-created one
-            //    (list is ordered by created_at DESC, so .last = oldest = first created)
             if (_selectedSalonId == null) {
               final firstCreatedSalon = _ownerSalons.last;
               _selectedSalonId = firstCreatedSalon['id'].toString();
               _selectedSalonName =
                   firstCreatedSalon['name']?.toString() ?? 'Salon';
+              _salonCurrencyCode =
+                  firstCreatedSalon['currency_code'] as String? ?? 'LKR';
+
               debugPrint(
-                '✅ Selected first-created salon: $_selectedSalonName (ID: $_selectedSalonId)',
+                '✅ Selected first-created salon: $_selectedSalonName (ID: $_selectedSalonId, Currency: $_salonCurrencyCode)',
               );
-            }
-            // ✅ Case 2: A salon is already selected → verify it still exists
-            else {
+            } else {
               final selected = _ownerSalons.firstWhere(
                 (s) => s['id'].toString() == _selectedSalonId,
-                orElse: () => _ownerSalons.first, // ✅ fallback to first
+                orElse: () => _ownerSalons.first,
               );
 
-              // If the previously selected salon no longer exists, sync the ID
               if (selected['id'].toString() != _selectedSalonId) {
                 debugPrint(
                   '⚠️ Previously selected salon not found — falling back to: ${selected['name']}',
@@ -1432,15 +1413,18 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               }
 
               _selectedSalonName = selected['name']?.toString() ?? 'Salon';
+              _salonCurrencyCode =
+                  selected['currency_code'] as String? ?? 'LKR';
+
               debugPrint(
-                '✅ Kept selected salon: $_selectedSalonName (ID: $_selectedSalonId)',
+                '✅ Kept selected salon: $_selectedSalonName (ID: $_selectedSalonId, Currency: $_salonCurrencyCode)',
               );
             }
           } else {
-            // ✅ No salons at all → clear everything
             _hasSalon = false;
             _selectedSalonId = null;
             _selectedSalonName = null;
+            _salonCurrencyCode = 'LKR';
             debugPrint('⚠️ No active salons found for this owner');
           }
         });
@@ -1453,6 +1437,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _hasSalon = false;
           _selectedSalonId = null;
           _selectedSalonName = null;
+          _salonCurrencyCode = 'LKR';
         });
       }
     }
@@ -1464,8 +1449,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Future<void> _loadDashboardStats() async {
     debugPrint('📊 _loadDashboardStats() called');
-    debugPrint('📊 _selectedSalonId: $_selectedSalonId');
-    debugPrint('📊 _ownerSalons.length: ${_ownerSalons.length}');
 
     if (_selectedSalonId == null || _ownerSalons.isEmpty) {
       debugPrint('⚠️ No salon selected or no salons found');
@@ -1483,8 +1466,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     try {
       final today = DateTime.now().toIso8601String().split('T')[0];
       final salonIdInt = int.parse(_selectedSalonId!);
-
-      debugPrint('📊 Today: $today, Salon ID: $salonIdInt');
 
       final results = await Future.wait([
         supabase
@@ -1517,17 +1498,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       final activeBarbers = results[2] as List;
       final followers = results[3] as List;
 
-      debugPrint('📊 Today appointments count: ${todayAppointments.length}');
-      debugPrint('📊 Pending bookings count: ${pendingBookings.length}');
-      debugPrint(
-        '📊 Active barbers from salon_barbers: ${activeBarbers.length}',
-      );
-
       int activeBarberCount = 0;
       if (activeBarbers.isNotEmpty) {
-        final barberIds = activeBarbers
-            .map((b) => b['barber_id'] as String)
-            .toList();
+        final barberIds =
+            activeBarbers.map((b) => b['barber_id'] as String).toList();
 
         final validBarbers = await supabase
             .from('user_roles')
@@ -1537,17 +1511,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             .eq('status', 'active');
 
         activeBarberCount = validBarbers.length;
-        debugPrint('📊 Active barbers with valid roles: $activeBarberCount');
       }
 
       final totalFollowers = followers.length;
-      debugPrint('📊 Total followers (Customers): $totalFollowers');
 
       final revenue = todayAppointments.fold<int>(
         0,
         (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0),
       );
-      debugPrint('📊 Revenue: $revenue');
 
       final completedToday = todayAppointments
           .where((a) => a['status'] == 'completed')
@@ -1562,9 +1533,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _totalRevenue = revenue;
           _completedToday = completedToday;
         });
-        debugPrint(
-          '📊 Stats updated: Today: $_todayAppointments, Pending: $_pendingBookings, Customers(Followers): $_totalCustomers, Barbers: $_activeBarbers, Revenue: $_totalRevenue',
-        );
       }
     } catch (e) {
       debugPrint('❌ Dashboard stats error: $e');
@@ -1660,10 +1628,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               (_hasHolidays ? 1 : 0);
         });
       }
-
-      debugPrint(
-        '📊 Onboarding: Salon: $_hasSalon, Services: $_hasServices, Barbers: $_hasBarbers, Steps: $_completedSteps',
-      );
     } catch (e) {
       debugPrint('❌ Onboarding error: $e');
     }
@@ -1682,6 +1646,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         orElse: () => {},
       );
       _selectedSalonName = selected['name']?.toString();
+
+      if (selected.isNotEmpty) {
+        _salonCurrencyCode = selected['currency_code'] as String? ?? 'LKR';
+        debugPrint('✅ Salon switched → Currency: $_salonCurrencyCode');
+      }
     });
 
     try {
@@ -1816,8 +1785,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  // ✅ Android 16: Responsive Stat Cards
-  // ✅ Android 16: Responsive Stat Cards
+  // ============================================================
+  // ✅ RESPONSIVE STAT CARDS - WITH SALON CURRENCY
+  // Mobile එකේ icon text hide, web/tablet එකේ පෙන්නනවා
+  // ============================================================
   Widget _buildResponsiveStatCards() {
     if (_isTablet) {
       return Padding(
@@ -1853,10 +1824,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               color: Colors.green,
               onTap: _navigateToBarberList,
             ),
+            // ✅ Revenue - uses salon currency TEXT (Rs., $, £)
+            // Tablet එකේ icon text පෙන්නනවා (hideIconTextOnMobile: false)
             DashboardStatCard(
               title: 'Revenue',
-              value: 'Rs. $_totalRevenue',
-              icon: Icons.currency_rupee,
+              value: _formatPrice(_totalRevenue),
+              iconText: _salonCurrencySymbol,
               color: Colors.orange,
               onTap: _viewRevenue,
             ),
@@ -1914,14 +1887,17 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ),
               ),
               const SizedBox(width: 12),
+              // ✅ Revenue - Mobile එකේ icon text hide කරනවා
+              // (value text එකේම "Rs. 15000.00" තියෙන නිසා duplicate නෑ)
               Expanded(
                 child: DashboardStatCard(
                   title: 'Revenue',
-                  value: 'Rs. $_totalRevenue',
-                  icon: Icons.currency_rupee,
+                  value: _formatPrice(_totalRevenue),
+                  iconText: _salonCurrencySymbol,
                   color: Colors.orange,
                   fullWidth: true,
                   onTap: _viewRevenue,
+                  hideIconTextOnMobile: true, // ✅ Mobile එකේ icon text hide
                 ),
               ),
             ],
@@ -1932,7 +1908,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ BUILD METHOD - WITH EDGE-TO-EDGE SUPPORT
+  // ✅ BUILD METHOD
   // ============================================================
 
   @override
@@ -1943,7 +1919,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
     _checkScreenSize();
 
-    // ✅ loading screen - first status check complete වෙනකම්
     if (_isCheckingStatus) {
       return Scaffold(
         key: _scaffoldKey,
@@ -1982,7 +1957,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       );
     }
 
-    // ✅ inactive/blocked screen
     if (!_isActive) {
       return Scaffold(
         key: _scaffoldKey,
@@ -2049,6 +2023,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         ),
       );
     }
+
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
@@ -2109,7 +2084,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.store, size: 14, color: Colors.white),
+                        const Icon(Icons.store, size: 14, color: Colors.white),
                         const SizedBox(width: 6),
                         Flexible(
                           child: Text(
@@ -2193,10 +2168,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ),
           );
   }
-
-  // ============================================================
-  // ✅ DASHBOARD CONTENT
-  // ============================================================
 
   Widget _buildDashboardContent() {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -2284,7 +2255,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ MANAGEMENT SECTION — fully responsive redesign
+  // ✅ MANAGEMENT SECTION
   // ============================================================
 
   Widget _buildManagementSection({
@@ -2583,7 +2554,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     if (result == true) await _refreshAllData();
   }
 
-
   void _viewSettings() => context.push('/settings');
 
   void _showCreateSalonFirstDialog() {
@@ -2729,7 +2699,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       '$_completedSteps of $_totalSteps steps complete',
                       style: TextStyle(
                         fontSize: 12,
-                        color: isDark ? Colors.white60 : Color(0xFF9CA3AF),
+                        color:
+                            isDark ? Colors.white60 : const Color(0xFF9CA3AF),
                       ),
                     ),
                   ],
@@ -2856,7 +2827,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   Flexible(
                     child: Text(
                       'Up next:  ${steps[nextIdx]['label'] as String}',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 12,
                         color: pink,
                         fontWeight: FontWeight.w500,

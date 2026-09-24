@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
+import '../../services/currency_service.dart';
 
 class AnalyticsScreen extends StatefulWidget {
   final String? salonId;
@@ -22,6 +23,14 @@ class AnalyticsScreen extends StatefulWidget {
 
 class _AnalyticsScreenState extends State<AnalyticsScreen> {
   final supabase = Supabase.instance.client;
+
+  // ==================== ✅ CURRENCY SERVICE ====================
+  final CurrencyService _currencyService = CurrencyService.instance;
+  String _salonCurrencyCode = 'LKR';
+
+  // ✅ Currency getters
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
 
   // Analytics data
   bool _isLoading = true;
@@ -44,6 +53,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   late bool _isTablet;
   late bool _isDark;
 
+  // ✅ Screen width for mobile detection
+  double _screenWidth = 0;
+  bool get _isMobile => _screenWidth < 600;
+
   // ✅ Scroll Controller for web
   final ScrollController _scrollController = ScrollController();
 
@@ -59,12 +72,40 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     _isWeb = context.isWeb;
     _isTablet = context.isTablet;
     _isDark = context.isDarkMode;
+    _screenWidth = MediaQuery.of(context).size.width;
   }
 
   @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // ============================================================
+  // ✅ CURRENCY HELPERS
+  // ============================================================
+
+  /// Format price with salon currency
+  String _formatPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
+
+  /// Format price for compact display (e.g., "Rs. 1.5k" or "$ 1.5k")
+  String _formatCompactPrice(dynamic price) {
+    final num value = (price as num?) ?? 0;
+
+    if (value >= 1000000) {
+      final millions = value / 1000000;
+      return '$_salonCurrencySymbol${millions.toStringAsFixed(1)}M';
+    } else if (value >= 1000) {
+      final thousands = value / 1000;
+      return '$_salonCurrencySymbol${thousands.toStringAsFixed(0)}k';
+    } else {
+      return '$_salonCurrencySymbol${value.toStringAsFixed(0)}';
+    }
   }
 
   Future<void> _loadData() async {
@@ -83,15 +124,20 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         return;
       }
 
+      // ✅ Load salon name AND currency
       if (widget.salonId != null) {
         final salonResponse = await supabase
             .from('salons')
-            .select('name')
+            .select('name, currency_code')
             .eq('id', int.parse(widget.salonId!))
             .maybeSingle();
 
         if (salonResponse != null) {
           _salonName = salonResponse['name'];
+          _salonCurrencyCode =
+              salonResponse['currency_code'] as String? ?? 'LKR';
+
+          debugPrint('✅ Salon currency: $_salonCurrencyCode');
         }
       }
 
@@ -113,7 +159,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   // ============================================================
   Future<void> _loadOwnerAnalytics(String ownerId) async {
     try {
-      final salonId = widget.salonId != null ? int.parse(widget.salonId!) : null;
+      final salonId =
+          widget.salonId != null ? int.parse(widget.salonId!) : null;
 
       if (salonId == null) {
         setState(() {
@@ -135,13 +182,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           startDate = DateFormat('yyyy-MM-dd').format(weekStart);
           break;
         case 'This Month':
-          startDate = DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
+          startDate =
+              DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
           break;
         case 'This Year':
           startDate = DateFormat('yyyy-MM-dd').format(DateTime(now.year, 1, 1));
           break;
         default:
-          startDate = DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
+          startDate =
+              DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
       }
 
       final endDate = DateFormat('yyyy-MM-dd').format(now);
@@ -251,7 +300,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           dailyStats[date] = {'count': 0, 'revenue': 0};
         }
         dailyStats[date]!['count'] = (dailyStats[date]!['count'] ?? 0) + 1;
-        dailyStats[date]!['revenue'] = (dailyStats[date]!['revenue'] ?? 0) + price;
+        dailyStats[date]!['revenue'] =
+            (dailyStats[date]!['revenue'] ?? 0) + price;
       }
 
       final trendData = dailyStats.entries
@@ -292,8 +342,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             'revenue': 0,
           };
         }
-        barberStats[barberId]!['count'] = (barberStats[barberId]!['count'] as int) + 1;
-        barberStats[barberId]!['revenue'] = (barberStats[barberId]!['revenue'] as int) + price;
+        barberStats[barberId]!['count'] =
+            (barberStats[barberId]!['count'] as int) + 1;
+        barberStats[barberId]!['revenue'] =
+            (barberStats[barberId]!['revenue'] as int) + price;
       }
 
       final barberPerformance = barberStats.entries
@@ -334,7 +386,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       final retentionData = customerCounts.values;
       int repeatCustomers = retentionData.where((count) => count > 1).length;
       int totalCustomers = retentionData.length;
-      double retentionRate = totalCustomers > 0 ? (repeatCustomers / totalCustomers) * 100 : 0;
+      double retentionRate =
+          totalCustomers > 0 ? (repeatCustomers / totalCustomers) * 100 : 0;
 
       setState(() {
         _analyticsData = {
@@ -346,7 +399,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           'total_customers': totalCustomers,
           'repeat_customers': repeatCustomers,
           'retention_rate': retentionRate,
-          'avg_revenue_per_appointment': completedCount > 0 ? totalRevenue / completedCount : 0,
+          'avg_revenue_per_appointment':
+              completedCount > 0 ? totalRevenue / completedCount : 0,
         };
         _revenueTrend = trendData;
         _appointmentTrend = trendData;
@@ -355,7 +409,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         _peakHours = peakHours;
         _isLoading = false;
       });
-
     } catch (e) {
       setState(() {
         _errorMessage = 'Error loading analytics: ${e.toString()}';
@@ -369,7 +422,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   // ============================================================
   Future<void> _loadBarberAnalytics(String barberId) async {
     try {
-      final salonId = widget.salonId != null ? int.parse(widget.salonId!) : null;
+      final salonId =
+          widget.salonId != null ? int.parse(widget.salonId!) : null;
 
       final now = DateTime.now();
       String startDate;
@@ -383,20 +437,23 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           startDate = DateFormat('yyyy-MM-dd').format(weekStart);
           break;
         case 'This Month':
-          startDate = DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
+          startDate =
+              DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
           break;
         case 'This Year':
           startDate = DateFormat('yyyy-MM-dd').format(DateTime(now.year, 1, 1));
           break;
         default:
-          startDate = DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
+          startDate =
+              DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
       }
 
       final endDate = DateFormat('yyyy-MM-dd').format(now);
 
       var query = supabase
           .from('appointments')
-          .select('status, price, appointment_date, start_time, customer_id, service_id, services!inner (name)')
+          .select(
+              'status, price, appointment_date, start_time, customer_id, service_id, services!inner (name)')
           .eq('barber_id', barberId)
           .gte('appointment_date', startDate)
           .lte('appointment_date', endDate);
@@ -449,7 +506,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           dailyStats[date] = {'count': 0, 'revenue': 0};
         }
         dailyStats[date]!['count'] = (dailyStats[date]!['count'] ?? 0) + 1;
-        dailyStats[date]!['revenue'] = (dailyStats[date]!['revenue'] ?? 0) + price;
+        dailyStats[date]!['revenue'] =
+            (dailyStats[date]!['revenue'] ?? 0) + price;
 
         serviceCounts[serviceName] = (serviceCounts[serviceName] ?? 0) + 1;
 
@@ -491,7 +549,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       final retentionData = customerCounts.values;
       int repeatCustomers = retentionData.where((count) => count > 1).length;
       int totalCustomers = retentionData.length;
-      double retentionRate = totalCustomers > 0 ? (repeatCustomers / totalCustomers) * 100 : 0;
+      double retentionRate =
+          totalCustomers > 0 ? (repeatCustomers / totalCustomers) * 100 : 0;
 
       setState(() {
         _analyticsData = {
@@ -503,7 +562,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           'total_customers': totalCustomers,
           'repeat_customers': repeatCustomers,
           'retention_rate': retentionRate,
-          'avg_revenue_per_appointment': completedCount > 0 ? totalRevenue / completedCount : 0,
+          'avg_revenue_per_appointment':
+              completedCount > 0 ? totalRevenue / completedCount : 0,
         };
         _revenueTrend = trendData;
         _appointmentTrend = trendData;
@@ -511,7 +571,6 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         _peakHours = peakHours;
         _isLoading = false;
       });
-
     } catch (e) {
       setState(() {
         _errorMessage = 'Error loading analytics: ${e.toString()}';
@@ -521,7 +580,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   // ============================================================
-  // BUILD METHODS - WITH DARK MODE & RESPONSIVE
+  // BUILD METHODS
   // ============================================================
 
   @override
@@ -529,6 +588,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     _isWeb = context.isWeb;
     _isTablet = context.isTablet;
     _isDark = context.isDarkMode;
+    _screenWidth = MediaQuery.of(context).size.width;
 
     return Scaffold(
       backgroundColor: _isDark ? const Color(0xFF121212) : Colors.white,
@@ -565,6 +625,31 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
           tooltip: 'Back',
         ),
         actions: [
+          // ✅ Currency badge
+          if (!_isLoading && _errorMessage == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _salonCurrencyCode,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadData,
@@ -716,7 +801,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   boxShadow: isSelected
                       ? [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: _isDark ? 0.3 : 0.15),
+                            color: Colors.black.withValues(
+                                alpha: _isDark ? 0.3 : 0.15),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -727,7 +813,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                   child: Text(
                     period,
                     style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
                       color: isSelected
                           ? AppTheme.primary
                           : (_isDark ? Colors.white60 : Colors.grey[600]),
@@ -743,7 +830,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   // ============================================================
-  // BUILD KPI CARDS
+  // ✅ BUILD KPI CARDS - WITH DYNAMIC CURRENCY ICON
+  // Mobile එකේ icon text hide, web එකේ පෙන්නනවා
   // ============================================================
   Widget _buildKPICards() {
     final data = _analyticsData;
@@ -752,13 +840,17 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     final pending = data['pending_count'] ?? 0;
     final cancelled = data['cancelled_count'] ?? 0;
     final noShow = data['no_show_count'] ?? 0;
-    final avgRevenue = data['avg_revenue_per_appointment'] ?? 0;
+    final avgRevenue = data['avg_revenue_per_person'] ??
+        data['avg_revenue_per_appointment'] ??
+        0;
 
-    final children = [
+    final children = <Widget>[
+      // ✅ Revenue - dynamic currency icon text
       _buildKPICard(
         title: 'Revenue',
-        value: 'Rs. $revenue',
+        value: _formatPrice(revenue),
         icon: Icons.attach_money,
+        iconText: _salonCurrencySymbol, // ✅ "Rs.", "$", "£"
         color: Colors.green,
       ),
       _buildKPICard(
@@ -792,11 +884,13 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       );
     }
 
+    // ✅ Avg Revenue - dynamic currency icon text
     children.add(
       _buildKPICard(
         title: 'Avg Revenue',
-        value: 'Rs. ${avgRevenue.toStringAsFixed(0)}',
+        value: _formatPrice(avgRevenue),
         icon: Icons.trending_up,
+        iconText: _salonCurrencySymbol, // ✅ "Rs.", "$", "£"
         color: Colors.purple,
       ),
     );
@@ -812,12 +906,18 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
     );
   }
 
+  // ✅ UPDATED: KPI Card with dynamic icon support
+  // Mobile එකේ icon text hide කරනවා (value එකේ already symbol තියෙන නිසා)
   Widget _buildKPICard({
     required String title,
     required String value,
-    required IconData icon,
+    IconData? icon,
+    String? iconText, // ✅ NEW
     required Color color,
   }) {
+    // ✅ Mobile එකේදී icon text එක hide කරන්න
+    final shouldHideIconText = _isMobile && iconText != null;
+
     return Card(
       elevation: 2,
       color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
@@ -832,16 +932,52 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(icon, color: color, size: _isTablet ? 32 : 28),
-            const SizedBox(height: 4),
+            // ✅ Icon container - dynamic text/icon support
+            if (!shouldHideIconText)
+              Container(
+                padding: EdgeInsets.all(_isTablet ? 10 : 8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(
+                    _isTablet ? 14.0 : 12.0,
+                  ),
+                ),
+                child: iconText != null
+                    ? Center(
+                        widthFactor: 1.0,
+                        child: Text(
+                          iconText,
+                          style: TextStyle(
+                            fontSize: (_isTablet ? 22 : 18) * 0.75,
+                            fontWeight: FontWeight.bold,
+                            color: color,
+                          ),
+                        ),
+                      )
+                    : Icon(
+                        icon!,
+                        color: color,
+                        size: _isTablet ? 32 : 28,
+                      ),
+              )
+            else
+              // ✅ Mobile එකේ icon text නෑ - generic icon පෙන්නනවා
+              Icon(
+                icon ?? Icons.attach_money,
+                color: color,
+                size: _isTablet ? 32 : 28,
+              ),
+            const SizedBox(height: 6),
             Text(
               value,
               style: TextStyle(
-                fontSize: _isTablet ? 18 : 16,
+                fontSize: _isTablet ? 16 : 14,
                 fontWeight: FontWeight.bold,
                 color: color,
               ),
               textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 2),
             Text(
@@ -859,7 +995,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   // ============================================================
-  // BUILD REVENUE TREND
+  // ✅ BUILD REVENUE TREND (with salon currency)
   // ============================================================
   Widget _buildRevenueTrend() {
     if (_revenueTrend.isEmpty) {
@@ -922,12 +1058,15 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
+                        // ✅ Compact price with salon currency
                         Text(
-                          'Rs.${(revenue / 1000).toStringAsFixed(0)}k',
+                          _formatCompactPrice(revenue),
                           style: TextStyle(
                             fontSize: 8,
                             color: _isDark ? Colors.white70 : Colors.grey,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Container(
@@ -1070,7 +1209,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
       return const SizedBox.shrink();
     }
 
-    final total = _serviceDistribution.fold(0, (sum, item) => sum + (item['count'] as int? ?? 0));
+    final total = _serviceDistribution.fold(
+        0, (sum, item) => sum + (item['count'] as int? ?? 0));
 
     return Card(
       elevation: 2,
@@ -1112,7 +1252,8 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
             ..._serviceDistribution.take(5).map((item) {
               final service = item['service'] as String? ?? 'Unknown';
               final count = item['count'] as int? ?? 0;
-              final percentage = total > 0 ? (count / total * 100).toStringAsFixed(1) : '0';
+              final percentage =
+                  total > 0 ? (count / total * 100).toStringAsFixed(1) : '0';
 
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1142,7 +1283,10 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
-                                colors: [AppTheme.primary, AppTheme.primaryLight],
+                                colors: [
+                                  AppTheme.primary,
+                                  AppTheme.primaryLight
+                                ],
                               ),
                               borderRadius: BorderRadius.circular(4),
                             ),
@@ -1424,7 +1568,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
   }
 
   // ============================================================
-  // BUILD BARBER PERFORMANCE (Owner only)
+  // ✅ BUILD BARBER PERFORMANCE (Owner only, with salon currency)
   // ============================================================
   Widget _buildBarberPerformance() {
     if (_barberPerformance.isEmpty) {
@@ -1504,16 +1648,23 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                                 '$count appointments',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: _isDark ? Colors.white60 : Colors.grey[500],
+                                  color: _isDark
+                                      ? Colors.white60
+                                      : Colors.grey[500],
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              Text(
-                                'Rs. $revenue',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.green,
-                                  fontWeight: FontWeight.w500,
+                              // ✅ Revenue with salon currency
+                              Flexible(
+                                child: Text(
+                                  _formatPrice(revenue),
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.green,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ],
@@ -1540,7 +1691,7 @@ class _AnalyticsScreenState extends State<AnalyticsScreen> {
                           const SizedBox(width: 4),
                           Text(
                             '$count',
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
                               color: AppTheme.primary,

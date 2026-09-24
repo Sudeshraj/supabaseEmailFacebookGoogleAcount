@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/services/currency_service.dart';
 
 class RevenueScreen extends StatefulWidget {
   final String? salonId;
@@ -22,6 +23,15 @@ class RevenueScreen extends StatefulWidget {
 
 class _RevenueScreenState extends State<RevenueScreen> {
   final supabase = Supabase.instance.client;
+
+  // ==================== ✅ CURRENCY SERVICE ====================
+  final CurrencyService _currencyService = CurrencyService.instance;
+  String _salonCurrencyCode = 'LKR';
+
+  // ✅ Currency getters
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
+
 
   // Revenue data
   int _todayRevenue = 0;
@@ -51,6 +61,33 @@ class _RevenueScreenState extends State<RevenueScreen> {
 
   // ✅ Scroll Controller for web
   final ScrollController _scrollController = ScrollController();
+
+  // ============================================================
+  // ✅ CURRENCY HELPERS
+  // ============================================================
+
+  /// Format price with salon currency
+  String _formatPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
+
+  /// Format price for compact display (e.g., "Rs. 1.5k" or "$ 1.5k")
+  String _formatCompactPrice(dynamic price) {
+    final num value = (price as num?) ?? 0;
+
+    if (value >= 1000000) {
+      final millions = value / 1000000;
+      return '$_salonCurrencySymbol${millions.toStringAsFixed(1)}M';
+    } else if (value >= 1000) {
+      final thousands = value / 1000;
+      return '$_salonCurrencySymbol${thousands.toStringAsFixed(1)}k';
+    } else {
+      return '$_salonCurrencySymbol${value.toStringAsFixed(0)}';
+    }
+  }
 
   @override
   void initState() {
@@ -87,16 +124,20 @@ class _RevenueScreenState extends State<RevenueScreen> {
         return;
       }
 
-      // Get salon name
+      // ✅ Get salon name AND currency
       if (widget.salonId != null) {
         final salonResponse = await supabase
             .from('salons')
-            .select('name')
+            .select('name, currency_code')
             .eq('id', int.parse(widget.salonId!))
             .maybeSingle();
 
         if (salonResponse != null) {
           _salonName = salonResponse['name'];
+          _salonCurrencyCode =
+              salonResponse['currency_code'] as String? ?? 'LKR';
+
+          debugPrint('✅ Salon currency: $_salonCurrencyCode');
         }
       }
 
@@ -118,7 +159,8 @@ class _RevenueScreenState extends State<RevenueScreen> {
   // ============================================================
   Future<void> _loadOwnerRevenue(String ownerId) async {
     try {
-      final salonId = widget.salonId != null ? int.parse(widget.salonId!) : null;
+      final salonId =
+          widget.salonId != null ? int.parse(widget.salonId!) : null;
 
       if (salonId == null) {
         setState(() {
@@ -190,16 +232,20 @@ class _RevenueScreenState extends State<RevenueScreen> {
       final dailyData = results[4] as List;
       final allData = results[5] as List;
 
-      _todayRevenue = todayData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
+      _todayRevenue = todayData.fold(
+          0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _todayAppointments = todayData.length;
 
-      _weekRevenue = weekData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
+      _weekRevenue = weekData.fold(
+          0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _weekAppointments = weekData.length;
 
-      _monthRevenue = monthData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
+      _monthRevenue = monthData.fold(
+          0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _monthAppointments = monthData.length;
 
-      _totalRevenue = allTimeData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
+      _totalRevenue = allTimeData.fold(
+          0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _totalAppointments = allTimeData.length;
 
       final Map<String, int> dailyMap = {};
@@ -275,7 +321,8 @@ class _RevenueScreenState extends State<RevenueScreen> {
       final allTimeStart = DateTime(2000, 1, 1);
       final allTimeStartStr = DateFormat('yyyy-MM-dd').format(allTimeStart);
 
-      final salonId = widget.salonId != null ? int.parse(widget.salonId!) : null;
+      final salonId =
+          widget.salonId != null ? int.parse(widget.salonId!) : null;
 
       PostgrestFilterBuilder<PostgrestList> buildBaseQuery() {
         var q = supabase
@@ -306,16 +353,20 @@ class _RevenueScreenState extends State<RevenueScreen> {
       final dailyData = results[4] as List;
       final allData = results[5] as List;
 
-      _todayRevenue = todayData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
+      _todayRevenue = todayData.fold(
+          0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _todayAppointments = todayData.length;
 
-      _weekRevenue = weekData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
+      _weekRevenue = weekData.fold(
+          0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _weekAppointments = weekData.length;
 
-      _monthRevenue = monthData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
+      _monthRevenue = monthData.fold(
+          0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _monthAppointments = monthData.length;
 
-      _totalRevenue = allTimeData.fold(0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
+      _totalRevenue = allTimeData.fold(
+          0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _totalAppointments = allTimeData.length;
 
       final Map<String, int> dailyMap = {};
@@ -375,7 +426,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
           children: [
             Text(
               widget.role == 'barber' ? 'My Revenue' : 'Revenue',
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -384,7 +435,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
             if (_salonName != null)
               Text(
                 _salonName!,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.normal,
                   color: Colors.white70,
@@ -402,6 +453,31 @@ class _RevenueScreenState extends State<RevenueScreen> {
           tooltip: 'Back',
         ),
         actions: [
+          // ✅ Currency badge
+          if (!_isLoading && _errorMessage == null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _salonCurrencyCode,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadData,
@@ -463,7 +539,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
   }
 
   // ============================================================
-  // ✅ WEB LAYOUT - Dashboard Style
+  // ✅ WEB LAYOUT
   // ============================================================
   Widget _buildWebLayout() {
     return Center(
@@ -554,7 +630,8 @@ class _RevenueScreenState extends State<RevenueScreen> {
                   boxShadow: isSelected
                       ? [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.1),
+                            color: Colors.black
+                                .withValues(alpha: isDark ? 0.3 : 0.1),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -565,7 +642,8 @@ class _RevenueScreenState extends State<RevenueScreen> {
                   child: Text(
                     period,
                     style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                      fontWeight:
+                          isSelected ? FontWeight.bold : FontWeight.normal,
                       color: isSelected
                           ? AppTheme.primary
                           : (isDark ? Colors.white60 : Colors.grey[600]),
@@ -581,7 +659,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
   }
 
   // ============================================================
-  // BUILD REVENUE STATS
+  // ✅ BUILD REVENUE STATS (with salon currency)
   // ============================================================
   Widget _buildRevenueStats() {
     final isDark = _isDark;
@@ -661,21 +739,23 @@ class _RevenueScreenState extends State<RevenueScreen> {
               ],
             ),
             const SizedBox(height: 12),
+            // ✅ Revenue with salon currency
             Row(
               children: [
-                Text(
-                  'Rs. ',
-                  style: TextStyle(
-                    fontSize: 24,
-                    color: isDark ? Colors.white60 : Colors.grey,
-                  ),
-                ),
-                Text(
-                  revenue.toString(),
-                  style: TextStyle(
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : AppTheme.primary,
+                // ✅ Mobile එකේ icon text hide කරන්නේ නෑ (මේක main display)
+                //     Text එකේම currency symbol එක තියෙන නිසා duplicate නෑ
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      _formatPrice(revenue),
+                      style: TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : AppTheme.primary,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -695,7 +775,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
   }
 
   // ============================================================
-  // BUILD REVENUE CHART (Simple Bar Chart)
+  // ✅ BUILD REVENUE CHART (with salon currency)
   // ============================================================
   Widget _buildRevenueChart() {
     final isDark = _isDark;
@@ -851,12 +931,15 @@ class _RevenueScreenState extends State<RevenueScreen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
+                        // ✅ Compact price with salon currency
                         Text(
-                          'Rs.${(value / 1000).toStringAsFixed(1)}k',
+                          _formatCompactPrice(value),
                           style: TextStyle(
                             fontSize: 10,
                             color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
                         Container(
@@ -866,7 +949,9 @@ class _RevenueScreenState extends State<RevenueScreen> {
                             gradient: LinearGradient(
                               colors: [
                                 isDark ? Colors.white : AppTheme.primary,
-                                isDark ? Colors.white60 : const Color(0xFFFF8A9F),
+                                isDark
+                                    ? Colors.white60
+                                    : const Color(0xFFFF8A9F),
                               ],
                             ),
                             borderRadius: BorderRadius.circular(4),
@@ -899,7 +984,10 @@ class _RevenueScreenState extends State<RevenueScreen> {
         if (parts.length == 3) {
           return '${parts[2]}/${parts[1]}';
         } else if (parts.length == 2) {
-          const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          const months = [
+            'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+            'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+          ];
           final month = int.parse(parts[1]) - 1;
           return months[month];
         }
@@ -1004,7 +1092,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
           style: TextStyle(
             fontSize: 20,
             fontWeight: FontWeight.bold,
-            color: isDark ? color : color,
+            color: color,
           ),
         ),
         const SizedBox(height: 4),
@@ -1020,7 +1108,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
   }
 
   // ============================================================
-  // BUILD ADDITIONAL INFO
+  // ✅ BUILD ADDITIONAL INFO (with salon currency)
   // ============================================================
   Widget _buildAdditionalInfo() {
     final isDark = _isDark;
@@ -1061,17 +1149,20 @@ class _RevenueScreenState extends State<RevenueScreen> {
               ],
             ),
             const SizedBox(height: 16),
-            _buildInfoRow('Total Revenue', 'Rs. $_totalRevenue'),
+            // ✅ Total Revenue - salon currency
+            _buildInfoRow('Total Revenue', _formatPrice(_totalRevenue)),
             const Divider(),
             _buildInfoRow('Total Appointments', '$_totalAppointments'),
             const Divider(),
+            // ✅ Average - salon currency
             _buildInfoRow(
               'Average per Appointment',
               _totalAppointments > 0
-                  ? 'Rs. ${(_totalRevenue / _totalAppointments).toStringAsFixed(0)}'
-                  : 'Rs. 0',
+                  ? _formatPrice(_totalRevenue / _totalAppointments)
+                  : _formatPrice(0),
             ),
             const Divider(),
+            // ✅ Best Month - salon currency
             _buildInfoRow('Best Month', _getBestMonth()),
           ],
         ),
@@ -1087,19 +1178,27 @@ class _RevenueScreenState extends State<RevenueScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              color: isDark ? Colors.white60 : Colors.grey[600],
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white : Colors.black87,
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
             ),
           ),
         ],
@@ -1122,15 +1221,21 @@ class _RevenueScreenState extends State<RevenueScreen> {
     if (month.isEmpty) return 'No data';
 
     try {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ];
       final parts = month.split('-');
       if (parts.length == 2) {
         final monthNum = int.parse(parts[1]) - 1;
-        return '${months[monthNum]} ${parts[0]} (Rs. $revenue)';
+        // ✅ Best month with salon currency
+        return '${months[monthNum]} ${parts[0]} (${_formatPrice(revenue)})';
       }
     } catch (e) {
-      return '$month (Rs. $revenue)';
+      // ✅ Fallback with salon currency
+      return '$month (${_formatPrice(revenue)})';
     }
-    return '$month (Rs. $revenue)';
+    // ✅ Fallback with salon currency
+    return '$month (${_formatPrice(revenue)})';
   }
 }
