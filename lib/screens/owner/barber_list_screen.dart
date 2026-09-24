@@ -20,31 +20,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   String? _selectedFilter = 'all';
   List<Map<String, dynamic>> _barbers = [];
 
-  // ✅ Web Scroll Controller
   final ScrollController _scrollController = ScrollController();
-
-  // Alternating card colors - Dark mode aware
-  final List<Color> _cardColorsLight = [
-    const Color(0xFFE3F2FD),
-    const Color(0xFFFCE4EC),
-    const Color(0xFFE8F5E9),
-    const Color(0xFFFFF3E0),
-    const Color(0xFFF3E5F5),
-    const Color(0xFFE0F7FA),
-    const Color(0xFFFFEBEE),
-    const Color(0xFFE8EAF6),
-  ];
-
-  final List<Color> _cardColorsDark = [
-    const Color(0xFF1A237E),
-    const Color(0xFF4A148C),
-    const Color(0xFF1B5E20),
-    const Color(0xFFE65100),
-    const Color(0xFF4A148C),
-    const Color(0xFF004D40),
-    const Color(0xFFB71C1C),
-    const Color(0xFF1A237E),
-  ];
 
   @override
   void initState() {
@@ -59,7 +35,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ LOAD DATA WITH user_roles.status CHECK
+  // ✅ LOAD DATA
   // ============================================================
   Future<void> _loadData() async {
     if (widget.salonId == null) {
@@ -111,16 +87,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
       final profilesResponse = await supabase
           .from('profiles')
-          .select('''
-          id,
-          full_name,
-          email,
-          phone,
-          avatar_url,
-          created_at,
-          is_active,
-          is_blocked
-        ''')
+          .select(
+            'id, full_name, email, phone, avatar_url, created_at, is_active, is_blocked',
+          )
           .inFilter('id', barberIds);
 
       final userRolesResponse = await supabase
@@ -146,7 +115,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
             .from('barber_services')
             .select('id')
             .eq('salon_barber_id', salonBarberId);
-
         serviceCountMap[sb['barber_id']] = count.length;
       }
 
@@ -156,16 +124,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
         final barberId = sb['barber_id'] as String;
         final profile = profileMap[barberId] ?? {};
         final roleStatus = roleStatusMap[barberId] ?? 'active';
-
         final isProfileActive = profile['is_active'] ?? true;
         final isProfileBlocked = profile['is_blocked'] ?? false;
 
         String actualStatus = sb['status'] ?? 'active';
-
-        if (roleStatus != 'active') {
-          actualStatus = roleStatus;
-        }
-
+        if (roleStatus != 'active') actualStatus = roleStatus;
         if (isProfileBlocked) {
           actualStatus = 'blocked';
         } else if (!isProfileActive && actualStatus == 'active') {
@@ -183,9 +146,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
           'avatar': profile['avatar_url'],
           'created_at': profile['created_at'],
           'service_count': serviceCountMap[barberId] ?? 0,
-          'user_roles_status': roleStatus,
-          'profile_active': isProfileActive,
-          'profile_blocked': isProfileBlocked,
         });
       }
 
@@ -196,18 +156,14 @@ class _BarberListScreenState extends State<BarberListScreen> {
       }
     } catch (e) {
       debugPrint('❌ Error loading barbers: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
+      if (mounted) context.showErrorSnackBar('Error: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
   // ============================================================
-  // ✅ ACTIVATE BARBER
+  // ✅ BARBER ACTIONS
   // ============================================================
   Future<void> _activateBarber(
     int salonBarberId,
@@ -230,69 +186,23 @@ class _BarberListScreenState extends State<BarberListScreen> {
           .eq('role_id', 2);
 
       await _loadData();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ $barberName activated'),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      if (mounted) context.showSuccessSnackBar('✅ $barberName activated');
     } catch (e) {
-      debugPrint('❌ Error activating barber: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
-      }
+      debugPrint('❌ Error: $e');
+      if (mounted) context.showErrorSnackBar('Error: $e');
     }
   }
 
-  // ============================================================
-  // ✅ DEACTIVATE BARBER
-  // ============================================================
   Future<void> _deactivateBarber(
     int salonBarberId,
     String barberName,
     String barberId,
   ) async {
-    final isDark = context.isDarkMode;
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Deactivate Barber',
-          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-        ),
-        content: Text(
-          'Temporarily deactivate $barberName? They can be reactivated later.',
-          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: isDark ? Colors.white60 : Colors.grey[600],
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Deactivate'),
-          ),
-        ],
-      ),
+    final confirm = await _showConfirmDialog(
+      title: 'Deactivate Barber',
+      message: 'Temporarily deactivate $barberName?',
+      confirmText: 'Deactivate',
+      confirmColor: AppTheme.warning,
     );
 
     if (confirm == true) {
@@ -312,98 +222,25 @@ class _BarberListScreenState extends State<BarberListScreen> {
             .eq('role_id', 2);
 
         await _loadData();
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('⏸️ $barberName deactivated'),
-              backgroundColor: Colors.orange,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
+        if (mounted) context.showWarningSnackBar('⏸️ $barberName deactivated');
       } catch (e) {
-        debugPrint('❌ Error deactivating barber: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-          );
-        }
+        debugPrint('❌ Error: $e');
+        if (mounted) context.showErrorSnackBar('Error: $e');
       }
     }
   }
 
-  // ============================================================
-  // ✅ DELETE BARBER
-  // ============================================================
   Future<void> _deleteBarber(
     int salonBarberId,
     String barberName,
     String barberId,
   ) async {
-    final isDark = context.isDarkMode;
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Delete Barber',
-          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Permanently delete $barberName from this salon?',
-              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              '• They will be hidden from all lists',
-              style: TextStyle(
-                fontSize: 13,
-                color: isDark ? Colors.white60 : Colors.grey,
-              ),
-            ),
-            Text(
-              '• All their data (appointments, leaves) will be kept',
-              style: TextStyle(
-                fontSize: 13,
-                color: isDark ? Colors.white60 : Colors.grey,
-              ),
-            ),
-            Text(
-              '• This action can be reversed by restoring',
-              style: TextStyle(
-                fontSize: 13,
-                color: isDark ? Colors.white60 : Colors.grey,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: isDark ? Colors.white60 : Colors.grey[600],
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final confirm = await _showConfirmDialog(
+      title: 'Delete Barber',
+      message:
+          'Permanently delete $barberName from this salon?\n\n• They will be hidden from all lists\n• All their data will be kept\n• This action can be reversed',
+      confirmText: 'Delete',
+      confirmColor: AppTheme.error,
     );
 
     if (confirm == true) {
@@ -423,70 +260,24 @@ class _BarberListScreenState extends State<BarberListScreen> {
             .eq('role_id', 2);
 
         await _loadData();
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('🗑️ $barberName deleted'),
-              backgroundColor: Colors.red,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
+        if (mounted) context.showErrorSnackBar('🗑️ $barberName deleted');
       } catch (e) {
-        debugPrint('❌ Error deleting barber: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-          );
-        }
+        debugPrint('❌ Error: $e');
+        if (mounted) context.showErrorSnackBar('Error: $e');
       }
     }
   }
 
-  // ============================================================
-  // ✅ RESTORE BARBER
-  // ============================================================
   Future<void> _restoreBarber(
     int salonBarberId,
     String barberName,
     String barberId,
   ) async {
-    final isDark = context.isDarkMode;
-
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Restore Barber',
-          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-        ),
-        content: Text(
-          'Restore $barberName to inactive status?',
-          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: isDark ? Colors.white60 : Colors.grey[600],
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blue,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Restore'),
-          ),
-        ],
-      ),
+    final confirm = await _showConfirmDialog(
+      title: 'Restore Barber',
+      message: 'Restore $barberName to inactive status?',
+      confirmText: 'Restore',
+      confirmColor: AppTheme.info,
     );
 
     if (confirm == true) {
@@ -506,25 +297,58 @@ class _BarberListScreenState extends State<BarberListScreen> {
             .eq('role_id', 2);
 
         await _loadData();
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('🔄 $barberName restored'),
-              backgroundColor: Colors.blue,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
+        if (mounted) context.showSnackBar('🔄 $barberName restored');
       } catch (e) {
-        debugPrint('❌ Error restoring barber: $e');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-          );
-        }
+        debugPrint('❌ Error: $e');
+        if (mounted) context.showErrorSnackBar('Error: $e');
       }
     }
+  }
+
+  Future<bool?> _showConfirmDialog({
+    required String title,
+    required String message,
+    required String confirmText,
+    required Color confirmColor,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: context.cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: context.textColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          message,
+          style: TextStyle(color: context.secondaryTextColor),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: context.secondaryTextColor),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: confirmColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: Text(confirmText),
+          ),
+        ],
+      ),
+    );
   }
 
   void _editBarberServices(Map<String, dynamic> barber) {
@@ -549,7 +373,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
     if (dateStr == null) return 'Unknown';
     try {
       final date = DateTime.parse(dateStr);
-      final months = [
+      const months = [
         'Jan',
         'Feb',
         'Mar',
@@ -570,7 +394,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ STATUS HELPER METHODS
+  // ✅ STATUS HELPERS
   // ============================================================
   String _getStatusText(String status) {
     switch (status) {
@@ -590,11 +414,11 @@ class _BarberListScreenState extends State<BarberListScreen> {
   Color _getStatusColor(String status) {
     switch (status) {
       case 'active':
-        return Colors.green;
+        return AppTheme.success;
       case 'inactive':
-        return Colors.orange;
+        return AppTheme.warning;
       case 'deleted':
-        return Colors.red;
+        return AppTheme.error;
       case 'blocked':
         return Colors.purple;
       default:
@@ -618,21 +442,23 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ BUILD METHOD - Edge-to-Edge + Responsive
+  // ✅ BUILD METHOD
   // ============================================================
   @override
   Widget build(BuildContext context) {
-    final isDark = context.isDarkMode;
     final isWeb = context.isWeb;
     final isTablet = context.isTablet;
-    final double padding = isWeb ? 24.0 : (isTablet ? 20.0 : 16.0);
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
+      backgroundColor: context.backgroundColor,
       appBar: AppBar(
         title: Text(
           'Barber List',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+            fontSize: isWeb ? 22 : 20,
+          ),
         ),
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
@@ -641,21 +467,20 @@ class _BarberListScreenState extends State<BarberListScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
-          tooltip: 'Back',
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.filter_list, color: Colors.white),
+            icon: const Icon(Icons.filter_list, color: Colors.white),
             onPressed: _showFilterDialog,
             tooltip: 'Filter',
           ),
           IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadData,
             tooltip: 'Refresh',
           ),
           IconButton(
-            icon: Icon(Icons.person_add, color: Colors.white),
+            icon: const Icon(Icons.person_add, color: Colors.white),
             onPressed: () =>
                 context.push('/owner/add-barber?salonId=${widget.salonId}'),
             tooltip: 'Add Barber',
@@ -666,56 +491,75 @@ class _BarberListScreenState extends State<BarberListScreen> {
         child: _isLoading
             ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
             : _barbers.isEmpty
-            ? _buildEmptyState(isWeb, padding, isDark)
+            ? _buildEmptyState()
             : isWeb
-            ? _buildDesktopView(padding, isDark)
+            ? _buildDesktopView()
             : RefreshIndicator(
                 onRefresh: _loadData,
                 color: AppTheme.primary,
-                child: isTablet
-                    ? _buildTabletView(padding, isDark)
-                    : _buildMobileView(padding, isDark),
+                child: isTablet ? _buildTabletView() : _buildMobileView(),
               ),
       ),
     );
   }
 
-  Widget _buildEmptyState(bool isWeb, double padding, bool isDark) {
+  // ============================================================
+  // ✅ EMPTY STATE
+  // ============================================================
+  Widget _buildEmptyState() {
+    final isWeb = context.isWeb;
+
     return Center(
       child: Padding(
-        padding: EdgeInsets.all(padding),
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.people_outline,
-              size: isWeb ? 80 : 64,
-              color: isDark ? Colors.white30 : Colors.grey[400],
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.people_outline,
+                size: isWeb ? 80 : 64,
+                color: AppTheme.primary.withValues(alpha: 0.6),
+              ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
             Text(
-              'No barbers found',
+              'No Barbers Found',
               style: TextStyle(
-                fontSize: isWeb ? 20 : 18,
-                color: isDark ? Colors.white60 : Colors.grey,
+                fontSize: isWeb ? 22 : 20,
+                fontWeight: FontWeight.bold,
+                color: context.textColor,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               'Add barbers to get started',
               style: TextStyle(
-                color: isDark ? Colors.white70 : Colors.grey[600],
+                fontSize: 14,
+                color: context.secondaryTextColor,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: () =>
                   context.push('/owner/add-barber?salonId=${widget.salonId}'),
               icon: const Icon(Icons.person_add),
-              label: const Text('Add Barber'),
+              label: const Text('Add First Barber'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primary,
                 foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 14,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ],
@@ -725,9 +569,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ DESKTOP VIEW - With Scrollbar
+  // ✅ DESKTOP VIEW - With Scrollbar + Proper Spacing
   // ============================================================
-  Widget _buildDesktopView(double padding, bool isDark) {
+  Widget _buildDesktopView() {
     final activeCount = _barbers.where((b) => b['status'] == 'active').length;
     final inactiveCount = _barbers
         .where((b) => b['status'] == 'inactive')
@@ -748,131 +592,181 @@ class _BarberListScreenState extends State<BarberListScreen> {
           child: SingleChildScrollView(
             controller: _scrollController,
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.all(padding),
+            padding: const EdgeInsets.all(24),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Stats Cards
+                // ✅ Stats Cards
                 Row(
                   children: [
                     _buildStatCard(
-                      'Total',
+                      'Total Barbers',
                       _barbers.length.toString(),
                       Icons.people,
                       Colors.blue,
-                      isDark,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 16),
                     _buildStatCard(
                       'Active',
                       activeCount.toString(),
                       Icons.check_circle,
-                      Colors.green,
-                      isDark,
+                      AppTheme.success,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 16),
                     _buildStatCard(
                       'Inactive',
                       inactiveCount.toString(),
                       Icons.pause_circle,
-                      Colors.orange,
-                      isDark,
+                      AppTheme.warning,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 16),
                     _buildStatCard(
                       'Deleted',
                       deletedCount.toString(),
                       Icons.delete,
-                      Colors.red,
-                      isDark,
+                      AppTheme.error,
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 16),
                     _buildStatCard(
                       'Blocked',
                       blockedCount.toString(),
                       Icons.block,
                       Colors.purple,
-                      isDark,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 32),
+
+                // ✅ Section Title
+                Row(
+                  children: [
+                    Container(
+                      width: 4,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'All Barbers',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: context.textColor,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '${_barbers.length}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primary,
+                        ),
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
 
-                // Table Header
+                // ✅ Table Header
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 16,
+                  ),
                   decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(
-                      alpha: isDark ? 0.2 : 0.1,
-                    ),
+                    color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: AppTheme.primary.withValues(
-                        alpha: isDark ? 0.3 : 0.3,
-                      ),
+                      color: AppTheme.primary.withValues(alpha: 0.2),
                     ),
                   ),
                   child: Row(
                     children: [
                       Expanded(
-                        flex: 3,
+                        flex: 4,
                         child: Text(
-                          'Barber',
+                          'BARBER',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 2,
-                        child: Text(
-                          'Contact',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 2,
-                        child: Text(
-                          'Joined',
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 1,
-                        child: Text(
-                          'Services',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 1,
-                        child: Text(
-                          'Status',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
+                            fontSize: 12,
+                            letterSpacing: 1,
+                            color: context.textColor,
                           ),
                         ),
                       ),
                       Expanded(
                         flex: 3,
                         child: Text(
-                          'Actions',
+                          'CONTACT',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            letterSpacing: 1,
+                            color: context.textColor,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          'JOINED',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            letterSpacing: 1,
+                            color: context.textColor,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          'SERVICES',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
+                            fontSize: 12,
+                            letterSpacing: 1,
+                            color: context.textColor,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          'STATUS',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            letterSpacing: 1,
+                            color: context.textColor,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 4,
+                        child: Text(
+                          'ACTIONS',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            letterSpacing: 1,
+                            color: context.textColor,
                           ),
                         ),
                       ),
@@ -881,10 +775,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 ),
                 const SizedBox(height: 8),
 
-                // Table Rows
+                // ✅ Table Rows
                 ..._barbers.asMap().entries.map(
-                  (entry) =>
-                      _buildDesktopBarberRow(entry.value, entry.key, isDark),
+                  (entry) => _buildDesktopBarberRow(entry.value, entry.key),
                 ),
               ],
             ),
@@ -895,50 +788,41 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ DESKTOP BARBER ROW
+  // ✅ DESKTOP BARBER ROW - Proper Design
   // ============================================================
-  Widget _buildDesktopBarberRow(
-    Map<String, dynamic> barber,
-    int index,
-    bool isDark,
-  ) {
+  Widget _buildDesktopBarberRow(Map<String, dynamic> barber, int index) {
     final status = barber['status'] ?? 'active';
     final statusColor = _getStatusColor(status);
     final statusText = _getStatusText(status);
     final statusIcon = _getStatusIcon(status);
-    final cardColor = isDark
-        ? _cardColorsDark[index % _cardColorsDark.length]
-        : _cardColorsLight[index % _cardColorsLight.length];
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       decoration: BoxDecoration(
-        color: cardColor,
+        color: context.cardColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-        ),
+        border: Border.all(color: context.dividerColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
-            blurRadius: 4,
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
       ),
       child: Row(
         children: [
-          // Barber info
+          // ✅ Barber info
           Expanded(
-            flex: 3,
+            flex: 4,
             child: Row(
               children: [
                 Stack(
                   children: [
                     CircleAvatar(
                       radius: 24,
-                      backgroundColor: statusColor.withValues(alpha: 0.1),
+                      backgroundColor: statusColor.withValues(alpha: 0.15),
                       backgroundImage: barber['avatar'] != null
                           ? NetworkImage(barber['avatar'])
                           : null,
@@ -962,12 +846,15 @@ class _BarberListScreenState extends State<BarberListScreen> {
                           decoration: BoxDecoration(
                             color: statusColor,
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
+                            border: Border.all(
+                              color: context.cardColor,
+                              width: 2,
+                            ),
                           ),
                           child: Icon(
                             statusIcon,
                             color: Colors.white,
-                            size: 12,
+                            size: 10,
                           ),
                         ),
                       ),
@@ -982,15 +869,18 @@ class _BarberListScreenState extends State<BarberListScreen> {
                         barber['name'],
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                          color: isDark ? Colors.white : Colors.black87,
+                          fontSize: 15,
+                          color: context.textColor,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
+                      const SizedBox(height: 2),
                       Text(
                         barber['email'],
                         style: TextStyle(
-                          fontSize: 13,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
+                          fontSize: 12,
+                          color: context.secondaryTextColor,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -1002,37 +892,41 @@ class _BarberListScreenState extends State<BarberListScreen> {
             ),
           ),
 
-          // Contact
+          // ✅ Contact
           Expanded(
-            flex: 2,
+            flex: 3,
             child: Text(
               barber['phone'] ?? 'No phone',
               style: TextStyle(
+                fontSize: 13,
                 color: barber['phone'] == 'No phone'
-                    ? (isDark ? Colors.white70 : Colors.grey[400])
-                    : (isDark ? Colors.white70 : Colors.grey[800]),
+                    ? context.secondaryTextColor
+                    : context.textColor,
               ),
             ),
           ),
 
-          // Joined date
+          // ✅ Joined date
           Expanded(
             flex: 2,
             child: Text(
               _formatDate(barber['joined_at']),
               style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white70 : Colors.black87,
+                fontSize: 13,
+                color: context.textColor,
               ),
             ),
           ),
 
-          // Service count
+          // ✅ Service count
           Expanded(
-            flex: 1,
+            flex: 2,
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: Colors.blue.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -1040,7 +934,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 child: Text(
                   '${barber['service_count']}',
                   style: TextStyle(
-                    color: isDark ? Colors.blue[300] : Colors.blue[700],
+                    color: context.isDarkMode
+                        ? Colors.blue[300]
+                        : Colors.blue[700],
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
@@ -1049,27 +945,33 @@ class _BarberListScreenState extends State<BarberListScreen> {
             ),
           ),
 
-          // Status
+          // ✅ Status
           Expanded(
-            flex: 1,
+            flex: 2,
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: statusColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: statusColor.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(statusIcon, color: statusColor, size: 14),
+                    Icon(statusIcon, color: statusColor, size: 12),
                     const SizedBox(width: 4),
                     Text(
                       statusText,
                       style: TextStyle(
                         color: statusColor,
                         fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                        fontSize: 11,
                       ),
                     ),
                   ],
@@ -1078,72 +980,79 @@ class _BarberListScreenState extends State<BarberListScreen> {
             ),
           ),
 
-          // Actions
+          // ✅ Actions
           Expanded(
-            flex: 3,
+            flex: 4,
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(
-                  icon: Icon(Icons.edit, color: Colors.blue),
-                  onPressed: () => _editBarberServices(barber),
-                  tooltip: 'Edit Services',
+                _buildDesktopActionButton(
+                  icon: Icons.edit,
+                  color: Colors.blue,
+                  tooltip: 'Services',
+                  onTap: () => _editBarberServices(barber),
                 ),
-                IconButton(
-                  icon: Icon(Icons.schedule, color: Colors.teal),
-                  onPressed: () => _viewSchedule(barber),
-                  tooltip: 'View Schedule',
+                _buildDesktopActionButton(
+                  icon: Icons.schedule,
+                  color: Colors.teal,
+                  tooltip: 'Schedule',
+                  onTap: () => _viewSchedule(barber),
                 ),
-                IconButton(
-                  icon: Icon(Icons.beach_access, color: Colors.orange),
-                  onPressed: () => _viewLeaves(barber),
-                  tooltip: 'View Leaves',
+                _buildDesktopActionButton(
+                  icon: Icons.beach_access,
+                  color: Colors.orange,
+                  tooltip: 'Leaves',
+                  onTap: () => _viewLeaves(barber),
                 ),
                 if (status == 'active')
-                  IconButton(
-                    icon: const Icon(Icons.pause_circle, color: Colors.orange),
-                    onPressed: () => _deactivateBarber(
+                  _buildDesktopActionButton(
+                    icon: Icons.pause_circle,
+                    color: AppTheme.warning,
+                    tooltip: 'Deactivate',
+                    onTap: () => _deactivateBarber(
                       barber['salon_barber_id'],
                       barber['name'],
                       barber['id'],
                     ),
-                    tooltip: 'Deactivate',
                   ),
                 if (status == 'inactive') ...[
-                  IconButton(
-                    icon: const Icon(Icons.play_circle, color: Colors.green),
-                    onPressed: () => _activateBarber(
-                      barber['salon_barber_id'],
-                      barber['name'],
-                      barber['id'],
-                    ),
+                  _buildDesktopActionButton(
+                    icon: Icons.play_circle,
+                    color: AppTheme.success,
                     tooltip: 'Activate',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete, color: Colors.red),
-                    onPressed: () => _deleteBarber(
+                    onTap: () => _activateBarber(
                       barber['salon_barber_id'],
                       barber['name'],
                       barber['id'],
                     ),
+                  ),
+                  _buildDesktopActionButton(
+                    icon: Icons.delete,
+                    color: AppTheme.error,
                     tooltip: 'Delete',
+                    onTap: () => _deleteBarber(
+                      barber['salon_barber_id'],
+                      barber['name'],
+                      barber['id'],
+                    ),
                   ),
                 ],
                 if (status == 'deleted')
-                  IconButton(
-                    icon: const Icon(Icons.restore, color: Colors.blue),
-                    onPressed: () => _restoreBarber(
+                  _buildDesktopActionButton(
+                    icon: Icons.restore,
+                    color: Colors.blue,
+                    tooltip: 'Restore',
+                    onTap: () => _restoreBarber(
                       barber['salon_barber_id'],
                       barber['name'],
                       barber['id'],
                     ),
-                    tooltip: 'Restore',
                   ),
                 if (status == 'blocked')
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+                      horizontal: 10,
+                      vertical: 6,
                     ),
                     decoration: BoxDecoration(
                       color: Colors.purple.withValues(alpha: 0.1),
@@ -1156,7 +1065,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                       'Contact Support',
                       style: TextStyle(
                         fontSize: 10,
-                        color: isDark ? Colors.purple[300] : Colors.purple,
+                        color: context.isDarkMode
+                            ? Colors.purple[300]
+                            : Colors.purple,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -1169,22 +1080,41 @@ class _BarberListScreenState extends State<BarberListScreen> {
     );
   }
 
+  Widget _buildDesktopActionButton({
+    required IconData icon,
+    required Color color,
+    required String tooltip,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 2),
+      child: IconButton(
+        icon: Icon(icon, size: 20),
+        color: color,
+        onPressed: onTap,
+        tooltip: tooltip,
+        splashRadius: 20,
+        padding: const EdgeInsets.all(8),
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      ),
+    );
+  }
+
   // ============================================================
   // ✅ TABLET VIEW
   // ============================================================
-  Widget _buildTabletView(double padding, bool isDark) {
+  Widget _buildTabletView() {
     return GridView.builder(
-      padding: EdgeInsets.all(padding),
+      padding: const EdgeInsets.all(20),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 400,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.1,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+        childAspectRatio: 1.0,
       ),
       itemCount: _barbers.length,
       itemBuilder: (context, index) {
-        final barber = _barbers[index];
-        return _buildMobileCard(barber, index, isDark);
+        return _buildBarberCard(_barbers[index]);
       },
     );
   }
@@ -1192,51 +1122,50 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ============================================================
   // ✅ MOBILE VIEW
   // ============================================================
-  Widget _buildMobileView(double padding, bool isDark) {
+  Widget _buildMobileView() {
     return ListView.builder(
-      padding: EdgeInsets.all(padding),
+      padding: const EdgeInsets.all(16),
       itemCount: _barbers.length,
       itemBuilder: (context, index) {
-        final barber = _barbers[index];
-        return _buildMobileCard(barber, index, isDark);
+        return _buildBarberCard(_barbers[index]);
       },
     );
   }
 
   // ============================================================
-  // ✅ MOBILE CARD
+  // ✅ BARBER CARD - Proper Design
   // ============================================================
-  Widget _buildMobileCard(Map<String, dynamic> barber, int index, bool isDark) {
+  Widget _buildBarberCard(Map<String, dynamic> barber) {
     final status = barber['status'] ?? 'active';
     final statusColor = _getStatusColor(status);
     final statusText = _getStatusText(status);
     final statusIcon = _getStatusIcon(status);
-    final cardColor = isDark
-        ? _cardColorsDark[index % _cardColorsDark.length]
-        : _cardColorsLight[index % _cardColorsLight.length];
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: context.cardColor,
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: context.dividerColor),
+      ),
       child: Container(
         decoration: BoxDecoration(
-          color: cardColor,
           borderRadius: BorderRadius.circular(16),
           border: Border(left: BorderSide(color: statusColor, width: 4)),
         ),
         child: Column(
           children: [
-            // Header with avatar and name
+            // ✅ Header - Avatar + Name + Status
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
                   Stack(
                     children: [
                       CircleAvatar(
                         radius: 28,
-                        backgroundColor: statusColor.withValues(alpha: 0.1),
+                        backgroundColor: statusColor.withValues(alpha: 0.15),
                         backgroundImage: barber['avatar'] != null
                             ? NetworkImage(barber['avatar'])
                             : null,
@@ -1246,7 +1175,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                                 style: TextStyle(
                                   color: statusColor,
                                   fontWeight: FontWeight.bold,
-                                  fontSize: 20,
+                                  fontSize: 22,
                                 ),
                               )
                             : null,
@@ -1256,11 +1185,14 @@ class _BarberListScreenState extends State<BarberListScreen> {
                           bottom: 0,
                           right: 0,
                           child: Container(
-                            padding: const EdgeInsets.all(2),
+                            padding: const EdgeInsets.all(3),
                             decoration: BoxDecoration(
                               color: statusColor,
                               shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 2),
+                              border: Border.all(
+                                color: context.cardColor,
+                                width: 2,
+                              ),
                             ),
                             child: Icon(
                               statusIcon,
@@ -1271,7 +1203,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                         ),
                     ],
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1280,72 +1212,32 @@ class _BarberListScreenState extends State<BarberListScreen> {
                           barber['name'],
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                        Text(
-                          barber['email'],
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark ? Colors.white60 : Colors.grey[600],
+                            fontSize: 17,
+                            color: context.textColor,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 2),
+                        Text(
+                          barber['email'],
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: context.secondaryTextColor,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 8),
                         Row(
                           children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: statusColor.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    statusIcon,
-                                    color: statusColor,
-                                    size: 12,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    statusText,
-                                    style: TextStyle(
-                                      color: statusColor,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                            _buildStatusChip(
+                              statusColor,
+                              statusIcon,
+                              statusText,
                             ),
                             const SizedBox(width: 8),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.blue.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '${barber['service_count']} services',
-                                style: TextStyle(
-                                  color: isDark
-                                      ? Colors.blue[300]
-                                      : Colors.blue[700],
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ),
+                            _buildServiceChip(barber['service_count']),
                           ],
                         ),
                       ],
@@ -1355,77 +1247,73 @@ class _BarberListScreenState extends State<BarberListScreen> {
               ),
             ),
 
-            // Contact and joined info
+            // ✅ Divider
+            Divider(height: 1, color: context.dividerColor),
+
+            // ✅ Info Row - Phone + Joined
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.05)
-                      : Colors.white.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.phone,
-                            size: 14,
-                            color: isDark ? Colors.white60 : Colors.grey[600],
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              barber['phone'] ?? 'No phone',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: barber['phone'] == 'No phone'
-                                    ? (isDark
-                                          ? Colors.white70
-                                          : Colors.grey[400])
-                                    : (isDark
-                                          ? Colors.white70
-                                          : Colors.grey[800]),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      width: 1,
-                      height: 20,
-                      color: isDark ? Colors.grey[700] : Colors.grey[300],
-                    ),
-                    Expanded(
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
-                        children: [
-                          Icon(
-                            Icons.calendar_today,
-                            size: 12,
-                            color: isDark ? Colors.white60 : Colors.grey[600],
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            _formatDate(barber['joined_at']),
+              padding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 12,
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.phone,
+                          size: 14,
+                          color: context.secondaryTextColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            barber['phone'] ?? 'No phone',
                             style: TextStyle(
-                              fontSize: 11,
-                              color: isDark ? Colors.white60 : Colors.grey[600],
+                              fontSize: 12,
+                              color: barber['phone'] == 'No phone'
+                                  ? context.secondaryTextColor
+                                  : context.textColor,
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                  Container(
+                    width: 1,
+                    height: 20,
+                    color: context.dividerColor,
+                  ),
+                  const SizedBox(width: 12),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.calendar_today,
+                        size: 12,
+                        color: context.secondaryTextColor,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _formatDate(barber['joined_at']),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: context.secondaryTextColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
 
-            // Action buttons
+            // ✅ Divider
+            Divider(height: 1, color: context.dividerColor),
+
+            // ✅ Action Buttons - Grid Layout
             Padding(
               padding: const EdgeInsets.all(12),
               child: Wrap(
@@ -1433,65 +1321,59 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 runSpacing: 8,
                 alignment: WrapAlignment.center,
                 children: [
-                  _buildMobileActionChip(
+                  _buildActionChip(
                     icon: Icons.edit,
                     label: 'Services',
                     color: Colors.blue,
                     onTap: () => _editBarberServices(barber),
-                    isDark: isDark,
                   ),
-                  _buildMobileActionChip(
+                  _buildActionChip(
                     icon: Icons.schedule,
                     label: 'Schedule',
                     color: Colors.teal,
                     onTap: () => _viewSchedule(barber),
-                    isDark: isDark,
                   ),
-                  _buildMobileActionChip(
+                  _buildActionChip(
                     icon: Icons.beach_access,
                     label: 'Leaves',
                     color: Colors.orange,
                     onTap: () => _viewLeaves(barber),
-                    isDark: isDark,
                   ),
                   if (status == 'active')
-                    _buildMobileActionChip(
+                    _buildActionChip(
                       icon: Icons.pause_circle,
                       label: 'Deactivate',
-                      color: Colors.orange,
+                      color: AppTheme.warning,
                       onTap: () => _deactivateBarber(
                         barber['salon_barber_id'],
                         barber['name'],
                         barber['id'],
                       ),
-                      isDark: isDark,
                     ),
                   if (status == 'inactive') ...[
-                    _buildMobileActionChip(
+                    _buildActionChip(
                       icon: Icons.play_circle,
                       label: 'Activate',
-                      color: Colors.green,
+                      color: AppTheme.success,
                       onTap: () => _activateBarber(
                         barber['salon_barber_id'],
                         barber['name'],
                         barber['id'],
                       ),
-                      isDark: isDark,
                     ),
-                    _buildMobileActionChip(
+                    _buildActionChip(
                       icon: Icons.delete,
                       label: 'Delete',
-                      color: Colors.red,
+                      color: AppTheme.error,
                       onTap: () => _deleteBarber(
                         barber['salon_barber_id'],
                         barber['name'],
                         barber['id'],
                       ),
-                      isDark: isDark,
                     ),
                   ],
                   if (status == 'deleted')
-                    _buildMobileActionChip(
+                    _buildActionChip(
                       icon: Icons.restore,
                       label: 'Restore',
                       color: Colors.blue,
@@ -1500,13 +1382,12 @@ class _BarberListScreenState extends State<BarberListScreen> {
                         barber['name'],
                         barber['id'],
                       ),
-                      isDark: isDark,
                     ),
                   if (status == 'blocked')
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
+                        horizontal: 12,
+                        vertical: 8,
                       ),
                       decoration: BoxDecoration(
                         color: Colors.purple.withValues(alpha: 0.1),
@@ -1515,13 +1396,28 @@ class _BarberListScreenState extends State<BarberListScreen> {
                           color: Colors.purple.withValues(alpha: 0.3),
                         ),
                       ),
-                      child: Text(
-                        'Blocked',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isDark ? Colors.purple[300] : Colors.purple,
-                          fontWeight: FontWeight.w500,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.block,
+                            size: 14,
+                            color: context.isDarkMode
+                                ? Colors.purple[300]
+                                : Colors.purple,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Blocked',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: context.isDarkMode
+                                  ? Colors.purple[300]
+                                  : Colors.purple,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                 ],
@@ -1533,37 +1429,86 @@ class _BarberListScreenState extends State<BarberListScreen> {
     );
   }
 
-  Widget _buildMobileActionChip({
+  Widget _buildStatusChip(Color color, IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: color, size: 12),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            style: TextStyle(
+              color: color,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildServiceChip(int count) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        '$count services',
+        style: TextStyle(
+          color: context.isDarkMode ? Colors.blue[300] : Colors.blue[700],
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionChip({
     required IconData icon,
     required String label,
     required Color color,
     required VoidCallback onTap,
-    required bool isDark,
   }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: isDark ? 0.2 : 0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: isDark ? 0.4 : 0.3)),
-      ),
+    return Material(
+      color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(20),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                color: color,
-                fontWeight: FontWeight.w500,
-              ),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: context.isDarkMode ? 0.15 : 0.1),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: color.withValues(alpha: context.isDarkMode ? 0.3 : 0.2),
             ),
-          ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: color,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1574,59 +1519,56 @@ class _BarberListScreenState extends State<BarberListScreen> {
     String value,
     IconData icon,
     Color color,
-    bool isDark,
   ) {
     return Expanded(
       child: Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark
-                ? color.withValues(alpha: 0.3)
-                : color.withValues(alpha: 0.3),
-          ),
+          color: context.cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
           boxShadow: [
             BoxShadow(
-              color: isDark
-                  ? Colors.black.withValues(alpha: 0.3)
-                  : color.withValues(alpha: 0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
+              color: color.withValues(alpha: 0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
             ),
           ],
         ),
         child: Row(
           children: [
             Container(
-              padding: const EdgeInsets.all(6),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
+                color: color.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(icon, color: color, size: 16),
+              child: Icon(icon, color: color, size: 20),
             ),
-            const SizedBox(width: 8),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: color,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    value,
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                    ),
                   ),
-                ),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 10,
-                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: context.secondaryTextColor,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -1638,7 +1580,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ✅ FILTER DIALOG
   // ============================================================
   void _showFilterDialog() {
-    final isDark = context.isDarkMode;
     String tempFilter = _selectedFilter!;
 
     showDialog(
@@ -1646,13 +1587,22 @@ class _BarberListScreenState extends State<BarberListScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            backgroundColor: context.cardColor,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
-            title: Text(
-              'Filter Barbers',
-              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            title: Row(
+              children: [
+                Icon(Icons.filter_list, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Filter Barbers',
+                  style: TextStyle(
+                    color: context.textColor,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1664,39 +1614,31 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   icon: Icons.people,
                   color: Colors.blue,
                   onTap: () => setDialogState(() => tempFilter = 'all'),
-                  isDark: isDark,
                 ),
-                const Divider(),
                 _buildFilterOption(
                   title: 'Active Only',
                   value: 'active',
                   currentFilter: tempFilter,
                   icon: Icons.check_circle,
-                  color: Colors.green,
+                  color: AppTheme.success,
                   onTap: () => setDialogState(() => tempFilter = 'active'),
-                  isDark: isDark,
                 ),
-                const Divider(),
                 _buildFilterOption(
                   title: 'Inactive Only',
                   value: 'inactive',
                   currentFilter: tempFilter,
                   icon: Icons.pause_circle,
-                  color: Colors.orange,
+                  color: AppTheme.warning,
                   onTap: () => setDialogState(() => tempFilter = 'inactive'),
-                  isDark: isDark,
                 ),
-                const Divider(),
                 _buildFilterOption(
                   title: 'Deleted Only',
                   value: 'deleted',
                   currentFilter: tempFilter,
                   icon: Icons.delete,
-                  color: Colors.red,
+                  color: AppTheme.error,
                   onTap: () => setDialogState(() => tempFilter = 'deleted'),
-                  isDark: isDark,
                 ),
-                const Divider(),
                 _buildFilterOption(
                   title: 'Blocked Only',
                   value: 'blocked',
@@ -1704,7 +1646,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   icon: Icons.block,
                   color: Colors.purple,
                   onTap: () => setDialogState(() => tempFilter = 'blocked'),
-                  isDark: isDark,
                 ),
               ],
             ),
@@ -1713,9 +1654,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 onPressed: () => Navigator.pop(context),
                 child: Text(
                   'Cancel',
-                  style: TextStyle(
-                    color: isDark ? Colors.white60 : Colors.grey[600],
-                  ),
+                  style: TextStyle(color: context.secondaryTextColor),
                 ),
               ),
               ElevatedButton(
@@ -1729,6 +1668,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
                 child: const Text('Apply'),
               ),
@@ -1746,51 +1688,59 @@ class _BarberListScreenState extends State<BarberListScreen> {
     required IconData icon,
     required Color color,
     required VoidCallback onTap,
-    required bool isDark,
   }) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: [
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: currentFilter == value
-                      ? color
-                      : (isDark ? Colors.grey[600]! : Colors.grey[400]!),
-                  width: 2,
+    final isSelected = currentFilter == value;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? color.withValues(alpha: 0.1)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? color.withValues(alpha: 0.3)
+                  : Colors.transparent,
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                color: currentFilter == value
-                    ? color.withValues(alpha: 0.1)
-                    : Colors.transparent,
+                child: Icon(icon, color: color, size: 16),
               ),
-              child: currentFilter == value
-                  ? Center(child: Icon(Icons.circle, color: color, size: 12))
-                  : null,
-            ),
-            const SizedBox(width: 12),
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    color: context.textColor,
+                  ),
+                ),
               ),
-              child: Icon(icon, color: color, size: 16),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 16,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-            ),
-          ],
+              if (isSelected)
+                Icon(Icons.check_circle, color: color, size: 20)
+              else
+                Icon(
+                  Icons.circle_outlined,
+                  color: context.secondaryTextColor,
+                  size: 20,
+                ),
+            ],
+          ),
         ),
       ),
     );
