@@ -49,36 +49,12 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
   String? _status;
   bool _hasError = false;
 
-  // ✅ API 36: Responsive variables
-  bool _isTablet = false;
-  bool _isWeb = false;
-
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkScreenSize();
       _processAuthCallback();
     });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _checkScreenSize();
-  }
-
-  void _checkScreenSize() {
-    final size = MediaQuery.of(context).size;
-    final isTablet = size.shortestSide >= 600;
-    final isWeb = size.width > 800;
-
-    if (_isTablet != isTablet || _isWeb != isWeb) {
-      setState(() {
-        _isTablet = isTablet;
-        _isWeb = isWeb;
-      });
-    }
   }
 
   // ============================================================
@@ -341,16 +317,36 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         await Future.delayed(const Duration(seconds: 1));
 
         if (mounted) {
-          context.go('/reset-password', extra: {'email': user.email});
+          // ✅ FIX: previously navigated to '/reset-password', which
+          // is ResetPasswordRequestScreen — the "type your email to
+          // get a reset link" screen. That route's builder also
+          // doesn't read `extra` at all (`builder: (_, _) => const
+          // ResetPasswordRequestScreen()`), so the email passed here
+          // was silently dropped on top of it. A user who just
+          // authenticated via a real recovery link got sent back to
+          // request ANOTHER link instead of actually setting a new
+          // password — exactly contradicting the "Please set your
+          // new password" status message above.
+          //
+          // The correct destination is '/reset-password-form'
+          // (ResetPasswordFormScreen), which is also where
+          // main.dart's own AuthChangeEvent.passwordRecovery listener
+          // navigates for this exact event. That screen works off
+          // the already-established session (supabase.auth.currentUser),
+          // so no `extra` is needed here either — matching how
+          // main.dart's listener calls it with no extra.
+          context.go('/reset-password-form');
         }
       } else {
         // ✅ No session yet — fall back to the pre-processed email
         // (from main.dart's upstream processing) instead of Uri.base,
-        // which is meaningless on mobile.
+        // which is meaningless on mobile. Without a session there's
+        // no way to actually set a new password, so this correctly
+        // sends the user to request a fresh link instead.
         final email = widget.preProcessedEmail;
 
         setState(() {
-          _status = 'Please enter your new password';
+          _status = 'Please request a new password reset link';
           _processing = false;
         });
 
@@ -482,6 +478,16 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
 
     Future.delayed(const Duration(seconds: 3), () {
       if (mounted) {
+        // ✅ NOTE (not changed, flagging for visibility): for
+        // otp_expired / access_denied specifically, the automatic
+        // navigation below was left commented out — those two error
+        // types show the error message and then just sit there with
+        // no auto-redirect (the "Go to Login" button in build() below
+        // still gives the user a manual way forward, so it isn't a
+        // full dead end, but it's inconsistent with every other error
+        // path, which does auto-redirect to /login). If a dedicated
+        // "link expired" screen is wanted, main.dart already has a
+        // '/verify-invalid' route ready to use here.
         if (errorCode == 'otp_expired' || error == 'access_denied') {
           // context.go('/verify-invalid');
         } else {

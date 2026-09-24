@@ -22,38 +22,22 @@ class _ResetPasswordFormScreenState extends State<ResetPasswordFormScreen> {
   bool _obscureConfirmPassword = true;
   bool _hasValidSession = false;
 
-  // ✅ API 36: Responsive variables
-  bool _isTablet = false;
-  bool _isWeb = false;
-
   @override
   void initState() {
     super.initState();
     _checkSession();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkScreenSize();
-    });
   }
 
+  // ✅ FIX: TextEditingControllers were created but never disposed —
+  // a classic Flutter resource leak. Every time this screen was
+  // pushed and popped (e.g. via the "Cancel" button or the back
+  // arrow), both controllers stayed alive with nothing releasing
+  // their internal listeners/resources.
   @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _checkScreenSize();
-  }
-
-  // ✅ API 36: Check screen size for responsive layout
-  void _checkScreenSize() {
-    final size = MediaQuery.of(context).size;
-    final isTablet = size.shortestSide >= 600;
-    final isWeb = size.width > 800;
-
-    if (_isTablet != isTablet || _isWeb != isWeb) {
-      setState(() {
-        _isTablet = isTablet;
-        _isWeb = isWeb;
-      });
-    }
+  void dispose() {
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
   }
 
   Future<void> _checkSession() async {
