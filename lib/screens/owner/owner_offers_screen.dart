@@ -61,7 +61,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   String get _salonCurrencySymbol =>
       _currencyService.getSymbol(_salonCurrencyCode);
 
-
   @override
   void initState() {
     super.initState();
@@ -79,6 +78,19 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // ============================================
+  // ✅ SAFE ERROR TEXT
+  // ============================================
+
+  /// ✅ FIX: `e.toString().substring(0, 100)` throws a RangeError whenever the
+  /// error message is shorter than 100 characters — which would crash inside
+  /// the catch block and the snackbar would never show. This helper is safe
+  /// for any length.
+  String _shortError(Object e) {
+    final s = e.toString();
+    return s.length > 100 ? s.substring(0, 100) : s;
   }
 
   // ============================================
@@ -106,6 +118,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         prefs.getString(TimezoneService.kUserTimezone) ??
         TimezoneService.getCurrentTimezone();
     await TimezoneService.setTimezone(_userTimezone);
+
+    // ✅ FIX: screen may have been closed while the awaits above were running
+    if (!mounted) return;
 
     setState(() {
       _isTimezoneLoaded = true;
@@ -173,6 +188,10 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
   }
 
   void _onScroll() {
+    // ✅ FIX: guard against the controller not being attached to a scroll view
+    // yet (e.g. while the loading/empty/error state is showing).
+    if (!_scrollController.hasClients) return;
+
     if (_scrollController.position.pixels > 200 && _showFloatingButton) {
       setState(() => _showFloatingButton = false);
     } else if (_scrollController.position.pixels <= 200 &&
@@ -250,6 +269,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
             .maybeSingle();
 
         if (salonResult != null) {
+          if (!mounted) return;
           setState(() {
             _currentSalonId = salonResult['id'] as int;
             _currentSalonName = salonResult['name'];
@@ -279,6 +299,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         return;
       }
 
+      if (!mounted) return;
       setState(() {
         _currentSalonId = salonResult['id'] as int;
         _currentSalonName = salonResult['name'];
@@ -451,7 +472,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '❌ Failed to create offer: ${e.toString().substring(0, 100)}',
+            '❌ Failed to create offer: ${_shortError(e)}',
             style: TextStyle(color: Colors.white),
           ),
           backgroundColor: Colors.red,
@@ -573,7 +594,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '❌ Failed: ${e.toString().substring(0, 100)}',
+              '❌ Failed: ${_shortError(e)}',
               style: TextStyle(color: Colors.white),
             ),
             backgroundColor: Colors.red,
@@ -634,7 +655,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '❌ Failed to update offer: ${e.toString().substring(0, 100)}',
+            '❌ Failed to update offer: ${_shortError(e)}',
             style: TextStyle(color: Colors.white),
           ),
           backgroundColor: Colors.red,
@@ -769,7 +790,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            '❌ Failed to delete offer: ${e.toString().substring(0, 100)}',
+            '❌ Failed to delete offer: ${_shortError(e)}',
             style: TextStyle(color: Colors.white),
           ),
           backgroundColor: Colors.red,
@@ -964,17 +985,22 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Left Sidebar
-            Container(
+            // ✅ FIX: wrapped in SingleChildScrollView so the stacked
+            // SalonInfoCard + StatsCard + QuickActionsCard never overflow
+            // the sidebar's bounded height on shorter web viewports.
+            SizedBox(
               width: 320,
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _buildSalonInfoCard(isDark),
-                  const SizedBox(height: 16),
-                  _buildStatsCard(),
-                  const SizedBox(height: 16),
-                  _buildQuickActionsCard(),
-                ],
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    _buildSalonInfoCard(isDark),
+                    const SizedBox(height: 16),
+                    _buildStatsCard(),
+                    const SizedBox(height: 16),
+                    _buildQuickActionsCard(),
+                  ],
+                ),
               ),
             ),
             // Right Content
@@ -1136,6 +1162,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(
               '⚡ Quick Actions',
@@ -1329,6 +1356,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                     fontWeight: FontWeight.bold,
                     color: isDarkMode ? Colors.white : Colors.black87,
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -1337,10 +1365,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                     fontSize: 13,
                     color: isDarkMode ? Colors.white60 : Colors.grey[600],
                   ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
+          const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
@@ -1824,7 +1854,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
-                        value: usedCount / usageLimit,
+                        // ✅ FIX: clamp so usedCount > usageLimit never
+                        // produces a value above 1.0
+                        value: (usedCount / usageLimit).clamp(0.0, 1.0),
                         backgroundColor:
                             isDark ? Colors.grey[800] : Colors.grey[200],
                         color: usageLimitColor,
@@ -1838,8 +1870,13 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
               const SizedBox(height: 12),
 
               // Action buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+              // ✅ FIX: Wrap instead of a plain Row so 3 action buttons
+              // (Deactivate/Edit/Delete) never force a horizontal overflow
+              // on narrower card widths — they simply flow to a new line.
+              Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                runSpacing: 8,
                 children: [
                   if (!isSmallScreen) ...[
                     _buildActionButton(
@@ -1851,14 +1888,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
                       color:
                           offer['is_active'] ? Colors.orange : Colors.green,
                     ),
-                    const SizedBox(width: 8),
                     _buildActionButton(
                       onPressed: () => _editOffer(offer),
                       icon: Icons.edit,
                       label: 'Edit',
                       color: Colors.blue,
                     ),
-                    const SizedBox(width: 8),
                     _buildActionButton(
                       onPressed: () => _deleteOffer(offer['id']),
                       icon: Icons.delete,
@@ -1934,24 +1969,38 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Filter Offers',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
+      builder: (context) => SafeArea(
+        // ✅ FIX: SingleChildScrollView safety-net so the sheet never
+        // overflows on very short screens (e.g. landscape phones).
+        child: SingleChildScrollView(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Filter Offers',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildFilterOption('All Offers', 'all', Icons.list_alt),
+                _buildFilterOption(
+                  'Active Offers',
+                  'active',
+                  Icons.check_circle,
+                ),
+                _buildFilterOption(
+                  'Expired/Inactive',
+                  'expired',
+                  Icons.timer_off,
+                ),
+              ],
             ),
-            const SizedBox(height: 16),
-            _buildFilterOption('All Offers', 'all', Icons.list_alt),
-            _buildFilterOption('Active Offers', 'active', Icons.check_circle),
-            _buildFilterOption('Expired/Inactive', 'expired', Icons.timer_off),
-          ],
+          ),
         ),
       ),
     );
@@ -1961,27 +2010,28 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen> {
     final isDark = _isDark;
     final isSelected = _selectedFilter == value;
 
-    return Material(
-      color: Colors.transparent,
-      child: ListTile(
-        leading: Icon(
-          icon,
-          color: isSelected
-              ? AppTheme.primary
-              : (isDark ? Colors.white60 : null),
-        ),
-        title: Text(
-          title,
-          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-        ),
-        trailing: isSelected
-            ? Icon(Icons.check, color: AppTheme.primary)
-            : null,
-        onTap: () {
-          setState(() => _selectedFilter = value);
-          Navigator.pop(context);
-        },
+    // ✅ FIX: removed the redundant `Material(color: transparent, ...)`
+    // wrapper. showModalBottomSheet already provides an ambient Material,
+    // so the extra transparent Material was the cause of the
+    // "ListTile background color or ink splashes may be invisible" warning.
+    return ListTile(
+      leading: Icon(
+        icon,
+        color: isSelected
+            ? AppTheme.primary
+            : (isDark ? Colors.white60 : null),
       ),
+      title: Text(
+        title,
+        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+      ),
+      trailing: isSelected
+          ? Icon(Icons.check, color: AppTheme.primary)
+          : null,
+      onTap: () {
+        setState(() => _selectedFilter = value);
+        Navigator.pop(context);
+      },
     );
   }
 }
@@ -2109,14 +2159,47 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     super.dispose();
   }
 
+  // ============================================
+  // ✅ FIX: SHORT-VIEWPORT HELPERS
+  // ============================================
+  // When the viewport is very short (e.g. browser DevTools docked at the
+  // bottom → dialog max height ≈ 95px), header + buttons alone are taller
+  // than the available space and the Column overflowed by ~21px.
+  // In that "compact" case the whole dialog scrolls instead.
+
+  /// Wraps [child] in a scroll view only in compact mode.
+  Widget _maybeScroll(bool compact, Widget child) =>
+      compact ? SingleChildScrollView(child: child) : child;
+
+  /// `Flexible` needs bounded height. In compact mode the outer scroll view
+  /// gives unbounded height, so we skip Flexible there.
+  Widget _maybeFlexible(bool compact, Widget child) =>
+      compact ? child : Flexible(child: child);
+
   Future<void> _selectDateRange() async {
     final isDark = _isDark;
 
+    // ✅ FIX: when EDITING an offer that already started, `_validFrom` is in
+    // the past, but firstDate was DateTime.now(). showDateRangePicker asserts
+    // that initialDateRange.start >= firstDate, so opening the picker on an
+    // old offer crashed. Widen the allowed range to include the current one.
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final validFromDay = DateTime(
+      _validFrom.year,
+      _validFrom.month,
+      _validFrom.day,
+    );
+    final validToDay = DateTime(_validTo.year, _validTo.month, _validTo.day);
+    final firstDate = validFromDay.isBefore(today) ? validFromDay : today;
+    final farthest = today.add(const Duration(days: 365));
+    final lastDate = validToDay.isAfter(farthest) ? validToDay : farthest;
+
     final DateTimeRange? picked = await showDateRangePicker(
       context: context,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-      initialDateRange: DateTimeRange(start: _validFrom, end: _validTo),
+      firstDate: firstDate,
+      lastDate: lastDate,
+      initialDateRange: DateTimeRange(start: validFromDay, end: validToDay),
       helpText: 'Select Offer Validity Period',
       confirmText: 'Apply',
       cancelText: 'Cancel',
@@ -2161,8 +2244,9 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     if (picked != null) {
       setState(() {
         _validFromTime = picked;
+        // ✅ FIX: (hour + 1) % 24 so picking 11 PM doesn't create hour 24
         _validToTime ??= TimeOfDay(
-          hour: picked.hour + 1,
+          hour: (picked.hour + 1) % 24,
           minute: picked.minute,
         );
       });
@@ -2261,305 +2345,94 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
     final isSmallScreen = context.isMobile;
     final isDark = context.isDarkMode;
 
+    // ✅ FIX: very short viewport → make the whole dialog scrollable
+    final compact = MediaQuery.of(context).size.height < 360;
+
     return Dialog(
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      child: Container(
-        width: isSmallScreen ? double.infinity : 600,
+      // ✅ FIX: insetPadding so the dialog always keeps margin from the
+      // screen edges instead of trying to be exactly 600px wide even
+      // when the viewport is narrower than that.
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: 600,
+          maxWidth: isSmallScreen ? double.infinity : 600,
           maxHeight: MediaQuery.of(context).size.height * 0.9,
         ),
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Icon(
-                    widget.isEditing ? Icons.edit : Icons.add,
-                    color: AppTheme.primary,
-                    size: 24,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    widget.isEditing ? 'Edit Offer' : 'Create New Offer',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: _maybeScroll(
+            compact,
+            Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      widget.isEditing ? Icons.edit : Icons.add,
+                      color: AppTheme.primary,
+                      size: 24,
                     ),
                   ),
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.close,
-                    color: isDark ? Colors.white60 : Colors.grey,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      widget.isEditing ? 'Edit Offer' : 'Create New Offer',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  onPressed: () => Navigator.pop(context),
-                  tooltip: 'Close',
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
+                  IconButton(
+                    icon: Icon(
+                      Icons.close,
+                      color: isDark ? Colors.white60 : Colors.grey,
+                    ),
+                    onPressed: () => Navigator.pop(context),
+                    tooltip: 'Close',
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
 
-            // Form
-            Expanded(
-              child: SingleChildScrollView(
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Title
-                      Text(
-                        'Offer Title *',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _titleController,
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'e.g., Summer Special Sale',
-                          hintStyle: TextStyle(
-                            color: isDark ? Colors.white70 : Colors.grey,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.grey[700]!
-                                  : Colors.grey[300]!,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.grey[700]!
-                                  : Colors.grey[300]!,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                              color: AppTheme.primary,
-                              width: 2,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: isDark
-                              ? const Color(0xFF2A2A2A)
-                              : Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'Please enter offer title';
-                          }
-                          if (value.length < 3) {
-                            return 'Title must be at least 3 characters';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Description
-                      Text(
-                        'Description (Optional)',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _descriptionController,
-                        maxLines: 3,
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'Describe your offer details...',
-                          hintStyle: TextStyle(
-                            color: isDark ? Colors.white70 : Colors.grey,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.grey[700]!
-                                  : Colors.grey[300]!,
-                            ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.grey[700]!
-                                  : Colors.grey[300]!,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                              color: AppTheme.primary,
-                              width: 2,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: isDark
-                              ? const Color(0xFF2A2A2A)
-                              : Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Discount Type
-                      Text(
-                        'Discount Type *',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: ChoiceChip(
-                              label: Text(
-                                'Percentage %',
-                                style: TextStyle(
-                                  color: _discountType == 'percentage'
-                                      ? AppTheme.primary
-                                      : (isDark
-                                            ? Colors.white70
-                                            : Colors.black87),
-                                ),
-                              ),
-                              selected: _discountType == 'percentage',
-                              onSelected: (selected) {
-                                if (selected) {
-                                  setState(() => _discountType = 'percentage');
-                                }
-                              },
-                              selectedColor: AppTheme.primary.withValues(
-                                alpha: 0.2,
-                              ),
-                              backgroundColor: isDark
-                                  ? const Color(0xFF2A2A2A)
-                                  : Colors.grey[100],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ChoiceChip(
-                              label: Text(
-                                'Fixed $_salonCurrencySymbol',
-                                style: TextStyle(
-                                  color: _discountType == 'fixed'
-                                      ? AppTheme.primary
-                                      : (isDark
-                                            ? Colors.white70
-                                            : Colors.black87),
-                                ),
-                              ),
-                              selected: _discountType == 'fixed',
-                              onSelected: (selected) {
-                                if (selected) {
-                                  setState(() => _discountType = 'fixed');
-                                }
-                              },
-                              selectedColor: AppTheme.primary.withValues(
-                                alpha: 0.2,
-                              ),
-                              backgroundColor: isDark
-                                  ? const Color(0xFF2A2A2A)
-                                  : Colors.grey[100],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: ChoiceChip(
-                              label: Text(
-                                'Free Service',
-                                style: TextStyle(
-                                  color: _discountType == 'free_service'
-                                      ? AppTheme.primary
-                                      : (isDark
-                                            ? Colors.white70
-                                            : Colors.black87),
-                                ),
-                              ),
-                              selected: _discountType == 'free_service',
-                              onSelected: (selected) {
-                                if (selected) {
-                                  setState(
-                                    () => _discountType = 'free_service',
-                                  );
-                                }
-                              },
-                              selectedColor: AppTheme.primary.withValues(
-                                alpha: 0.2,
-                              ),
-                              backgroundColor: isDark
-                                  ? const Color(0xFF2A2A2A)
-                                  : Colors.grey[100],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Discount Value
-                      if (_discountType != 'free_service') ...[
+              // Form
+              _maybeFlexible(
+                compact,
+                SingleChildScrollView(
+                  child: Form(
+                    key: _formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Title
                         Text(
-                          'Discount Value *',
+                          'Offer Title *',
                           style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
                             color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                         const SizedBox(height: 8),
                         TextFormField(
-                          controller: _discountValueController,
-                          keyboardType: TextInputType.number,
+                          controller: _titleController,
                           style: TextStyle(
                             color: isDark ? Colors.white : Colors.black87,
                           ),
                           decoration: InputDecoration(
-                            hintText: _discountType == 'percentage'
-                                ? 'e.g., 20'
-                                : 'e.g., 500',
-                            prefixText: _discountType == 'percentage'
-                                ? '% '
-                                : '$_salonCurrencySymbol ',
-                            prefixStyle: TextStyle(
-                              color: isDark ? Colors.white60 : Colors.grey,
-                            ),
+                            hintText: 'e.g., Summer Special Sale',
                             hintStyle: TextStyle(
                               color: isDark ? Colors.white70 : Colors.grey,
                             ),
@@ -2597,502 +2470,787 @@ class _OfferFormDialogState extends State<OfferFormDialog> {
                           ),
                           validator: (value) {
                             if (value == null || value.isEmpty) {
-                              return 'Please enter discount value';
+                              return 'Please enter offer title';
                             }
-                            final number = double.tryParse(value);
-                            if (number == null) {
-                              return 'Please enter a valid number';
-                            }
-                            if (number <= 0) {
-                              return 'Discount must be greater than 0';
-                            }
-                            if (_discountType == 'percentage' && number > 100) {
-                              return 'Percentage cannot exceed 100%';
-                            }
-                            // ✅ NEW: Currency-aware decimal validation
-                            if (_discountType == 'fixed' &&
-                                !_currencyUsesDecimals &&
-                                value.contains('.')) {
-                              final decimalPart = value.split('.').last;
-                              if (decimalPart.isNotEmpty &&
-                                  int.tryParse(decimalPart) != 0) {
-                                return '${widget.currencyCode} does not use decimals';
-                              }
+                            if (value.length < 3) {
+                              return 'Title must be at least 3 characters';
                             }
                             return null;
                           },
                         ),
                         const SizedBox(height: 16),
-                      ],
 
-                      // Points Required
-                      Text(
-                        'Points Required',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _pointsRequiredController,
-                        keyboardType: TextInputType.number,
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: '0 (Available for all customers)',
-                          hintStyle: TextStyle(
-                            color: isDark ? Colors.white70 : Colors.grey,
+                        // Description
+                        Text(
+                          'Description (Optional)',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.grey[700]!
-                                  : Colors.grey[300]!,
+                        ),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _descriptionController,
+                          maxLines: 3,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'Describe your offer details...',
+                            hintStyle: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.grey,
                             ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.grey[700]!
-                                  : Colors.grey[300]!,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
                             ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                              color: AppTheme.primary,
-                              width: 2,
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
                             ),
-                          ),
-                          filled: true,
-                          fillColor: isDark
-                              ? const Color(0xFF2A2A2A)
-                              : Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) return null;
-                          final points = int.tryParse(value);
-                          if (points == null) {
-                            return 'Please enter a valid number';
-                          }
-                          if (points < 0) {
-                            return 'Points cannot be negative';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Usage Limit
-                      Text(
-                        'Usage Limit (Optional)',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      TextFormField(
-                        controller: _usageLimitController,
-                        keyboardType: TextInputType.number,
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                        decoration: InputDecoration(
-                          hintText: 'e.g., 10 (First 10 customers only)',
-                          hintStyle: TextStyle(
-                            color: isDark ? Colors.white70 : Colors.grey,
-                          ),
-                          helperText: 'Leave empty for unlimited uses',
-                          helperStyle: TextStyle(
-                            color: isDark ? Colors.white70 : Colors.grey,
-                          ),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.grey[700]!
-                                  : Colors.grey[300]!,
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: AppTheme.primary,
+                                width: 2,
+                              ),
                             ),
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.grey[700]!
-                                  : Colors.grey[300]!,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: const BorderSide(
-                              color: AppTheme.primary,
-                              width: 2,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: isDark
-                              ? const Color(0xFF2A2A2A)
-                              : Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                        ),
-                        validator: (value) {
-                          if (value == null || value.isEmpty) return null;
-                          final limit = int.tryParse(value);
-                          if (limit == null) {
-                            return 'Please enter a valid number';
-                          }
-                          if (limit <= 0) {
-                            return 'Usage limit must be greater than 0';
-                          }
-                          return null;
-                        },
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Valid Period
-                      Text(
-                        'Valid Period *',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      InkWell(
-                        onTap: _selectDateRange,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 14,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isDark
+                            filled: true,
+                            fillColor: isDark
                                 ? const Color(0xFF2A2A2A)
                                 : Colors.grey[50],
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isDark
-                                  ? Colors.grey[700]!
-                                  : Colors.grey[300]!,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
                             ),
                           ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.calendar_today,
-                                color: AppTheme.primary,
-                                size: 20,
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Discount Type
+                        Text(
+                          'Discount Type *',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        // ✅ FIX: Wrap instead of Row+Expanded. A Row of 3
+                        // Expanded ChoiceChips could overflow horizontally
+                        // on narrow phones once the "Fixed <symbol>" /
+                        // "Free Service" labels didn't fit their share of
+                        // the width. Wrap lets chips reflow to a new line
+                        // instead of throwing a RenderFlex overflow.
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            ChoiceChip(
+                              label: Text(
+                                'Percentage %',
+                                style: TextStyle(
+                                  color: _discountType == 'percentage'
+                                      ? AppTheme.primary
+                                      : (isDark
+                                            ? Colors.white70
+                                            : Colors.black87),
+                                ),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  '${DateFormat('MMM dd, yyyy').format(_validFrom)} → ${DateFormat('MMM dd, yyyy').format(_validTo)}',
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: isDark
-                                        ? Colors.white
-                                        : Colors.black87,
+                              selected: _discountType == 'percentage',
+                              onSelected: (selected) {
+                                if (selected) {
+                                  setState(() => _discountType = 'percentage');
+                                }
+                              },
+                              selectedColor: AppTheme.primary.withValues(
+                                alpha: 0.2,
+                              ),
+                              backgroundColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.grey[100],
+                            ),
+                            ChoiceChip(
+                              label: Text(
+                                'Fixed $_salonCurrencySymbol',
+                                style: TextStyle(
+                                  color: _discountType == 'fixed'
+                                      ? AppTheme.primary
+                                      : (isDark
+                                            ? Colors.white70
+                                            : Colors.black87),
+                                ),
+                              ),
+                              selected: _discountType == 'fixed',
+                              onSelected: (selected) {
+                                if (selected) {
+                                  setState(() => _discountType = 'fixed');
+                                }
+                              },
+                              selectedColor: AppTheme.primary.withValues(
+                                alpha: 0.2,
+                              ),
+                              backgroundColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.grey[100],
+                            ),
+                            ChoiceChip(
+                              label: Text(
+                                'Free Service',
+                                style: TextStyle(
+                                  color: _discountType == 'free_service'
+                                      ? AppTheme.primary
+                                      : (isDark
+                                            ? Colors.white70
+                                            : Colors.black87),
+                                ),
+                              ),
+                              selected: _discountType == 'free_service',
+                              onSelected: (selected) {
+                                if (selected) {
+                                  setState(
+                                    () => _discountType = 'free_service',
+                                  );
+                                }
+                              },
+                              selectedColor: AppTheme.primary.withValues(
+                                alpha: 0.2,
+                              ),
+                              backgroundColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.grey[100],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Discount Value
+                        if (_discountType != 'free_service') ...[
+                          Text(
+                            'Discount Value *',
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          TextFormField(
+                            controller: _discountValueController,
+                            keyboardType: TextInputType.number,
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                            decoration: InputDecoration(
+                              hintText: _discountType == 'percentage'
+                                  ? 'e.g., 20'
+                                  : 'e.g., 500',
+                              prefixText: _discountType == 'percentage'
+                                  ? '% '
+                                  : '$_salonCurrencySymbol ',
+                              prefixStyle: TextStyle(
+                                color: isDark ? Colors.white60 : Colors.grey,
+                              ),
+                              hintStyle: TextStyle(
+                                color: isDark ? Colors.white70 : Colors.grey,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: isDark
+                                      ? Colors.grey[700]!
+                                      : Colors.grey[300]!,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(
+                                  color: isDark
+                                      ? Colors.grey[700]!
+                                      : Colors.grey[300]!,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(
+                                  color: AppTheme.primary,
+                                  width: 2,
+                                ),
+                              ),
+                              filled: true,
+                              fillColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.grey[50],
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
+                              ),
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Please enter discount value';
+                              }
+                              final number = double.tryParse(value);
+                              if (number == null) {
+                                return 'Please enter a valid number';
+                              }
+                              if (number <= 0) {
+                                return 'Discount must be greater than 0';
+                              }
+                              if (_discountType == 'percentage' &&
+                                  number > 100) {
+                                return 'Percentage cannot exceed 100%';
+                              }
+                              // ✅ Currency-aware decimal validation
+                              if (_discountType == 'fixed' &&
+                                  !_currencyUsesDecimals &&
+                                  value.contains('.')) {
+                                final decimalPart = value.split('.').last;
+                                if (decimalPart.isNotEmpty &&
+                                    int.tryParse(decimalPart) != 0) {
+                                  return '${widget.currencyCode} does not use decimals';
+                                }
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+
+                        // Points Required
+                        Text(
+                          'Points Required',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _pointsRequiredController,
+                          keyboardType: TextInputType.number,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: '0 (Available for all customers)',
+                            hintStyle: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.grey,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: AppTheme.primary,
+                                width: 2,
+                              ),
+                            ),
+                            filled: true,
+                            fillColor: isDark
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.grey[50],
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) return null;
+                            final points = int.tryParse(value);
+                            if (points == null) {
+                              return 'Please enter a valid number';
+                            }
+                            if (points < 0) {
+                              return 'Points cannot be negative';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Usage Limit
+                        Text(
+                          'Usage Limit (Optional)',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: _usageLimitController,
+                          keyboardType: TextInputType.number,
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                          decoration: InputDecoration(
+                            hintText: 'e.g., 10 (First 10 customers only)',
+                            hintStyle: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.grey,
+                            ),
+                            helperText: 'Leave empty for unlimited uses',
+                            helperStyle: TextStyle(
+                              color: isDark ? Colors.white70 : Colors.grey,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: const BorderSide(
+                                color: AppTheme.primary,
+                                width: 2,
+                              ),
+                            ),
+                            filled: true,
+                            fillColor: isDark
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.grey[50],
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                          ),
+                          validator: (value) {
+                            if (value == null || value.isEmpty) return null;
+                            final limit = int.tryParse(value);
+                            if (limit == null) {
+                              return 'Please enter a valid number';
+                            }
+                            if (limit <= 0) {
+                              return 'Usage limit must be greater than 0';
+                            }
+                            return null;
+                          },
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Valid Period
+                        Text(
+                          'Valid Period *',
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        InkWell(
+                          onTap: _selectDateRange,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.grey[50],
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.calendar_today,
+                                  color: AppTheme.primary,
+                                  size: 20,
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    '${DateFormat('MMM dd, yyyy').format(_validFrom)} → ${DateFormat('MMM dd, yyyy').format(_validTo)}',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.arrow_drop_down,
+                                  color: isDark ? Colors.white70 : Colors.grey,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Time Range Section
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.purple.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Colors.purple.withValues(alpha: 0.2),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              // ✅ FIX: a plain Row instead of SwitchListTile.
+                              // SwitchListTile sits directly inside this
+                              // purple DecoratedBox, which triggers "ListTile
+                              // background color or ink splashes may be
+                              // invisible" (the DecoratedBox hides the
+                              // ListTile's own Material effects) and, at
+                              // narrow widths where the subtitle wraps to two
+                              // lines, overflows the ListTile's fixed row
+                              // height. A custom Row has no such fixed height
+                              // and no ListTile-Material conflict — it simply
+                              // grows to fit the wrapped subtitle.
+                              InkWell(
+                                borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(12),
+                                ),
+                                onTap: () {
+                                  final next = !_hasTimeRestriction;
+                                  setState(() {
+                                    _hasTimeRestriction = next;
+                                    if (!next) {
+                                      _validFromTime = null;
+                                      _validToTime = null;
+                                    }
+                                  });
+                                },
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.center,
+                                    children: [
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              'Restrict to specific time range',
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w500,
+                                                color: isDark
+                                                    ? Colors.white
+                                                    : Colors.black87,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              'Offer valid only during selected hours',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                color: isDark
+                                                    ? Colors.white60
+                                                    : Colors.grey,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Switch(
+                                        value: _hasTimeRestriction,
+                                        onChanged: (value) {
+                                          setState(() {
+                                            _hasTimeRestriction = value;
+                                            if (!value) {
+                                              _validFromTime = null;
+                                              _validToTime = null;
+                                            }
+                                          });
+                                        },
+                                        activeThumbColor: AppTheme.primary,
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
-                              Icon(
-                                Icons.arrow_drop_down,
-                                color: isDark ? Colors.white70 : Colors.grey,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Time Range Section
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.purple.withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: Colors.purple.withValues(alpha: 0.2),
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            SwitchListTile(
-                              title: Text(
-                                'Restrict to specific time range',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w500,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                              subtitle: Text(
-                                'Offer valid only during selected hours',
-                                style: TextStyle(
-                                  color: isDark ? Colors.white60 : Colors.grey,
-                                ),
-                              ),
-                              value: _hasTimeRestriction,
-                              onChanged: (value) {
-                                setState(() {
-                                  _hasTimeRestriction = value;
-                                  if (!value) {
-                                    _validFromTime = null;
-                                    _validToTime = null;
-                                  }
-                                });
-                              },
-                              activeThumbColor: AppTheme.primary,
-                            ),
-                            if (_hasTimeRestriction) ...[
-                              const Divider(height: 1),
-                              Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: InkWell(
-                                        onTap: _selectFromTime,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 12,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: isDark
-                                                ? const Color(0xFF2A2A2A)
-                                                : Colors.grey[50],
-                                            borderRadius: BorderRadius.circular(
-                                              10,
+                              if (_hasTimeRestriction) ...[
+                                const Divider(height: 1),
+                                Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: InkWell(
+                                          onTap: _selectFromTime,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 12,
                                             ),
-                                            border: Border.all(
+                                            decoration: BoxDecoration(
                                               color: isDark
-                                                  ? Colors.grey[700]!
-                                                  : Colors.grey[300]!,
+                                                  ? const Color(0xFF2A2A2A)
+                                                  : Colors.grey[50],
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                              border: Border.all(
+                                                color: isDark
+                                                    ? Colors.grey[700]!
+                                                    : Colors.grey[300]!,
+                                              ),
                                             ),
-                                          ),
-                                          child: Column(
-                                            children: [
-                                              Text(
-                                                'Start Time',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: isDark
-                                                      ? Colors.white70
-                                                      : Colors.grey,
+                                            child: Column(
+                                              children: [
+                                                Text(
+                                                  'Start Time',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: isDark
+                                                        ? Colors.white70
+                                                        : Colors.grey,
+                                                  ),
                                                 ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                _validFromTime != null
-                                                    ? _formatTimeOfDay(
-                                                        _validFromTime!,
-                                                      )
-                                                    : 'Select Time',
-                                                style: TextStyle(
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w500,
-                                                  color: _validFromTime != null
-                                                      ? AppTheme.primary
-                                                      : (isDark
-                                                            ? Colors.white70
-                                                            : Colors.grey),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  _validFromTime != null
+                                                      ? _formatTimeOfDay(
+                                                          _validFromTime!,
+                                                        )
+                                                      : 'Select Time',
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight:
+                                                        FontWeight.w500,
+                                                    color:
+                                                        _validFromTime != null
+                                                            ? AppTheme.primary
+                                                            : (isDark
+                                                                  ? Colors
+                                                                        .white70
+                                                                  : Colors
+                                                                        .grey),
+                                                  ),
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Icon(
-                                      Icons.arrow_forward,
-                                      color: isDark
-                                          ? Colors.white70
-                                          : Colors.grey,
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Expanded(
-                                      child: InkWell(
-                                        onTap: _selectToTime,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 12,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: isDark
-                                                ? const Color(0xFF2A2A2A)
-                                                : Colors.grey[50],
-                                            borderRadius: BorderRadius.circular(
-                                              10,
+                                      const SizedBox(width: 16),
+                                      Icon(
+                                        Icons.arrow_forward,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.grey,
+                                      ),
+                                      const SizedBox(width: 16),
+                                      Expanded(
+                                        child: InkWell(
+                                          onTap: _selectToTime,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 12,
                                             ),
-                                            border: Border.all(
+                                            decoration: BoxDecoration(
                                               color: isDark
-                                                  ? Colors.grey[700]!
-                                                  : Colors.grey[300]!,
+                                                  ? const Color(0xFF2A2A2A)
+                                                  : Colors.grey[50],
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                              border: Border.all(
+                                                color: isDark
+                                                    ? Colors.grey[700]!
+                                                    : Colors.grey[300]!,
+                                              ),
                                             ),
-                                          ),
-                                          child: Column(
-                                            children: [
-                                              Text(
-                                                'End Time',
-                                                style: TextStyle(
-                                                  fontSize: 12,
-                                                  color: isDark
-                                                      ? Colors.white70
-                                                      : Colors.grey,
+                                            child: Column(
+                                              children: [
+                                                Text(
+                                                  'End Time',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    color: isDark
+                                                        ? Colors.white70
+                                                        : Colors.grey,
+                                                  ),
                                                 ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                _validToTime != null
-                                                    ? _formatTimeOfDay(
-                                                        _validToTime!,
-                                                      )
-                                                    : 'Select Time',
-                                                style: TextStyle(
-                                                  fontSize: 16,
-                                                  fontWeight: FontWeight.w500,
-                                                  color: _validToTime != null
-                                                      ? AppTheme.primary
-                                                      : (isDark
-                                                            ? Colors.white70
-                                                            : Colors.grey),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  _validToTime != null
+                                                      ? _formatTimeOfDay(
+                                                          _validToTime!,
+                                                        )
+                                                      : 'Select Time',
+                                                  style: TextStyle(
+                                                    fontSize: 16,
+                                                    fontWeight:
+                                                        FontWeight.w500,
+                                                    color: _validToTime != null
+                                                        ? AppTheme.primary
+                                                        : (isDark
+                                                              ? Colors
+                                                                    .white70
+                                                              : Colors.grey),
+                                                  ),
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
-                          ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 16),
+                        const SizedBox(height: 16),
 
-                      // Send Notification to Followers
-                      if (!widget.isEditing)
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: Colors.blue.withValues(alpha: 0.2),
+                        // Send Notification to Followers
+                        if (!widget.isEditing)
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: Colors.blue.withValues(alpha: 0.2),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: const Icon(
+                                    Icons.notifications_active,
+                                    color: Colors.blue,
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Notify Followers',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 14,
+                                          color: isDark
+                                              ? Colors.white
+                                              : Colors.black87,
+                                        ),
+                                      ),
+                                      Text(
+                                        'Send push notification to all salon followers',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isDark
+                                              ? Colors.white60
+                                              : Colors.grey[600],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Switch(
+                                  value: _sendNotification,
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _sendNotification = value;
+                                    });
+                                    widget.onNotificationToggle(value);
+                                  },
+                                  activeThumbColor: AppTheme.primary,
+                                ),
+                              ],
                             ),
                           ),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.blue.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: const Icon(
-                                  Icons.notifications_active,
-                                  color: Colors.blue,
-                                  size: 20,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Notify Followers',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 14,
-                                        color: isDark
-                                            ? Colors.white
-                                            : Colors.black87,
-                                      ),
-                                    ),
-                                    Text(
-                                      'Send push notification to all salon followers',
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: isDark
-                                            ? Colors.white60
-                                            : Colors.grey[600],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Switch(
-                                value: _sendNotification,
-                                onChanged: (value) {
-                                  setState(() {
-                                    _sendNotification = value;
-                                  });
-                                  widget.onNotificationToggle(value);
-                                },
-                                activeThumbColor: AppTheme.primary,
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
 
-            const SizedBox(height: 16),
+              const SizedBox(height: 16),
 
-            // Action Buttons
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: isDark ? Colors.white60 : Colors.grey,
-                      side: BorderSide(
-                        color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              // Action Buttons
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: isDark ? Colors.white60 : Colors.grey,
+                        side: BorderSide(
+                          color:
+                              isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text('Cancel'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: Text(
-                      widget.isEditing ? 'Update Offer' : 'Create Offer',
-                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      child: const Text('Cancel'),
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _submit,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        widget.isEditing ? 'Update Offer' : 'Create Offer',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
             ),
-          ],
+          ),
         ),
       ),
     );
