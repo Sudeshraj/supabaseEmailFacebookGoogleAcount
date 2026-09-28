@@ -5,6 +5,7 @@ import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/currency_service.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
+import 'package:flutter_application_1/widgets/service_menu_editor.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
@@ -89,6 +90,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   final ScrollController _scrollController = ScrollController();
 
+  // ==================== ✅ SERVICE MENU SECTION ====================
+  // After the first load, later refreshes happen silently (no full-page
+  // spinner) so the Service Menu keeps any unsaved edits.
+  bool _initialLoadDone = false;
+
+  // Bumped when returning from another screen so the Service Menu tree
+  // reloads from the database (it may have been changed elsewhere).
+  int _serviceMenuVersion = 0;
+
   // ============================================================
   // ✅ CURRENCY HELPERS
   // ============================================================
@@ -148,6 +158,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   @override
   void didPopNext() {
     debugPrint('🔄 Dashboard: Returning from child screen, refreshing data');
+    // Reload the Service Menu tree from the database
+    if (mounted) setState(() => _serviceMenuVersion++);
     _refreshAllData();
   }
 
@@ -1197,7 +1209,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ============================================================
 
   Future<void> _loadAllData() async {
-    setState(() => _isLoading = true);
+    // Full-page spinner only on the very first load. Later refreshes are
+    // silent so the Service Menu section keeps its state.
+    if (!_initialLoadDone) setState(() => _isLoading = true);
     try {
       debugPrint('🔄 _loadAllData() started');
 
@@ -1255,6 +1269,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       }
 
       if (mounted) {
+        _initialLoadDone = true;
         setState(() => _isLoading = false);
         debugPrint('✅ _loadAllData() completed');
       }
@@ -1634,6 +1649,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   Future<void> _refreshAllData() async => _loadAllData();
+
+  // Called by the Service Menu section after services were saved.
+  Future<void> _onServicesSaved() async {
+    await _checkOnboardingStatus();
+  }
 
   Future<void> _switchSalon(String salonId) async {
     if (_isSwitchingSalon || salonId == _selectedSalonId) return;
@@ -2241,6 +2261,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
         if (_completedSteps < _totalSteps) _buildStepFlow(),
 
+        // ✅ Service Menu — right below the Salon Setup section
+        _buildServiceMenuSection(isDark: isDark),
+
         if (_ownerSalons.isEmpty)
           Container(
             margin: const EdgeInsets.all(16),
@@ -2302,6 +2325,157 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
         const SizedBox(height: 80),
       ],
+    );
+  }
+
+  // ============================================================
+  // ✅ SERVICE MENU — styled like a menu book
+  // ============================================================
+
+  Widget _buildServiceMenuSection({required bool isDark}) {
+    final salonId = int.tryParse(_selectedSalonId ?? '');
+    if (_ownerSalons.isEmpty || salonId == null) {
+      return const SizedBox.shrink();
+    }
+
+    const accent = Colors.green; // same colour as the Service Management tiles
+    final paper = isDark ? const Color(0xFF17201A) : const Color(0xFFF6FBF6);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: paper,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: accent.withValues(alpha: isDark ? 0.35 : 0.25),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: accent.withValues(alpha: isDark ? 0.12 : 0.14),
+            blurRadius: 16.0,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Stack(
+        children: [
+          // Book spine with stitches
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 14,
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [accent.shade700, accent.shade400],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: List.generate(
+                  8,
+                  (_) => Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Page
+          Padding(
+            padding: const EdgeInsets.fromLTRB(30, 18, 16, 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: BoxDecoration(
+                        color: accent.withValues(alpha: isDark ? 0.24 : 0.14),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.menu_book_rounded,
+                        size: 24,
+                        color: accent,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        'Service Menu',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 21,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.3,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Categories contain services. Services contain variants.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Divider(
+                        color: accent.withValues(alpha: 0.35),
+                        height: 1,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Icon(
+                        Icons.auto_awesome,
+                        size: 13,
+                        color: accent.withValues(alpha: 0.7),
+                      ),
+                    ),
+                    Expanded(
+                      child: Divider(
+                        color: accent.withValues(alpha: 0.35),
+                        height: 1,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                ServiceMenuEditor(
+                  key: ValueKey('service_menu_${salonId}_$_serviceMenuVersion'),
+                  salonId: salonId,
+                  showHeader: false,
+                  accentColor: accent,
+                  onSaved: _onServicesSaved,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
