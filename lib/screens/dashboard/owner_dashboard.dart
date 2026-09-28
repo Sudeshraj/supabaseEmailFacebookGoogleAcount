@@ -2031,6 +2031,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: isWeb,
+        leadingWidth: 56,
+        titleSpacing: 0,
         leading: Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.menu, color: Colors.white),
@@ -2039,78 +2041,127 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             iconSize: 28,
           ),
         ),
-        title: Row(
-          children: [
-            if (!isWeb)
-              Flexible(
-                child: Text(
-                  _selectedSalonName != null && _selectedSalonName!.isNotEmpty
-                      ? _selectedSalonName!
-                      : 'Dashboard',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+        // ✅ Fixed: title no longer duplicates the salon chip on web
+        // (it's shown once in `actions` for web, and once here for mobile),
+        // and it is wrapped so it can never force the trailing actions to overflow.
+        title: isWeb
+            ? null
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      _selectedSalonName != null &&
+                              _selectedSalonName!.isNotEmpty
+                          ? _selectedSalonName!
+                          : 'Dashboard',
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.white,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                  overflow: TextOverflow.ellipsis,
-                ),
+                ],
               ),
-            const Spacer(),
-            if (!isWeb && _ownerSalons.length > 1)
-              Flexible(child: _buildSalonSelectorChip()),
-          ],
-        ),
+        // ✅ Fixed: actions row is now built with LayoutBuilder so the salon
+        // chip's max width is computed from the *actual* available space
+        // instead of a fixed 200px, which is what caused the 61px overflow
+        // on medium-width web windows.
         actions: [
-          if (isWeb &&
-              _selectedSalonName != null &&
-              _selectedSalonName!.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 200),
-                child: GestureDetector(
-                  onTap: _ownerSalons.length > 1
-                      ? _showSalonSelectorDialog
-                      : null,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.store, size: 14, color: Colors.white),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            _selectedSalonName!,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
+          Flexible(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Reserve space for notification icon + profile avatar first.
+                const reservedForIconsAndAvatar = 96.0;
+                final availableForChip =
+                    constraints.maxWidth - reservedForIconsAndAvatar;
+
+                final showChip = isWeb &&
+                    _ownerSalons.isNotEmpty &&
+                    _selectedSalonName != null &&
+                    _selectedSalonName!.isNotEmpty &&
+                    availableForChip > 60;
+
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (showChip)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: availableForChip.clamp(60, 200),
+                          ),
+                          child: GestureDetector(
+                            onTap: _ownerSalons.length > 1
+                                ? _showSalonSelectorDialog
+                                : null,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.store,
+                                    size: 14,
+                                    color: Colors.white,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Flexible(
+                                    child: Text(
+                                      _selectedSalonName!,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (_ownerSalons.length > 1)
+                                    const Icon(
+                                      Icons.arrow_drop_down,
+                                      size: 16,
+                                      color: Colors.white,
+                                    ),
+                                ],
+                              ),
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        if (_ownerSalons.length > 1)
-                          const Icon(
-                            Icons.arrow_drop_down,
-                            size: 16,
-                            color: Colors.white,
+                      ),
+                    // ✅ Mobile: show a compact salon chip on the right of the
+                    // AppBar (was previously stuffed into `title`, which is
+                    // what caused overflow on narrow phones with long names).
+                    if (!isWeb && _ownerSalons.length > 1 && !showChip)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 4),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: (constraints.maxWidth - 88).clamp(
+                              40,
+                              140,
+                            ),
                           ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+                          child: _buildSalonSelectorChip(),
+                        ),
+                      ),
+                    _buildNotificationIcon(),
+                    _buildProfileImage(),
+                  ],
+                );
+              },
             ),
-          _buildNotificationIcon(),
-          _buildProfileImage(),
+          ),
         ],
       ),
       drawer: SideMenu(
