@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -21,10 +22,9 @@ class SideMenu extends StatefulWidget {
   final String? profileImageUrl;
   final String? selectedSalonId;
   final VoidCallback? onMenuItemSelected;
-  // ✅ NEW: lets the parent (e.g. OwnerDashboard) know exactly which salon
+  // ✅ lets the parent (e.g. OwnerDashboard) know exactly which salon
   // was picked from the side menu, so it can update its own selected-salon
-  // state and reload the correct data. Without this the menu only knew
-  // about its own local selection and the dashboard never found out.
+  // state and reload the correct data.
   final void Function(String salonId)? onSalonChanged;
 
   const SideMenu({
@@ -65,8 +65,7 @@ class _SideMenuState extends State<SideMenu> {
   bool _isTablet = false;
   bool _isLargeScreen = false;
 
-  // ✅ Timezone (shown as a command menu item — same picker as the
-  // dashboards, just reachable from the side menu now)
+  // ✅ Timezone (shown as a command menu item)
   String _currentTimezone = '';
   String _timezoneFlag = '🌐';
   String _timezoneOffset = '';
@@ -190,6 +189,7 @@ class _SideMenuState extends State<SideMenu> {
           }
         }
 
+        if (!mounted) return;
         setState(() {
           _barberSalons = salons;
         });
@@ -223,6 +223,7 @@ class _SideMenuState extends State<SideMenu> {
         );
         debugPrint('✅ Total barber salons: ${_barberSalons.length}');
       } else {
+        if (!mounted) return;
         setState(() {
           _barberSalons = [];
           _selectedSalonId = null;
@@ -232,6 +233,7 @@ class _SideMenuState extends State<SideMenu> {
       }
     } catch (e) {
       debugPrint('❌ Error loading barber salons: $e');
+      if (!mounted) return;
       setState(() {
         _barberSalons = [];
       });
@@ -256,6 +258,7 @@ class _SideMenuState extends State<SideMenu> {
           .order('name');
 
       if (response.isNotEmpty) {
+        if (!mounted) return;
         setState(() {
           _ownerSalons = List<Map<String, dynamic>>.from(response);
         });
@@ -504,7 +507,7 @@ class _SideMenuState extends State<SideMenu> {
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) {
-        setState(() => _isLoading = false);
+        if (mounted) setState(() => _isLoading = false);
         return;
       }
 
@@ -617,7 +620,48 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 SWITCH PROFILE
+  // 🔥 NAVIGATE TO A ROLE'S DASHBOARD (shared helper)
+  // ============================================================
+  void _goToRoleDashboard(GoRouter router, String role) {
+    switch (role) {
+      case 'owner':
+        debugPrint('👑 Navigating to owner dashboard');
+        router.go('/owner');
+        break;
+      case 'barber':
+        debugPrint('💇 Navigating to barber dashboard');
+        router.go('/barber');
+        break;
+      case 'customer':
+        debugPrint('👤 Navigating to customer dashboard');
+        router.go('/customer');
+        break;
+      default:
+        router.go('/');
+    }
+  }
+
+  // ============================================================
+  // 🔥 SWITCH PROFILE  (FIXED)
+  //
+  // Root cause of the old bug:
+  //   - AppState reads the role from SessionManager.getCurrentRole()
+  //     on every refreshState(). The old code saved the new role
+  //     with SessionManager.updateUserRole(), then called
+  //     context.go('/owner') and only refreshed AppState in the
+  //     BACKGROUND. So the router redirect still saw the OLD role
+  //     (barber) → "Current role barber but has owner role →
+  //     /role-selector".
+  //   - Navigator.pop(context) + context.go(...) at the same time
+  //     also removed the last page → go_router "popped the last
+  //     page off of the stack" assertion.
+  //
+  // Fix:
+  //   1. appState.setCurrentRole(newRole) updates memory + prefs
+  //      immediately (BEFORE navigating), so redirect sees new role.
+  //   2. No Navigator.pop – router.go() replaces the page stack and
+  //      the drawer is disposed with it.
+  //   3. Supabase metadata update runs in background (no race).
   // ============================================================
   Future<void> _switchProfile(Map<String, dynamic> profile) async {
     if (!mounted) return;
@@ -628,104 +672,86 @@ class _SideMenuState extends State<SideMenu> {
     }
 
     if (profile['is_active'] == false) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('This profile is inactive'),
-            backgroundColor: Colors.orange,
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This profile is inactive'),
+          backgroundColor: Colors.orange,
+        ),
+      );
       return;
     }
 
     if (profile['is_blocked'] == true) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('This profile is blocked'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This profile is blocked'),
+          backgroundColor: Colors.red,
+        ),
+      );
       return;
     }
+
+    // ✅ Capture everything that needs `context` BEFORE any await
+    final router = GoRouter.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    final String newRole = profile['role'] as String;
 
     setState(() => _isLoading = true);
 
     try {
-      debugPrint('🔄 Switching to profile: ${profile['role']}');
+      debugPrint('🔄 Switching to profile: $newRole');
 
       final currentUser = supabase.auth.currentUser;
       final email = widget.userEmail ?? currentUser?.email;
-
       if (email == null) throw Exception('No email found');
 
-      await SessionManager.updateUserRole(profile['role']);
-      debugPrint('✅ Role saved to SessionManager: ${profile['role']}');
+      // 1️⃣ Keep the existing SessionManager role update
+      await SessionManager.updateUserRole(newRole);
 
+      // 2️⃣ ✅ Update AppState (memory + SharedPreferences) FIRST
+      await appState.setCurrentRole(newRole);
+
+      // Safety net: setCurrentRole() silently ignores roles that are
+      // not in appState.roles yet (stale list). Fall back to saving
+      // the role and reloading the state before we navigate.
+      if (appState.currentRole != newRole) {
+        debugPrint('⚠️ AppState roles stale – forcing refresh');
+        await SessionManager.saveCurrentRole(newRole);
+        await appState.refreshState(silent: true);
+        await appState.setCurrentRole(newRole);
+      }
+      debugPrint('✅ AppState currentRole = ${appState.currentRole}');
+
+      // 3️⃣ Supabase metadata in the BACKGROUND – must not block or
+      // race with navigation.
       if (currentUser != null) {
         final currentMetadata = currentUser.userMetadata ?? {};
-        await supabase.auth.updateUser(
-          UserAttributes(
-            data: {...currentMetadata, 'current_role': profile['role']},
-          ),
-        );
-        debugPrint('✅ User metadata updated with role: ${profile['role']}');
+        unawaited(() async {
+          try {
+            await supabase.auth.updateUser(
+              UserAttributes(
+                data: {...currentMetadata, 'current_role': newRole},
+              ),
+            );
+            debugPrint('✅ User metadata updated with role: $newRole');
+          } catch (e) {
+            debugPrint('❌ Metadata update error (non-fatal): $e');
+          }
+        }());
       }
 
-      if (!mounted) return;
-
-      Navigator.pop(context);
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-
-        try {
-          switch (profile['role']) {
-            case 'owner':
-              debugPrint('👑 Navigating to owner dashboard');
-              context.go('/owner');
-              break;
-            case 'barber':
-              debugPrint('💇 Navigating to barber dashboard');
-              context.go('/barber');
-              break;
-            case 'customer':
-              debugPrint('👤 Navigating to customer dashboard');
-              context.go('/customer');
-              break;
-            default:
-              context.go('/');
-          }
-        } catch (e) {
-          debugPrint('❌ Navigation error: $e');
-        }
-      });
-
-      appState
-          .refreshState()
-          .then((_) {
-            debugPrint('✅ App state refreshed in background');
-          })
-          .catchError((e) {
-            debugPrint('❌ Background refresh error: $e');
-          });
-
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (mounted) {
-          setState(() => _isLoading = false);
-        }
-      });
+      // 4️⃣ Navigate. No Navigator.pop – go() replaces the stack.
+      _goToRoleDashboard(router, newRole);
     } catch (e) {
       debugPrint('❌ Error switching profile: $e');
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Error switching profile: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error switching profile: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
         setState(() => _isLoading = false);
       }
     }
@@ -759,21 +785,8 @@ class _SideMenuState extends State<SideMenu> {
     final selectedRole = await showDialog<String>(
       context: context,
       builder: (context) {
-        // ✅ FINAL FIX: everything — title, description AND the
-        // "Cancel" button — now lives inside ONE single
-        // SingleChildScrollView. Previously the title/Cancel button
-        // sat OUTSIDE the scrollable area as "fixed" Column children;
-        // on a very short screen (e.g. a small preview/emulator
-        // window where the dialog only gets ~70-100px of height)
-        // those fixed pieces alone were already taller than the
-        // space available, so even a Flexible + scrollable content
-        // area couldn't prevent the RenderFlex overflow.
-        //
-        // By putting the ENTIRE dialog body in one scroll view, no
-        // matter how small maxHeight ends up being, the dialog will
-        // simply become scrollable instead of overflowing — it can
-        // never throw a "RenderFlex overflowed" error again,
-        // regardless of screen size, font scaling, or keyboard height.
+        // Everything (title, description, Cancel) lives inside ONE
+        // SingleChildScrollView so the dialog can never overflow.
         final dialogMaxHeight = MediaQuery.of(context).size.height * 0.9;
 
         return Dialog(
@@ -791,7 +804,6 @@ class _SideMenuState extends State<SideMenu> {
               maxWidth: 400,
               maxHeight: dialogMaxHeight,
             ),
-            // ✅ Single scroll view wraps title + content + actions.
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
               child: Column(
@@ -843,10 +855,13 @@ class _SideMenuState extends State<SideMenu> {
   }
 
   // ============================================================
-  // 🔥 CREATE PROFILE DIRECTLY
+  // 🔥 CREATE PROFILE DIRECTLY  (FIXED navigation part)
   // ============================================================
   Future<void> _createProfileDirectly(String role) async {
     if (!mounted) return;
+
+    // ✅ Capture router BEFORE any await
+    final router = GoRouter.of(context);
 
     setState(() => _isLoading = true);
 
@@ -970,7 +985,7 @@ class _SideMenuState extends State<SideMenu> {
           .eq('status', 'active');
 
       final List<String> userRoles = userRolesResponse
-          .map((r) => r['roles']['name'] as String)
+          .map<String>((r) => r['roles']['name'] as String)
           .toList();
 
       debugPrint('📝 Active user roles after update: $userRoles');
@@ -1008,6 +1023,13 @@ class _SideMenuState extends State<SideMenu> {
 
       await _loadUserRolesFromDatabase();
 
+      // ✅ FIX: refresh AppState (so the new role is in appState.roles)
+      // and set the current role BEFORE navigating – no background
+      // refresh, no router race.
+      await appState.refreshState(silent: true);
+      await appState.setCurrentRole(role);
+      debugPrint('✅ AppState currentRole = ${appState.currentRole}');
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1020,44 +1042,8 @@ class _SideMenuState extends State<SideMenu> {
         );
       }
 
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-
-        debugPrint('🎯 Navigating directly to dashboard: $role');
-
-        try {
-          switch (role) {
-            case 'owner':
-              context.go('/owner');
-              break;
-            case 'barber':
-              context.go('/barber');
-              break;
-            case 'customer':
-              context.go('/customer');
-              break;
-            default:
-              context.go('/');
-          }
-        } catch (e) {
-          debugPrint('❌ Navigation error: $e');
-        }
-      });
-
-      appState
-          .refreshState()
-          .then((_) {
-            debugPrint('✅ App state refreshed in background');
-          })
-          .catchError((e) {
-            debugPrint('❌ Background refresh error: $e');
-          });
-
-      Future.delayed(const Duration(milliseconds: 500), () {
-        if (mounted) {
-          setState(() => _isLoading = false);
-        }
-      });
+      debugPrint('🎯 Navigating directly to dashboard: $role');
+      _goToRoleDashboard(router, role);
     } catch (e) {
       debugPrint('❌ Error creating profile directly: $e');
       if (mounted) {
@@ -1068,6 +1054,7 @@ class _SideMenuState extends State<SideMenu> {
           ),
         );
       }
+    } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -2124,9 +2111,8 @@ class _SideMenuState extends State<SideMenu> {
   // ============================================================
   List<Map<String, dynamic>> _getCommonMenuItems() {
     return [
-      // ✅ NEW: Timezone as a side-menu command item — opens the same
-      // searchable timezone picker used on the dashboards, without
-      // touching the dashboard's own timezone selector at all.
+      // ✅ Timezone as a side-menu command item — opens the same
+      // searchable timezone picker used on the dashboards.
       {
         'icon': Icons.access_time,
         'title': 'Timezone',
@@ -2374,8 +2360,7 @@ class _SideMenuState extends State<SideMenu> {
               fontWeight: FontWeight.w500,
             ),
           ),
-          // ✅ NEW: optional subtitle (used by the Timezone command item
-          // to show the currently selected timezone, flag & offset).
+          // ✅ optional subtitle (used by the Timezone command item)
           subtitle: item['subtitle'] != null
               ? Text(
                   item['subtitle'] as String,
@@ -2412,10 +2397,8 @@ class _SideMenuState extends State<SideMenu> {
                   color: isDark ? Colors.white30 : Colors.grey[400],
                 ),
           onTap: () {
-            // ✅ NEW: Timezone command item opens the picker dialog on
-            // top of the (still-open) drawer instead of navigating —
-            // the drawer is closed automatically once a timezone is
-            // actually applied (see _applyTimezoneChange).
+            // ✅ Timezone command item opens the picker dialog on top
+            // of the (still-open) drawer instead of navigating.
             if (item['isTimezoneSelector'] == true) {
               _changeTimezone();
               return;
@@ -2571,12 +2554,6 @@ class _SideMenuState extends State<SideMenu> {
 
   // ============================================================
   // 🔥 TIMEZONE SELECTOR (Command item logic)
-  // ✅ FIXED: removed the fragile manual pixel-budget math that caused
-  // "RenderFlex overflowed" errors. Now uses Flexible (loose fit) for
-  // the scrollable list area, so if content is taller than the dialog
-  // it just shrinks/scrolls instead of overflowing — this can never
-  // throw an overflow error again, regardless of screen size, font
-  // scaling, or keyboard height.
   // ============================================================
   Future<void> _changeTimezone() async {
     final allTimezones = TimezoneService.getAllAvailableTimezones();
@@ -2678,16 +2655,10 @@ class _SideMenuState extends State<SideMenu> {
               }
             }
 
-            // ✅ FIX: whether the footer / "found" summary fit comfortably.
-            // Below this we hide the non-essential bits so the important
-            // stuff (search + list) always gets priority space.
             final bool isCompact = dialogHeight < 420;
             final bool showFooter = keyboardHeight == 0 && !isCompact;
             final bool showFoundText = hasSearchQuery && !isCompact;
 
-            // ✅ FIX: estimate the height every "fixed" (non-scrolling)
-            // chrome element needs, then give whatever remains to the
-            // list area via a bounded SizedBox instead of Expanded.
             const double headerHeight = 56;
             const double dividerHeight = 17;
             const double searchFieldHeight = 12 + 56 + 12;
@@ -2722,9 +2693,6 @@ class _SideMenuState extends State<SideMenu> {
                 borderRadius: BorderRadius.circular(24),
               ),
               child: ConstrainedBox(
-                // ✅ FIX: max height as a hard ceiling — actual content
-                // decides real height, but can never exceed this and can
-                // never overflow it because everything below is scrollable.
                 constraints: BoxConstraints(
                   maxHeight: dialogHeight,
                   maxWidth: dialogWidth,
@@ -2732,9 +2700,6 @@ class _SideMenuState extends State<SideMenu> {
                 child: Container(
                   width: dialogWidth,
                   padding: const EdgeInsets.all(16),
-                  // ✅ FIX: SingleChildScrollView guarantees this dialog can
-                  // NEVER throw a RenderFlex overflow again — if content is
-                  // taller than available space it just scrolls instead.
                   child: SingleChildScrollView(
                     physics: const ClampingScrollPhysics(),
                     child: Column(
@@ -2810,9 +2775,6 @@ class _SideMenuState extends State<SideMenu> {
                               ),
                             ),
                           ),
-                        // ✅ FIX: bounded SizedBox instead of Expanded — this
-                        // is what makes it legal to nest inside
-                        // SingleChildScrollView without a layout crash.
                         SizedBox(
                           height: listAreaHeight,
                           child: hasSearchQuery
@@ -3019,6 +2981,8 @@ class _SideMenuState extends State<SideMenu> {
       },
     );
 
+    searchController.dispose();
+
     if (result != null && result != _currentTimezone) {
       await _applyTimezoneChange(result);
     }
@@ -3053,7 +3017,7 @@ class _SideMenuState extends State<SideMenu> {
       );
 
       // ✅ Close the drawer and let the parent screen refresh its
-      // timezone-dependent data — same as the dashboard's own selector.
+      // timezone-dependent data.
       if (mounted) {
         Navigator.pop(context);
       }
@@ -3393,7 +3357,7 @@ class _SideMenuState extends State<SideMenu> {
             ),
             child: Text(
               offset,
-              style: TextStyle(
+              style: const TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 11,
                 color: AppTheme.primary,
@@ -3435,24 +3399,8 @@ class _SideMenuState extends State<SideMenu> {
             )
           : Container(
               color: isDark ? const Color(0xFF121212) : Colors.white,
-              // ✅ FINAL FIX: no more splitting into a fixed part + an
-              // Expanded part. Any split like that (header vs. Expanded
-              // list, or Expanded list vs. fixed bottom bar) can still
-              // overflow if the *fixed* pieces alone are taller than
-              // whatever height the Drawer actually gets — which can be
-              // surprisingly small (rotation, split-screen, a resizable
-              // window, a keyboard, or just a small device).
-              //
-              // The only layout that can NEVER overflow, no matter how
-              // small the available height is, is a single scrolling
-              // column: header, menu items, and the bottom section
-              // (Settings / Logout / Version) all live in ONE
-              // SingleChildScrollView. On any normal-height screen this
-              // looks identical to before — the bottom section still sits
-              // right after the menu, fully visible without scrolling.
-              // It only becomes scrollable in the rare case where there
-              // truly isn't enough room, which is the correct, safe
-              // fallback instead of clipped/overflowing pixels.
+              // Single scrolling column: header, menu items and the
+              // bottom section can never overflow, whatever the height.
               child: SafeArea(
                 top: false,
                 child: SingleChildScrollView(
