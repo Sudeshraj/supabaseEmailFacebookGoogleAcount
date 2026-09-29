@@ -2341,140 +2341,127 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     const accent = Colors.green; // same colour as the Service Management tiles
     final paper = isDark ? const Color(0xFF17201A) : const Color(0xFFF6FBF6);
 
+    // Mobile gets the full screen width and tight padding so the tree has
+    // maximum room — no side border/spine eating into it.
+    final horizontalMargin = _isWeb ? 16.0 : 0.0;
+    final horizontalPadding = _isWeb ? 20.0 : 10.0;
+    final cornerRadius = _isWeb ? 20.0 : 0.0;
+
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      clipBehavior: Clip.antiAlias,
+      margin: EdgeInsets.symmetric(horizontal: horizontalMargin, vertical: 10),
       decoration: BoxDecoration(
         color: paper,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: accent.withValues(alpha: isDark ? 0.35 : 0.25),
-          width: 1.2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: accent.withValues(alpha: isDark ? 0.12 : 0.14),
-            blurRadius: 16.0,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(cornerRadius),
+        border: _isWeb
+            ? Border.all(
+                color: accent.withValues(alpha: isDark ? 0.35 : 0.25),
+                width: 1.2,
+              )
+            : Border(
+                top: BorderSide(
+                  color: accent.withValues(alpha: isDark ? 0.3 : 0.2),
+                  width: 1,
+                ),
+                bottom: BorderSide(
+                  color: accent.withValues(alpha: isDark ? 0.3 : 0.2),
+                  width: 1,
+                ),
+              ),
+        boxShadow: _isWeb
+            ? [
+                BoxShadow(
+                  color: accent.withValues(alpha: isDark ? 0.12 : 0.14),
+                  blurRadius: 16.0,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
       ),
-      child: Stack(
-        children: [
-          // Book spine with stitches
-          Positioned(
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 14,
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [accent.shade700, accent.shade400],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: List.generate(
-                  8,
-                  (_) => Container(
-                    width: 5,
-                    height: 5,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.7),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // Page
-          Padding(
-            padding: const EdgeInsets.fromLTRB(30, 18, 16, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          16,
+          horizontalPadding,
+          16,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(9),
-                      decoration: BoxDecoration(
-                        color: accent.withValues(alpha: isDark ? 0.24 : 0.14),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.menu_book_rounded,
-                        size: 24,
-                        color: accent,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Flexible(
-                      child: Text(
-                        'Service Menu',
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.3,
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Categories contain services. Services contain variants.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 11.5,
-                    color: isDark ? Colors.white60 : Colors.grey[600],
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: isDark ? 0.24 : 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.menu_book_rounded,
+                    size: 20,
+                    color: accent,
                   ),
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Divider(
-                        color: accent.withValues(alpha: 0.35),
-                        height: 1,
-                      ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    'Service Menu',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.3,
+                      color: isDark ? Colors.white : Colors.black87,
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: Icon(
-                        Icons.auto_awesome,
-                        size: 13,
-                        color: accent.withValues(alpha: 0.7),
-                      ),
-                    ),
-                    Expanded(
-                      child: Divider(
-                        color: accent.withValues(alpha: 0.35),
-                        height: 1,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                ServiceMenuEditor(
-                  key: ValueKey('service_menu_${salonId}_$_serviceMenuVersion'),
-                  salonId: salonId,
-                  showHeader: false,
-                  accentColor: accent,
-                  onSaved: _onServicesSaved,
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 6),
+            Text(
+              'Categories contain services. Services contain variants.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Divider(
+                    color: accent.withValues(alpha: 0.35),
+                    height: 1,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Icon(
+                    Icons.auto_awesome,
+                    size: 13,
+                    color: accent.withValues(alpha: 0.7),
+                  ),
+                ),
+                Expanded(
+                  child: Divider(
+                    color: accent.withValues(alpha: 0.35),
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            ServiceMenuEditor(
+              key: ValueKey('service_menu_${salonId}_$_serviceMenuVersion'),
+              salonId: salonId,
+              showHeader: false,
+              accentColor: accent,
+              onSaved: _onServicesSaved,
+            ),
+          ],
+        ),
       ),
     );
   }

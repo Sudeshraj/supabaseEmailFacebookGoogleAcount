@@ -1025,8 +1025,8 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     setState(() {
       final services = _categories[categoryIndex]['services'] as List;
       if (editServiceIndex != null) {
-        services[editServiceIndex] = {
-          ...services[editServiceIndex],
+        services[editServiceIndex] = <String, dynamic>{
+          ...services[editServiceIndex] as Map<String, dynamic>,
           ...result,
         };
       } else {
@@ -1644,8 +1644,8 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     setState(() {
       final variants = (service['variants'] as List);
       if (editVariantIndex != null) {
-        variants[editVariantIndex] = {
-          ...variants[editVariantIndex],
+        variants[editVariantIndex] = <String, dynamic>{
+          ...variants[editVariantIndex] as Map<String, dynamic>,
           ...result,
         };
       } else {
@@ -1900,6 +1900,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
       }
 
       // 2) Update existing rows, insert new ones.
+      final failedUpdates = <String>[];
       for (int ci = 0; ci < _categories.length; ci++) {
         final cat = _categories[ci];
         final catData = <String, dynamic>{
@@ -1916,10 +1917,14 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         int catId;
         if (cat['id'] is int) {
           catId = cat['id'] as int;
-          await supabase
+          final updated = await supabase
               .from('salon_categories')
               .update(catData)
-              .eq('id', catId);
+              .eq('id', catId)
+              .select('id');
+          if (updated.isEmpty) {
+            failedUpdates.add('category "${cat['display_name']}"');
+          }
         } else {
           final inserted = await supabase
               .from('salon_categories')
@@ -1943,13 +1948,17 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
           int svcId;
           if (svc['id'] is int) {
             svcId = svc['id'] as int;
-            await supabase
+            final updated = await supabase
                 .from('services')
                 .update({
                   ...svcData,
                   'updated_at': DateTime.now().toIso8601String(),
                 })
-                .eq('id', svcId);
+                .eq('id', svcId)
+                .select('id');
+            if (updated.isEmpty) {
+              failedUpdates.add('service "${svc['name']}"');
+            }
           } else {
             final inserted = await supabase
                 .from('services')
@@ -1980,10 +1989,15 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
             };
 
             if (v['variant_id'] is int) {
-              await supabase
+              final updated = await supabase
                   .from('service_variants')
                   .update(variantData)
-                  .eq('id', v['variant_id'] as int);
+                  .eq('id', v['variant_id'] as int)
+                  .select('id');
+              if (updated.isEmpty) {
+                failedUpdates.add(
+                    'a variant of "${svc['name']}" (${v['gender_name']} • ${v['age_category_name']})');
+              }
             } else {
               await supabase
                   .from('service_variants')
@@ -1997,12 +2011,31 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
       await _loadData(silent: true);
 
       if (!mounted) return;
-      _showSnackBar(
-        'Saved: ${_categories.length} categor${_categories.length == 1 ? 'y' : 'ies'}, '
-        '$totalServices service${totalServices == 1 ? '' : 's'}, '
-        '$totalVariants variant${totalVariants == 1 ? '' : 's'}',
-        Colors.green,
-      );
+
+      if (failedUpdates.isNotEmpty) {
+        // The list you see now reflects the server's actual data — the
+        // edits above never reached it, so nothing was lost, but nothing
+        // was saved either.
+        await showCustomAlert(
+          context: context,
+          title: "Some changes weren't saved",
+          message:
+              "New items saved fine, but ${failedUpdates.length} existing "
+              "item${failedUpdates.length == 1 ? '' : 's'} could not be "
+              'updated — most likely your account lacks UPDATE permission '
+              '(a Supabase Row Level Security policy) on this table. '
+              'Ask whoever manages the database to allow UPDATE for your '
+              'role, then try again.\n\nAffected: ${failedUpdates.join(', ')}',
+          isError: true,
+        );
+      } else {
+        _showSnackBar(
+          'Saved: ${_categories.length} categor${_categories.length == 1 ? 'y' : 'ies'}, '
+          '$totalServices service${totalServices == 1 ? '' : 's'}, '
+          '$totalVariants variant${totalVariants == 1 ? '' : 's'}',
+          Colors.green,
+        );
+      }
       widget.onSaved?.call();
     } catch (e) {
       debugPrint('Error saving: $e');
