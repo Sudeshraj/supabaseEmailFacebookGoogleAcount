@@ -18,39 +18,7 @@ class _ResetPasswordRequestScreenState
   bool _loading = false;
   bool _isValidEmail = false;
   String? _emailError;
-  final _formKey = GlobalKey<FormState>();
   final supabase = Supabase.instance.client;
-
-  // ✅ API 36: Responsive variables
-  bool _isTablet = false;
-  bool _isWeb = false;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkScreenSize();
-    });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _checkScreenSize();
-  }
-
-  void _checkScreenSize() {
-    final size = MediaQuery.of(context).size;
-    final isTablet = size.shortestSide >= 600;
-    final isWeb = size.width > 800;
-
-    if (_isTablet != isTablet || _isWeb != isWeb) {
-      setState(() {
-        _isTablet = isTablet;
-        _isWeb = isWeb;
-      });
-    }
-  }
 
   bool _isValidEmailFormat(String value) {
     final emailRegex = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
@@ -75,14 +43,12 @@ class _ResetPasswordRequestScreenState
   }
 
   Future<void> _sendResetEmail() async {
-    if (!_formKey.currentState!.validate()) return;
     if (!_isValidEmail) return;
 
+    final email = _emailController.text.trim();
     setState(() => _loading = true);
 
     try {
-      final email = _emailController.text.trim();
-      
       debugPrint('Sending password reset email to: $email');
       
       String redirectUrl;
@@ -122,14 +88,36 @@ class _ResetPasswordRequestScreenState
       }
     } on AuthException catch (e) {
       debugPrint('Auth error: ${e.message}');
-      
+
+      final lowerMessage = e.message.toLowerCase();
+
+      // ============================================================
+      // ✅ SECURITY FIX: previously this specifically detected
+      // "user not found" and showed "No account found with this
+      // email" — an email-enumeration vulnerability. Whether or not
+      // Supabase's current server-side behavior actually throws this
+      // distinction (resetPasswordForEmail is typically designed to
+      // silently no-op for unregistered emails precisely to prevent
+      // this), keeping a client-side branch that reveals account
+      // existence is a latent risk if that ever changes. Treating it
+      // identically to success — same navigation, same message —
+      // means an attacker probing email addresses gets no observable
+      // difference (message text OR navigation target) between a
+      // registered and unregistered email.
+      // ============================================================
+      if (lowerMessage.contains('user not found') ||
+          lowerMessage.contains('not found')) {
+        if (mounted) {
+          context.go('/reset-password-confirm', extra: {'email': email});
+        }
+        return;
+      }
+
       String errorMessage = 'Failed to send reset email';
-      
-      if (e.message.toLowerCase().contains('user not found')) {
-        errorMessage = 'No account found with this email';
-      } else if (e.message.toLowerCase().contains('rate limit')) {
+
+      if (lowerMessage.contains('rate limit')) {
         errorMessage = 'Too many attempts. Please try again later.';
-      } else if (e.message.toLowerCase().contains('email')) {
+      } else if (lowerMessage.contains('email')) {
         errorMessage = 'Invalid email address';
       }
       
@@ -242,69 +230,78 @@ class _ResetPasswordRequestScreenState
 
                     const SizedBox(height: 32),
 
-                    // Email field
-                    Form(
-                      key: _formKey,
-                      child: TextField(
-                        controller: _emailController,
-                        onChanged: (value) => _validateEmail(),
-                        style: TextStyle(color: textColor),
-                        keyboardType: TextInputType.emailAddress,
-                        autofocus: true,
-                        decoration: InputDecoration(
-                          labelText: 'Email Address',
-                          labelStyle: TextStyle(color: secondaryTextColor),
-                          hintText: 'you@example.com',
-                          hintStyle: TextStyle(
-                            color: isDark
-                                ? Colors.white54
-                                : Colors.grey.shade400,
-                          ),
-                          filled: true,
-                          fillColor: isDark
-                              ? Colors.white.withValues(alpha: 0.05)
-                              : Colors.grey.shade50,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: isDark
-                                  ? Colors.white24
-                                  : Colors.grey.shade300,
-                            ),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide(
-                              color: _isValidEmail
-                                  ? primaryColor
-                                  : errorColor,
-                              width: 2,
-                            ),
-                          ),
-                          prefixIcon: Icon(
-                            Icons.email_outlined,
-                            color: isDark
-                                ? Colors.white54
-                                : Colors.grey.shade400,
-                          ),
-                          suffixIcon: _emailController.text.isEmpty
-                              ? null
-                              : _isValidEmail
-                                  ? Icon(
-                                      Icons.check_circle,
-                                      color: successColor,
-                                    )
-                                  : Icon(
-                                      Icons.error_outline,
-                                      color: errorColor,
-                                    ),
-                          errorText: _emailError,
-                          errorStyle: TextStyle(color: errorColor),
+                    // ✅ FIX: previously this TextField was wrapped in
+                    // a Form with a GlobalKey<FormState>, and
+                    // _sendResetEmail() called
+                    // `_formKey.currentState!.validate()` before
+                    // proceeding — but a plain TextField (not a
+                    // TextFormField) registers no FormField with the
+                    // Form, so that call always returned true and
+                    // validated nothing. The Form wrapper did nothing
+                    // useful; the real validation was, and still is,
+                    // done separately via _isValidEmail/_emailError
+                    // below. Removed the non-functional Form/GlobalKey
+                    // to avoid the misleading impression that it was
+                    // doing validation.
+                    TextField(
+                      controller: _emailController,
+                      onChanged: (value) => _validateEmail(),
+                      style: TextStyle(color: textColor),
+                      keyboardType: TextInputType.emailAddress,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        labelText: 'Email Address',
+                        labelStyle: TextStyle(color: secondaryTextColor),
+                        hintText: 'you@example.com',
+                        hintStyle: TextStyle(
+                          color: isDark
+                              ? Colors.white54
+                              : Colors.grey.shade400,
                         ),
+                        filled: true,
+                        fillColor: isDark
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : Colors.grey.shade50,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: isDark
+                                ? Colors.white24
+                                : Colors.grey.shade300,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: _isValidEmail
+                                ? primaryColor
+                                : errorColor,
+                            width: 2,
+                          ),
+                        ),
+                        prefixIcon: Icon(
+                          Icons.email_outlined,
+                          color: isDark
+                              ? Colors.white54
+                              : Colors.grey.shade400,
+                        ),
+                        suffixIcon: _emailController.text.isEmpty
+                            ? null
+                            : _isValidEmail
+                                ? Icon(
+                                    Icons.check_circle,
+                                    color: successColor,
+                                  )
+                                : Icon(
+                                    Icons.error_outline,
+                                    color: errorColor,
+                                  ),
+                        errorText: _emailError,
+                        errorStyle: TextStyle(color: errorColor),
                       ),
                     ),
 
