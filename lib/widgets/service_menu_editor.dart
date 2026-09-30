@@ -1078,6 +1078,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     final newAgeMaxController = TextEditingController(text: '100');
     bool showNewAgeForm = false;
     String? variantError;
+    String? durationError;
 
     final isDark = _isDark;
 
@@ -1190,7 +1191,13 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                           );
                         }).toList(),
                       ),
-                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Divider(
+                          height: 1,
+                          color: isDark ? Colors.grey[800] : Colors.grey[200],
+                        ),
+                      ),
 
                       // Age Category
                       Row(
@@ -1205,29 +1212,41 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                             ),
                           ),
                           const Spacer(),
-                          TextButton.icon(
-                            onPressed: () => setDialogState(() {
-                              showNewAgeForm = !showNewAgeForm;
-                            }),
-                            icon: Icon(
-                              showNewAgeForm
-                                  ? Icons.close
-                                  : Icons.add_circle_outline,
-                              size: 14,
-                              color: Colors.green,
+                          if (_ageCategories.isNotEmpty)
+                            TextButton.icon(
+                              onPressed: () => setDialogState(() {
+                                showNewAgeForm = !showNewAgeForm;
+                              }),
+                              icon: Icon(
+                                showNewAgeForm
+                                    ? Icons.close
+                                    : Icons.add_circle_outline,
+                                size: 14,
+                                color: Colors.green,
+                              ),
+                              label: Text(
+                                showNewAgeForm ? 'Cancel' : 'Add New',
+                                style: const TextStyle(
+                                    fontSize: 11, color: Colors.green),
+                              ),
+                              style: TextButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                minimumSize: Size.zero,
+                              ),
                             ),
-                            label: Text(
-                              showNewAgeForm ? 'Cancel' : 'Add New',
-                              style: const TextStyle(
-                                  fontSize: 11, color: Colors.green),
-                            ),
-                            style: TextButton.styleFrom(
-                              padding: EdgeInsets.zero,
-                              minimumSize: Size.zero,
-                            ),
-                          ),
                         ],
                       ),
+                      if (_ageCategories.isEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'No age categories yet — add one below.',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontStyle: FontStyle.italic,
+                            color: isDark ? Colors.white38 : Colors.grey[500],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 6),
                       if (_ageCategories.isNotEmpty)
                         Wrap(
@@ -1270,7 +1289,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                             );
                           }).toList(),
                         ),
-                      if (showNewAgeForm) ...[
+                      if (showNewAgeForm || _ageCategories.isEmpty) ...[
                         const SizedBox(height: 10),
                         Container(
                           padding: const EdgeInsets.all(12),
@@ -1422,114 +1441,153 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                           ),
                         ),
                       ],
-                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Divider(
+                          height: 1,
+                          color: isDark ? Colors.grey[800] : Colors.grey[200],
+                        ),
+                      ),
 
-                      // Price & Duration
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: priceController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                      decimal: true),
-                              style: TextStyle(
-                                  color: isDark
-                                      ? Colors.white
-                                      : Colors.black87),
-                              decoration: InputDecoration(
-                                labelText: 'Price (optional)',
-                                hintText: '0',
-                                prefixIcon: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 12),
-                                  child: Center(
-                                    widthFactor: 1.0,
-                                    child: Text(
-                                      _salonCurrencySymbol,
-                                      style: TextStyle(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.bold,
-                                          color: isDark
-                                              ? Colors.white70
-                                              : Colors.grey),
-                                    ),
-                                  ),
-                                ),
-                                prefixIconConstraints:
-                                    const BoxConstraints(
-                                        minWidth: 50, minHeight: 20),
-                                border: OutlineInputBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(10)),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                  borderSide: BorderSide(
-                                      color: isDark
-                                          ? Colors.grey[700]!
-                                          : Colors.grey[300]!),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                  borderSide: const BorderSide(
-                                      color: AppTheme.primary, width: 2),
-                                ),
-                                filled: true,
-                                fillColor: isDark
-                                    ? const Color(0xFF2A2A2A)
-                                    : Colors.grey[50],
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 10),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              controller: durationController,
-                              onChanged: (_) {
-                                if (variantError != null) {
-                                  setDialogState(() => variantError = null);
-                                }
-                              },
-                              keyboardType: TextInputType.number,
-                              style: TextStyle(
-                                  color: isDark
-                                      ? Colors.white
-                                      : Colors.black87),
-                              decoration: InputDecoration(
-                                labelText: 'Duration (mins)',
-                                hintText: '30',
-                                prefixIcon: Icon(Icons.timer,
-                                    size: 18,
+                      // Price
+                      Text(
+                        'Price',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white70 : Colors.grey[700],
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: priceController,
+                        onChanged: (_) {
+                          if (variantError != null) {
+                            setDialogState(() => variantError = null);
+                          }
+                        },
+                        keyboardType:
+                            const TextInputType.numberWithOptions(
+                                decimal: true),
+                        style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87),
+                        decoration: InputDecoration(
+                          hintText: 'Leave empty to set later',
+                          prefixIcon: Padding(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 12),
+                            child: Center(
+                              widthFactor: 1.0,
+                              child: Text(
+                                _salonCurrencySymbol,
+                                style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
                                     color: isDark
                                         ? Colors.white70
                                         : Colors.grey),
-                                border: OutlineInputBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(10)),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                  borderSide: BorderSide(
-                                      color: isDark
-                                          ? Colors.grey[700]!
-                                          : Colors.grey[300]!),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                  borderSide: const BorderSide(
-                                      color: AppTheme.primary, width: 2),
-                                ),
-                                filled: true,
-                                fillColor: isDark
-                                    ? const Color(0xFF2A2A2A)
-                                    : Colors.grey[50],
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 10),
                               ),
                             ),
                           ),
+                          prefixIconConstraints:
+                              const BoxConstraints(minWidth: 50, minHeight: 20),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(
+                                color: AppTheme.primary, width: 2),
+                          ),
+                          filled: true,
+                          fillColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[50],
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        child: Divider(
+                          height: 1,
+                          color: isDark ? Colors.grey[800] : Colors.grey[200],
+                        ),
+                      ),
+                      // Duration
+                      Row(
+                        children: [
+                          Text(
+                            'Duration',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color:
+                                  isDark ? Colors.white70 : Colors.grey[700],
+                            ),
+                          ),
+                          Text(
+                            ' *',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.red[300],
+                            ),
+                          ),
                         ],
+                      ),
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: durationController,
+                        onChanged: (_) {
+                          if (variantError != null) {
+                            setDialogState(() => variantError = null);
+                          }
+                          if (durationError != null) {
+                            setDialogState(() => durationError = null);
+                          }
+                        },
+                        keyboardType: TextInputType.number,
+                        style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black87),
+                        decoration: InputDecoration(
+                          hintText: 'e.g., 30',
+                          suffixText: 'mins',
+                          prefixIcon: Icon(Icons.timer,
+                              size: 18,
+                              color: isDark ? Colors.white70 : Colors.grey),
+                          border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(
+                                color: isDark
+                                    ? Colors.grey[700]!
+                                    : Colors.grey[300]!),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(
+                                color: AppTheme.primary, width: 2),
+                          ),
+                          errorBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(color: Colors.red),
+                          ),
+                          filled: true,
+                          fillColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[50],
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          errorText: durationError,
+                        ),
                       ),
                       if (variantError != null) ...[
                         const SizedBox(height: 12),
@@ -1574,21 +1632,27 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    if (selectedGenderId == null &&
-                        selectedAgeId == null &&
-                        priceController.text.trim().isEmpty &&
-                        durationController.text.trim().isEmpty) {
+                    final priceText = priceController.text.trim();
+                    final durationText = durationController.text.trim();
+
+                    // Duration is the only required field for a variant.
+                    if (durationText.isEmpty) {
+                      setDialogState(() {
+                        durationError = 'Duration is required';
+                      });
+                      return;
+                    }
+                    final duration = int.tryParse(durationText);
+                    if (duration == null || duration <= 0) {
+                      setDialogState(() {
+                        durationError = 'Enter a valid duration in minutes';
+                      });
                       return;
                     }
 
-                    final priceText = priceController.text.trim();
-                    final durationText = durationController.text.trim();
                     final priceSet = priceText.isNotEmpty;
                     final price =
                         priceSet ? double.tryParse(priceText) ?? 0.0 : 0.0;
-                    final duration = durationText.isNotEmpty
-                        ? int.tryParse(durationText) ?? 0
-                        : 0;
 
                     // Block duplicates right here, before they reach the list
                     if (_isDuplicateVariant(
