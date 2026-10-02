@@ -669,16 +669,39 @@ class _RegistrationFlowState extends State<RegistrationFlow> {
           _isLoading = false;
         });
 
-        final friendlyMessage = e is StateError
+        final isMissingProfile = e is StateError;
+        final friendlyMessage = isMissingProfile
             ? e.message
             : _friendlyProfileErrorMessage(e);
 
         await showCustomAlert(
           context: context,
-          title: "Setup Incomplete",
+          title: isMissingProfile ? "Account Setup Issue" : "Setup Incomplete",
           message: friendlyMessage,
           isError: true,
         );
+
+        // ============================================================
+        // ✅ NEW: the "profile row missing" case (existingProfile ==
+        // null, or the UPDATE matched zero rows) can't actually be
+        // fixed by retrying on this screen — the trigger that creates
+        // the profiles row only fires on signUp(), not on login, so
+        // staying on /reg and tapping Continue again just repeats the
+        // same failure forever. Signing out and sending the user back
+        // to /login is the honest outcome here: it ends the loop
+        // instead of leaving them stuck, and gives them a clean path
+        // to try again or contact support if it keeps happening.
+        // ============================================================
+        if (isMissingProfile && mounted) {
+          try {
+            await Supabase.instance.client.auth.signOut();
+          } catch (signOutError) {
+            debugPrint('⚠️ Sign-out before redirect failed: $signOutError');
+          }
+          if (mounted) {
+            context.go('/login');
+          }
+        }
       }
     }
   }
