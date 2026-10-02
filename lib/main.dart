@@ -1491,7 +1491,11 @@ GoRouter _createRouter() {
       ),
       GoRoute(
         path: '/customer/vip-booking',
-        builder: (context, state) => const VIPBookingScreen(),
+        name: 'vip-booking',
+        builder: (context, state) {
+          final salon = state.extra as Map<String, dynamic>?;
+          return VIPBookingScreen(initialSalon: salon);
+        },
       ),
       GoRoute(
         path: '/customer/salon-profile',
