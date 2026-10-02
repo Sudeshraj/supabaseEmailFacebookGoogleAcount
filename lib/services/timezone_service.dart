@@ -464,8 +464,9 @@ class TimezoneService {
       final location = tz.getLocation(timezone);
       final tzNow = tz.TZDateTime.now(location);
       final offset = tzNow.timeZoneOffset;
-      _utcOffsetHours = offset.inHours;
-      _utcOffsetMinutes = offset.inMinutes.abs() % 60;
+      final totalMinutes = offset.inMinutes;
+      _utcOffsetHours = totalMinutes ~/ 60;
+      _utcOffsetMinutes = totalMinutes.abs() % 60;
     } catch (e) {
       for (var entry in countryTimezones.entries) {
         for (var tz in entry.value) {
@@ -580,9 +581,11 @@ class TimezoneService {
       final location = tz.getLocation(timezone);
       final tzNow = tz.TZDateTime.now(location);
       final offset = tzNow.timeZoneOffset;
-      final hours = offset.inHours;
-      final minutes = offset.inMinutes.abs() % 60;
-      final sign = hours >= 0 ? '+' : '';
+      final totalMinutes = offset.inMinutes;
+      final sign = totalMinutes >= 0 ? '+' : '-';
+      final absMinutes = totalMinutes.abs();
+      final hours = absMinutes ~/ 60;
+      final minutes = absMinutes % 60;
       return 'UTC$sign$hours:${minutes.toString().padLeft(2, '0')}';
     } catch (e) {
       debugPrint('❌ Error getting UTC offset for $timezone: $e');
