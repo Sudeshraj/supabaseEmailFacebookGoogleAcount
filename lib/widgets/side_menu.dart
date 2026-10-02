@@ -990,18 +990,11 @@ class _SideMenuState extends State<SideMenu> {
 
       debugPrint('📝 Active user roles after update: $userRoles');
 
+      // ℹ️ Auth metadata is updated in the BACKGROUND after navigation
+      // (see below). Awaiting it here fires an auth "userUpdated" event
+      // that can trigger an AppState refresh mid-flow and race with
+      // the role switch.
       final currentMetadata = currentUser.userMetadata ?? {};
-      await supabase.auth.updateUser(
-        UserAttributes(
-          data: {
-            ...currentMetadata,
-            'roles': userRoles,
-            'current_role': role,
-            'profile_updated_at': DateTime.now().toIso8601String(),
-          },
-        ),
-      );
-      debugPrint('✅ User metadata updated');
 
       debugPrint('📱 Saving to SessionManager');
 
@@ -1019,17 +1012,22 @@ class _SideMenuState extends State<SideMenu> {
         provider: await _getUserProvider(currentUser, photoUrl),
       );
 
-      await SessionManager.saveCurrentRole(role);
+      // ⚠️ DO NOT call SessionManager.saveCurrentRole(role) here.
+      // If the new role is saved now, the appState.refreshState() below
+      // switches AppState.currentRole while the user is still on the OLD
+      // dashboard route → router redirects to /role-selector (the flash).
+      // The role is saved + applied together with navigation instead.
 
       await _loadUserRolesFromDatabase();
 
-      // ✅ FIX: refresh AppState (so the new role is in appState.roles)
-      // and set the current role BEFORE navigating – no background
-      // refresh, no router race.
+      // 1️⃣ Refresh AppState so the NEW role is in appState.roles.
+      // The saved current role is still the OLD one, so currentRole
+      // does not change here and the router stays happy on the
+      // current dashboard.
       await appState.refreshState(silent: true);
-      await appState.setCurrentRole(role);
-      debugPrint('✅ AppState currentRole = ${appState.currentRole}');
 
+      // 2️⃣ Show the snackbar BEFORE the role switch so there is no
+      // gap (no await) between switching the role and navigating.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1042,8 +1040,38 @@ class _SideMenuState extends State<SideMenu> {
         );
       }
 
+      // 3️⃣ Switch role (memory + prefs) and navigate right after –
+      // same flow as _switchProfile, so the router never sees a
+      // role/route mismatch.
+      await appState.setCurrentRole(role);
+      if (appState.currentRole != role) {
+        debugPrint('⚠️ AppState roles stale – forcing refresh');
+        await SessionManager.saveCurrentRole(role);
+        await appState.refreshState(silent: true);
+      }
+      debugPrint('✅ AppState currentRole = ${appState.currentRole}');
+
       debugPrint('🎯 Navigating directly to dashboard: $role');
       _goToRoleDashboard(router, role);
+
+      // 4️⃣ Auth metadata in the background (non-blocking, no race).
+      unawaited(() async {
+        try {
+          await supabase.auth.updateUser(
+            UserAttributes(
+              data: {
+                ...currentMetadata,
+                'roles': userRoles,
+                'current_role': role,
+                'profile_updated_at': DateTime.now().toIso8601String(),
+              },
+            ),
+          );
+          debugPrint('✅ User metadata updated');
+        } catch (e) {
+          debugPrint('❌ Metadata update error (non-fatal): $e');
+        }
+      }());
     } catch (e) {
       debugPrint('❌ Error creating profile directly: $e');
       if (mounted) {
