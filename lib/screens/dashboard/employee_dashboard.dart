@@ -40,7 +40,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   final CurrencyService _currencyService = CurrencyService.instance;
   String _salonCurrencyCode = 'LKR';
 
-  // ✅ Currency getter
   String get _salonCurrencySymbol =>
       _currencyService.getSymbol(_salonCurrencyCode);
 
@@ -48,7 +47,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   bool _showPermissionCard = false;
   bool _isLoading = true;
 
-  //  NEW: Status check state (CustomerDashboard pattern)
+  // Status check state
   bool _isActive = true;
   bool _isCheckingStatus = true;
   String _inactiveReason = 'Your barber profile is not active.';
@@ -95,7 +94,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   // ✅ CURRENCY HELPERS
   // ============================================================
 
-  /// Format price with salon currency
   String _formatPrice(dynamic price) {
     return _currencyService.format(
       price: price,
@@ -113,7 +111,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     await _initializeTimezone();
     await _checkEmployeeStatus();
 
-    // ✅ Only load dashboard data + salons if the account is active
     if (_isActive) {
       await _loadAssignedSalons();
       await _loadData();
@@ -628,16 +625,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     }
   }
 
+  // ==================== LOAD ASSIGNED SALONS ====================
+  // ✅ FIX: explicit FK hint `salons!salon_id`
+
   Future<void> _loadAssignedSalons() async {
     try {
-      // ✅ Load currency_code from salons
       final response = await supabase
           .from('salon_barbers')
           .select('''
             id,
             salon_id,
             status,
-            salons!inner (
+            salons!salon_id (
               id,
               name,
               address,
@@ -678,7 +677,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           if (_selectedSalonId == null && salonData['is_active'] == true) {
             _selectedSalonId = salonData['id'].toString();
             _selectedSalonName = salonData['name'] ?? '';
-            // ✅ Load currency
             _salonCurrencyCode =
                 salonData['currency_code'] as String? ?? 'LKR';
           }
@@ -734,7 +732,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       );
       _selectedSalonName = selected['name'] ?? '';
 
-      // ✅ Update currency
       if (selected.isNotEmpty) {
         _salonCurrencyCode =
             selected['currency_code'] as String? ?? 'LKR';
@@ -830,6 +827,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // =====================================================
   // LOAD APPOINTMENTS WITH PERFORMANCE STATS
+  // ✅ FIX: appointments no longer has service_id / variant_id.
+  //    All per-service data lives in appointment_services.
+  //    Read appointments.price directly (server-synced total).
   // =====================================================
   Future<void> _loadAppointments() async {
     try {
@@ -868,8 +868,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             end_time,
             status,
             price,
-            service_id,
-            variant_id,
+            original_price,
+            discount_amount,
+            extra_charge,
             salon_id,
             queue_number,
             queue_token,
@@ -878,14 +879,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               id,
               name
             ),
-            services!inner (
-              name
-            ),
-            service_variants!left (
-              price,
+            appointment_services (
+              id,
+              service_id,
+              variant_id,
+              service_name,
+              variant_label,
               duration,
-              salon_genders!left (display_name),
-              salon_age_categories!left (display_name)
+              original_price,
+              discount_amount,
+              final_price
             ),
             profiles!appointments_customer_id_fkey (
               full_name,
@@ -915,8 +918,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       int totalAppointmentsToday = 0;
 
       for (var apt in response) {
-        final service = apt['services'] as Map?;
-        final variant = apt['service_variants'] as Map?;
         final customer = apt['profiles'] as Map?;
         final salon = apt['salons'] as Map?;
 
@@ -924,10 +925,33 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         final aptDate = apt['appointment_date'] as String;
         final isToday = aptDate == todayStr;
 
-        final price =
-            (apt['price'] as num?)?.toDouble() ??
-            (variant?['price'] as num?)?.toDouble() ??
-            0.0;
+        // ✅ appointments.price is server-synced. Fall back to summing
+        // appointment_services.final_price if null (defensive).
+        double price = (apt['price'] as num?)?.toDouble() ?? 0.0;
+        final servicesList = (apt['appointment_services'] as List?) ?? [];
+        if (price <= 0 && servicesList.isNotEmpty) {
+          price = servicesList.fold<double>(
+            0.0,
+            (acc, s) =>
+                acc + ((s['final_price'] as num?)?.toDouble() ?? 0.0),
+          );
+        }
+
+        // ✅ Combine multiple service names into a summary
+        String serviceName = 'No services';
+        int totalDuration = 30;
+        if (servicesList.isNotEmpty) {
+          final names = servicesList
+              .map((s) => s['service_name']?.toString() ?? 'Service')
+              .toList();
+          serviceName = names.length == 1
+              ? names.first
+              : '${names.first} +${names.length - 1} more';
+          totalDuration = servicesList.fold<int>(
+            0,
+            (acc, s) => acc + ((s['duration'] as num?)?.toInt() ?? 30),
+          );
+        }
 
         final startTimeLocal = _utcToLocalTimeString(apt['start_time']);
         final endTimeLocal = _utcToLocalTimeString(apt['end_time']);
@@ -949,7 +973,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           'booking_number': apt['booking_number'],
           'customer_name': customer?['full_name'] ?? 'Unknown Customer',
           'customer_phone': customer?['phone'] ?? '',
-          'service_name': service?['name'] ?? 'Unknown Service',
+          'service_name': serviceName,
           'salon_name': salon?['name'] ?? 'Unknown Salon',
           'appointment_date': aptDate,
           'is_today': isToday,
@@ -958,7 +982,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           'end_time': endTimeLocal,
           'status': status,
           'price': price,
-          'duration': variant?['duration'] ?? 30,
+          'duration': totalDuration,
           'is_vip': apt['is_vip'] ?? false,
           'queue_number': apt['queue_number'],
           'queue_token': apt['queue_token'],
@@ -968,8 +992,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       // ✅ Calculate On Time Percentage
       int onTimePercentage = 0;
       if (totalAppointmentsToday > 0) {
-        onTimePercentage = ((todayCompleted / totalAppointmentsToday) * 100)
-            .round();
+        onTimePercentage =
+            ((todayCompleted / totalAppointmentsToday) * 100).round();
       }
 
       setState(() {
@@ -1001,6 +1025,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // =====================================================
   // LOAD STATISTICS
+  // ✅ FIX: uses appointments.price directly (server-synced total).
   // =====================================================
   Future<void> _loadStatistics() async {
     try {
@@ -1030,6 +1055,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       final uniqueCustomers = customersResponse
           .map((a) => a['customer_id'])
+          .where((id) => id != null)
           .toSet()
           .length;
 
@@ -1048,6 +1074,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       );
       final lastDayStr = lastDayOfMonth.toIso8601String().split('T').first;
 
+      // ✅ Read price directly - server-synced total (services + extra - discount)
       final monthlyResponse = await supabase
           .from('appointments')
           .select('price')
@@ -1575,7 +1602,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
     _checkScreenSize();
 
-    // ✅ STATE 1: Loading (timezone OR status check still in progress)
+    // ✅ STATE 1: Loading
     if (!_isTimezoneLoaded || _isCheckingStatus) {
       return Scaffold(
         key: _scaffoldKey,
@@ -1613,7 +1640,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       );
     }
 
-    // ✅ STATE 2: Inactive / blocked / no role
+    // ✅ STATE 2: Inactive
     if (!_isActive) {
       return Scaffold(
         key: _scaffoldKey,
@@ -2055,9 +2082,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         ),
         const SizedBox(height: 16),
 
-        // ============================================================
-        // ✅ STATS CARDS - RESPONSIVE WITH SALON CURRENCY
-        // ============================================================
+        // STATS CARDS - RESPONSIVE WITH SALON CURRENCY
         if (_isTablet)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2077,13 +2102,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                   subtitle: '$_completedToday completed',
                   onTap: _viewMySchedule,
                 ),
-                // ✅ Earnings card - Tablet: icon text + value
                 DashboardStatCard(
                   title: 'Earnings',
                   value: _formatPrice(_todayEarnings),
                   iconText: _salonCurrencySymbol,
                   color: Colors.green,
-                  subtitle: '${_getMonthName()}: ${_formatPrice(_monthlyEarnings)}',
+                  subtitle:
+                      '${_getMonthName()}: ${_formatPrice(_monthlyEarnings)}',
                   onTap: _viewTodayEarnings,
                 ),
                 DashboardStatCard(
@@ -2100,7 +2125,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         else
           Column(
             children: [
-              // Stats Cards - Row 1
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Row(
@@ -2116,24 +2140,22 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    // ✅ Earnings card - Mobile: icon text hide, value විතරයි
                     Expanded(
                       child: DashboardStatCard(
                         title: 'Earnings',
                         value: _formatPrice(_todayEarnings),
                         iconText: _salonCurrencySymbol,
                         color: Colors.green,
-                        subtitle: '${_getMonthName()}: ${_formatPrice(_monthlyEarnings)}',
+                        subtitle:
+                            '${_getMonthName()}: ${_formatPrice(_monthlyEarnings)}',
                         onTap: _viewTodayEarnings,
-                        hideIconTextOnMobile: true, // ✅ Mobile එකේ hide
+                        hideIconTextOnMobile: true,
                       ),
                     ),
                   ],
                 ),
               ),
               const SizedBox(height: 12),
-
-              // Stats Cards - Row 2
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: DashboardStatCard(
@@ -2150,7 +2172,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           ),
         const SizedBox(height: 16),
 
-        // Quick Actions - Only My Schedule
+        // Quick Actions
         const SectionHeader(title: 'Quick Actions', actionText: ''),
         const SizedBox(height: 8),
         Padding(
@@ -2170,7 +2192,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         ),
         const SizedBox(height: 16),
 
-        // Today's Schedule with View All
+        // Today's Schedule
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -2249,7 +2271,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                           status: apt['status'],
                           statusColor: statusColor,
                           barberName: 'You',
-                          price: apt['price'],
+                          formattedPrice: _formatPrice(apt['price']),
                           salonName: apt['salon_name'],
                           isVip: apt['is_vip'] ?? false,
                           queueNumber: apt['queue_number'],
@@ -2264,7 +2286,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         ),
         const SizedBox(height: 16),
 
-        // ✅ Performance Card
+        // Performance Card
         Container(
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(16),

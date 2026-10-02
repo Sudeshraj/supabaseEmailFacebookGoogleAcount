@@ -23,10 +23,6 @@ class CustomerDashboard extends StatefulWidget {
 
 class _CustomerDashboardState extends State<CustomerDashboard>
     with WidgetsBindingObserver, AutomaticKeepAliveClientMixin {
-  // ⚠️ FIX: keeps this screen's state alive when the outer bottom-nav /
-  // IndexedStack switches to another tab and back, so it does NOT get
-  // disposed + recreated (which was re-running initState() -> a full
-  // reload) every time the user revisits the Dashboard tab.
   @override
   bool get wantKeepAlive => true;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -40,12 +36,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   bool _showPermissionCard = false;
   bool _isLoading = true;
   bool _isActive = false;
-  // ⚠️ FIX: tracks whether _checkCustomerStatus() has finished at least
-  // once. _isActive starts as false, and without this flag the "Profile
-  // Inactive / Check Status" screen would flash briefly on every load
-  // (before the server confirms the account IS active), which looked
-  // broken. Now a loading screen shows instead until the first check
-  // completes.
   bool _isCheckingStatus = true;
 
   // Customer Data
@@ -115,22 +105,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _checkScreenSize();
-    // ⚠️ FIX: Previously this called _checkForUpdates() -> _loadDashboardData()
-    // on EVERY dependency change (keyboard open/close, rotation, theme change,
-    // etc). That caused the dashboard to reload constantly. Dashboard data is
-    // now only reloaded on app resume (see didChangeAppLifecycleState) and
-    // after returning from a booking flow with a successful result.
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed) {
-      // ⚠️ FIX: previously this also called _loadDashboardData() here,
-      // which re-fetched everything (and flashed the loading spinner)
-      // every single time the phone was unlocked / app brought back from
-      // sleep. Only the lightweight unread-count + active-status checks
-      // run now - no full dashboard reload on resume.
       debugPrint('🔄 App resumed - refreshing notification count');
       _loadUnreadCount();
       _checkCustomerStatus();
@@ -242,10 +222,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       debugPrint('❌ Error checking customer status: $e');
       setState(() => _isActive = false);
     } finally {
-      // ⚠️ FIX: no matter which branch above returned, mark the first
-      // status check as complete so build() can stop showing the loading
-      // screen and move to either the real dashboard or the genuine
-      // "Profile Inactive" screen - never a flash of the wrong one.
       if (mounted && _isCheckingStatus) {
         setState(() => _isCheckingStatus = false);
       }
@@ -364,8 +340,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // 🔥 CONTEXTUAL ACTIONS
   // ============================================================
 
-  // ⚠️ FIX: now awaits the pushed route and only reloads the dashboard
-  // when the booking flow reports success (Navigator.pop(context, true)).
   Future<void> _bookAppointment() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'booking');
@@ -382,7 +356,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ⚠️ FIX: same pattern for VIP booking.
   Future<void> _createVipBooking() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'vip');
@@ -399,7 +372,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ⚠️ FIX: refresh dashboard only if something changed on the offers screen.
   Future<void> _viewAllOffers() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'offer');
@@ -623,6 +595,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   // ============================================================
   // LOAD DASHBOARD DATA
+  // ✅ FIX: appointments no longer has service_id / variant_id.
+  //    Every service lives in appointment_services now. Reading
+  //    appointments.price directly (server-synced total) instead of
+  //    trying to join services / service_variants.
   // ============================================================
 
   Future<void> _loadDashboardData() async {
@@ -656,19 +632,23 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             is_vip,
             vip_booking_id,
             price,
+            original_price,
+            discount_amount,
+            extra_charge,
             queue_number,
             queue_token,
             barber_id,
-            service_id,
-            variant_id,
-            services!inner (
-              name
-            ),
-            service_variants!left (
-              price,
+            customer_id,
+            appointment_services (
+              id,
+              service_id,
+              variant_id,
+              service_name,
+              variant_label,
               duration,
-              salon_genders!left (display_name),
-              salon_age_categories!left (display_name)
+              original_price,
+              discount_amount,
+              final_price
             )
           ''')
           .eq('customer_id', user.id)
@@ -686,10 +666,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         final status = apt['status'] as String;
         final isVip = apt['is_vip'] == true;
 
-        final double price =
-            (apt['price'] as num?)?.toDouble() ??
-            (apt['service_variants']?['price'] as num?)?.toDouble() ??
-            0.0;
+        // ✅ appointments.price is the authoritative server-synced total.
+        // Fall back to summing appointment_services.final_price if it's
+        // null (older rows / defensive).
+        double price = (apt['price'] as num?)?.toDouble() ?? 0.0;
+        if (price <= 0) {
+          final servicesList = (apt['appointment_services'] as List?) ?? [];
+          price = servicesList.fold<double>(
+            0.0,
+            (acc, s) => acc + ((s['final_price'] as num?)?.toDouble() ?? 0.0),
+          );
+        }
 
         if (status == 'confirmed' || status == 'pending') {
           final dateStr = apt['appointment_date'] as String;
@@ -765,6 +752,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   // ============================================================
   // GET FAVORITE BARBERS
+  // ✅ FIX: explicit FK constraint name
+  //    (appointments_barber_id_fkey). `profiles!barber_id` was ambiguous
+  //    because appointments has TWO FKs to profiles (customer_id +
+  //    barber_id). Also barber_id is nullable now (barber delete වුණාම).
   // ============================================================
 
   Future<List<Map<String, dynamic>>> _getFavoriteBarbers(
@@ -775,7 +766,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           .from('appointments')
           .select('''
             barber_id,
-            profiles!barber_id (
+            barber_profile:profiles!appointments_barber_id_fkey (
               full_name,
               avatar_url
             )
@@ -785,8 +776,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       final Map<String, Map<String, dynamic>> barberCount = {};
       for (var apt in response) {
-        final barberId = apt['barber_id'] as String;
-        final barberData = apt['profiles'] as Map?;
+        // ✅ barber_id can be NULL (barber account deleted) - skip those.
+        final barberId = apt['barber_id'] as String?;
+        if (barberId == null) continue;
+
+        final barberData = apt['barber_profile'] as Map?;
 
         if (!barberCount.containsKey(barberId)) {
           barberCount[barberId] = {
@@ -796,7 +790,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             'count': 0,
           };
         }
-        barberCount[barberId]!['count'] = barberCount[barberId]!['count'] + 1;
+        barberCount[barberId]!['count'] =
+            (barberCount[barberId]!['count'] as int) + 1;
       }
 
       List<Map<String, dynamic>> barbers = barberCount.values.toList();
@@ -904,6 +899,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   // ============================================================
   // LOAD OFFERS FROM FOLLOWED SALONS
+  // ✅ FIX: explicit salon FK hint to avoid ambiguity.
   // ============================================================
 
   Future<List<Map<String, dynamic>>> _loadOffersFromDatabase() async {
@@ -943,7 +939,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             valid_to,
             image_url,
             salon_id,
-            salons:salon_id (
+            salons:salons!offers_salon_id_fkey (
               id,
               name,
               logo_url,
@@ -1089,6 +1085,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   // ============================================================
   // APPLY OFFER METHOD
+  // ✅ FIX: loyalty_transactions.source check constraint allows only:
+  //    ('booking', 'review', 'referral', 'birthday', 'promotion',
+  //     'cancellation'). 'offer' is NOT allowed - using 'promotion'.
   // ============================================================
 
   void _showSnackBar(String message, Color color) {
@@ -1346,11 +1345,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             })
             .eq('customer_id', user.id);
 
+        // ✅ FIX: source check constraint only allows
+        // ('booking','review','referral','birthday','promotion',
+        //  'cancellation'). 'offer' is not allowed - use 'promotion'.
         await supabase.from('loyalty_transactions').insert({
           'customer_id': user.id,
           'points': -pointsRequired,
           'type': 'redeem',
-          'source': 'offer',
+          'source': 'promotion',
           'reference_id': offer['id'].toString(),
           'description':
               'Redeemed $pointsRequired points for ${offer['title']}',
@@ -1366,8 +1368,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       }
 
       if (mounted) {
-        // ⚠️ FIX: wait for the booking flow result and only reload the
-        // dashboard if a booking was actually completed.
         final result = await context.push(
           '/customer/booking-flow',
           extra: {'offer': offer},
@@ -1811,14 +1811,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ⚠️ FIX: the salon profile screen can change dashboard-relevant state
-  // in more than one way - following/unfollowing the salon, booking a
-  // service, applying an offer - and not all of those necessarily pop
-  // with `true` (e.g. tapping "Follow" usually doesn't pop the screen at
-  // all with a result). Waiting for `result == true` meant a newly
-  // followed salon would silently not show up until a manual pull-to-
-  // refresh. So: always refresh once the user comes back from this flow,
-  // regardless of what (if anything) was returned.
   Future<void> _navigateToSalonProfile(Map<String, dynamic> salon) async {
     debugPrint('🎯 Navigating to salon profile: ${salon['name']}');
     await context.push('/customer/salon-profile', extra: salon);
@@ -2810,21 +2802,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // required by AutomaticKeepAliveClientMixin
+    super.build(context);
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
 
     _checkScreenSize();
 
-    // ⚠️ FIX: previously this only waited for _isTimezoneLoaded, so as
-    // soon as timezone init finished (usually near-instant), build()
-    // moved on to the `!_isActive` check below - and since _isActive
-    // still defaults to false until _checkCustomerStatus() finishes, the
-    // "Profile Inactive / Check Status" screen flashed on screen for a
-    // moment before the real dashboard loaded. Now we also wait for
-    // _isCheckingStatus to clear, so the user only ever sees one loading
-    // screen and then the correct final screen - never the wrong one in
-    // between.
     if (!_isTimezoneLoaded || _isCheckingStatus) {
       return Scaffold(
         key: _scaffoldKey,
@@ -2874,7 +2857,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           ),
           title: null,
           actions: [_buildProfilePhoto()],
-        ),      
+        ),
         drawer: SideMenu(
           userRole: 'customer',
           userName: _customerName,
@@ -2924,7 +2907,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       );
     }
 
-    // ✅ Main Scaffold - Using Builder pattern
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
@@ -2952,13 +2934,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         userName: _customerName,
         userEmail: _customerEmail,
         profileImageUrl: _customerImage,
-        // ⚠️ FIX: previously this called _loadDashboardData() on every
-        // single drawer item tap (Profile, Settings, Logout, etc.), even
-        // when that item had nothing to do with dashboard data. That was
-        // the "click karaddi refresh venawa" bug. The drawer just closes
-        // itself now; the dashboard only reloads on app resume or after a
-        // successful booking (see _bookAppointment / _createVipBooking /
-        // _navigateToSalonProfile / _viewAllOffers above).
         onMenuItemSelected: () {},
       ),
       body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
@@ -2986,7 +2961,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
-                  // ✅ Search Bar inside content (Web)
                   Container(
                     margin: const EdgeInsets.only(bottom: 20),
                     decoration: BoxDecoration(

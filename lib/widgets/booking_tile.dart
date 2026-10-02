@@ -9,16 +9,21 @@ class BookingTile extends StatelessWidget {
   final Color statusColor;
   final VoidCallback onTap;
   final String? barberName;
-  final double? price;
+
+  // ✅ UPDATED: Price is now a pre-formatted string (multi-currency safe)
+  // Screen should pass: CurrencyService.instance.format(price, currencyCode)
+  // e.g., "Rs. 1,500", "$50.00", "₹1,200", "£35", "€40"
+  final String? formattedPrice;
+
   final String? imageUrl;
   final bool showActions;
   final VoidCallback? onComplete;
-  
+
   // VIP and Queue parameters
   final bool isVip;
   final int? queueNumber;
   final String? queueToken;
-  
+
   // Salon name parameter
   final String? salonName;
 
@@ -31,7 +36,8 @@ class BookingTile extends StatelessWidget {
     required this.statusColor,
     required this.onTap,
     this.barberName,
-    this.price,
+    // ✅ Changed from `double? price` to `String? formattedPrice`
+    this.formattedPrice,
     this.imageUrl,
     this.showActions = false,
     this.onComplete,
@@ -47,7 +53,7 @@ class BookingTile extends StatelessWidget {
     final screenWidth = MediaQuery.of(context).size.width;
     final isTablet = screenWidth >= 600;
     final isDark = context.isDarkMode;
-    
+
     final padding = isTablet ? 16.0 : 12.0;
     final avatarSize = isTablet ? 60.0 : 50.0;
     final nameSize = isTablet ? 18.0 : 16.0;
@@ -59,7 +65,7 @@ class BookingTile extends StatelessWidget {
     final minHeight = isTablet ? 100.0 : 80.0;
 
     return Card(
-      margin: EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 8),
       elevation: 1,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(borderRadius),
@@ -71,9 +77,7 @@ class BookingTile extends StatelessWidget {
         splashColor: const Color(0xFFFF6B8B).withValues(alpha: 0.1),
         highlightColor: const Color(0xFFFF6B8B).withValues(alpha: 0.05),
         child: Container(
-          constraints: BoxConstraints(
-            minHeight: minHeight,
-          ),
+          constraints: BoxConstraints(minHeight: minHeight),
           padding: EdgeInsets.all(padding),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -114,7 +118,7 @@ class BookingTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ✅ Customer Name Row with VIP Badge - FIXED OVERFLOW
+                    // ✅ Customer Name Row with VIP Badge
                     Row(
                       children: [
                         Flexible(
@@ -129,7 +133,6 @@ class BookingTile extends StatelessWidget {
                             maxLines: 1,
                           ),
                         ),
-                        // VIP Badge - FIXED OVERFLOW
                         if (isVip)
                           Flexible(
                             child: Container(
@@ -149,7 +152,7 @@ class BookingTile extends StatelessWidget {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(
+                                  const Icon(
                                     Icons.star,
                                     size: 8,
                                     color: Colors.white,
@@ -171,14 +174,15 @@ class BookingTile extends StatelessWidget {
                     ),
                     const SizedBox(height: 4),
 
-                    // ✅ Salon Name - FIXED OVERFLOW
+                    // ✅ Salon Name
                     if (salonName != null && salonName!.isNotEmpty) ...[
                       Row(
                         children: [
                           Icon(
                             Icons.store,
                             size: iconSize,
-                            color: isDark ? Colors.blue[300] : Colors.blue[600],
+                            color:
+                                isDark ? Colors.blue[300] : Colors.blue[600],
                           ),
                           const SizedBox(width: 4),
                           Flexible(
@@ -186,7 +190,9 @@ class BookingTile extends StatelessWidget {
                               salonName!,
                               style: TextStyle(
                                 fontSize: subSize * 0.9,
-                                color: isDark ? Colors.blue[300] : Colors.blue[700],
+                                color: isDark
+                                    ? Colors.blue[300]
+                                    : Colors.blue[700],
                                 fontWeight: FontWeight.w500,
                               ),
                               overflow: TextOverflow.ellipsis,
@@ -198,7 +204,7 @@ class BookingTile extends StatelessWidget {
                       const SizedBox(height: 2),
                     ],
 
-                    // ✅ Service and Barber - FIXED OVERFLOW
+                    // ✅ Service
                     Row(
                       children: [
                         Icon(
@@ -212,7 +218,8 @@ class BookingTile extends StatelessWidget {
                             serviceName,
                             style: TextStyle(
                               fontSize: subSize,
-                              color: isDark ? Colors.grey[400] : Colors.grey[600],
+                              color:
+                                  isDark ? Colors.grey[400] : Colors.grey[600],
                             ),
                             overflow: TextOverflow.ellipsis,
                             maxLines: 1,
@@ -235,7 +242,9 @@ class BookingTile extends StatelessWidget {
                               barberName!,
                               style: TextStyle(
                                 fontSize: subSize,
-                                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                color: isDark
+                                    ? Colors.grey[400]
+                                    : Colors.grey[600],
                               ),
                               overflow: TextOverflow.ellipsis,
                               maxLines: 1,
@@ -245,7 +254,7 @@ class BookingTile extends StatelessWidget {
                       ),
                     ],
 
-                    // ✅ Time, Queue Number and Status - Wrap (already good)
+                    // ✅ Time, Queue Number and Status
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
@@ -258,7 +267,7 @@ class BookingTile extends StatelessWidget {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: isDark 
+                            color: isDark
                                 ? Colors.white.withValues(alpha: 0.08)
                                 : Colors.grey.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(12),
@@ -269,20 +278,24 @@ class BookingTile extends StatelessWidget {
                               Icon(
                                 Icons.access_time,
                                 size: smallSize,
-                                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                color: isDark
+                                    ? Colors.grey[400]
+                                    : Colors.grey[600],
                               ),
                               const SizedBox(width: 4),
                               Text(
                                 time,
                                 style: TextStyle(
                                   fontSize: smallSize,
-                                  color: isDark ? Colors.grey[400] : Colors.grey[600],
+                                  color: isDark
+                                      ? Colors.grey[400]
+                                      : Colors.grey[600],
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        
+
                         // Queue Number
                         if (queueNumber != null)
                           Container(
@@ -303,21 +316,25 @@ class BookingTile extends StatelessWidget {
                                 Icon(
                                   Icons.numbers,
                                   size: smallSize,
-                                  color: isDark ? Colors.blue[300] : Colors.blue[700],
+                                  color: isDark
+                                      ? Colors.blue[300]
+                                      : Colors.blue[700],
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
                                   'Q-$queueNumber',
                                   style: TextStyle(
                                     fontSize: smallSize,
-                                    color: isDark ? Colors.blue[300] : Colors.blue[700],
+                                    color: isDark
+                                        ? Colors.blue[300]
+                                        : Colors.blue[700],
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          
+
                         // Queue Token
                         if (queueToken != null && queueNumber == null)
                           Container(
@@ -338,14 +355,18 @@ class BookingTile extends StatelessWidget {
                                 Icon(
                                   Icons.qr_code,
                                   size: smallSize,
-                                  color: isDark ? Colors.blue[300] : Colors.blue[700],
+                                  color: isDark
+                                      ? Colors.blue[300]
+                                      : Colors.blue[700],
                                 ),
                                 const SizedBox(width: 4),
                                 Text(
                                   queueToken!,
                                   style: TextStyle(
                                     fontSize: smallSize,
-                                    color: isDark ? Colors.blue[300] : Colors.blue[700],
+                                    color: isDark
+                                        ? Colors.blue[300]
+                                        : Colors.blue[700],
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -377,14 +398,17 @@ class BookingTile extends StatelessWidget {
 
                     const SizedBox(height: 8),
 
-                    // ✅ Price
-                    if (price != null)
+                    // ✅ Price - Now uses pre-formatted string
+                    // Supports any currency: "Rs. 1,500", "$50", "₹1,200", etc.
+                    if (formattedPrice != null &&
+                        formattedPrice!.isNotEmpty)
                       Text(
-                        'Rs. ${price!.toStringAsFixed(0)}',
+                        formattedPrice!,
                         style: TextStyle(
                           fontSize: priceSize,
                           fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.green[300] : Colors.green[700],
+                          color:
+                              isDark ? Colors.green[300] : Colors.green[700],
                         ),
                       ),
 
@@ -419,7 +443,9 @@ class BookingTile extends StatelessWidget {
                             onPressed: () {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Reschedule feature coming soon'),
+                                  content: Text(
+                                    'Reschedule feature coming soon',
+                                  ),
                                   duration: Duration(seconds: 1),
                                 ),
                               );
@@ -449,7 +475,7 @@ class BookingTile extends StatelessWidget {
                 ),
               ),
 
-              // ✅ Arrow icon - hide when actions are shown
+              // ✅ Arrow icon
               if (!showActions)
                 Icon(
                   Icons.arrow_forward_ios,
