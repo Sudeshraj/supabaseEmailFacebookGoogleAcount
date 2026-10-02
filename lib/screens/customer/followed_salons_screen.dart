@@ -1,4 +1,5 @@
-//Dashboard screen for customer to view their followed salons, search, filter, and unfollow salons
+// Dashboard screen for customer to view their followed salons,
+// search, filter, and unfollow salons
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -27,16 +28,12 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // Filter options
   String _selectedFilter = 'All'; // All, Most Popular, Newest
 
-  // ✅ Web Scroll Controller
   final ScrollController _scrollController = ScrollController();
-
-  // ✅ Focus Node for search
   final FocusNode _searchFocusNode = FocusNode();
 
   // ============================================
-  // ✅ TIMEZONE VARIABLES
+  // ✅ TIMEZONE
   // ============================================
-  String _userTimezone = '';
   bool _isTimezoneLoaded = false;
 
   @override
@@ -55,34 +52,31 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ============================================
   // ✅ TIMEZONE INITIALIZATION
   // ============================================
-
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    _userTimezone =
+    final userTimezone =
         prefs.getString('cached_timezone') ??
         TimezoneService.getCurrentTimezone();
-    await TimezoneService.setTimezone(_userTimezone);
+    await TimezoneService.setTimezone(userTimezone);
 
+    if (!mounted) return;
     setState(() {
       _isTimezoneLoaded = true;
     });
 
-    debugPrint('✅ User timezone: $_userTimezone');
+    debugPrint('✅ User timezone: $userTimezone');
 
     await _loadFollowedSalons();
   }
 
   // ============================================
-  // ✅ TIMEZONE HELPER METHODS
+  // ✅ TIMEZONE HELPER
   // ============================================
-
-  /// Convert UTC time string to user's local time string
   String _utcToLocalTimeString(String? utcTime) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     try {
-      // If time is already in HH:MM format, add seconds
       String timeStr = utcTime;
       if (timeStr.length == 5) {
         timeStr = '$timeStr:00';
@@ -94,7 +88,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     }
   }
 
-  /// Format time fallback
   String _formatTimeFallback(String timeStr) {
     try {
       final parts = timeStr.split(':');
@@ -111,7 +104,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ============================================================
   // LOAD FOLLOWED SALONS
   // ============================================================
-
   Future<void> _loadFollowedSalons() async {
     if (!_isTimezoneLoaded) return;
 
@@ -130,11 +122,12 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
         return;
       }
 
-      // Get followed salons with counts
       final response = await supabase.rpc(
         'get_followed_salons_with_counts',
         params: {'p_customer_id': currentUser.id},
       );
+
+      if (!mounted) return;
 
       if (response != null && response.isNotEmpty) {
         setState(() {
@@ -151,6 +144,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
       }
     } catch (e) {
       debugPrint('❌ Error loading followed salons: $e');
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading your followed salons: ${e.toString()}';
         _isLoading = false;
@@ -161,11 +155,9 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ============================================================
   // FILTER AND SEARCH
   // ============================================================
-
   List<Map<String, dynamic>> get _filteredSalons {
     var filtered = List<Map<String, dynamic>>.from(_followedSalons);
 
-    // Search filter
     if (_searchQuery.isNotEmpty) {
       filtered = filtered.where((salon) {
         final name = (salon['name'] as String?)?.toLowerCase() ?? '';
@@ -175,7 +167,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
       }).toList();
     }
 
-    // Sort filter
     switch (_selectedFilter) {
       case 'Most Popular':
         filtered.sort(
@@ -186,7 +177,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
         break;
       case 'Newest':
         break;
-      default: // 'All'
+      default:
         break;
     }
 
@@ -196,7 +187,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ============================================================
   // UNFOLLOW SALON
   // ============================================================
-
   Future<void> _unfollowSalon(int salonId, String salonName) async {
     final isDark = context.isDarkMode;
 
@@ -234,7 +224,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     try {
       final currentUser = supabase.auth.currentUser;
@@ -246,51 +236,43 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
           .eq('customer_id', currentUser.id)
           .eq('salon_id', salonId);
 
+      if (!mounted) return;
       setState(() {
         _followedSalons.removeWhere((s) => s['id'] == salonId);
       });
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Unfollowed "$salonName"'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Unfollowed "$salonName"'),
+          backgroundColor: Colors.green,
+        ),
+      );
     } catch (e) {
       debugPrint('❌ Error unfollowing salon: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error unfollowing salon: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error unfollowing salon: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   // ============================================================
-  // VIEW SALON DETAILS
+  // NAVIGATION
   // ============================================================
-
   void _viewSalonDetails(Map<String, dynamic> salon) {
     context.push('/customer/salon-profile', extra: salon);
   }
-
-  // ============================================================
-  // BOOK APPOINTMENT
-  // ============================================================
 
   void _bookAppointment(Map<String, dynamic> salon) {
     context.push('/customer/booking-flow', extra: salon);
   }
 
   // ============================================================
-  // BUILD METHODS
+  // BUILD
   // ============================================================
-
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
@@ -304,7 +286,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
             ? const Color(0xFF121212)
             : const Color(0xFFF8F9FA),
         appBar: AppBar(
-          title: Text(
+          title: const Text(
             'My Salons',
             style: TextStyle(
               fontSize: 18,
@@ -339,7 +321,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
           ? const Color(0xFF121212)
           : const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: Text(
+        title: const Text(
           'My Salons',
           style: TextStyle(
             fontSize: 18,
@@ -357,7 +339,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadFollowedSalons,
           ),
         ],
@@ -416,7 +398,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     );
   }
 
-  // ✅ WEB LAYOUT - Search Bar at Top of Content
+  // ✅ WEB LAYOUT
   Widget _buildWebLayout(List<Map<String, dynamic>> filteredSalons) {
     final isDark = context.isDarkMode;
 
@@ -475,7 +457,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     );
   }
 
-  // ✅ MOBILE LAYOUT - Search Bar at Top of Content
+  // ✅ MOBILE LAYOUT
   Widget _buildMobileLayout(List<Map<String, dynamic>> filteredSalons) {
     final isDark = context.isDarkMode;
 
@@ -504,7 +486,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     );
   }
 
-  // ✅ SEARCH BAR - Reusable Widget
+  // ✅ SEARCH BAR
   Widget _buildSearchBar() {
     final isDark = context.isDarkMode;
 
@@ -727,9 +709,8 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   }
 
   // ============================================================
-  // ✅ BUILD SALON CARD WITH TIMEZONE CONVERTED TIMES
+  // ✅ SALON CARD
   // ============================================================
-
   Widget _buildSalonCard(Map<String, dynamic> salon) {
     final isDark = context.isDarkMode;
     final name = salon['name']?.toString() ?? 'Salon';
@@ -739,7 +720,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     final bookingCount = salon['booking_count'] as int? ?? 0;
     final salonId = salon['id'] as int? ?? 0;
 
-    // ✅ Convert UTC times to local time
     final openTimeLocal = _utcToLocalTimeString(salon['open_time']?.toString());
     final closeTimeLocal = _utcToLocalTimeString(
       salon['close_time']?.toString(),
@@ -762,12 +742,10 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
         ),
         child: Column(
           children: [
-            // Main content
             Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
                 children: [
-                  // Logo
                   Container(
                     width: 65,
                     height: 65,
@@ -785,7 +763,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                         ? Center(
                             child: Text(
                               name.substring(0, 1).toUpperCase(),
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontSize: 28,
                                 fontWeight: FontWeight.bold,
                                 color: AppTheme.primary,
@@ -795,8 +773,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                         : null,
                   ),
                   const SizedBox(width: 16),
-
-                  // Salon info
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -837,7 +813,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                               ),
                             ],
                           ),
-                        // ✅ Display LOCAL times with timezone info
                         Row(
                           children: [
                             Icon(
@@ -855,7 +830,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                                     : Colors.grey[600],
                               ),
                             ),
-                            // ✅ Add timezone flag
                             const SizedBox(width: 6),
                             Text(
                               TimezoneService.getCurrentFlag(),
@@ -906,7 +880,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
               ),
             ),
 
-            // Actions
             Divider(
               height: 1,
               color: isDark ? Colors.grey[700] : Colors.grey[200],
@@ -915,18 +888,20 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: Row(
                 children: [
-                  // View Details
                   Expanded(
                     child: TextButton.icon(
                       onPressed: () => _viewSalonDetails(salon),
-                      icon: Icon(
+                      icon: const Icon(
                         Icons.info_outline,
                         size: 18,
                         color: AppTheme.primary,
                       ),
-                      label: Text(
+                      label: const Text(
                         'Details',
-                        style: TextStyle(fontSize: 13, color: AppTheme.primary),
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.primary,
+                        ),
                       ),
                       style: TextButton.styleFrom(
                         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -941,7 +916,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                     height: 25,
                     color: isDark ? Colors.grey[700] : Colors.grey[200],
                   ),
-                  // Book
                   Expanded(
                     child: TextButton.icon(
                       onPressed: () => _bookAppointment(salon),
@@ -950,7 +924,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                         size: 18,
                         color: Colors.green,
                       ),
-                      label: Text(
+                      label: const Text(
                         'Book',
                         style: TextStyle(fontSize: 13, color: Colors.green),
                       ),
@@ -965,7 +939,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                     height: 25,
                     color: isDark ? Colors.grey[700] : Colors.grey[200],
                   ),
-                  // Unfollow
                   Expanded(
                     child: TextButton.icon(
                       onPressed: () => _unfollowSalon(salonId, name),

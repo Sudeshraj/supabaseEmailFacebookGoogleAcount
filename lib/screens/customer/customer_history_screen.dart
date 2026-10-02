@@ -121,7 +121,9 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           startDate = null;
       }
 
-      // Build query
+      // ✅ FIX: appointments no longer has service_id / variant_id.
+      //    All per-service data lives in appointment_services. Read
+      //    appointments.price directly (server-synced total).
       var query = supabase
           .from('appointments')
           .select('''
@@ -132,28 +134,34 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
             end_time,
             status,
             price,
-            service_id,
-            variant_id,
+            original_price,
+            discount_amount,
+            extra_charge,
+            extra_charge_note,
             salon_id,
             barber_id,
             cancel_reason,
             created_at,
             updated_at,
-            services!inner (
-              name
-            ),
             salons!inner (
               id,
               name,
-              logo_url
+              logo_url,
+              currency_code
             ),
             profiles!appointments_barber_id_fkey (
               full_name
             ),
-            service_variants!left (
+            appointment_services (
+              id,
+              service_id,
+              variant_id,
+              service_name,
+              variant_label,
               duration,
-              salon_genders!left (display_name),
-              salon_age_categories!left (display_name)
+              original_price,
+              discount_amount,
+              final_price
             )
           ''')
           .eq('customer_id', currentUser.id)
@@ -174,28 +182,59 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
       int totalSpent = 0;
 
       for (var item in response) {
-        final service = item['services'] as Map?;
         final salon = item['salons'] as Map?;
         final barber = item['profiles'] as Map?;
-        final variant = item['service_variants'] as Map?;
 
         final status = item['status'] as String? ?? 'pending';
-        final price = (item['price'] as num?)?.toDouble() ?? 0.0;
         final date = item['appointment_date'] as String;
+
+        // ✅ Read price from appointments.price (server-synced), fall back
+        // to summing appointment_services.final_price if null.
+        double price = (item['price'] as num?)?.toDouble() ?? 0.0;
+        final servicesList = (item['appointment_services'] as List?) ?? [];
+        if (price <= 0 && servicesList.isNotEmpty) {
+          price = servicesList.fold<double>(
+            0.0,
+            (acc, s) =>
+                acc + ((s['final_price'] as num?)?.toDouble() ?? 0.0),
+          );
+        }
+
+        // ✅ Combine multiple service names
+        String serviceName = 'Unknown Service';
+        int totalDuration = 30;
+        if (servicesList.isNotEmpty) {
+          final names = servicesList
+              .map((s) => s['service_name']?.toString() ?? 'Service')
+              .toList();
+          serviceName = names.length == 1
+              ? names.first
+              : '${names.first} +${names.length - 1} more';
+          totalDuration = servicesList.fold<int>(
+            0,
+            (acc, s) => acc + ((s['duration'] as num?)?.toInt() ?? 30),
+          );
+        }
 
         historyList.add({
           'id': item['id'],
           'booking_number': item['booking_number'],
-          'service_name': service?['name']?.toString() ?? 'Unknown Service',
+          'service_name': serviceName,
+          'services': servicesList,
           'salon_name': salon?['name']?.toString() ?? 'Unknown Salon',
           'salon_logo': salon?['logo_url']?.toString(),
+          'currency_code': salon?['currency_code']?.toString() ?? 'LKR',
           'barber_name': barber?['full_name']?.toString() ?? 'Unknown Barber',
           'appointment_date': date,
           'start_time': item['start_time'],
           'end_time': item['end_time'],
           'status': status,
           'price': price,
-          'duration': variant?['duration'] ?? 30,
+          'original_price': item['original_price'],
+          'discount_amount': item['discount_amount'],
+          'extra_charge': item['extra_charge'],
+          'extra_charge_note': item['extra_charge_note'],
+          'duration': totalDuration,
           'cancel_reason': item['cancel_reason'],
           'created_at': item['created_at'],
           'updated_at': item['updated_at'],
@@ -300,7 +339,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // VIEW BOOKING DETAILS - WITH DARK MODE
+  // VIEW BOOKING DETAILS
   // ============================================================
   void _viewBookingDetails(Map<String, dynamic> booking) {
     final isDark = context.isDarkMode;
@@ -382,12 +421,15 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                     color: isDark ? Colors.white70 : Colors.grey[400],
                   ),
                   const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    style: TextStyle(
-                      color: isDark ? Colors.white60 : Colors.grey[600],
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      _errorMessage!,
+                      style: TextStyle(
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                      textAlign: TextAlign.center,
                     ),
-                    textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton(
@@ -419,14 +461,11 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           constraints: const BoxConstraints(maxWidth: 1200),
           child: Column(
             children: [
-              // Filters
               _buildFilters(),
-              // Content
               Expanded(
                 child: TabBarView(
                   controller: _tabController,
                   children: [
-                    // History Tab
                     filteredHistory.isEmpty
                         ? _buildEmptyState()
                         : Scrollbar(
@@ -446,7 +485,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                               },
                             ),
                           ),
-                    // Stats Tab
                     _buildStatsTab(),
                   ],
                 ),
@@ -464,14 +502,11 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
 
     return Column(
       children: [
-        // Filters
         _buildFilters(),
-        // Content
         Expanded(
           child: TabBarView(
             controller: _tabController,
             children: [
-              // History Tab
               filteredHistory.isEmpty
                   ? _buildEmptyState()
                   : ListView.builder(
@@ -482,7 +517,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                         return _buildHistoryCard(booking);
                       },
                     ),
-              // Stats Tab
               _buildStatsTab(),
             ],
           ),
@@ -492,7 +526,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // BUILD FILTERS - WITH DARK MODE
+  // BUILD FILTERS
   // ============================================================
   Widget _buildFilters() {
     final isDark = context.isDarkMode;
@@ -504,7 +538,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       child: Column(
         children: [
-          // Search
           TextField(
             onChanged: (value) {
               setState(() {
@@ -555,8 +588,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
             ),
           ),
           const SizedBox(height: 8),
-
-          // Status filter
           Row(
             children: [
               Text(
@@ -611,8 +642,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
             ],
           ),
           const SizedBox(height: 4),
-
-          // Period filter
           Row(
             children: [
               Text(
@@ -673,7 +702,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // BUILD HISTORY CARD - WITH DARK MODE
+  // BUILD HISTORY CARD
   // ============================================================
   Widget _buildHistoryCard(Map<String, dynamic> booking) {
     final isDark = context.isDarkMode;
@@ -729,7 +758,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Header: Date & Status
+              // Header
               Row(
                 children: [
                   Container(
@@ -813,6 +842,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                             color: isDark ? Colors.white : Colors.black87,
                           ),
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                         Text(
                           salonName,
@@ -821,6 +851,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                             color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                         Row(
                           children: [
@@ -830,15 +861,18 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                               color: isDark ? Colors.white70 : Colors.grey[500],
                             ),
                             const SizedBox(width: 4),
-                            Text(
-                              barberName,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark
-                                    ? Colors.white70
-                                    : Colors.grey[500],
+                            Flexible(
+                              child: Text(
+                                barberName,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.grey[500],
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
                               ),
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
@@ -849,7 +883,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               ),
               const SizedBox(height: 12),
 
-              // Details: Price, Duration, Booking #
+              // Details
               Row(
                 children: [
                   Container(
@@ -926,7 +960,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // BUILD STATS TAB - WITH DARK MODE
+  // BUILD STATS TAB
   // ============================================================
   Widget _buildStatsTab() {
     final isDark = context.isDarkMode;
@@ -935,7 +969,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
-          // Summary Cards
           Row(
             children: [
               Expanded(
@@ -958,8 +991,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
             ],
           ),
           const SizedBox(height: 12),
-
-          // Status Distribution
           Card(
             elevation: 2,
             color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
@@ -1005,8 +1036,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
             ),
           ),
           const SizedBox(height: 12),
-
-          // Recent Activity
           Card(
             elevation: 2,
             color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
@@ -1093,6 +1122,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                                           : Colors.black87,
                                     ),
                                     overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
                                   ),
                                   Text(
                                     date,
@@ -1232,9 +1262,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     );
   }
 
-  // ============================================================
-  // BUILD EMPTY STATE - WITH DARK MODE
-  // ============================================================
   Widget _buildEmptyState() {
     final isDark = context.isDarkMode;
 
@@ -1284,7 +1311,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
 }
 
 // ============================================================
-// BOOKING DETAILS SHEET - WITH DARK MODE
+// BOOKING DETAILS SHEET
 // ============================================================
 class _BookingDetailsSheet extends StatelessWidget {
   final Map<String, dynamic> booking;
@@ -1305,6 +1332,11 @@ class _BookingDetailsSheet extends StatelessWidget {
     final status = booking['status'] as String? ?? 'pending';
     final cancelReason = booking['cancel_reason']?.toString();
     final displayDate = booking['display_date']?.toString() ?? '';
+    final extraCharge = (booking['extra_charge'] as num?)?.toDouble() ?? 0;
+    final extraNote = booking['extra_charge_note']?.toString();
+    final discountAmount =
+        (booking['discount_amount'] as num?)?.toDouble() ?? 0;
+    final services = (booking['services'] as List?) ?? [];
 
     Color statusColor;
     String statusLabel;
@@ -1328,7 +1360,7 @@ class _BookingDetailsSheet extends StatelessWidget {
     }
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.6,
+      initialChildSize: 0.7,
       minChildSize: 0.4,
       maxChildSize: 0.9,
       expand: false,
@@ -1341,7 +1373,6 @@ class _BookingDetailsSheet extends StatelessWidget {
           ),
           child: Column(
             children: [
-              // Handle
               Center(
                 child: Container(
                   width: 40,
@@ -1405,7 +1436,10 @@ class _BookingDetailsSheet extends StatelessWidget {
                             fontSize: 14,
                             color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
                         ),
+                        const SizedBox(height: 4),
                         Row(
                           children: [
                             Container(
@@ -1428,13 +1462,16 @@ class _BookingDetailsSheet extends StatelessWidget {
                             ),
                             if (bookingNumber.isNotEmpty) ...[
                               const SizedBox(width: 8),
-                              Text(
-                                '#$bookingNumber',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.grey[500],
+                              Flexible(
+                                child: Text(
+                                  '#$bookingNumber',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.grey[500],
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ],
@@ -1449,46 +1486,183 @@ class _BookingDetailsSheet extends StatelessWidget {
               const SizedBox(height: 20),
               const Divider(),
 
-              // Details
               Expanded(
                 child: ListView(
                   controller: scrollController,
                   children: [
-                    // ✅ Pass context to each call
                     _buildDetailRow(
-                      context, // ← Pass context
+                      context,
                       icon: Icons.calendar_today,
                       label: 'Date',
                       value: displayDate,
                     ),
                     _buildDetailRow(
-                      context, // ← Pass context
+                      context,
                       icon: Icons.access_time,
                       label: 'Time',
                       value: '$startTime - $endTime',
                     ),
                     _buildDetailRow(
-                      context, // ← Pass context
+                      context,
                       icon: Icons.person,
                       label: 'Barber',
                       value: barberName,
                     ),
                     _buildDetailRow(
-                      context, // ← Pass context
+                      context,
                       icon: Icons.timer,
                       label: 'Duration',
                       value: '$duration minutes',
                     ),
+
+                    // ✅ Services list (multi-service)
+                    if (services.isNotEmpty) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12, bottom: 8),
+                        child: Text(
+                          'Services (${services.length})',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ),
+                      ...services.map((s) {
+                        final sName =
+                            s['service_name']?.toString() ?? 'Service';
+                        final sDuration =
+                            (s['duration'] as num?)?.toInt() ?? 30;
+                        final sFinal =
+                            (s['final_price'] as num?)?.toDouble() ?? 0;
+                        final sOriginal =
+                            (s['original_price'] as num?)?.toDouble() ?? 0;
+                        final sDiscount =
+                            (s['discount_amount'] as num?)?.toDouble() ?? 0;
+                        final variantLabel =
+                            s['variant_label']?.toString() ?? '';
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.grey[50],
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[200]!,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      sName,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
+                                      ),
+                                    ),
+                                    Row(
+                                      children: [
+                                        if (variantLabel.isNotEmpty)
+                                          Text(
+                                            '$variantLabel • ',
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: isDark
+                                                  ? Colors.white60
+                                                  : Colors.grey[600],
+                                            ),
+                                          ),
+                                        Text(
+                                          '$sDuration min',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            color: isDark
+                                                ? Colors.white60
+                                                : Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  if (sDiscount > 0)
+                                    Text(
+                                      'Rs. ${sOriginal.toStringAsFixed(0)}',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        decoration:
+                                            TextDecoration.lineThrough,
+                                        color: isDark
+                                            ? Colors.white60
+                                            : Colors.grey,
+                                      ),
+                                    ),
+                                  Text(
+                                    'Rs. ${(sDiscount > 0 ? sFinal : sOriginal).toStringAsFixed(0)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: sDiscount > 0
+                                          ? Colors.green
+                                          : (isDark
+                                                ? Colors.white70
+                                                : Colors.black87),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ],
+
+                    if (discountAmount > 0)
+                      _buildDetailRow(
+                        context,
+                        icon: Icons.local_offer,
+                        label: 'Discount',
+                        value: '- Rs. ${discountAmount.toStringAsFixed(0)}',
+                        valueColor: Colors.green,
+                      ),
+
+                    if (extraCharge > 0)
+                      _buildDetailRow(
+                        context,
+                        icon: Icons.add_circle,
+                        label: 'Extra Charge',
+                        value:
+                            '+ Rs. ${extraCharge.toStringAsFixed(0)}${extraNote != null && extraNote.isNotEmpty ? ' ($extraNote)' : ''}',
+                        valueColor: Colors.orange,
+                      ),
+
                     _buildDetailRow(
-                      context, // ← Pass context
+                      context,
                       icon: Icons.attach_money,
-                      label: 'Price',
+                      label: 'Total Price',
                       value: 'Rs. ${price.toStringAsFixed(0)}',
                       valueColor: Colors.green,
                     ),
+
                     if (cancelReason != null && cancelReason.isNotEmpty)
                       _buildDetailRow(
-                        context, // ← Pass context
+                        context,
                         icon: Icons.info_outline,
                         label: 'Cancellation Reason',
                         value: cancelReason,
@@ -1498,7 +1672,6 @@ class _BookingDetailsSheet extends StatelessWidget {
                 ),
               ),
 
-              // Close button
               const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
@@ -1522,7 +1695,6 @@ class _BookingDetailsSheet extends StatelessWidget {
     );
   }
 
-  // ✅ Fixed: Add context parameter
   Widget _buildDetailRow(
     BuildContext context, {
     required IconData icon,

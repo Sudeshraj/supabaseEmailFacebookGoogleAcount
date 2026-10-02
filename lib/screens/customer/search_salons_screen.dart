@@ -63,8 +63,6 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   // LOAD RECENT SEARCHES
   // ============================================================
   Future<void> _loadRecentSearches() async {
-    // Load from shared preferences or memory
-    // For now, using in-memory
     setState(() {
       _recentSearches = _recentSearches;
     });
@@ -77,7 +75,7 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
     try {
       final response = await supabase
           .from('salons')
-          .select('id, name, logo_url, address')
+          .select('id, name, logo_url, address, currency_code, currency_symbol')
           .eq('is_active', true)
           .order('created_at', ascending: false)
           .limit(10);
@@ -93,6 +91,11 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
 
   // ============================================================
   // SEARCH SALONS
+  // ✅ FIX: N+1 query problem — instead of a separate count query per
+  //    salon (which meant 20 salons = 20 extra queries), fetch every
+  //    salon at once and count followers in ONE additional aggregate
+  //    query. Salon_followers is a small lookup table so this is much
+  //    faster than looping.
   // ============================================================
   Future<void> _searchSalons(String query) async {
     if (query.isEmpty) {
@@ -124,6 +127,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
             email,
             description,
             is_active,
+            currency_code,
+            currency_symbol,
             created_at
           ''')
           .eq('is_active', true)
@@ -133,13 +138,27 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
 
       final results = List<Map<String, dynamic>>.from(response);
 
-      // Get follower counts for each salon
-      for (var salon in results) {
-        final followers = await supabase
+      // ✅ Single query for follower counts of all matched salons
+      if (results.isNotEmpty) {
+        final salonIds = results.map((s) => s['id']).toList();
+
+        final followerRows = await supabase
             .from('salon_followers')
-            .select('id')
-            .eq('salon_id', salon['id']);
-        salon['follower_count'] = followers.length;
+            .select('salon_id')
+            .inFilter('salon_id', salonIds);
+
+        // Build a count map
+        final Map<int, int> followerCounts = {};
+        for (final row in followerRows) {
+          final sid = row['salon_id'] as int?;
+          if (sid == null) continue;
+          followerCounts[sid] = (followerCounts[sid] ?? 0) + 1;
+        }
+
+        for (var salon in results) {
+          final sid = salon['id'] as int?;
+          salon['follower_count'] = sid != null ? (followerCounts[sid] ?? 0) : 0;
+        }
       }
 
       setState(() {
@@ -148,7 +167,6 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
         _isSearching = false;
       });
 
-      // Add to recent searches
       if (results.isNotEmpty) {
         _addRecentSearch(query);
       }
@@ -197,7 +215,7 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
     try {
       final response = await supabase
           .from('salons')
-          .select('id, name, logo_url, address')
+          .select('id, name, logo_url, address, currency_code, currency_symbol')
           .eq('is_active', true)
           .ilike('name', '%$query%')
           .order('name')
@@ -332,10 +350,7 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   Widget _buildMobileLayout() {
     return Column(
       children: [
-        // Search Bar
         _buildSearchBar(),
-
-        // Results or Suggestions
         Expanded(
           child: _isSearching ? _buildSearchResults() : _buildSuggestions(),
         ),
@@ -450,11 +465,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
     return ListView(
       padding: EdgeInsets.all(isWeb ? 16 : 12),
       children: [
-        // Recent Searches
         if (_recentSearches.isNotEmpty && _searchQuery.isEmpty)
           _buildRecentSearches(),
-
-        // Recent Salons (Suggestions)
         if (_suggestions.isNotEmpty) _buildSuggestionsList(),
       ],
     );
@@ -587,7 +599,6 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
         ),
         child: Row(
           children: [
-            // Logo
             Container(
               width: 50,
               height: 50,
@@ -796,7 +807,7 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Profile Image (Clickable)
+                // Profile Image
                 GestureDetector(
                   onTap: () => _navigateToSalonProfile(salon),
                   child: Container(
@@ -835,7 +846,6 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Name (Clickable)
                       GestureDetector(
                         onTap: () => _navigateToSalonProfile(salon),
                         child: Text(
@@ -903,7 +913,6 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
               children: [
-                // View Profile (Clickable)
                 Expanded(
                   child: TextButton.icon(
                     onPressed: () => _navigateToSalonProfile(salon),
@@ -923,7 +932,6 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                   height: 25,
                   color: isDark ? Colors.grey[700] : Colors.grey[200],
                 ),
-                // Book Now
                 Expanded(
                   child: TextButton.icon(
                     onPressed: () => _navigateToBooking(salon),

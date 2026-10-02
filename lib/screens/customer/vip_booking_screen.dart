@@ -546,89 +546,211 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   // ============================================
   // STEP 3: SERVICE SELECTION
+  // ✅ FIX: no nested !inner embedding. Services, variants, categories,
+  //    genders and age-categories are fetched as separate flat queries and
+  //    joined on the Dart side (same fix as booking-flow screen). The old
+  //    3-level-deep embedded select silently dropped a whole service the
+  //    moment ANY one nested child row failed its RLS check, because
+  //    !inner embedding is a real SQL INNER JOIN and RLS policies apply as
+  //    extra WHERE conditions on every joined table. Flat queries don't
+  //    have that failure mode.
   // ============================================
 
   Future<void> _loadSalonServices() async {
     if (_servicesLoaded) return;
+    if (_selectedSalon == null) {
+      debugPrint('⚠️ [VIP] _loadSalonServices: no salon selected yet');
+      return;
+    }
     setState(() => _isLoadingServices = true);
 
     try {
       final salonId = _selectedSalon!['id'];
+      debugPrint('🔍 [VIP SERVICE] Loading services for salon_id: $salonId');
 
-      final response = await supabase
+      // STEP 1: services
+      final servicesResponse = await supabase
           .from('services')
-          .select('''
-          id,
-          name,
-          description,
-          is_active,
-          category_id,
-          salon_categories!inner (
-            display_name
-          ),
-          service_variants!inner (
-            id,
-            price,
-            duration,
-            salon_gender_id,
-            salon_age_category_id,
-            salon_genders!inner (
-              display_name
-            ),
-            salon_age_categories!inner (
-              display_name
-            )
-          )
-        ''')
+          .select('id, name, description, is_active, category_id')
           .eq('salon_id', salonId)
-          .eq('is_active', true)
-          .eq('service_variants.is_active', true);
+          .eq('is_active', true);
 
-      final Map<int, Map<String, dynamic>> groupedServices = {};
+      if (servicesResponse.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _salonServices = [];
+          _isLoadingServices = false;
+          _servicesLoaded = true;
+        });
 
-      for (var service in response) {
-        final serviceId = service['id'] as int;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('This salon has no services available yet.'),
+            backgroundColor: Colors.orange.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
 
-        if (!groupedServices.containsKey(serviceId)) {
-          groupedServices[serviceId] = {
-            'id': serviceId,
-            'name': service['name']?.toString() ?? 'Service',
-            'description': service['description']?.toString(),
-            'category_name':
-                service['salon_categories']?['display_name'] ?? 'Other',
-            'variants': [],
-          };
-        }
+      final serviceIds = servicesResponse.map((s) => s['id'] as int).toList();
 
-        final variants = service['service_variants'] as List? ?? [];
-        for (var variant in variants) {
-          groupedServices[serviceId]!['variants'].add({
-            'id': variant['id'],
-            'gender': variant['salon_genders']?['display_name'] ?? '',
-            'age': variant['salon_age_categories']?['display_name'] ?? '',
-            'price': (variant['price'] as num?)?.toDouble() ?? 0.0,
-            'duration': variant['duration'] ?? 30,
-          });
+      // STEP 2: variants
+      final variantsResponse = await supabase
+          .from('service_variants')
+          .select(
+            'id, service_id, price, duration, salon_gender_id, salon_age_category_id, is_active',
+          )
+          .inFilter('service_id', serviceIds);
+
+      final activeVariants = variantsResponse
+          .where((v) => v['is_active'] == true)
+          .toList();
+
+      if (activeVariants.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _salonServices = [];
+          _isLoadingServices = false;
+          _servicesLoaded = true;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+              'Services have no active variants. Please contact the salon.',
+            ),
+            backgroundColor: Colors.orange.shade700,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      // STEP 3: categories
+      final categoryIds = servicesResponse
+          .map((s) => s['category_id'] as int?)
+          .whereType<int>()
+          .toSet()
+          .toList();
+
+      Map<int, String> categoryMap = {};
+      if (categoryIds.isNotEmpty) {
+        try {
+          final rows = await supabase
+              .from('salon_categories')
+              .select('id, display_name')
+              .inFilter('id', categoryIds);
+          for (final c in rows) {
+            categoryMap[c['id'] as int] =
+                c['display_name']?.toString() ?? 'Other';
+          }
+        } catch (e) {
+          debugPrint('⚠️ [VIP] categories failed: $e');
         }
       }
 
-      final servicesList = groupedServices.values.toList();
+      // STEP 4: genders
+      final genderIds = activeVariants
+          .map((v) => v['salon_gender_id'] as int?)
+          .whereType<int>()
+          .toSet()
+          .toList();
 
+      Map<int, String> genderMap = {};
+      if (genderIds.isNotEmpty) {
+        try {
+          final rows = await supabase
+              .from('salon_genders')
+              .select('id, display_name')
+              .inFilter('id', genderIds);
+          for (final g in rows) {
+            genderMap[g['id'] as int] = g['display_name']?.toString() ?? '';
+          }
+        } catch (e) {
+          debugPrint('⚠️ [VIP] genders failed: $e');
+        }
+      }
+
+      // STEP 5: age categories
+      final ageIds = activeVariants
+          .map((v) => v['salon_age_category_id'] as int?)
+          .whereType<int>()
+          .toSet()
+          .toList();
+
+      Map<int, String> ageMap = {};
+      if (ageIds.isNotEmpty) {
+        try {
+          final rows = await supabase
+              .from('salon_age_categories')
+              .select('id, display_name')
+              .inFilter('id', ageIds);
+          for (final a in rows) {
+            ageMap[a['id'] as int] = a['display_name']?.toString() ?? '';
+          }
+        } catch (e) {
+          debugPrint('⚠️ [VIP] age categories failed: $e');
+        }
+      }
+
+      // STEP 6: group services with variants
+      final Map<int, Map<String, dynamic>> groupedServices = {};
+
+      for (final service in servicesResponse) {
+        final serviceId = service['id'] as int;
+        final categoryId = service['category_id'] as int?;
+
+        groupedServices[serviceId] = {
+          'id': serviceId,
+          'name': service['name']?.toString() ?? 'Service',
+          'description': service['description']?.toString(),
+          'category_name': categoryId != null
+              ? (categoryMap[categoryId] ?? 'Other')
+              : 'Other',
+          'variants': [],
+        };
+      }
+
+      for (final variant in activeVariants) {
+        final serviceId = variant['service_id'] as int;
+        final genderId = variant['salon_gender_id'] as int?;
+        final ageId = variant['salon_age_category_id'] as int?;
+
+        (groupedServices[serviceId]?['variants'] as List?)?.add({
+          'id': variant['id'],
+          'gender': genderId != null ? (genderMap[genderId] ?? '') : '',
+          'age': ageId != null ? (ageMap[ageId] ?? '') : '',
+          'price': (variant['price'] as num?)?.toDouble() ?? 0.0,
+          'duration': variant['duration'] ?? 30,
+        });
+      }
+
+      final servicesList = groupedServices.values
+          .where((s) => (s['variants'] as List).isNotEmpty)
+          .toList();
+
+      debugPrint(
+        '✅ [VIP] Grouped into ${servicesList.length} service(s) with variants',
+      );
+
+      if (!mounted) return;
       setState(() {
         _salonServices = servicesList;
         _isLoadingServices = false;
         _servicesLoaded = true;
       });
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('❌ [VIP] Failed to load services: $e');
+      debugPrint('📚 $stackTrace');
+      if (!mounted) return;
       setState(() => _isLoadingServices = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to load services: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to load services: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -957,7 +1079,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           .not('status', 'in', '("cancelled","no_show")');
       setState(() {
         _duplicateError = existing.isNotEmpty
-            ? '⚠️ You already have a VIP booking for ${childName.isEmpty ? "yourself" : childName} on ${DateFormat('MMM dd').format(_selectedDate!)}.'
+            ? '⚠️ You already have a booking for ${childName.isEmpty ? "yourself" : childName} on ${DateFormat('MMM dd').format(_selectedDate!)}.'
             : null;
       });
     } catch (e) {
@@ -1168,7 +1290,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         if (startTimeUTC.length > 5) {
           startTimeUTC = startTimeUTC.substring(0, 5);
         }
-        if (endTimeUTC.length > 5) endTimeUTC = endTimeUTC.substring(0, 5);
+        if (endTimeUTC.length > 5) {
+          endTimeUTC = endTimeUTC.substring(0, 5);
+        }
 
         final startParts = startTimeUTC.split(':');
         final endParts = endTimeUTC.split(':');
@@ -1427,6 +1551,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   // ============================================
   // STEP 7: CONFIRMATION
+  // ✅ FIX: create_vip_booking now takes p_variant_ids (INTEGER[]) instead
+  //    of p_service_id / p_variant_id. appointments no longer has those
+  //    columns at all - appointment_services holds every selected service.
   // ============================================
 
   Future<void> _confirmBooking() async {
@@ -1442,14 +1569,38 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final utcStartTime = _selectedSlot!['utc_start_time'];
       final utcEndTime = _selectedSlot!['utc_end_time'];
 
+      // ✅ FIX: build the variant_ids array from ALL selected services
+      final variantIds = _selectedServices
+          .map((s) => s['variant_id'])
+          .whereType<int>()
+          .toList();
+
+      // ✅ Guard: catch missing variant_id before the RPC round-trip
+      final missingVariants = _selectedServices
+          .where((s) => s['variant_id'] == null)
+          .toList();
+      if (missingVariants.isNotEmpty) {
+        final names = missingVariants.map((s) => s['name']).join(', ');
+        throw Exception(
+          'Missing variant for: $names. Please re-select these services.',
+        );
+      }
+
+      if (variantIds.isEmpty) {
+        throw Exception(
+          'No variants selected. Please select at least one service.',
+        );
+      }
+
+      debugPrint('📤 [VIP] Sending variant_ids: $variantIds');
+
       final result = await supabase.rpc(
         'create_vip_booking',
         params: {
           'p_customer_id': user.id,
           'p_salon_id': _selectedSalon!['id'],
           'p_barber_id': barberId,
-          'p_service_id': _selectedServices.first['id'],
-          'p_variant_id': _selectedServices.first['variant_id'],
+          'p_variant_ids': variantIds,
           'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
           'p_utc_start_time': utcStartTime,
           'p_utc_end_time': utcEndTime,
@@ -1660,9 +1811,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        CircularProgressIndicator(
-                          color: AppTheme.primary,
-                        ),
+                        CircularProgressIndicator(color: AppTheme.primary),
                         const SizedBox(height: 16),
                         Text(
                           'Loading your followed salons...',
@@ -1852,7 +2001,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               salon['address'],
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isDark ? Colors.white60 : Colors.grey[600],
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
                               ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -2087,10 +2238,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 onPressed: () => setState(() => _currentStep = 0),
                 child: Text(
                   'Change',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
                 ),
               ),
             ],
@@ -2115,14 +2263,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       color: isDark ? Colors.red.shade900 : Colors.red.shade50,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isDark ? Colors.red.shade700 : Colors.red.shade300,
+                        color: isDark
+                            ? Colors.red.shade700
+                            : Colors.red.shade300,
                       ),
                     ),
                     child: Row(
                       children: [
                         Icon(
                           Icons.event_busy,
-                          color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                          color: isDark
+                              ? Colors.red.shade300
+                              : Colors.red.shade700,
                           size: 20,
                         ),
                         const SizedBox(width: 12),
@@ -2135,21 +2287,27 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                                  color: isDark
+                                      ? Colors.red.shade300
+                                      : Colors.red.shade700,
                                 ),
                               ),
                               Text(
                                 _holidayNames[today] ?? 'Salon is closed today',
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: isDark ? Colors.red.shade300 : Colors.red.shade600,
+                                  color: isDark
+                                      ? Colors.red.shade300
+                                      : Colors.red.shade600,
                                 ),
                               ),
                               Text(
                                 'Auto-selected next available date: ${DateFormat('EEEE, MMM dd').format(_selectedDate ?? getFirstAvailableDate())}',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                                  color: isDark
+                                      ? Colors.blue.shade300
+                                      : Colors.blue.shade700,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -2190,7 +2348,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       color: isDark ? Colors.red.shade900 : Colors.red.shade50,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: isDark ? Colors.red.shade700 : Colors.red.shade300,
+                        color: isDark
+                            ? Colors.red.shade700
+                            : Colors.red.shade300,
                         width: 1.5,
                       ),
                     ),
@@ -2199,12 +2359,16 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: isDark ? Colors.red.shade800 : Colors.red.shade100,
+                            color: isDark
+                                ? Colors.red.shade800
+                                : Colors.red.shade100,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(
                             Icons.event_busy,
-                            color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                            color: isDark
+                                ? Colors.red.shade300
+                                : Colors.red.shade700,
                             size: 24,
                           ),
                         ),
@@ -2218,7 +2382,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                     ? '🚫 TODAY IS A HOLIDAY'
                                     : '⛔ HOLIDAY',
                                 style: TextStyle(
-                                  color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                                  color: isDark
+                                      ? Colors.red.shade300
+                                      : Colors.red.shade700,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
                                 ),
@@ -2227,7 +2393,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               Text(
                                 '${selectedHolidayName ?? 'Salon is closed'} ${isSelectedToday ? 'today' : 'on this date'}',
                                 style: TextStyle(
-                                  color: isDark ? Colors.red.shade300 : Colors.red.shade600,
+                                  color: isDark
+                                      ? Colors.red.shade300
+                                      : Colors.red.shade600,
                                   fontSize: 14,
                                 ),
                               ),
@@ -2235,7 +2403,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 Text(
                                   'Please select another date (tomorrow or later)',
                                   style: TextStyle(
-                                    color: isDark ? Colors.red.shade300 : Colors.red.shade500,
+                                    color: isDark
+                                        ? Colors.red.shade300
+                                        : Colors.red.shade500,
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
                                   ),
@@ -2253,14 +2423,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     margin: const EdgeInsets.only(top: 16),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: isDark ? Colors.orange.shade900 : Colors.orange.shade50,
+                      color: isDark
+                          ? Colors.orange.shade900
+                          : Colors.orange.shade50,
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Row(
                       children: [
                         Icon(
                           Icons.warning_amber,
-                          color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                          color: isDark
+                              ? Colors.orange.shade300
+                              : Colors.orange.shade700,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -2268,7 +2442,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             _unavailableReason ??
                                 '⚠️ No barbers available on this day',
                             style: TextStyle(
-                              color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                              color: isDark
+                                  ? Colors.orange.shade300
+                                  : Colors.orange.shade700,
                               fontSize: 14,
                             ),
                           ),
@@ -2281,24 +2457,32 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     margin: const EdgeInsets.only(top: 16),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: isDark ? Colors.green.shade900 : Colors.green.shade50,
+                      color: isDark
+                          ? Colors.green.shade900
+                          : Colors.green.shade50,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: isDark ? Colors.green.shade700 : Colors.green.shade200,
+                        color: isDark
+                            ? Colors.green.shade700
+                            : Colors.green.shade200,
                       ),
                     ),
                     child: Row(
                       children: [
                         Icon(
                           Icons.check_circle,
-                          color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                          color: isDark
+                              ? Colors.green.shade300
+                              : Colors.green.shade700,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             '✅ Selected: ${DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!)}',
                             style: TextStyle(
-                              color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                              color: isDark
+                                  ? Colors.green.shade300
+                                  : Colors.green.shade700,
                               fontSize: 14,
                               fontWeight: FontWeight.w500,
                             ),
@@ -2470,10 +2654,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 onPressed: () => setState(() => _currentStep = 1),
                 child: Text(
                   'Change',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
                 ),
               ),
             ],
@@ -2593,7 +2774,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 ),
                 selected: _selectedCategoryTab == null,
                 onSelected: (_) => setState(() => _selectedCategoryTab = null),
-                backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                backgroundColor: isDark
+                    ? const Color(0xFF2A2A2A)
+                    : Colors.white,
                 selectedColor: AppTheme.primary,
               ),
               const SizedBox(width: 8),
@@ -2612,7 +2795,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                     selected: _selectedCategoryTab == c,
                     onSelected: (_) => setState(() => _selectedCategoryTab = c),
-                    backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                    backgroundColor: isDark
+                        ? const Color(0xFF2A2A2A)
+                        : Colors.white,
                     selectedColor: AppTheme.primary,
                   ),
                 ),
@@ -2623,9 +2808,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         Expanded(
           child: _isLoadingServices
               ? Center(
-                  child: CircularProgressIndicator(
-                    color: AppTheme.primary,
-                  ),
+                  child: CircularProgressIndicator(color: AppTheme.primary),
                 )
               : servicesToShow.isEmpty
               ? Center(
@@ -2749,14 +2932,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade700,
                   ),
                 ),
                 Text(
                   _appliedOffer!['title']?.toString() ?? '',
                   style: TextStyle(
                     fontSize: 12,
-                    color: isDark ? Colors.green.shade300 : Colors.green.shade600,
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade600,
                   ),
                 ),
                 Text(
@@ -2764,7 +2951,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
-                    color: isDark ? Colors.green.shade300 : Colors.green.shade600,
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade600,
                   ),
                 ),
               ],
@@ -2773,7 +2962,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           TextButton(
             onPressed: _removeOffer,
             style: TextButton.styleFrom(
-              foregroundColor: isDark ? Colors.green.shade300 : Colors.green.shade700,
+              foregroundColor: isDark
+                  ? Colors.green.shade300
+                  : Colors.green.shade700,
             ),
             child: const Text('Remove'),
           ),
@@ -2801,7 +2992,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
-      color: isDark ? const Color(0xFF2A2A2A) : _cardColors[index % _cardColors.length],
+      color: isDark
+          ? const Color(0xFF2A2A2A)
+          : _cardColors[index % _cardColors.length],
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
@@ -2812,7 +3005,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: isDark ? const Color(0xFF2A2A2A) : _cardColors[index % _cardColors.length],
+          color: isDark
+              ? const Color(0xFF2A2A2A)
+              : _cardColors[index % _cardColors.length],
         ),
         child: Column(
           children: [
@@ -2908,10 +3103,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             if (variants.isNotEmpty && (!isMobile || isExpanded))
               Column(
                 children: [
-                  const Divider(
-                    color: Colors.grey,
-                    height: 1,
-                  ),
+                  const Divider(color: Colors.grey, height: 1),
                   Padding(
                     padding: const EdgeInsets.all(14),
                     child: Column(
@@ -3007,7 +3199,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               child: Icon(
                 genderIcon,
                 size: isMobile ? 22 : 24,
-                color: isSelected ? AppTheme.primary : (isDark ? Colors.white60 : Colors.grey[600]),
+                color: isSelected
+                    ? AppTheme.primary
+                    : (isDark ? Colors.white60 : Colors.grey[600]),
               ),
             ),
             const SizedBox(width: 12),
@@ -3018,7 +3212,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   Text(
                     displayText.isEmpty ? 'Variant' : displayText,
                     style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
                       fontSize: isMobile ? 13 : 15,
                       color: isSelected
                           ? AppTheme.primary
@@ -3044,7 +3240,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               price.toStringAsFixed(0),
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isDark ? Colors.white70 : Colors.grey[500],
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.grey[500],
                                 decoration: TextDecoration.lineThrough,
                               ),
                             ),
@@ -3058,7 +3256,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   ? FontWeight.w600
                                   : FontWeight.normal,
                               color: _discountAmount > 0 && isSelected
-                                  ? (isDark ? Colors.green.shade300 : Colors.green.shade700)
+                                  ? (isDark
+                                        ? Colors.green.shade300
+                                        : Colors.green.shade700)
                                   : (isDark ? Colors.white70 : Colors.grey[700]),
                             ),
                           ),
@@ -3093,7 +3293,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 vertical: isMobile ? 6 : 8,
               ),
               decoration: BoxDecoration(
-                color: isSelected ? AppTheme.primary : (isDark ? Colors.grey[800] : Colors.grey[100]),
+                color: isSelected
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[800] : Colors.grey[100]),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
@@ -3134,217 +3336,283 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
-        expand: false,
-        builder: (context, scrollController) {
-          return Container(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.grey[700] : Colors.grey[300],
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (context, scrollController) {
+            return Container(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
                       decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
+                        color: isDark ? Colors.grey[700] : Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
                       ),
-                      child: Icon(
-                        Icons.checklist,
-                        color: AppTheme.primary,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Selected Services',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                          Text(
-                            '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} selected',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: isDark ? Colors.white60 : Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (_selectedServices.isNotEmpty)
-                      TextButton(
-                        onPressed: () {
-                          setState(() {
-                            _selectedServices.clear();
-                            _updateTotalAndDiscount();
-                          });
-                          Navigator.pop(context);
-                        },
-                        child: Text(
-                          'Clear All',
-                          style: TextStyle(
-                            color: isDark ? Colors.red.shade300 : Colors.red,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Expanded(
-                  child: _selectedServices.isEmpty
-                      ? Center(
-                          child: SingleChildScrollView(
-                            padding: const EdgeInsets.all(24),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.shopping_cart_outlined,
-                                  size: 64,
-                                  color: isDark ? Colors.white30 : Colors.grey[300],
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  'No services selected',
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: isDark ? Colors.white60 : Colors.grey[500],
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Tap on service variants to add',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    color: isDark ? Colors.white70 : Colors.grey[400],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      : ListView.separated(
-                          controller: scrollController,
-                          itemCount: _selectedServices.length,
-                          separatorBuilder: (context, index) =>
-                              const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final service = _selectedServices[index];
-                            return _buildSelectedServiceItem(service, index);
-                          },
-                        ),
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: AppTheme.primary.withValues(alpha: 0.2),
                     ),
                   ),
-                  child: Column(
+                  Row(
                     children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Total Duration',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: isDark ? Colors.white60 : Colors.grey,
-                            ),
-                          ),
-                          Text(
-                            '${_calculateTotalDuration()} min',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.primary,
-                            ),
-                          ),
-                        ],
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.checklist,
+                          color: AppTheme.primary,
+                          size: 24,
+                        ),
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Total Price',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: isDark ? Colors.white60 : Colors.grey,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Selected Services',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
                             ),
-                          ),
-                          Text(
-                            'Rs. ${_calculateTotalPrice().toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.primary,
+                            Text(
+                              '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} selected',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
+                      if (_selectedServices.isNotEmpty)
+                        TextButton(
+                          onPressed: () {
+                            setSheetState(() {
+                              _selectedServices.clear();
+                            });
+                            setState(() {});
+                            _updateTotalAndDiscount();
+                          },
+                          child: Text(
+                            'Clear All',
+                            style: TextStyle(
+                              color: isDark ? Colors.red.shade300 : Colors.red,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
                     ],
                   ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: _selectedServices.isEmpty
+                        ? Center(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.shopping_cart_outlined,
+                                    size: 64,
+                                    color: isDark
+                                        ? Colors.white30
+                                        : Colors.grey[300],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No services selected',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: isDark
+                                          ? Colors.white60
+                                          : Colors.grey[500],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Tap on service variants to add',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.grey[400],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            controller: scrollController,
+                            itemCount: _selectedServices.length,
+                            separatorBuilder: (context, index) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final service = _selectedServices[index];
+                              return _buildSelectedServiceItem(
+                                service,
+                                index,
+                                setSheetState,
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppTheme.primary.withValues(alpha: 0.2),
                       ),
                     ),
-                    child: const Text('Close'),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Total Duration',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isDark ? Colors.white60 : Colors.grey,
+                              ),
+                            ),
+                            Text(
+                              '${_calculateTotalDuration()} min',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (_discountAmount > 0) ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Subtotal',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: isDark ? Colors.white60 : Colors.grey,
+                                ),
+                              ),
+                              Text(
+                                'Rs. ${_originalTotalPrice.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Discount',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: isDark ? Colors.white60 : Colors.grey,
+                                ),
+                              ),
+                              Text(
+                                '- Rs. ${_discountAmount.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.green.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                        ],
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Total Price',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isDark ? Colors.white60 : Colors.grey,
+                              ),
+                            ),
+                            Text(
+                              'Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          );
-        },
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildSelectedServiceItem(Map<String, dynamic> service, int index) {
+  Widget _buildSelectedServiceItem(
+    Map<String, dynamic> service,
+    int index,
+    StateSetter setSheetState,
+  ) {
     final isDark = context.isDarkMode;
     final String serviceName = service['name']?.toString() ?? 'Service';
     final String gender = service['gender']?.toString() ?? '';
     final String age = service['age']?.toString() ?? '';
     final double price = (service['price'] as num?)?.toDouble() ?? 0.0;
     final int duration = service['duration'] ?? 30;
+    final double discountedPrice = _getDiscountedPrice(price);
+    final bool hasDiscount = _appliedOffer != null;
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -3389,21 +3657,38 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               ],
             ),
           ),
-          Text(
-            'Rs. ${price.toStringAsFixed(2)}',
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.primary,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (hasDiscount)
+                Text(
+                  'Rs. ${price.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey[500],
+                    decoration: TextDecoration.lineThrough,
+                  ),
+                ),
+              Text(
+                'Rs. ${(hasDiscount ? discountedPrice : price).toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: hasDiscount
+                      ? Colors.green.shade600
+                      : AppTheme.primary,
+                ),
+              ),
+            ],
           ),
           const SizedBox(width: 8),
           GestureDetector(
             onTap: () {
-              setState(() {
+              setSheetState(() {
                 _selectedServices.removeAt(index);
-                _updateTotalAndDiscount();
               });
+              setState(() {});
+              _updateTotalAndDiscount();
             },
             child: Container(
               padding: const EdgeInsets.all(6),
@@ -3505,10 +3790,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 onPressed: () => setState(() => _currentStep = 2),
                 child: Text(
                   'Change',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
                 ),
               ),
             ],
@@ -3517,9 +3799,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         Expanded(
           child: _isLoadingBarbers
               ? Center(
-                  child: CircularProgressIndicator(
-                    color: AppTheme.primary,
-                  ),
+                  child: CircularProgressIndicator(color: AppTheme.primary),
                 )
               : _availableBarbers.isEmpty
               ? Center(
@@ -3734,7 +4014,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           Icon(
                             Icons.star,
                             size: 16,
-                            color: isDark ? Colors.amber.shade300 : Colors.amber[700],
+                            color: isDark
+                                ? Colors.amber.shade300
+                                : Colors.amber[700],
                           ),
                           const SizedBox(width: 4),
                           Text(
@@ -3771,14 +4053,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               Icon(
                                 Icons.star,
                                 size: 14,
-                                color: isDark ? Colors.amber.shade300 : Colors.amber.shade600,
+                                color: isDark
+                                    ? Colors.amber.shade300
+                                    : Colors.amber.shade600,
                               ),
                               const SizedBox(width: 6),
                               Text(
                                 'Special schedule today',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: isDark ? Colors.amber.shade300 : Colors.amber.shade700,
+                                  color: isDark
+                                      ? Colors.amber.shade300
+                                      : Colors.amber.shade700,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -3793,14 +4079,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               Icon(
                                 Icons.free_breakfast,
                                 size: 14,
-                                color: isDark ? Colors.blue.shade300 : Colors.blue.shade600,
+                                color: isDark
+                                    ? Colors.blue.shade300
+                                    : Colors.blue.shade600,
                               ),
                               const SizedBox(width: 6),
                               Text(
                                 'Special break today',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                                  color: isDark
+                                      ? Colors.blue.shade300
+                                      : Colors.blue.shade700,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -3816,14 +4106,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: isDark ? Colors.orange.shade900 : Colors.orange.shade50,
+                              color: isDark
+                                  ? Colors.orange.shade900
+                                  : Colors.orange.shade50,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
                               availability!['reason']!,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                                color: isDark
+                                    ? Colors.orange.shade300
+                                    : Colors.orange.shade700,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -3842,7 +4136,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       border: Border.all(
                         color: isSelected
                             ? AppTheme.primary
-                            : (isDark ? Colors.grey[600]! : Colors.grey[400]!),
+                            : (isDark
+                                  ? Colors.grey[600]!
+                                  : Colors.grey[400]!),
                         width: 2,
                       ),
                     ),
@@ -3926,10 +4222,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 onPressed: () => setState(() => _currentStep = 3),
                 child: Text(
                   'Change',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
                 ),
               ),
             ],
@@ -3959,10 +4252,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   onPressed: () => setState(() => _currentStep = 1),
                   child: Text(
                     'Change',
-                    style: TextStyle(
-                      color: AppTheme.primary,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(color: AppTheme.primary, fontSize: 14),
                   ),
                 ),
               ],
@@ -4049,10 +4339,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(color: AppTheme.primary, width: 2),
+                        borderSide: BorderSide(
+                          color: AppTheme.primary,
+                          width: 2,
+                        ),
                       ),
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                      fillColor: isDark
+                          ? const Color(0xFF2A2A2A)
+                          : Colors.white,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 16,
@@ -4079,14 +4374,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       children: [
                         Icon(
                           Icons.warning,
-                          color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                          color: isDark
+                              ? Colors.red.shade300
+                              : Colors.red.shade700,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             _duplicateError!,
                             style: TextStyle(
-                              color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                              color: isDark
+                                  ? Colors.red.shade300
+                                  : Colors.red.shade700,
                               fontSize: 13,
                             ),
                           ),
@@ -4105,7 +4404,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     children: [
                       Icon(
                         Icons.info_outline,
-                        color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                        color: isDark
+                            ? Colors.blue.shade300
+                            : Colors.blue.shade700,
                         size: 22,
                       ),
                       const SizedBox(width: 12),
@@ -4114,7 +4415,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           'Each person can only have one VIP booking per day.',
                           style: TextStyle(
                             fontSize: 13,
-                            color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                            color: isDark
+                                ? Colors.blue.shade300
+                                : Colors.blue.shade700,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -4216,7 +4519,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: isSelected ? AppTheme.primary : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
+          color: isSelected
+              ? AppTheme.primary
+              : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
           width: isSelected ? 2 : 1,
         ),
       ),
@@ -4366,10 +4671,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 onPressed: () => setState(() => _currentStep = 3),
                 child: Text(
                   'Change',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
                 ),
               ),
             ],
@@ -4396,10 +4698,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   onPressed: () => setState(() => _currentStep = 1),
                   child: Text(
                     'Change',
-                    style: TextStyle(
-                      color: AppTheme.primary,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(color: AppTheme.primary, fontSize: 14),
                   ),
                 ),
               ],
@@ -4409,9 +4708,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         Expanded(
           child: _isLoadingSlots
               ? Center(
-                  child: CircularProgressIndicator(
-                    color: AppTheme.primary,
-                  ),
+                  child: CircularProgressIndicator(color: AppTheme.primary),
                 )
               : _slotErrorMessage != null
               ? _buildNoSlotsState(isDark)
@@ -4448,7 +4745,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             color: AppTheme.primary.withValues(alpha: 0.08),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(24),
-                              side: BorderSide(color: AppTheme.primary, width: 2),
+                              side: BorderSide(
+                                color: AppTheme.primary,
+                                width: 2,
+                              ),
                             ),
                             child: Padding(
                               padding: const EdgeInsets.all(24),
@@ -4531,19 +4831,23 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           spacing: 12,
                           runSpacing: 12,
                           children: availableSlots.map((slot) {
-                            final isSelected = _selectedSlot == slot;
+                            final isSelected =
+                                _selectedSlot?['utc_start_time'] ==
+                                slot['utc_start_time'];
                             final displayTime = slot['start_time_display'];
                             final willGetVipNumber = slot['vip_number'];
 
                             return ElevatedButton(
                               onPressed: () => _bookSlot(slot),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: isSelected && _showingVipNumber
+                                backgroundColor:
+                                    isSelected && _showingVipNumber
                                     ? AppTheme.primary
                                     : (isDark
                                           ? const Color(0xFF2A2A2A)
                                           : Colors.white),
-                                foregroundColor: isSelected && _showingVipNumber
+                                foregroundColor:
+                                    isSelected && _showingVipNumber
                                     ? Colors.white
                                     : AppTheme.primary,
                                 shape: RoundedRectangleBorder(
@@ -4551,7 +4855,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   side: BorderSide(
                                     color: isSelected && _showingVipNumber
                                         ? AppTheme.primary
-                                        : AppTheme.primary.withValues(alpha: 0.5),
+                                        : AppTheme.primary.withValues(
+                                            alpha: 0.5,
+                                          ),
                                     width: 1.5,
                                   ),
                                 ),
@@ -4559,9 +4865,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   horizontal: 16,
                                   vertical: 12,
                                 ),
-                                elevation: isSelected && _showingVipNumber
-                                    ? 2
-                                    : 0,
+                                elevation:
+                                    isSelected && _showingVipNumber ? 2 : 0,
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -4692,7 +4997,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         Container(
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: isDark ? Colors.orange.shade900 : Colors.orange.shade50,
+                            color: isDark
+                                ? Colors.orange.shade900
+                                : Colors.orange.shade50,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Column(
@@ -4701,14 +5008,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 children: [
                                   Icon(
                                     Icons.info_outline,
-                                    color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                                    color: isDark
+                                        ? Colors.orange.shade300
+                                        : Colors.orange.shade700,
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: Text(
                                       'No available slots on this date.',
                                       style: TextStyle(
-                                        color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                                        color: isDark
+                                            ? Colors.orange.shade300
+                                            : Colors.orange.shade700,
                                       ),
                                     ),
                                   ),
@@ -4732,7 +5043,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   await _checkDateAvailability(nextDate);
                                   await _loadAvailableSlots();
                                 },
-                                icon: const Icon(Icons.arrow_forward, size: 18),
+                                icon: const Icon(
+                                  Icons.arrow_forward,
+                                  size: 18,
+                                ),
                                 label: Text(
                                   'Try Next Day (${DateFormat('MMM dd').format(_selectedDate!.add(const Duration(days: 1)))})',
                                 ),
@@ -5120,7 +5434,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.3 : 0.05,
+                      ),
                       blurRadius: 20,
                       offset: const Offset(0, 4),
                     ),
@@ -5170,7 +5486,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               Container(
                 width: connectorWidth,
                 height: 2,
-                color: _currentStep > 0 ? AppTheme.primary : (isDark ? Colors.grey[700] : Colors.grey[300]),
+                color: _currentStep > 0
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
                 1,
@@ -5183,7 +5501,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               Container(
                 width: connectorWidth,
                 height: 2,
-                color: _currentStep > 1 ? AppTheme.primary : (isDark ? Colors.grey[700] : Colors.grey[300]),
+                color: _currentStep > 1
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
                 2,
@@ -5196,7 +5516,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               Container(
                 width: connectorWidth,
                 height: 2,
-                color: _currentStep > 2 ? AppTheme.primary : (isDark ? Colors.grey[700] : Colors.grey[300]),
+                color: _currentStep > 2
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
                 3,
@@ -5209,7 +5531,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               Container(
                 width: connectorWidth,
                 height: 2,
-                color: _currentStep > 3 ? AppTheme.primary : (isDark ? Colors.grey[700] : Colors.grey[300]),
+                color: _currentStep > 3
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
                 4,
@@ -5222,7 +5546,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               Container(
                 width: connectorWidth,
                 height: 2,
-                color: _currentStep > 4 ? AppTheme.primary : (isDark ? Colors.grey[700] : Colors.grey[300]),
+                color: _currentStep > 4
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
                 5,
@@ -5235,7 +5561,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               Container(
                 width: connectorWidth,
                 height: 2,
-                color: _currentStep > 5 ? AppTheme.primary : (isDark ? Colors.grey[700] : Colors.grey[300]),
+                color: _currentStep > 5
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
                 6,
@@ -5322,12 +5650,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   Widget _buildContent() {
     // ✅ Guards against transient near-zero height constraints that Flutter
-    // Web can hand down to IndexedStack during a window/metrics resize
-    // (e.g. browser resize, mobile address-bar show/hide, keyboard open).
+    // Web can hand down to IndexedStack during a window/metrics resize.
     // OverflowBox (not SizedBox alone) is required because a SizedBox can
     // only ever come out smaller than what its own parent allows - it can
-    // never force extra height - so when the ambient parent is squeezed,
-    // OverflowBox is what actually lets the child render at a safe height.
+    // never force extra height.
     return LayoutBuilder(
       builder: (context, constraints) {
         final double safeHeight =
@@ -5387,9 +5713,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircularProgressIndicator(
-                  color: AppTheme.primary,
-                ),
+                CircularProgressIndicator(color: AppTheme.primary),
                 const SizedBox(height: 16),
                 Text(
                   'Loading timezone...',
@@ -5447,16 +5771,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // ✅ Same guard as _buildContent(): the step-indicator row plus
-            // an Expanded content area (used by both the web and mobile
-            // branches below) can be handed a transient near-zero height
-            // during a window/metrics resize. Even a 1px shortfall there
-            // throws a RenderFlex overflow, so we give this Column a safe
-            // minimum height via OverflowBox.
             final double safeHeight =
-                (constraints.maxHeight.isFinite && constraints.maxHeight >= 200)
-                    ? constraints.maxHeight
-                    : 600.0;
+                (constraints.maxHeight.isFinite &&
+                    constraints.maxHeight >= 200)
+                ? constraints.maxHeight
+                : 600.0;
 
             return OverflowBox(
               alignment: Alignment.topCenter,
@@ -5469,9 +5788,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     : Column(
                         children: [
                           _buildStepIndicatorRow(),
-                          Expanded(
-                            child: _buildContent(),
-                          ),
+                          Expanded(child: _buildContent()),
                         ],
                       ),
               ),
