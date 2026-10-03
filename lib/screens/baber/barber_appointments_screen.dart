@@ -20,32 +20,35 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   final supabase = Supabase.instance.client;
 
   Color get _primaryColor => AppTheme.primary;
-  Color get _vipColor => Colors.purple.shade400;
+
+  // ✅ VIP color = Amber (same as owner)
+  Color get _vipColor => Colors.amber.shade700;
+  Color get _vipBorderColor => Colors.amber.shade400;
+
+  // ✅ Regular queue color = Blue (distinct)
+  Color get _regularQueueColor => Colors.blue.shade600;
+  Color get _regularQueueBorderColor => Colors.blue.shade400;
+
   Color get _secondaryColor => Colors.green;
   Color get _warningColor => Colors.orange;
   Color get _dangerColor => Colors.red;
 
-  // ✅ Date-filtered appointments (loaded from DB)
+  // ✅ Date-filtered appointments
   List<Map<String, dynamic>> _allAppointments = [];
-
-  // ✅ Status-filtered (in memory, per tab)
   List<Map<String, dynamic>> _filteredAppointments = [];
 
   bool _isLoading = true;
   String? _error;
   bool _isBarberActive = true;
 
-  // ✅ Tab controller (5 status tabs)
   late TabController _tabController;
 
-  // Stats (based on date-filtered set)
   int _totalCount = 0;
   int _completedCount = 0;
   int _pendingCount = 0;
   int _cancelledCount = 0;
   int _pendingPaymentCount = 0;
 
-  // ✅ Date selection (starts today — same as before)
   DateTime _selectedDate = DateTime.now();
 
   bool _isProcessing = false;
@@ -56,7 +59,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   bool _isWeb = false;
   bool _isTablet = false;
 
-  // ✅ Statuses for services editing
   static const _editableStatuses = {'pending', 'confirmed', 'in_progress'};
 
   @override
@@ -101,46 +103,39 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     }
   }
 
-  // =====================================================
-  // ✅ DATE STRING (yyyy-MM-dd of selected date)
-  // =====================================================
   String get _selectedDateString =>
       DateFormat('yyyy-MM-dd').format(_selectedDate);
 
   String get _selectedDateDisplay =>
       DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate);
 
-
-  // =====================================================
-  // ✅ APPLY STATUS FILTER (in-memory, on top of date filter)
-  // =====================================================
   void _applyStatusFilter() {
     switch (_tabController.index) {
-      case 0: // Pending
+      case 0:
         _filteredAppointments = _allAppointments.where((a) {
           final s = a['status'] as String? ?? '';
           return s == 'pending' || s == 'confirmed' || s == 'in_progress';
         }).toList();
         break;
-      case 1: // Pending Payment
+      case 1:
         _filteredAppointments = _allAppointments.where((a) {
           return a['status'] == 'completed' &&
               (a['payment_status'] as String? ?? 'unpaid') != 'paid';
         }).toList();
         break;
-      case 2: // Complete
+      case 2:
         _filteredAppointments = _allAppointments.where((a) {
           return a['status'] == 'completed' &&
               (a['payment_status'] as String? ?? 'unpaid') == 'paid';
         }).toList();
         break;
-      case 3: // Cancel
+      case 3:
         _filteredAppointments = _allAppointments.where((a) {
           final s = a['status'] as String? ?? '';
           return s == 'cancelled' || s == 'no_show';
         }).toList();
         break;
-      case 4: // All
+      case 4:
       default:
         _filteredAppointments = List.from(_allAppointments);
         break;
@@ -148,7 +143,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   }
 
   // =====================================================
-  // ✅ CHECK BARBER STATUS AND LOAD DATA
+  // ✅ CHECK BARBER STATUS
   // =====================================================
   Future<void> _checkBarberStatusAndLoad() async {
     setState(() {
@@ -261,7 +256,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
   }
 
   // =====================================================
-  // ✅ LOAD APPOINTMENTS (date-filtered)
+  // ✅ LOAD APPOINTMENTS
   // =====================================================
   Future<void> _loadAppointments() async {
     if (!mounted) return;
@@ -297,7 +292,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         return;
       }
 
-      // ✅ Date filter: only selected date
       final appointments = await supabase
           .from('appointments')
           .select('''
@@ -461,7 +455,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         final status = apt['status'] as String? ?? 'pending';
         final paymentStatus = apt['payment_status']?.toString() ?? 'unpaid';
 
-        // ✅ Stats
         total++;
         if (status == 'completed') {
           if (paymentStatus == 'paid') {
@@ -490,7 +483,8 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               (apt['original_price'] as num?)?.toDouble() ??
               (apt['price'] as num?)?.toDouble() ??
               0.0,
-          'discount_amount': (apt['discount_amount'] as num?)?.toDouble() ?? 0.0,
+          'discount_amount':
+              (apt['discount_amount'] as num?)?.toDouble() ?? 0.0,
           'extra_charge': (apt['extra_charge'] as num?)?.toDouble() ?? 0.0,
           'extra_charge_note': apt['extra_charge_note'],
           'offer_id': apt['offer_id'],
@@ -527,7 +521,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         });
       }
 
-      // Sort by queue_position (same as before)
       allList.sort((a, b) {
         final aPos = a['queue_position'] ?? 999;
         final bPos = b['queue_position'] ?? 999;
@@ -963,11 +956,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   ),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.warning_amber,
-                        size: 18,
-                        color: _warningColor,
-                      ),
+                      Icon(Icons.warning_amber, size: 18, color: _warningColor),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -1084,6 +1073,10 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     if (!mounted) return;
 
     final total = (appointment['price'] as num?)?.toDouble() ?? 0.0;
+    final status = appointment['status'] as String? ?? '';
+
+    final willAutoComplete =
+        status == 'pending' || status == 'confirmed' || status == 'in_progress';
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1165,6 +1158,49 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                 ],
               ),
             ),
+            if (willAutoComplete) ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: _warningColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _warningColor.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.warning_amber, size: 18, color: _warningColor),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'This will END the appointment',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: _warningColor,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'The appointment is still $status. Marking as paid will also complete it and adjust the queue.',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: _warningColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
         actions: [
@@ -1204,11 +1240,14 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
       if (result['success'] == true) {
         if (mounted) {
+          final autoCompleted = result['auto_completed'] == true;
+          final message = autoCompleted
+              ? '✅ Appointment completed & paid — Rs. ${total.toStringAsFixed(2)}'
+              : '✅ Payment of Rs. ${total.toStringAsFixed(2)} recorded';
+
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(
-                '✅ Payment received. Rs. ${total.toStringAsFixed(2)}',
-              ),
+              content: Text(message),
               backgroundColor: _secondaryColor,
               behavior: SnackBarBehavior.floating,
               duration: const Duration(seconds: 3),
@@ -1583,8 +1622,9 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     final isDark = context.isDarkMode;
     final paymentStatus = appointment['payment_status']?.toString() ?? 'unpaid';
 
-    final List<Map<String, dynamic>> services =
-        List<Map<String, dynamic>>.from(appointment['services'] ?? []);
+    final List<Map<String, dynamic>> services = List<Map<String, dynamic>>.from(
+      appointment['services'] ?? [],
+    );
     final double discountAmount =
         (appointment['discount_amount'] as num?)?.toDouble() ?? 0.0;
     final double extraCharge =
@@ -1816,9 +1856,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     );
   }
 
-  // =====================================================
-  // ✅ DATE PICKER (same as before)
-  // =====================================================
   void _showDatePickerDialog() {
     final isDark = context.isDarkMode;
 
@@ -1896,6 +1933,18 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     );
   }
 
+  // =====================================================
+  // ✅ APPOINTMENT CARD — Owner-style with VIP amber / Regular blue
+  // =====================================================
+  // =====================================================
+  // ✅ APPOINTMENT CARD — Final layout (matching diagram)
+  //    Row 1: Queue badge + VIP/Regular label
+  //    Row 2: Customer + PAID/UNPAID + Barber + For
+  //    Row 3: Services (flat rows) + Total
+  //    Row 4: Date/Time
+  //    Row 5: Notes (if any)
+  //    Action buttons (no divider above)
+  // =====================================================
   Widget _buildAppointmentCard(Map<String, dynamic> appointment) {
     final isDark = context.isDarkMode;
     final status = appointment['status'];
@@ -1907,16 +1956,36 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
     final isPendingPayment = isCompleted && paymentStatus != 'paid';
     final isFullyCompleted = isCompleted && paymentStatus == 'paid';
     final isVip = appointment['is_vip'] ?? false;
-    final displayQueue = appointment['display_queue'] ?? '';
-    final queuePosition = appointment['queue_position'];
-    final displayTime = appointment['display_time'];
+    final isPaid = paymentStatus == 'paid';
+
+    final customerName = appointment['customer_name'] ?? 'Customer';
+    final customerAvatar = appointment['customer_avatar'] as String?;
+    final barberName = appointment['barber_name'] ?? 'Barber';
+    final displayDate = appointment['date_display'] ?? '';
+    final startTime = appointment['local_start_time'] ?? '';
+    final endTime = appointment['local_end_time'] ?? '';
+    final regQueue = appointment['regular_queue_number'];
+    final vipQueue = appointment['vip_queue_number'];
+    final childName = appointment['child_name'] as String?;
+    final notes = appointment['notes'] as String?;
     final hasEstimatedTime =
-        appointment['estimated_start_time'].isNotEmpty &&
+        appointment['estimated_start_time'].toString().isNotEmpty &&
         appointment['estimated_start_time'] != appointment['local_start_time'];
-    final double discountAmount =
+
+    final List<Map<String, dynamic>> services = List<Map<String, dynamic>>.from(
+      appointment['services'] ?? [],
+    );
+    final double totalPrice = (appointment['price'] as num?)?.toDouble() ?? 0.0;
+    final double totalDiscount =
         (appointment['discount_amount'] as num?)?.toDouble() ?? 0.0;
     final double extraCharge =
         (appointment['extra_charge'] as num?)?.toDouble() ?? 0.0;
+    final String? extraNote = appointment['extra_charge_note'] as String?;
+
+    final int duration = services.fold<int>(
+      0,
+      (a, s) => a + ((s['duration'] as num?)?.toInt() ?? 0),
+    );
 
     // ✅ Button visibility
     final bool canStart =
@@ -1924,61 +1993,29 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         !isNoShow &&
         (status == 'pending' || status == 'confirmed');
     final bool canEnd = isInProgress;
-    final bool canPay = isPendingPayment;
+    final bool canPay = isInProgress || isPendingPayment;
     final bool canCancel =
         !isCancelled &&
         !isNoShow &&
         (status == 'pending' || status == 'confirmed');
+    final bool canEditServices =
+        _editableStatuses.contains(status) || isPendingPayment;
 
-    Color statusColor;
-    String statusText;
-    IconData statusIcon;
+    // ✅ VIP / Regular label
+    final labelColor = isVip ? _vipColor : _regularQueueColor;
+    final labelIcon = isVip ? Icons.star : Icons.confirmation_number;
 
-    if (isFullyCompleted) {
-      statusColor = Colors.purple;
-      statusText = 'Completed';
-      statusIcon = Icons.check_circle;
+    // ✅ Card border
+    BorderSide borderSide;
+    if (isVip) {
+      borderSide = BorderSide(color: _vipBorderColor, width: 2);
     } else if (isPendingPayment) {
-      statusColor = _warningColor;
-      statusText = 'Pending Payment';
-      statusIcon = Icons.payments_outlined;
+      borderSide = BorderSide(color: Colors.orange.shade400, width: 2);
     } else {
-      switch (status) {
-        case 'confirmed':
-          statusColor = Colors.green;
-          statusText = 'Confirmed';
-          statusIcon = Icons.check_circle_outline;
-          break;
-        case 'pending':
-          statusColor = Colors.orange;
-          statusText = 'Pending';
-          statusIcon = Icons.pending_outlined;
-          break;
-        case 'in_progress':
-          statusColor = Colors.blue;
-          statusText = 'In Progress';
-          statusIcon = Icons.play_circle_outline;
-          break;
-        case 'completed':
-          statusColor = Colors.purple;
-          statusText = 'Completed';
-          statusIcon = Icons.check_circle;
-          break;
-        case 'cancelled':
-          statusColor = Colors.red;
-          statusText = 'Cancelled';
-          statusIcon = Icons.cancel_outlined;
-          break;
-        case 'no_show':
-          statusColor = Colors.red;
-          statusText = 'No Show';
-          statusIcon = Icons.person_off;
-          break;
-        default:
-          statusColor = Colors.grey;
-          statusText = status;
-          statusIcon = Icons.circle_outlined;
-      }
+      borderSide = BorderSide(
+        color: _regularQueueBorderColor.withValues(alpha: 0.6),
+        width: 1.5,
+      );
     }
 
     return Card(
@@ -1986,517 +2023,752 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       elevation: 2,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: isInProgress
-            ? BorderSide(color: Colors.blue, width: 2)
-            : (isPendingPayment
-                  ? BorderSide(color: _warningColor, width: 2)
-                  : (isVip
-                        ? BorderSide(color: _vipColor, width: 1)
-                        : BorderSide.none)),
+        borderRadius: BorderRadius.circular(16),
+        side: borderSide,
       ),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Header
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isVip
-                        ? _vipColor.withValues(alpha: 0.1)
-                        : _primaryColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (hasEstimatedTime)
-                        Icon(Icons.schedule, size: 12, color: _warningColor),
-                      if (hasEstimatedTime) const SizedBox(width: 4),
-                      Text(
-                        displayTime,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: isVip ? _vipColor : _primaryColor,
+      child: InkWell(
+        onTap: () => _showCustomerInfo(appointment),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // =====================================================
+              // ROW 1: Queue badge + VIP/Regular label
+              // =====================================================
+              Row(
+                children: [
+                  // Queue badge (Q5 / VIP-3)
+                  if (regQueue != null || vipQueue != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isVip
+                            ? _vipColor.withValues(alpha: 0.12)
+                            : _regularQueueColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isVip
+                              ? _vipColor.withValues(alpha: 0.5)
+                              : _regularQueueColor.withValues(alpha: 0.5),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 12),
-                if (isVip)
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isVip ? Icons.star : Icons.confirmation_number,
+                            size: 11,
+                            color: isVip ? _vipColor : _regularQueueColor,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isVip ? 'VIP-$vipQueue' : 'Q$regQueue',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: isVip ? _vipColor : _regularQueueColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                  const SizedBox(width: 8),
+
+                  // VIP / REGULAR label
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
+                      horizontal: 7,
+                      vertical: 3,
                     ),
                     decoration: BoxDecoration(
-                      color: _vipColor,
-                      borderRadius: BorderRadius.circular(12),
+                      color: labelColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: labelColor.withValues(alpha: 0.5),
+                      ),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.star, size: 12, color: Colors.white),
-                        SizedBox(width: 4),
+                        Icon(labelIcon, size: 10, color: labelColor),
+                        const SizedBox(width: 3),
                         Text(
-                          'VIP',
+                          isVip ? 'VIP' : 'REGULAR',
                           style: TextStyle(
-                            fontSize: 10,
-                            color: Colors.white,
+                            fontSize: 9,
                             fontWeight: FontWeight.bold,
+                            color: labelColor,
+                            letterSpacing: 0.5,
                           ),
                         ),
                       ],
                     ),
                   ),
-                const Spacer(),
-                if (displayQueue.isNotEmpty)
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              // =====================================================
+              // ROW 2: Customer
+              // =====================================================
+              Row(
+                children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
+                    width: 42,
+                    height: 42,
                     decoration: BoxDecoration(
-                      color: isVip
-                          ? _vipColor.withValues(alpha: 0.1)
-                          : (isDark ? Colors.grey[800] : Colors.grey[200]),
-                      borderRadius: BorderRadius.circular(12),
+                      shape: BoxShape.circle,
+                      color: isDark ? Colors.grey[800] : Colors.grey[200],
                     ),
-                    child: Text(
-                      displayQueue,
+                    child: customerAvatar != null && customerAvatar.isNotEmpty
+                        ? ClipOval(
+                            child: Image.network(
+                              customerAvatar,
+                              fit: BoxFit.cover,
+                              width: 42,
+                              height: 42,
+                              errorBuilder: (_, _, _) => Center(
+                                child: Text(
+                                  customerName.isNotEmpty
+                                      ? customerName[0].toUpperCase()
+                                      : '?',
+                                  style: TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark
+                                        ? Colors.white60
+                                        : Colors.grey,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          )
+                        : Center(
+                            child: Text(
+                              customerName.isNotEmpty
+                                  ? customerName[0].toUpperCase()
+                                  : '?',
+                              style: TextStyle(
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white60 : Colors.grey,
+                              ),
+                            ),
+                          ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                customerName,
+                                style: TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (isCompleted)
+                              Container(
+                                margin: const EdgeInsets.only(left: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isPaid
+                                      ? Colors.green.withValues(alpha: 0.15)
+                                      : Colors.orange.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      isPaid
+                                          ? Icons.check_circle
+                                          : Icons.schedule,
+                                      size: 10,
+                                      color: isPaid
+                                          ? Colors.green.shade700
+                                          : Colors.orange.shade700,
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      isPaid ? 'PAID' : 'UNPAID',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: isPaid
+                                            ? Colors.green.shade700
+                                            : Colors.orange.shade700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.person_outline,
+                              size: 12,
+                              color: isDark ? Colors.white60 : Colors.grey[500],
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                'Barber: $barberName',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (childName != null && childName.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.child_care,
+                                  size: 12,
+                                  color: labelColor,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'For: $childName',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: labelColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              // =====================================================
+              // ROW 3: Services
+              // =====================================================
+              Row(
+                children: [
+                  Icon(Icons.content_cut, size: 13, color: _primaryColor),
+                  const SizedBox(width: 5),
+                  Text(
+                    'Services (${services.length})',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white70 : Colors.grey[700],
+                    ),
+                  ),
+                  const Spacer(),
+                  if (duration > 0)
+                    Text(
+                      '$duration min',
                       style: TextStyle(
                         fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                        color: isVip
-                            ? _vipColor
-                            : (isDark ? Colors.white70 : Colors.grey[700]),
+                        color: isDark ? Colors.white60 : Colors.grey[600],
                       ),
                     ),
+                ],
+              ),
+              const SizedBox(height: 6),
+
+              if (services.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Text(
+                    'No services',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
                   ),
-                if (queuePosition != null && queuePosition > 0)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.grey[700] : Colors.grey[300],
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        '#$queuePosition',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
+                )
+              else
+                ...services.map((s) {
+                  final sFinal = (s['final_price'] as num?)?.toDouble() ?? 0;
+                  final sDiscount =
+                      (s['discount_amount'] as num?)?.toDouble() ?? 0;
+                  final sOriginal =
+                      (s['original_price'] as num?)?.toDouble() ?? 0;
+                  final hasDiscount = sDiscount > 0;
+                  final offerTitle = s['offer_title'] as String?;
+                  final variantLabel = s['variant_label'] as String?;
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '• ${s['service_name']}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (hasDiscount)
+                              Icon(
+                                Icons.local_offer,
+                                size: 10,
+                                color: Colors.green.shade700,
+                              ),
+                            const SizedBox(width: 3),
+                            if (hasDiscount)
+                              Text(
+                                'Rs. ${sOriginal.toStringAsFixed(0)}',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  decoration: TextDecoration.lineThrough,
+                                  color: isDark ? Colors.white60 : Colors.grey,
+                                ),
+                              ),
+                            if (hasDiscount) const SizedBox(width: 3),
+                            Text(
+                              'Rs. ${(hasDiscount ? sFinal : sOriginal).toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: hasDiscount
+                                    ? Colors.green.shade700
+                                    : (isDark ? Colors.white : Colors.black87),
+                              ),
+                            ),
+                          ],
                         ),
+                        if (variantLabel != null && variantLabel.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 12, top: 1),
+                            child: Text(
+                              variantLabel,
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.grey[500],
+                              ),
+                            ),
+                          ),
+                        if (hasDiscount && offerTitle != null)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 12, top: 1),
+                            child: Text(
+                              'Offer: $offerTitle',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.green.shade700,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                }),
+
+              // Extra charge
+              if (extraCharge > 0) ...[
+                const Divider(height: 12),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.add_circle,
+                      size: 12,
+                      color: Colors.orange,
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        extraNote != null && extraNote.isNotEmpty
+                            ? 'Extra ($extraNote)'
+                            : 'Extra',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.orange,
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  ),
+                    Text(
+                      '+Rs. ${extraCharge.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.orange,
+                      ),
+                    ),
+                  ],
+                ),
               ],
-            ),
-            if (hasEstimatedTime)
-              Padding(
-                padding: const EdgeInsets.only(top: 4, left: 8),
-                child: Row(
+
+              // Discount
+              if (totalDiscount > 0) ...[
+                const SizedBox(height: 4),
+                Row(
                   children: [
                     Icon(
-                      Icons.access_time,
+                      Icons.local_offer,
                       size: 12,
-                      color: context.secondaryTextColor,
+                      color: Colors.green.shade700,
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      'Scheduled: ${appointment['local_start_time']}',
+                      'Discount',
                       style: TextStyle(
                         fontSize: 11,
-                        color: context.secondaryTextColor,
-                        decoration: TextDecoration.lineThrough,
+                        color: Colors.green.shade700,
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '−Rs. ${totalDiscount.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Colors.green.shade700,
                       ),
                     ),
                   ],
                 ),
-              ),
-            const SizedBox(height: 12),
-            // Customer info
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: isVip
-                      ? _vipColor.withValues(alpha: 0.1)
-                      : _primaryColor.withValues(alpha: 0.1),
-                  backgroundImage: appointment['customer_avatar'] != null
-                      ? NetworkImage(appointment['customer_avatar'])
-                      : null,
-                  child: appointment['customer_avatar'] == null
-                      ? Text(
-                          (appointment['customer_name'][0]).toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: isVip ? _vipColor : _primaryColor,
-                          ),
-                        )
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        appointment['customer_name'],
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          color: context.textColor,
-                        ),
-                      ),
-                      if (appointment['child_name'] != null &&
-                          appointment['child_name'].toString().isNotEmpty)
-                        Text(
-                          'Booked for: ${appointment['child_name']}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: context.secondaryTextColor,
-                          ),
-                        ),
-                      Row(
-                        children: [
-                          Icon(statusIcon, size: 12, color: statusColor),
-                          const SizedBox(width: 4),
-                          Text(
-                            statusText,
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: statusColor,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.info_outline,
-                    color: context.secondaryTextColor,
-                    size: 20,
-                  ),
-                  onPressed: () => _showCustomerInfo(appointment),
-                  tooltip: 'Customer Info',
-                ),
               ],
-            ),
-            const SizedBox(height: 12),
-            // Service info
-            Row(
-              children: [
-                Icon(
-                  Icons.content_cut,
-                  size: 14,
-                  color: context.secondaryTextColor,
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    appointment['service_name'],
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+
+              // Total
+              const Divider(height: 14),
+              Row(
+                children: [
+                  Text(
+                    'Total',
                     style: TextStyle(
                       fontSize: 13,
-                      color: context.secondaryTextColor,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
                     ),
                   ),
-                ),
-                Text(
-                  'Rs. ${(appointment['price'] as num?)?.toStringAsFixed(2) ?? '0.00'}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isVip ? _vipColor : _primaryColor,
+                  const Spacer(),
+                  Text(
+                    'Rs. ${totalPrice.toStringAsFixed(2)}',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: isVip ? _vipColor : _primaryColor,
+                    ),
                   ),
-                ),
-              ],
-            ),
-            if (discountAmount > 0 || extraCharge > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 4, left: 20),
-                child: Wrap(
-                  spacing: 10,
-                  runSpacing: 2,
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              // =====================================================
+              // ROW 4: Date/Time
+              // =====================================================
+              Row(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.calendar_today,
+                          size: 14,
+                          color: isDark ? Colors.white60 : Colors.grey[500],
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          displayDate,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white70 : Colors.grey[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    Icons.access_time,
+                    size: 14,
+                    color: isDark ? Colors.white60 : Colors.grey[500],
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    hasEstimatedTime
+                        ? '${appointment['display_time']} (Est)'
+                        : '$startTime - $endTime',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ],
+              ),
+
+              // =====================================================
+              // ROW 5: Notes (if any)
+              // =====================================================
+              if (notes != null && notes.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (discountAmount > 0)
-                      Text(
-                        '🏷️ -Rs. ${discountAmount.toStringAsFixed(0)} offer',
+                    Icon(Icons.note, size: 12, color: Colors.blue.shade700),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        notes,
                         style: TextStyle(
                           fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.green.shade600,
+                          color: Colors.blue.shade700,
+                          fontStyle: FontStyle.italic,
                         ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                    if (extraCharge > 0)
-                      Text(
-                        '+ Rs. ${extraCharge.toStringAsFixed(0)} extra',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: _warningColor,
-                        ),
-                      ),
+                    ),
                   ],
                 ),
-              ),
-            const SizedBox(height: 12),
+              ],
 
-            // ✅ ACTION BUTTONS
-            if (canStart)
-              Column(
-                children: [
-                  Row(
-                    children: [
+              // =====================================================
+              // ACTION BUTTONS — no divider above
+              // =====================================================
+              if (canStart ||
+                  canEnd ||
+                  canPay ||
+                  canCancel ||
+                  canEditServices) ...[
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    if (canStart)
                       Expanded(
                         flex: 2,
                         child: ElevatedButton.icon(
                           onPressed: _isProcessing
                               ? null
                               : () => _startAppointment(appointment),
-                          icon: const Icon(Icons.play_arrow, size: 18),
-                          label: const Text('START'),
+                          icon: const Icon(Icons.play_arrow, size: 16),
+                          label: const Text(
+                            'START',
+                            style: TextStyle(fontSize: 12),
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _secondaryColor,
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
                             padding: const EdgeInsets.symmetric(vertical: 10),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _isProcessing
-                              ? null
-                              : () => _openEditServices(appointment),
-                          icon: const Icon(Icons.add_circle_outline, size: 18),
-                          label: const Text('SERVICES'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: _primaryColor,
-                            side: BorderSide(color: _primaryColor),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                            padding: const EdgeInsets.symmetric(vertical: 10),
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                  if (canCancel) ...[
-                    const SizedBox(height: 8),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: _isProcessing
-                            ? null
-                            : () => _cancelAppointment(appointment),
-                        icon: const Icon(Icons.close, size: 18),
-                        label: const Text('CANCEL'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: _dangerColor,
-                          side: BorderSide(color: _dangerColor),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              )
-            else if (canEnd)
-              Column(
-                children: [
-                  Row(
-                    children: [
+                    if (canEnd)
                       Expanded(
                         flex: 2,
                         child: ElevatedButton.icon(
                           onPressed: _isProcessing
                               ? null
                               : () => _endAppointment(appointment),
-                          icon: const Icon(Icons.check, size: 18),
-                          label: const Text('END'),
+                          icon: const Icon(Icons.check, size: 16),
+                          label: const Text(
+                            'END',
+                            style: TextStyle(fontSize: 12),
+                          ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _secondaryColor,
                             foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
                             padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                           ),
                         ),
                       ),
+                    if (canPay)
+                      Expanded(
+                        flex: 2,
+                        child: ElevatedButton.icon(
+                          onPressed: _isProcessing
+                              ? null
+                              : () => _payAppointment(appointment),
+                          icon: const Icon(Icons.payments, size: 16),
+                          label: const Text(
+                            'PAY',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.teal.shade600,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if ((canStart || canEnd || canPay) && canEditServices)
                       const SizedBox(width: 8),
+                    if (canEditServices)
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: _isProcessing
                               ? null
                               : () => _openEditServices(appointment),
-                          icon: const Icon(Icons.add_circle_outline, size: 18),
-                          label: const Text('SERVICES'),
+                          icon: const Icon(Icons.add_circle_outline, size: 16),
+                          label: const Text(
+                            'SERVICES',
+                            style: TextStyle(fontSize: 12),
+                          ),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: _primaryColor,
                             side: BorderSide(color: _primaryColor),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
                             padding: const EdgeInsets.symmetric(vertical: 10),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                  ],
+                ),
+
+                if (canCancel) ...[
                   const SizedBox(height: 8),
                   SizedBox(
                     width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _isProcessing
-                          ? null
-                          : () => _payAppointment(appointment),
-                      icon: const Icon(Icons.payments, size: 18),
-                      label: const Text('PAY'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal.shade600,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
-                  ),
-                ],
-              )
-            else if (canPay)
-              Row(
-                children: [
-                  Expanded(
                     child: OutlinedButton.icon(
                       onPressed: _isProcessing
                           ? null
-                          : () => _openEditServices(appointment),
-                      icon: const Icon(Icons.add_circle_outline, size: 18),
-                      label: const Text('SERVICES'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: _primaryColor,
-                        side: BorderSide(color: _primaryColor),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
+                          : () => _cancelAppointment(appointment),
+                      icon: const Icon(Icons.close, size: 16),
+                      label: const Text(
+                        'CANCEL',
+                        style: TextStyle(fontSize: 12),
                       ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _isProcessing
-                          ? null
-                          : () => _payAppointment(appointment),
-                      icon: const Icon(Icons.payments, size: 18),
-                      label: const Text('PAY'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _secondaryColor,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                        ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _dangerColor,
+                        side: BorderSide(color: _dangerColor),
                         padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                     ),
                   ),
                 ],
-              )
-            else if (isFullyCompleted)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: _secondaryColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.check_circle,
-                        size: 16,
-                        color: _secondaryColor,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Paid & Completed',
-                        style: TextStyle(
-                          fontSize: 12,
+              ] else if (isFullyCompleted)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _secondaryColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.check_circle,
+                          size: 16,
                           color: _secondaryColor,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        Text(
+                          'Paid & Completed',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: _secondaryColor,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              )
-            else if (isCancelled || isNoShow)
-              Padding(
-                padding: const EdgeInsets.only(top: 4),
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: _dangerColor.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        isCancelled ? Icons.cancel : Icons.person_off,
-                        size: 16,
-                        color: _dangerColor,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        isCancelled ? 'Cancelled' : 'No Show',
-                        style: TextStyle(
-                          fontSize: 12,
+                )
+              else if (isCancelled || isNoShow)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _dangerColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isCancelled ? Icons.cancel : Icons.person_off,
+                          size: 16,
                           color: _dangerColor,
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 8),
+                        Text(
+                          isCancelled ? 'Cancelled' : 'No Show',
+                          style: TextStyle(fontSize: 12, color: _dangerColor),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
+  // =====================================================
+  // ✅ APPOINTMENT LIST — with pull-to-refresh fix (empty state included)
+  // =====================================================
   Widget _buildAppointmentList() {
-
+    // ✅ Empty state + RefreshIndicator
     if (_filteredAppointments.isEmpty) {
-      return _buildEmptyState();
+      if (_isWeb) {
+        return _buildEmptyState();
+      }
+      return RefreshIndicator(
+        onRefresh: _loadAppointments,
+        color: _primaryColor,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height - 250,
+            child: _buildEmptyState(),
+          ),
+        ),
+      );
     }
 
     if (_isWeb) {
@@ -2518,7 +2790,7 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                   maxCrossAxisExtent: 400,
                   crossAxisSpacing: 16,
                   mainAxisSpacing: 16,
-                  childAspectRatio: 0.7,
+                  childAspectRatio: 0.55,
                 ),
                 itemCount: _filteredAppointments.length,
                 itemBuilder: (context, index) {
@@ -2531,10 +2803,12 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
       );
     }
 
+    // ✅ Mobile with AlwaysScrollableScrollPhysics
     return RefreshIndicator(
       onRefresh: _loadAppointments,
       color: _primaryColor,
       child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(12),
         itemCount: _filteredAppointments.length,
         itemBuilder: (context, index) {
@@ -2595,6 +2869,15 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               color: context.isDarkMode ? Colors.white70 : Colors.grey[400],
             ),
           ),
+          const SizedBox(height: 12),
+          Text(
+            'Pull down to refresh',
+            style: TextStyle(
+              fontSize: 11,
+              color: context.isDarkMode ? Colors.white30 : Colors.grey[400],
+              fontStyle: FontStyle.italic,
+            ),
+          ),
         ],
       ),
     );
@@ -2627,14 +2910,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
           onPressed: () => Navigator.pop(context),
           tooltip: 'Back',
         ),
-        actions: [
-          // ✅ Date picker icon (removed refresh button)
-          IconButton(
-            icon: const Icon(Icons.calendar_today, color: Colors.white),
-            onPressed: _showDatePickerDialog,
-            tooltip: 'Select Date',
-          ),
-        ],
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: _primaryColor))
@@ -2699,7 +2974,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ Date display
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
@@ -2742,8 +3016,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               ),
             ),
             const SizedBox(height: 16),
-
-            // Stats row
             Row(
               children: [
                 Expanded(
@@ -2784,8 +3056,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               ],
             ),
             const SizedBox(height: 16),
-
-            // Tab bar
             Container(
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
@@ -2869,8 +3139,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
               ),
             ),
             const SizedBox(height: 16),
-
-            // List
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _loadAppointments,
@@ -2889,7 +3157,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
 
     return Column(
       children: [
-        // ✅ Date display
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
           child: Container(
@@ -2926,17 +3193,12 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
                     size: 16,
                     color: _primaryColor,
                   ),
-                  label: Text(
-                    'Change',
-                    style: TextStyle(color: _primaryColor),
-                  ),
+                  label: Text('Change', style: TextStyle(color: _primaryColor)),
                 ),
               ],
             ),
           ),
         ),
-
-        // Stats summary
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Row(
@@ -2979,8 +3241,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
             ],
           ),
         ),
-
-        // Tab bar
         Container(
           color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           child: TabBar(
@@ -3053,8 +3313,6 @@ class _BarberAppointmentsScreenState extends State<BarberAppointmentsScreen>
             ],
           ),
         ),
-
-        // List
         Expanded(child: _buildAppointmentList()),
       ],
     );
