@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -19,20 +21,21 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   final supabase = Supabase.instance.client;
 
   // ============================================
-  // ✅ STEP ORDER (changed): Salon -> Service -> Date -> Barber -> Person -> Time -> Confirm
+  // ✅ STEP ORDER: Salon -> Service -> Date -> Barber -> Person -> Time -> Confirm
   //    0 Salon, 1 Service, 2 Date, 3 Barber, 4 Person, 5 Time, 6 Confirm
   // ============================================
   int _currentStep = 0;
 
-  // Step 0: Salon
+  // Step 0: Salon (all active salons — no "followed" concept)
   bool _isSearching = false;
   List<Map<String, dynamic>> _searchResults = [];
-  List<Map<String, dynamic>> _followedSalons = [];
+  List<Map<String, dynamic>> _allSalons = [];
   final TextEditingController _searchController = TextEditingController();
   Map<String, dynamic>? _selectedSalon;
-  bool _isLoadingFollowedSalons = true;
+  bool _isLoadingSalons = true;
+  Timer? _salonSearchDebounce;
 
-  // Step 1: Service (loads ALL services + variants for the selected salon)
+  // Step 1: Service
   List<Map<String, dynamic>> _salonServices = [];
   List<Map<String, dynamic>> _selectedServices = [];
   bool _isLoadingServices = false;
@@ -74,24 +77,23 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   bool _isBooking = false;
   bool _isInitialized = false;
 
-  // Offer related variables (per-service discount)
+  // Offer related variables
   Map<String, dynamic>? _appliedOffer;
-  Set<int> _offerServiceIds = {}; // hisi nam = hama service ekakatama adala
+  Set<int> _offerServiceIds = {};
   double _discountAmount = 0;
   double _originalTotalPrice = 0;
   double _finalTotalPrice = 0;
 
-  // Timezone variables
+  // Timezone
   String _userTimezone = '';
   String _lastTimezone = '';
   bool _isTimezoneLoaded = false;
 
-  // ✅ Responsive variables
+  // Responsive
   bool _isLargeScreen = false;
   bool _isTablet = false;
   bool _isWeb = false;
 
-  // ✅ Web Scroll Controller
   final ScrollController _scrollController = ScrollController();
 
   // Colors
@@ -125,10 +127,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     _searchController.dispose();
     _childNameController.dispose();
     _scrollController.dispose();
+    _salonSearchDebounce?.cancel();
     super.dispose();
   }
 
-  // ✅ Check screen size for responsive layout
   void _checkScreenSize() {
     final size = MediaQuery.of(context).size;
     final isLarge = size.width > 800 || size.height > 800;
@@ -145,7 +147,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // CHECK FOR OFFER FROM NAVIGATION
+  // OFFER — FROM NAVIGATION
   // ============================================
 
   void _checkForOffer() {
@@ -160,8 +162,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 
-  // ✅ Offer eka adala service mokakda kiyala load karanawa.
-  // Row ekakwath naethnam = offer eka hama service ekakatama adalayi.
   Future<void> _loadOfferServices(int offerId) async {
     try {
       final rows = await supabase
@@ -179,7 +179,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // DISCOUNT CALCULATION METHODS (per-service, matches DB's calculate_service_discounts)
+  // DISCOUNT CALCULATION (client-side mirror)
   // ============================================
 
   double _round2(double v) => (v * 100).round() / 100;
@@ -205,14 +205,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 
-  // Selected service item ekaka discount eka (offer eka adala nam vitharai)
   double _discountForItem(Map<String, dynamic> item) {
     final serviceId = item['id'];
     if (serviceId is! int || !_isOfferApplicable(serviceId)) return 0;
     return _discountForPrice((item['price'] as num?)?.toDouble() ?? 0);
   }
 
-  // Variant row eke penvana discounted price eka (select karanna kalinma)
   double _getDiscountedPrice(int serviceId, double price) {
     if (!_isOfferApplicable(serviceId)) return price;
     return price - _discountForPrice(price);
@@ -225,8 +223,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _finalTotalPrice = _originalTotalPrice;
       return;
     }
-    _discountAmount =
-        _selectedServices.fold(0.0, (sum, s) => sum + _discountForItem(s));
+    _discountAmount = _selectedServices.fold(
+      0.0,
+      (sum, s) => sum + _discountForItem(s),
+    );
     final result = _originalTotalPrice - _discountAmount;
     _finalTotalPrice = result < 0 ? 0 : result;
   }
@@ -267,7 +267,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // TIMEZONE INITIALIZATION
+  // TIMEZONE
   // ============================================
 
   Future<void> _initialize() async {
@@ -285,7 +285,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _isTimezoneLoaded = true;
     });
 
-    await _loadFollowedSalons();
+    await _loadAllSalons();
     await _initializeScreen();
   }
 
@@ -320,15 +320,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   Future<void> _initializeScreen() async {
     if (widget.initialSalon != null && !_isInitialized) {
       _selectedSalon = widget.initialSalon;
-      _currentStep = 1; // Service step
+      _currentStep = 1;
       _isInitialized = true;
       await supabase.rpc('cleanup_old_queues');
-      _loadHolidays(); // background - needed once user reaches the Date step
+      _loadHolidays();
       await _loadSalonServices();
     }
   }
 
-  // ==================== HELPER FUNCTIONS ====================
+  // ==================== HELPERS ====================
 
   int _calculateTotalDuration() =>
       _selectedServices.fold(0, (sum, s) => sum + (s['duration'] as int));
@@ -362,7 +362,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _selectedTravelTime = 0;
       _showTravelTimeSelector = false;
       _searchController.clear();
-      _searchResults = [];
+      _searchResults = List.from(_allSalons);
       _isInitialized = false;
       _servicesLoaded = false;
       _barbersLoaded = false;
@@ -431,61 +431,51 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   // ==================== STEP 0: SALON SEARCH ====================
 
-  Future<void> _loadFollowedSalons() async {
+  /// ✅ Loads ALL active salons (no follow requirement)
+  /// Uses `get_active_salons_for_booking` RPC — public data, no auth needed
+  Future<void> _loadAllSalons() async {
     setState(() {
-      _isLoadingFollowedSalons = true;
-      _followedSalons = [];
+      _isLoadingSalons = true;
+      _allSalons = [];
     });
 
     try {
-      final user = supabase.auth.currentUser;
-      if (user == null) {
-        setState(() => _isLoadingFollowedSalons = false);
-        return;
-      }
-
       final result = await supabase.rpc(
-        'get_followed_salons_with_counts',
-        params: {'p_customer_id': user.id},
+        'get_active_salons_for_booking',
+        params: {'p_search_query': null, 'p_limit': 100, 'p_offset': 0},
       );
 
+      if (!mounted) return;
+
       if (result != null && result.isNotEmpty) {
+        final salons = List<Map<String, dynamic>>.from(result);
         setState(() {
-          _followedSalons = List<Map<String, dynamic>>.from(result);
-          _searchResults = List.from(_followedSalons);
-          _isLoadingFollowedSalons = false;
+          _allSalons = salons;
+          _searchResults = List.from(salons);
+          _isLoadingSalons = false;
         });
-        debugPrint('✅ Loaded ${_followedSalons.length} followed salons');
+        debugPrint('✅ Loaded ${salons.length} salons');
       } else {
         setState(() {
-          _followedSalons = [];
+          _allSalons = [];
           _searchResults = [];
-          _isLoadingFollowedSalons = false;
+          _isLoadingSalons = false;
         });
-        debugPrint('ℹ️ No followed salons found');
+        debugPrint('ℹ️ No salons found');
       }
     } catch (e) {
-      debugPrint('❌ Error loading followed salons: $e');
+      debugPrint('❌ Error loading salons: $e');
+      if (!mounted) return;
       setState(() {
-        _followedSalons = [];
+        _allSalons = [];
         _searchResults = [];
-        _isLoadingFollowedSalons = false;
+        _isLoadingSalons = false;
       });
     }
   }
 
-  // ==================== STEP 1: SERVICE SELECTION (loads ALL salon services) ====================
+  // ==================== STEP 1: SERVICE LOADING ====================
 
-  // ✅ FIXED: no nested !inner embedding. Services, variants, categories,
-  // genders and age-categories are fetched as separate flat queries and
-  // joined on the Dart side. The old 3-level-deep embedded select
-  // (services -> salon_categories!inner -> service_variants!inner ->
-  // salon_genders!inner / salon_age_categories!inner) silently dropped a
-  // whole service the moment ANY one nested child row failed its RLS check
-  // -- PostgREST's !inner embedding is a real SQL INNER JOIN, and RLS
-  // policies apply as extra WHERE conditions on every joined table, so one
-  // RLS-filtered row anywhere in the chain removed the entire parent row.
-  // Flat queries don't have that failure mode.
   Future<void> _loadSalonServices() async {
     if (_servicesLoaded) return;
     if (_selectedSalon == null) {
@@ -533,8 +523,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           )
           .inFilter('service_id', serviceIds);
 
+      // ✅ NULL-safe: NULL or true → active
       final activeVariants = variantsResponse
-          .where((v) => v['is_active'] == true)
+          .where((v) => v['is_active'] != false)
           .toList();
 
       if (activeVariants.isEmpty) {
@@ -663,7 +654,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .where((s) => (s['variants'] as List).isNotEmpty)
           .toList();
 
-      debugPrint('✅ Grouped into ${servicesList.length} service(s) with variants');
+      debugPrint(
+        '✅ Grouped into ${servicesList.length} service(s) with variants',
+      );
 
       if (!mounted) return;
       setState(() {
@@ -736,6 +729,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .from('salon_holidays')
           .select('holiday_date, name')
           .eq('salon_id', _selectedSalon!['id']);
+      if (!mounted) return;
       setState(() {
         _holidays.clear();
         _holidayNames.clear();
@@ -779,11 +773,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .eq('salon_id', _selectedSalon!['id'])
           .eq('day_of_week', date.weekday)
           .eq('is_working', true);
+      if (!mounted) return;
       setState(() {
         _isDateUnavailable = schedules.isEmpty;
         _unavailableReason = schedules.isEmpty
             ? 'No barbers working on ${DateFormat('EEEE').format(date)}'
             : null;
+        // ✅ Invalidate cached barber list on date change
+        _barbersLoaded = false;
+        _availableBarbers = [];
+        _barberAvailability = {};
+        _selectedBarber = null;
       });
     } catch (e) {
       debugPrint('Error checking date availability: $e');
@@ -918,7 +918,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
       result['is_available'] = true;
       result['reason'] = null;
-
       return result;
     } catch (e) {
       debugPrint('Error checking barber availability: $e');
@@ -937,6 +936,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
+        if (!mounted) return;
         setState(() {
           _availableBarbers = [];
           _isLoadingBarbers = false;
@@ -954,6 +954,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           ).format(_selectedDate ?? DateTime.now()),
         },
       );
+
+      if (!mounted) return;
 
       if (result == null || result.isEmpty) {
         setState(() {
@@ -998,6 +1000,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         return (b['avg_rating'] as num).compareTo(a['avg_rating'] as num);
       });
 
+      if (!mounted) return;
       setState(() {
         _availableBarbers = barberList;
         _isLoadingBarbers = false;
@@ -1005,6 +1008,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       });
     } catch (e) {
       debugPrint('❌ Error loading barbers: $e');
+      if (!mounted) return;
       setState(() {
         _isLoadingBarbers = false;
         _barbersLoaded = false;
@@ -1033,6 +1037,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .eq('appointment_date', dateStr)
           .eq('child_name', childName)
           .not('status', 'in', '("cancelled","no_show")');
+      if (!mounted) return;
       setState(() {
         _duplicateError = existing.isNotEmpty
             ? '⚠️ You already have a booking for ${childName.isEmpty ? "yourself" : childName} on ${DateFormat('MMM dd').format(_selectedDate!)}.'
@@ -1041,7 +1046,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     } catch (e) {
       debugPrint('Error checking duplicate: $e');
     } finally {
-      setState(() => _isCheckingDuplicate = false);
+      if (mounted) setState(() => _isCheckingDuplicate = false);
     }
   }
 
@@ -1057,7 +1062,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return _duplicateError == null;
   }
 
-  // ==================== STEP 5: TIME SLOT SELECTION ====================
+  // ==================== STEP 5: TIME SLOT ====================
 
   Widget _buildTimezoneIndicator() {
     final isDark = context.isDarkMode;
@@ -1131,6 +1136,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
+        if (!mounted) return;
         setState(() => _isLoadingSlots = false);
         return;
       }
@@ -1154,6 +1160,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           )
           .timeout(const Duration(seconds: 10));
 
+      if (!mounted) return;
       if (result == null) throw Exception('No response');
       final data = result is List && result.isNotEmpty ? result[0] : result;
 
@@ -1162,13 +1169,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
       if (isToday &&
           (conflictType == 'OVERFLOW' || conflictType == 'MOVE_TO_NEXT_DAY')) {
-        String message =
-            'No appointments available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
-            'Your requested time would exceed salon closing time by $extensionMinutes minutes.\n\n'
-            'Please select another date or try tomorrow.';
-
         setState(() {
-          _slotErrorMessage = message;
+          _slotErrorMessage =
+              'No appointments available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
+              'Your requested time would exceed salon closing time by $extensionMinutes minutes.\n\n'
+              'Please select another date or try tomorrow.';
           _isLoadingSlots = false;
         });
         return;
@@ -1258,21 +1263,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         _showTravelTimeSelector = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoadingSlots = false;
         _slotErrorMessage = 'Failed to load time slots. Please try again.';
         _availableSlots = [];
       });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Error: ${e.toString().replaceFirst('Exception: ', '')}',
-            ),
-            backgroundColor: Colors.red,
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Error: ${e.toString().replaceFirst('Exception: ', '')}',
           ),
-        );
-      }
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -1301,10 +1305,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return 'Time adjusted based on availability';
   }
 
-  // ✅ create_new_appointment_advanced now takes p_variant_ids (INTEGER[])
-  // instead of a single p_service_id / p_variant_id - appointments no longer
-  // has those columns at all, appointment_services holds every selected
-  // service. p_offer_id is validated + applied server-side.
+  /// ✅ Booking — uses `create_new_appointment_advanced` RPC
+  /// - `p_variant_ids` (multi-service array)
+  /// - `p_offer_id` (validated server-side)
+  /// - `p_notes: null` (services already in appointment_services)
+  /// - Auth required (customer must be logged in)
   Future<void> _confirmBooking() async {
     if (!mounted) return;
 
@@ -1314,10 +1319,23 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
 
+      // ✅ Build variant ids (validate: not empty, count match)
       final variantIds = _selectedServices
           .map((s) => s['variant_id'])
           .whereType<int>()
           .toList();
+
+      if (variantIds.isEmpty) {
+        throw Exception(
+          'No valid services selected. Please go back and select services.',
+        );
+      }
+
+      if (variantIds.length != _selectedServices.length) {
+        throw Exception(
+          'Some services have invalid variants. Please re-select your services.',
+        );
+      }
 
       final offerId = (_appliedOffer != null && _discountAmount > 0)
           ? _appliedOffer!['id']
@@ -1335,9 +1353,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'p_utc_end_time': _selectedSlot!['utc_end_time'],
           'p_child_name': _getChildNameForBooking(),
           'p_travel_time_minutes': _selectedSlot!['travel_time_used'] ?? 0,
-          'p_notes': _selectedServices.length > 1
-              ? _selectedServices.map((s) => s['name']?.toString() ?? '').join(', ')
-              : null,
+          // ✅ Services already in appointment_services; notes left null
+          'p_notes': null,
           'p_is_vip': false,
           'p_vip_booking_id': null,
           'p_confirm_overflow': true,
@@ -1348,7 +1365,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       if (!mounted) return;
 
       if (result['success'] == true) {
-        // Offer "used" marking + customer_offers update happen server-side now.
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -1361,7 +1377,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           Navigator.pop(context, true);
         }
       } else {
-        throw Exception(result['message'] ?? 'Booking failed');
+        // ✅ Show detailed server error
+        final errorMessage = result['message'] ?? 'Booking failed';
+        final errorCode = result['error_code']?.toString() ?? '';
+        throw Exception(
+          errorCode.isNotEmpty ? '$errorMessage ($errorCode)' : errorMessage,
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -1481,7 +1502,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // ✅ MAIN BUILD METHOD - WITH EDGE-TO-EDGE
+  // MAIN BUILD
   // ============================================
 
   @override
@@ -1508,9 +1529,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               mainAxisAlignment: MainAxisAlignment.center,
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircularProgressIndicator(
-                  color: AppTheme.primary,
-                ),
+                CircularProgressIndicator(color: AppTheme.primary),
                 const SizedBox(height: 16),
                 Text(
                   'Loading timezone...',
@@ -1574,18 +1593,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // ✅ Same guard as _buildContent(): the step-indicator row plus
-            // an Expanded content area (used by both the web and mobile
-            // branches below) can be handed a transient near-zero height
-            // during a window/metrics resize. Even a 1px shortfall there
-            // throws a RenderFlex overflow, so we give this Column a safe
-            // minimum height via OverflowBox (a SizedBox alone can't help,
-            // since it can only ever be clamped DOWN to what SafeArea
-            // offers, never up).
             final double safeHeight =
                 (constraints.maxHeight.isFinite && constraints.maxHeight >= 200)
-                    ? constraints.maxHeight
-                    : 600.0;
+                ? constraints.maxHeight
+                : 600.0;
 
             return OverflowBox(
               alignment: Alignment.topCenter,
@@ -1605,9 +1616,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             connectorWidth,
                             showLabels,
                           ),
-                          Expanded(
-                            child: _buildContent(),
-                          ),
+                          Expanded(child: _buildContent()),
                         ],
                       ),
               ),
@@ -1618,7 +1627,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
-  // ✅ WEB LAYOUT
   Widget _buildWebLayout() {
     final isDark = context.isDarkMode;
 
@@ -1627,14 +1635,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         constraints: const BoxConstraints(maxWidth: 800),
         child: Column(
           children: [
-            _buildStepIndicatorRow(
-              false,
-              42,
-              20,
-              11,
-              35,
-              true,
-            ),
+            _buildStepIndicatorRow(false, 42, 20, 11, 35, true),
             Expanded(
               child: Container(
                 margin: const EdgeInsets.all(16),
@@ -1643,7 +1644,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   borderRadius: BorderRadius.circular(20),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
+                      color: Colors.black.withValues(
+                        alpha: isDark ? 0.3 : 0.05,
+                      ),
                       blurRadius: 20,
                       offset: const Offset(0, 4),
                     ),
@@ -1661,7 +1664,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
-  // ✅ Step indicator: Salon -> Service -> Date -> Barber -> Person -> Time -> Confirm
   Widget _buildStepIndicatorRow(
     bool isMobile,
     double stepSize,
@@ -1843,17 +1845,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
-  // ✅ IndexedStack order: Salon, Service, Date, Barber, Person, Time, Confirm
   Widget _buildContent() {
-    // Guards against transient near-zero height constraints Flutter Web can
-    // hand down to IndexedStack during a window/metrics resize (see
-    // OverflowBox note above - same reasoning applies here).
     return LayoutBuilder(
       builder: (context, constraints) {
         final double safeHeight =
             (constraints.maxHeight.isFinite && constraints.maxHeight >= 200)
-                ? constraints.maxHeight
-                : 600.0;
+            ? constraints.maxHeight
+            : 600.0;
 
         return OverflowBox(
           alignment: Alignment.topCenter,
@@ -1880,7 +1878,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // ✅ STEP 0: SALON SEARCH
+  // STEP 0: SALON SEARCH
   // ============================================
 
   Widget _buildSalonSearchStep() {
@@ -1900,7 +1898,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               color: isDark ? Colors.white : Colors.black87,
             ),
             decoration: InputDecoration(
-              hintText: 'Search your followed salons...',
+              hintText: 'Search salons by name or address...',
               hintStyle: TextStyle(
                 fontSize: 15,
                 color: isDark ? Colors.white70 : Colors.grey[400],
@@ -1920,20 +1918,21 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       ),
                     )
                   : (_searchController.text.isNotEmpty
-                      ? IconButton(
-                          icon: Icon(
-                            Icons.clear,
-                            color: isDark ? Colors.white70 : Colors.grey[400],
-                          ),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {
-                              _searchResults = List.from(_followedSalons);
-                              _isSearching = false;
-                            });
-                          },
-                        )
-                      : null),
+                        ? IconButton(
+                            icon: Icon(
+                              Icons.clear,
+                              color: isDark ? Colors.white70 : Colors.grey[400],
+                            ),
+                            onPressed: () {
+                              _searchController.clear();
+                              _salonSearchDebounce?.cancel();
+                              setState(() {
+                                _searchResults = List.from(_allSalons);
+                                _isSearching = false;
+                              });
+                            },
+                          )
+                        : null),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide(
@@ -1954,7 +1953,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           ),
         ),
         Expanded(
-          child: _isLoadingFollowedSalons
+          child: _isLoadingSalons
               ? Center(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(24),
@@ -1962,12 +1961,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       mainAxisAlignment: MainAxisAlignment.center,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        CircularProgressIndicator(
-                          color: AppTheme.primary,
-                        ),
+                        CircularProgressIndicator(color: AppTheme.primary),
                         const SizedBox(height: 16),
                         Text(
-                          'Loading your followed salons...',
+                          'Loading salons...',
                           style: TextStyle(
                             color: isDark ? Colors.white60 : Colors.black87,
                           ),
@@ -1976,18 +1973,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                   ),
                 )
-              : _searchResults.isEmpty && !_isSearching && _followedSalons.isEmpty
+              : _searchResults.isEmpty && !_isSearching && _allSalons.isEmpty
               ? _buildEmptyState(isDark)
-              : _searchResults.isEmpty &&
-                      !_isSearching &&
-                      _followedSalons.isNotEmpty
-                  ? _buildNoResultsState(isDark)
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _searchResults.length,
-                      itemBuilder: (context, index) =>
-                          _buildSalonCard(_searchResults[index]),
-                    ),
+              : _searchResults.isEmpty && !_isSearching && _allSalons.isNotEmpty
+              ? _buildNoResultsState(isDark)
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _searchResults.length,
+                  itemBuilder: (context, index) =>
+                      _buildSalonCard(_searchResults[index]),
+                ),
         ),
       ],
     );
@@ -2008,7 +2003,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             ),
             const SizedBox(height: 20),
             Text(
-              'No salons followed yet',
+              'No salons available',
               style: TextStyle(
                 fontSize: 18,
                 color: isDark ? Colors.white60 : Colors.grey[500],
@@ -2016,7 +2011,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Follow salons to book appointments',
+              'No active salons found',
               style: TextStyle(
                 fontSize: 14,
                 color: isDark ? Colors.white70 : Colors.grey[400],
@@ -2024,9 +2019,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () => context.push('/customer/search-salons'),
-              icon: const Icon(Icons.search),
-              label: const Text('Find Salons to Follow'),
+              onPressed: _loadAllSalons,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primary,
                 foregroundColor: Colors.white,
@@ -2067,8 +2062,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             TextButton.icon(
               onPressed: () {
                 _searchController.clear();
+                _salonSearchDebounce?.cancel();
                 setState(() {
-                  _searchResults = List.from(_followedSalons);
+                  _searchResults = List.from(_allSalons);
+                  _isSearching = false;
                 });
               },
               icon: const Icon(Icons.clear),
@@ -2083,8 +2080,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   Widget _buildSalonCard(Map<String, dynamic> salon) {
     final isDark = context.isDarkMode;
     final logoUrl = salon['logo_url'];
-    final followerCount = salon['follower_count'] ?? 0;
-    final bookingCount = salon['booking_count'] ?? 0;
+    final avgRating = (salon['avg_rating'] as num?)?.toDouble() ?? 0.0;
+    final totalBookings = salon['total_bookings'] ?? 0;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2154,7 +2151,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               salon['address'],
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isDark ? Colors.white60 : Colors.grey[600],
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
                               ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -2183,16 +2182,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     Row(
                       children: [
                         Icon(
-                          Icons.people,
+                          Icons.star,
                           size: 14,
-                          color: isDark ? Colors.white60 : Colors.grey[500],
+                          color: isDark
+                              ? Colors.amber.shade300
+                              : Colors.amber[700],
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '$followerCount followers',
+                          avgRating > 0 ? avgRating.toStringAsFixed(1) : 'New',
                           style: TextStyle(
                             fontSize: 11,
-                            color: isDark ? Colors.white70 : Colors.grey[500],
+                            color: isDark ? Colors.white70 : Colors.grey[600],
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -2203,7 +2204,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '$bookingCount bookings',
+                          '$totalBookings bookings',
                           style: TextStyle(
                             fontSize: 11,
                             color: isDark ? Colors.white70 : Colors.grey[500],
@@ -2226,10 +2227,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
+  // ✅ Server-side search with debounce
   Future<void> _searchSalons(String query) async {
-    if (query.isEmpty) {
+    _salonSearchDebounce?.cancel();
+
+    if (query.trim().isEmpty) {
       setState(() {
-        _searchResults = List.from(_followedSalons);
+        _searchResults = List.from(_allSalons);
         _isSearching = false;
       });
       return;
@@ -2237,27 +2241,43 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
     setState(() => _isSearching = true);
 
-    final filtered = _followedSalons.where((salon) {
-      final name = (salon['name'] as String?)?.toLowerCase() ?? '';
-      final address = (salon['address'] as String?)?.toLowerCase() ?? '';
-      final searchTerm = query.toLowerCase();
-      return name.contains(searchTerm) || address.contains(searchTerm);
-    }).toList();
+    _salonSearchDebounce = Timer(const Duration(milliseconds: 350), () async {
+      try {
+        final result = await supabase.rpc(
+          'get_active_salons_for_booking',
+          params: {
+            'p_search_query': query.trim(),
+            'p_limit': 50,
+            'p_offset': 0,
+          },
+        );
 
-    setState(() {
-      _searchResults = filtered;
-      _isSearching = false;
+        if (!mounted) return;
+
+        setState(() {
+          _searchResults = result != null
+              ? List<Map<String, dynamic>>.from(result)
+              : [];
+          _isSearching = false;
+        });
+
+        debugPrint('🔍 Search "$query" → ${_searchResults.length} results');
+      } catch (e) {
+        debugPrint('❌ Search error: $e');
+        if (!mounted) return;
+        setState(() {
+          _searchResults = [];
+          _isSearching = false;
+        });
+      }
     });
   }
 
-  // ✅ Salon eka select karapu ekkenma Service step ekata yanawa saha
-  // ehema salon eke tiyena services okkoma load karanawa (date ekakata
-  // kalin - date eken vitharak load wenne barber list eka).
   Future<void> _selectSalon(Map<String, dynamic> salon) async {
     debugPrint('🏪 Salon selected: ${salon['id']} - ${salon['name']}');
     setState(() {
       _selectedSalon = salon;
-      _currentStep = 1; // Service step
+      _currentStep = 1;
       _servicesLoaded = false;
       _salonServices = [];
       _selectedServices = [];
@@ -2268,12 +2288,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _originalTotalPrice = 0;
       _finalTotalPrice = 0;
     });
-    _loadHolidays(); // background load, needed once user reaches the Date step
+    _loadHolidays();
     await _loadSalonServices();
   }
 
   // ============================================
-  // ✅ STEP 1: SERVICE SELECTION (multi-select, ALL salon services + variants)
+  // STEP 1: SERVICE SELECTION
   // ============================================
 
   Widget _buildServiceSelectionStep() {
@@ -2322,7 +2342,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         child: Text(
                           (_selectedSalon?['name'] as String?)
                                   ?.substring(0, 1)
-                                  .toUpperCase() ?? 'S',
+                                  .toUpperCase() ??
+                              'S',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -2360,10 +2381,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 onPressed: () => setState(() => _currentStep = 0),
                 child: Text(
                   'Change',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
                 ),
               ),
             ],
@@ -2486,7 +2504,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 ),
                 selected: _selectedCategoryTab == null,
                 onSelected: (_) => setState(() => _selectedCategoryTab = null),
-                backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                backgroundColor: isDark
+                    ? const Color(0xFF2A2A2A)
+                    : Colors.white,
                 selectedColor: AppTheme.primary,
               ),
               const SizedBox(width: 8),
@@ -2505,7 +2525,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                     selected: _selectedCategoryTab == c,
                     onSelected: (_) => setState(() => _selectedCategoryTab = c),
-                    backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                    backgroundColor: isDark
+                        ? const Color(0xFF2A2A2A)
+                        : Colors.white,
                     selectedColor: AppTheme.primary,
                   ),
                 ),
@@ -2517,9 +2539,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         Expanded(
           child: _isLoadingServices
               ? Center(
-                  child: CircularProgressIndicator(
-                    color: AppTheme.primary,
-                  ),
+                  child: CircularProgressIndicator(color: AppTheme.primary),
                 )
               : servicesToShow.isEmpty
               ? Center(
@@ -2562,7 +2582,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               onPressed: _selectedServices.isEmpty
                   ? null
                   : () {
-                      setState(() => _currentStep = 2); // Date step
+                      setState(() => _currentStep = 2);
                     },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _selectedServices.isNotEmpty
@@ -2637,14 +2657,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade700,
                   ),
                 ),
                 Text(
                   _appliedOffer!['title']?.toString() ?? '',
                   style: TextStyle(
                     fontSize: 12,
-                    color: isDark ? Colors.green.shade300 : Colors.green.shade600,
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade600,
                   ),
                 ),
                 Text(
@@ -2652,7 +2676,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
-                    color: isDark ? Colors.green.shade300 : Colors.green.shade600,
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade600,
                   ),
                 ),
                 if (_selectedServices.isNotEmpty && _discountAmount == 0)
@@ -2662,7 +2688,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       'This offer does not apply to the selected services',
                       style: TextStyle(
                         fontSize: 11,
-                        color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                        color: isDark
+                            ? Colors.orange.shade300
+                            : Colors.orange.shade700,
                       ),
                     ),
                   ),
@@ -2672,7 +2700,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           TextButton(
             onPressed: _removeOffer,
             style: TextButton.styleFrom(
-              foregroundColor: isDark ? Colors.green.shade300 : Colors.green.shade700,
+              foregroundColor: isDark
+                  ? Colors.green.shade300
+                  : Colors.green.shade700,
             ),
             child: const Text('Remove'),
           ),
@@ -2701,7 +2731,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       elevation: 2,
-      color: isDark ? const Color(0xFF2A2A2A) : _cardColors[index % _cardColors.length],
+      color: isDark
+          ? const Color(0xFF2A2A2A)
+          : _cardColors[index % _cardColors.length],
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
@@ -2712,7 +2744,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       child: Container(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          color: isDark ? const Color(0xFF2A2A2A) : _cardColors[index % _cardColors.length],
+          color: isDark
+              ? const Color(0xFF2A2A2A)
+              : _cardColors[index % _cardColors.length],
         ),
         child: Column(
           children: [
@@ -2763,7 +2797,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w600,
-                                    color: isDark ? Colors.white : Colors.black87,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
                                   ),
                                 ),
                               ),
@@ -2838,10 +2874,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             if (variants.isNotEmpty && (!isMobile || isExpanded))
               Column(
                 children: [
-                  const Divider(
-                    color: Colors.grey,
-                    height: 1,
-                  ),
+                  const Divider(color: Colors.grey, height: 1),
                   Padding(
                     padding: const EdgeInsets.all(14),
                     child: Column(
@@ -2963,7 +2996,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               child: Icon(
                 genderIcon,
                 size: isMobile ? 22 : 24,
-                color: isSelected ? AppTheme.primary : (isDark ? Colors.white60 : Colors.grey[600]),
+                color: isSelected
+                    ? AppTheme.primary
+                    : (isDark ? Colors.white60 : Colors.grey[600]),
               ),
             ),
             const SizedBox(width: 12),
@@ -2974,7 +3009,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   Text(
                     displayText.isEmpty ? 'Variant' : displayText,
                     style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
                       fontSize: isMobile ? 13 : 15,
                       color: isSelected
                           ? AppTheme.primary
@@ -3000,7 +3037,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               price.toStringAsFixed(0),
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isDark ? Colors.white70 : Colors.grey[500],
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.grey[500],
                                 decoration: TextDecoration.lineThrough,
                               ),
                             ),
@@ -3014,8 +3053,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                   ? FontWeight.w600
                                   : FontWeight.normal,
                               color: hasDiscount
-                                  ? (isDark ? Colors.green.shade300 : Colors.green.shade700)
-                                  : (isDark ? Colors.white70 : Colors.grey[700]),
+                                  ? (isDark
+                                        ? Colors.green.shade300
+                                        : Colors.green.shade700)
+                                  : (isDark
+                                        ? Colors.white70
+                                        : Colors.grey[700]),
                             ),
                           ),
                         ],
@@ -3049,7 +3092,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 vertical: isMobile ? 6 : 8,
               ),
               decoration: BoxDecoration(
-                color: isSelected ? AppTheme.primary : (isDark ? Colors.grey[800] : Colors.grey[100]),
+                color: isSelected
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[800] : Colors.grey[100]),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
@@ -3144,7 +3189,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} selected',
                               style: TextStyle(
                                 fontSize: 13,
-                                color: isDark ? Colors.white60 : Colors.grey[600],
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
                               ),
                             ),
                           ],
@@ -3182,14 +3229,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                   Icon(
                                     Icons.shopping_cart_outlined,
                                     size: 64,
-                                    color: isDark ? Colors.white30 : Colors.grey[300],
+                                    color: isDark
+                                        ? Colors.white30
+                                        : Colors.grey[300],
                                   ),
                                   const SizedBox(height: 12),
                                   Text(
                                     'No services selected',
                                     style: TextStyle(
                                       fontSize: 16,
-                                      color: isDark ? Colors.white60 : Colors.grey[500],
+                                      color: isDark
+                                          ? Colors.white60
+                                          : Colors.grey[500],
                                     ),
                                   ),
                                   const SizedBox(height: 8),
@@ -3197,7 +3248,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                     'Tap on service variants to add',
                                     style: TextStyle(
                                       fontSize: 13,
-                                      color: isDark ? Colors.white70 : Colors.grey[400],
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.grey[400],
                                     ),
                                   ),
                                 ],
@@ -3267,7 +3320,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                 'Rs. ${_originalTotalPrice.toStringAsFixed(2)}',
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: isDark ? Colors.white60 : Colors.grey[600],
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
                                   decoration: TextDecoration.lineThrough,
                                 ),
                               ),
@@ -3417,7 +3472,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: discount > 0 ? Colors.green.shade600 : AppTheme.primary,
+                  color: discount > 0
+                      ? Colors.green.shade600
+                      : AppTheme.primary,
                 ),
               ),
             ],
@@ -3450,7 +3507,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // ✅ STEP 2: DATE SELECTION
+  // STEP 2: DATE SELECTION
   // ============================================
 
   Widget _buildDateSelectionStep() {
@@ -3529,14 +3586,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       color: isDark ? Colors.red.shade900 : Colors.red.shade50,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isDark ? Colors.red.shade700 : Colors.red.shade300,
+                        color: isDark
+                            ? Colors.red.shade700
+                            : Colors.red.shade300,
                       ),
                     ),
                     child: Row(
                       children: [
                         Icon(
                           Icons.event_busy,
-                          color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                          color: isDark
+                              ? Colors.red.shade300
+                              : Colors.red.shade700,
                           size: 20,
                         ),
                         const SizedBox(width: 12),
@@ -3549,21 +3610,27 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                                  color: isDark
+                                      ? Colors.red.shade300
+                                      : Colors.red.shade700,
                                 ),
                               ),
                               Text(
                                 _holidayNames[today] ?? 'Salon is closed today',
                                 style: TextStyle(
                                   fontSize: 13,
-                                  color: isDark ? Colors.red.shade300 : Colors.red.shade600,
+                                  color: isDark
+                                      ? Colors.red.shade300
+                                      : Colors.red.shade600,
                                 ),
                               ),
                               Text(
                                 'Auto-selected next available date: ${DateFormat('EEEE, MMM dd').format(_selectedDate ?? getFirstAvailableDate())}',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                                  color: isDark
+                                      ? Colors.blue.shade300
+                                      : Colors.blue.shade700,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -3606,7 +3673,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       color: isDark ? Colors.red.shade900 : Colors.red.shade50,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: isDark ? Colors.red.shade700 : Colors.red.shade300,
+                        color: isDark
+                            ? Colors.red.shade700
+                            : Colors.red.shade300,
                         width: 1.5,
                       ),
                     ),
@@ -3615,12 +3684,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: isDark ? Colors.red.shade800 : Colors.red.shade100,
+                            color: isDark
+                                ? Colors.red.shade800
+                                : Colors.red.shade100,
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(
                             Icons.event_busy,
-                            color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                            color: isDark
+                                ? Colors.red.shade300
+                                : Colors.red.shade700,
                             size: 24,
                           ),
                         ),
@@ -3634,7 +3707,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                     ? '🚫 TODAY IS A HOLIDAY'
                                     : '⛔ HOLIDAY',
                                 style: TextStyle(
-                                  color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                                  color: isDark
+                                      ? Colors.red.shade300
+                                      : Colors.red.shade700,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 16,
                                 ),
@@ -3643,7 +3718,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               Text(
                                 '${selectedHolidayName ?? 'Salon is closed'} ${isSelectedToday ? 'today' : 'on this date'}',
                                 style: TextStyle(
-                                  color: isDark ? Colors.red.shade300 : Colors.red.shade600,
+                                  color: isDark
+                                      ? Colors.red.shade300
+                                      : Colors.red.shade600,
                                   fontSize: 14,
                                 ),
                               ),
@@ -3651,7 +3728,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                 Text(
                                   'Please select another date (tomorrow or later)',
                                   style: TextStyle(
-                                    color: isDark ? Colors.red.shade300 : Colors.red.shade500,
+                                    color: isDark
+                                        ? Colors.red.shade300
+                                        : Colors.red.shade500,
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
                                   ),
@@ -3670,14 +3749,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     margin: const EdgeInsets.only(top: 16),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: isDark ? Colors.orange.shade900 : Colors.orange.shade50,
+                      color: isDark
+                          ? Colors.orange.shade900
+                          : Colors.orange.shade50,
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Row(
                       children: [
                         Icon(
                           Icons.warning_amber,
-                          color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                          color: isDark
+                              ? Colors.orange.shade300
+                              : Colors.orange.shade700,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -3685,7 +3768,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             _unavailableReason ??
                                 '⚠️ No barbers available on this day',
                             style: TextStyle(
-                              color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                              color: isDark
+                                  ? Colors.orange.shade300
+                                  : Colors.orange.shade700,
                               fontSize: 14,
                             ),
                           ),
@@ -3699,24 +3784,32 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     margin: const EdgeInsets.only(top: 16),
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: isDark ? Colors.green.shade900 : Colors.green.shade50,
+                      color: isDark
+                          ? Colors.green.shade900
+                          : Colors.green.shade50,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: isDark ? Colors.green.shade700 : Colors.green.shade200,
+                        color: isDark
+                            ? Colors.green.shade700
+                            : Colors.green.shade200,
                       ),
                     ),
                     child: Row(
                       children: [
                         Icon(
                           Icons.check_circle,
-                          color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                          color: isDark
+                              ? Colors.green.shade300
+                              : Colors.green.shade700,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             '✅ Selected: ${DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!)}',
                             style: TextStyle(
-                              color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                              color: isDark
+                                  ? Colors.green.shade300
+                                  : Colors.green.shade700,
                               fontSize: 14,
                               fontWeight: FontWeight.w500,
                             ),
@@ -3750,7 +3843,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       !_isDateUnavailable &&
                       !_holidays.contains(_selectedDate))
                   ? () async {
-                      setState(() => _currentStep = 3); // Barber step
+                      setState(() => _currentStep = 3);
                       await _loadAvailableBarbers();
                     }
                   : null,
@@ -3802,7 +3895,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // ✅ STEP 3: BARBER SELECTION
+  // STEP 3: BARBER SELECTION
   // ============================================
 
   Widget _buildBarberSelectionStep() {
@@ -3844,7 +3937,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         child: Text(
                           (_selectedSalon?['name'] as String?)
                                   ?.substring(0, 1)
-                                  .toUpperCase() ?? 'S',
+                                  .toUpperCase() ??
+                              'S',
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -3879,13 +3973,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () => setState(() => _currentStep = 1), // Service step
+                onPressed: () => setState(() => _currentStep = 1),
                 child: Text(
                   'Change',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
                 ),
               ),
             ],
@@ -3894,9 +3985,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         Expanded(
           child: _isLoadingBarbers
               ? Center(
-                  child: CircularProgressIndicator(
-                    color: AppTheme.primary,
-                  ),
+                  child: CircularProgressIndicator(color: AppTheme.primary),
                 )
               : _availableBarbers.isEmpty
               ? Center(
@@ -3968,7 +4057,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ? null
                   : () {
                       setState(() {
-                        _currentStep = 4; // Person step
+                        _currentStep = 4;
                         _childNameController.clear();
                         _selectedChildName = null;
                         _isSameAsCustomer = true;
@@ -4109,7 +4198,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           Icon(
                             Icons.star,
                             size: 16,
-                            color: isDark ? Colors.amber.shade300 : Colors.amber[700],
+                            color: isDark
+                                ? Colors.amber.shade300
+                                : Colors.amber[700],
                           ),
                           const SizedBox(width: 4),
                           Text(
@@ -4146,14 +4237,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               Icon(
                                 Icons.star,
                                 size: 14,
-                                color: isDark ? Colors.amber.shade300 : Colors.amber.shade600,
+                                color: isDark
+                                    ? Colors.amber.shade300
+                                    : Colors.amber.shade600,
                               ),
                               const SizedBox(width: 6),
                               Text(
                                 'Special schedule today',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: isDark ? Colors.amber.shade300 : Colors.amber.shade700,
+                                  color: isDark
+                                      ? Colors.amber.shade300
+                                      : Colors.amber.shade700,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -4168,14 +4263,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               Icon(
                                 Icons.free_breakfast,
                                 size: 14,
-                                color: isDark ? Colors.blue.shade300 : Colors.blue.shade600,
+                                color: isDark
+                                    ? Colors.blue.shade300
+                                    : Colors.blue.shade600,
                               ),
                               const SizedBox(width: 6),
                               Text(
                                 'Special break today',
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                                  color: isDark
+                                      ? Colors.blue.shade300
+                                      : Colors.blue.shade700,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
@@ -4191,14 +4290,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: isDark ? Colors.orange.shade900 : Colors.orange.shade50,
+                              color: isDark
+                                  ? Colors.orange.shade900
+                                  : Colors.orange.shade50,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Text(
                               availability!['reason']!,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                                color: isDark
+                                    ? Colors.orange.shade300
+                                    : Colors.orange.shade700,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -4240,7 +4343,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // ✅ STEP 4: PERSON SELECTION
+  // STEP 4: PERSON SELECTION
   // ============================================
 
   Widget _buildPersonSelectionStep() {
@@ -4298,13 +4401,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () => setState(() => _currentStep = 3), // Barber step
+                onPressed: () => setState(() => _currentStep = 3),
                 child: Text(
                   'Change',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
                 ),
               ),
             ],
@@ -4315,11 +4415,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                Icon(
-                  Icons.calendar_today,
-                  size: 18,
-                  color: _secondaryColor,
-                ),
+                Icon(Icons.calendar_today, size: 18, color: _secondaryColor),
                 const SizedBox(width: 8),
                 Text(
                   DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
@@ -4331,13 +4427,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 ),
                 const Spacer(),
                 TextButton(
-                  onPressed: () => setState(() => _currentStep = 2), // Date step
+                  onPressed: () => setState(() => _currentStep = 2),
                   child: Text(
                     'Change',
-                    style: TextStyle(
-                      color: AppTheme.primary,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(color: AppTheme.primary, fontSize: 14),
                   ),
                 ),
               ],
@@ -4424,10 +4517,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(color: AppTheme.primary, width: 2),
+                        borderSide: BorderSide(
+                          color: AppTheme.primary,
+                          width: 2,
+                        ),
                       ),
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                      fillColor: isDark
+                          ? const Color(0xFF2A2A2A)
+                          : Colors.white,
                       contentPadding: const EdgeInsets.symmetric(
                         horizontal: 16,
                         vertical: 16,
@@ -4454,14 +4552,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       children: [
                         Icon(
                           Icons.warning,
-                          color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                          color: isDark
+                              ? Colors.red.shade300
+                              : Colors.red.shade700,
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             _duplicateError!,
                             style: TextStyle(
-                              color: isDark ? Colors.red.shade300 : Colors.red.shade700,
+                              color: isDark
+                                  ? Colors.red.shade300
+                                  : Colors.red.shade700,
                               fontSize: 13,
                             ),
                           ),
@@ -4480,7 +4582,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     children: [
                       Icon(
                         Icons.info_outline,
-                        color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                        color: isDark
+                            ? Colors.blue.shade300
+                            : Colors.blue.shade700,
                         size: 22,
                       ),
                       const SizedBox(width: 12),
@@ -4489,7 +4593,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           'Each person can only have one booking per day.',
                           style: TextStyle(
                             fontSize: 13,
-                            color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                            color: isDark
+                                ? Colors.blue.shade300
+                                : Colors.blue.shade700,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -4520,7 +4626,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ? () async {
                       if (await _validateAndProceed()) {
                         setState(() {
-                          _currentStep = 5; // Time step
+                          _currentStep = 5;
                           _showTravelTimeSelector = false;
                           _selectedTravelTime = 0;
                           _availableSlots = [];
@@ -4590,7 +4696,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(
-          color: isSelected ? AppTheme.primary : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
+          color: isSelected
+              ? AppTheme.primary
+              : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
           width: isSelected ? 2 : 1,
         ),
       ),
@@ -4679,7 +4787,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // ✅ STEP 5: TIME SLOT SELECTION
+  // STEP 5: TIME SLOT
   // ============================================
 
   Widget _buildTimeSlotStep() {
@@ -4733,13 +4841,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () => setState(() => _currentStep = 3), // Barber step
+                onPressed: () => setState(() => _currentStep = 3),
                 child: Text(
                   'Change',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 14,
-                  ),
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
                 ),
               ),
             ],
@@ -4750,11 +4855,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                Icon(
-                  Icons.calendar_today,
-                  size: 18,
-                  color: _secondaryColor,
-                ),
+                Icon(Icons.calendar_today, size: 18, color: _secondaryColor),
                 const SizedBox(width: 8),
                 Text(
                   DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
@@ -4766,13 +4867,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 ),
                 const Spacer(),
                 TextButton(
-                  onPressed: () => setState(() => _currentStep = 2), // Date step
+                  onPressed: () => setState(() => _currentStep = 2),
                   child: Text(
                     'Change',
-                    style: TextStyle(
-                      color: AppTheme.primary,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(color: AppTheme.primary, fontSize: 14),
                   ),
                 ),
               ],
@@ -4782,9 +4880,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         Expanded(
           child: _isLoadingSlots
               ? Center(
-                  child: CircularProgressIndicator(
-                    color: AppTheme.primary,
-                  ),
+                  child: CircularProgressIndicator(color: AppTheme.primary),
                 )
               : _slotErrorMessage != null
               ? _buildNoSlotsState(isDark)
@@ -4820,7 +4916,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       !_isLoadingSlots &&
                       _availableSlots.isNotEmpty &&
                       _slotErrorMessage == null)
-                  ? () => setState(() => _currentStep = 6) // Confirm step
+                  ? () => setState(() => _currentStep = 6)
                   : null,
               style: ElevatedButton.styleFrom(
                 backgroundColor:
@@ -4842,10 +4938,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 children: [
                   const Text(
                     'Continue to Confirmation',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(width: 8),
                   const Icon(Icons.arrow_forward, size: 18),
@@ -4882,10 +4975,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             ),
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               child: Text(
                 _slotErrorMessage!,
                 textAlign: TextAlign.center,
@@ -4905,7 +4995,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   onPressed: () {
                     setState(() {
                       _selectedDate = null;
-                      _currentStep = 2; // Date step
+                      _currentStep = 2;
                       _slotErrorMessage = null;
                     });
                   },
@@ -4953,15 +5043,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 onPressed: () {
                   setState(() {
                     _selectedBarber = null;
-                    _currentStep = 3; // Barber step
+                    _currentStep = 3;
                     _slotErrorMessage = null;
                   });
                 },
-                icon: Icon(
-                  Icons.person,
-                  size: 18,
-                  color: AppTheme.primary,
-                ),
+                icon: Icon(Icons.person, size: 18, color: AppTheme.primary),
                 label: Text(
                   'Try Another Barber',
                   style: TextStyle(color: AppTheme.primary),
@@ -5104,7 +5190,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         : 'Select travel time to add to your appointment start time',
                     style: TextStyle(
                       fontSize: 12,
-                      color: isDark ? Colors.blue.shade300 : Colors.blue.shade700,
+                      color: isDark
+                          ? Colors.blue.shade300
+                          : Colors.blue.shade700,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -5182,11 +5270,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(
-                      Icons.access_time,
-                      size: 22,
-                      color: AppTheme.primary,
-                    ),
+                    Icon(Icons.access_time, size: 22, color: AppTheme.primary),
                     const SizedBox(width: 10),
                     Text(
                       '$startTime - $endTime',
@@ -5207,14 +5291,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: isDark ? Colors.orange.shade900 : Colors.orange.shade50,
+                    color: isDark
+                        ? Colors.orange.shade900
+                        : Colors.orange.shade50,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
                     '⏱️ ~ $waitMinutes min wait time',
                     style: TextStyle(
                       fontSize: 13,
-                      color: isDark ? Colors.orange.shade300 : Colors.orange.shade700,
+                      color: isDark
+                          ? Colors.orange.shade300
+                          : Colors.orange.shade700,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -5238,7 +5326,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     '⏰ Salon will close $extensionMinutes min late for you',
                     style: TextStyle(
                       fontSize: 13,
-                      color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+                      color: isDark
+                          ? Colors.green.shade300
+                          : Colors.green.shade700,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -5263,7 +5353,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // ✅ STEP 6: CONFIRMATION
+  // STEP 6: CONFIRMATION
   // ============================================
 
   Widget _buildConfirmationStep() {
@@ -5388,7 +5478,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               color: d > 0
                                   ? Colors.green.shade600
                                   : (isDark ? Colors.white70 : Colors.black87),
-                              fontWeight: d > 0 ? FontWeight.w500 : FontWeight.normal,
+                              fontWeight: d > 0
+                                  ? FontWeight.w500
+                                  : FontWeight.normal,
                             ),
                           ),
                         );
@@ -5504,5 +5596,3 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 }
-
-// create_new_appointment_advanced {"success" : false, "message" : "Service variant not found"}

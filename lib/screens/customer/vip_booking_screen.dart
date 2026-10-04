@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -18,16 +20,28 @@ class VIPBookingScreen extends StatefulWidget {
 class _VIPBookingScreenState extends State<VIPBookingScreen> {
   final supabase = Supabase.instance.client;
 
-  // Step tracking
+  // ============================================
+  // ✅ STEP ORDER: Salon -> Service -> Date -> Barber -> Person -> Time -> Confirm
+  //    0 Salon, 1 Service, 2 Date, 3 Barber, 4 Person, 5 Time, 6 Confirm
+  // ============================================
   int _currentStep = 0;
 
-  // Step 1: Salon
+  // Step 0: Salon (all active salons — no "followed" concept)
   bool _isSearching = false;
   List<Map<String, dynamic>> _searchResults = [];
-  List<Map<String, dynamic>> _followedSalons = [];
+  List<Map<String, dynamic>> _allSalons = [];
   final TextEditingController _searchController = TextEditingController();
   Map<String, dynamic>? _selectedSalon;
-  bool _isLoadingFollowedSalons = true;
+  bool _isLoadingSalons = true;
+  Timer? _salonSearchDebounce;
+
+  // Step 1: Service
+  List<Map<String, dynamic>> _salonServices = [];
+  List<Map<String, dynamic>> _selectedServices = [];
+  bool _isLoadingServices = false;
+  bool _servicesLoaded = false;
+  String? _selectedCategoryTab;
+  int? _expandedServiceId;
 
   // Step 2: Date
   DateTime? _selectedDate;
@@ -36,29 +50,21 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   bool _isDateUnavailable = false;
   String? _unavailableReason;
 
-  // Step 3: Service
-  List<Map<String, dynamic>> _salonServices = [];
-  List<Map<String, dynamic>> _selectedServices = [];
-  bool _isLoadingServices = false;
-  bool _servicesLoaded = false;
-  String? _selectedCategoryTab;
-  int? _expandedServiceId;
-
-  // Step 4: Barber
+  // Step 3: Barber
   List<Map<String, dynamic>> _availableBarbers = [];
   Map<String, dynamic>? _selectedBarber;
   bool _isLoadingBarbers = false;
   bool _barbersLoaded = false;
   Map<String, Map<String, dynamic>> _barberAvailability = {};
 
-  // Step 5: Person
+  // Step 4: Person
   final TextEditingController _childNameController = TextEditingController();
   String? _selectedChildName;
   bool _isSameAsCustomer = true;
   bool _isCheckingDuplicate = false;
   String? _duplicateError;
 
-  // Step 6: Time Slot (VIP)
+  // Step 5: Time Slot (VIP)
   List<Map<String, dynamic>> _allTimeSlots = [];
   Map<String, dynamic>? _selectedSlot;
   bool _isLoadingSlots = false;
@@ -67,12 +73,13 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   int _generatedVipNumber = 0;
   String _selectedStartTime = '';
 
-  // Step 7: Confirm
+  // Step 6: Confirm
   bool _isBooking = false;
   bool _isInitialized = false;
 
-  // Offer related variables
+  // Offer related variables (per-service discount)
   Map<String, dynamic>? _appliedOffer;
+  Set<int> _offerServiceIds = {};
   double _discountAmount = 0;
   double _originalTotalPrice = 0;
   double _finalTotalPrice = 0;
@@ -87,7 +94,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   bool _isTablet = false;
   bool _isWeb = false;
 
-  // ✅ Web Scroll Controller
   final ScrollController _scrollController = ScrollController();
 
   // Colors
@@ -121,10 +127,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     _searchController.dispose();
     _childNameController.dispose();
     _scrollController.dispose();
+    _salonSearchDebounce?.cancel(); // ✅ FIX: cancel debounce
     super.dispose();
   }
 
-  // ✅ Check screen size for responsive layout
   void _checkScreenSize() {
     final size = MediaQuery.of(context).size;
     final isLarge = size.width > 800 || size.height > 800;
@@ -150,43 +156,85 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final offer = extra['offer'] as Map<String, dynamic>;
       if (_appliedOffer == null) {
         _appliedOffer = offer;
-        _calculateDiscount();
         debugPrint('🎁 VIP Offer applied: ${offer['title']}');
+        _loadOfferServices(offer['id'] as int);
       }
     }
   }
 
+  Future<void> _loadOfferServices(int offerId) async {
+    try {
+      final rows = await supabase
+          .from('offer_services')
+          .select('service_id')
+          .eq('offer_id', offerId);
+      if (!mounted) return;
+      setState(() {
+        _offerServiceIds = rows.map<int>((r) => r['service_id'] as int).toSet();
+      });
+      _updateTotalAndDiscount();
+    } catch (e) {
+      debugPrint('❌ Error loading offer services: $e');
+    }
+  }
+
   // ============================================
-  // DISCOUNT CALCULATION METHODS
+  // DISCOUNT CALCULATION
   // ============================================
+
+  double _round2(double v) => (v * 100).round() / 100;
+
+  bool _isOfferApplicable(int serviceId) {
+    if (_appliedOffer == null) return false;
+    return _offerServiceIds.isEmpty || _offerServiceIds.contains(serviceId);
+  }
+
+  double _discountForPrice(double price) {
+    if (_appliedOffer == null) return 0;
+    final type = _appliedOffer!['discount_type']?.toString() ?? '';
+    final value = (_appliedOffer!['discount_value'] as num?)?.toDouble() ?? 0;
+    switch (type) {
+      case 'percentage':
+        return _round2(price * value / 100);
+      case 'fixed':
+        return value > price ? price : value;
+      case 'free_service':
+        return price;
+      default:
+        return 0;
+    }
+  }
+
+  double _discountForItem(Map<String, dynamic> item) {
+    final serviceId = item['id'];
+    if (serviceId is! int || !_isOfferApplicable(serviceId)) return 0;
+    return _discountForPrice((item['price'] as num?)?.toDouble() ?? 0);
+  }
+
+  double _getDiscountedPrice(int serviceId, double price) {
+    if (!_isOfferApplicable(serviceId)) return price;
+    return price - _discountForPrice(price);
+  }
 
   void _calculateDiscount() {
-    if (_appliedOffer == null) return;
-
     _originalTotalPrice = _calculateTotalPrice();
-
-    final discountType = _appliedOffer!['discount_type'];
-    final discountValue = _appliedOffer!['discount_value'];
-
-    if (discountType == 'percentage') {
-      _discountAmount = _originalTotalPrice * (discountValue / 100);
-    } else if (discountType == 'fixed') {
-      _discountAmount = discountValue.toDouble();
-    } else if (discountType == 'free_service') {
-      _discountAmount = _originalTotalPrice;
+    if (_appliedOffer == null) {
+      _discountAmount = 0;
+      _finalTotalPrice = _originalTotalPrice;
+      return;
     }
-
-    _finalTotalPrice = _originalTotalPrice - _discountAmount;
-    if (_finalTotalPrice < 0) _finalTotalPrice = 0;
-
-    debugPrint(
-      '💰 VIP Discount calculated: $_discountAmount, Final: $_finalTotalPrice',
+    _discountAmount = _selectedServices.fold(
+      0.0,
+      (sum, s) => sum + _discountForItem(s),
     );
+    final result = _originalTotalPrice - _discountAmount;
+    _finalTotalPrice = result < 0 ? 0 : result;
   }
 
   void _updateTotalAndDiscount() {
-    _originalTotalPrice = _calculateTotalPrice();
-    _calculateDiscount();
+    setState(() {
+      _calculateDiscount();
+    });
   }
 
   double _getDisplayTotalPrice() {
@@ -210,6 +258,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   void _removeOffer() {
     setState(() {
       _appliedOffer = null;
+      _offerServiceIds = {};
       _discountAmount = 0;
       _finalTotalPrice = 0;
       _originalTotalPrice = 0;
@@ -236,8 +285,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _isTimezoneLoaded = true;
     });
 
-    await _loadFollowedSalons();
-    _initializeScreen();
+    await _loadAllSalons(); // ✅ FIX: renamed
+    await _initializeScreen();
   }
 
   void _checkTimezoneChange() async {
@@ -286,6 +335,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _selectedSalon = widget.initialSalon;
       _currentStep = 1;
       _isInitialized = true;
+      _loadHolidays();
+      await _loadSalonServices();
     }
   }
 
@@ -327,7 +378,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _generatedVipNumber = 0;
       _selectedStartTime = '';
       _searchController.clear();
-      _searchResults = [];
+      _searchResults = List.from(_allSalons); // ✅ FIX
       _isInitialized = false;
       _servicesLoaded = false;
       _barbersLoaded = false;
@@ -345,15 +396,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _slotErrorMessage = null;
       _expandedServiceId = null;
       _appliedOffer = null;
+      _offerServiceIds = {};
       _discountAmount = 0;
       _originalTotalPrice = 0;
       _finalTotalPrice = 0;
     });
   }
-
-  // ============================================
-  // TIMEZONE FLAG DISPLAY
-  // ============================================
 
   Widget _buildTimezoneFlag() {
     final isDark = context.isDarkMode;
@@ -433,133 +481,108 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 1: SALON SEARCH
+  // ✅ FIX 1: LOAD ALL ACTIVE SALONS
   // ============================================
 
-  Future<void> _loadFollowedSalons() async {
+  Future<void> _loadAllSalons() async {
     setState(() {
-      _isLoadingFollowedSalons = true;
-      _followedSalons = [];
+      _isLoadingSalons = true;
+      _allSalons = [];
     });
 
     try {
-      final user = supabase.auth.currentUser;
-      if (user == null) {
-        setState(() => _isLoadingFollowedSalons = false);
-        return;
-      }
-
       final result = await supabase.rpc(
-        'get_followed_salons_with_counts',
-        params: {'p_customer_id': user.id},
+        'get_active_salons_for_booking',
+        params: {'p_search_query': null, 'p_limit': 100, 'p_offset': 0},
       );
+
+      if (!mounted) return;
 
       if (result != null && result.isNotEmpty) {
+        final salons = List<Map<String, dynamic>>.from(result);
         setState(() {
-          _followedSalons = List<Map<String, dynamic>>.from(result);
-          _searchResults = List.from(_followedSalons);
-          _isLoadingFollowedSalons = false;
+          _allSalons = salons;
+          _searchResults = List.from(salons);
+          _isLoadingSalons = false;
         });
-        debugPrint('✅ Loaded ${_followedSalons.length} followed salons');
+        debugPrint('✅ [VIP] Loaded ${salons.length} salons');
       } else {
         setState(() {
-          _followedSalons = [];
+          _allSalons = [];
           _searchResults = [];
-          _isLoadingFollowedSalons = false;
+          _isLoadingSalons = false;
         });
-        debugPrint('ℹ️ No followed salons found');
       }
     } catch (e) {
-      debugPrint('❌ Error loading followed salons: $e');
+      debugPrint('❌ [VIP] Error loading salons: $e');
+      if (!mounted) return;
       setState(() {
-        _followedSalons = [];
+        _allSalons = [];
         _searchResults = [];
-        _isLoadingFollowedSalons = false;
+        _isLoadingSalons = false;
       });
     }
   }
 
   // ============================================
-  // STEP 2: DATE SELECTION
+  // ✅ FIX 2: SERVER-SIDE SEARCH WITH DEBOUNCE
   // ============================================
 
-  Future<void> _loadHolidays() async {
-    if (_selectedSalon == null) return;
-    try {
-      final response = await supabase
-          .from('salon_holidays')
-          .select('holiday_date, name')
-          .eq('salon_id', _selectedSalon!['id']);
+  Future<void> _searchSalons(String query) async {
+    _salonSearchDebounce?.cancel();
+
+    if (query.trim().isEmpty) {
       setState(() {
-        _holidays.clear();
-        _holidayNames.clear();
-        for (var holiday in response) {
-          final date = DateTime.parse(holiday['holiday_date']);
-          _holidays.add(date);
-          _holidayNames[date] = holiday['name'];
-        }
+        _searchResults = List.from(_allSalons);
+        _isSearching = false;
       });
+      return;
+    }
 
-      final today = DateTime(
-        DateTime.now().year,
-        DateTime.now().month,
-        DateTime.now().day,
-      );
+    setState(() => _isSearching = true);
 
-      if (_holidays.contains(today) && _selectedDate == null) {
-        DateTime nextDate = today.add(const Duration(days: 1));
-        for (int i = 0; i < 30; i++) {
-          if (!_holidays.contains(nextDate)) {
-            setState(() {
-              _selectedDate = nextDate;
-            });
-            await _checkDateAvailability(nextDate);
-            break;
-          }
-          nextDate = nextDate.add(const Duration(days: 1));
-        }
+    _salonSearchDebounce = Timer(const Duration(milliseconds: 350), () async {
+      try {
+        final result = await supabase.rpc(
+          'get_active_salons_for_booking',
+          params: {
+            'p_search_query': query.trim(),
+            'p_limit': 50,
+            'p_offset': 0,
+          },
+        );
+
+        if (!mounted) return;
+
+        setState(() {
+          _searchResults = result != null
+              ? List<Map<String, dynamic>>.from(result)
+              : [];
+          _isSearching = false;
+        });
+
+        debugPrint(
+          '🔍 [VIP] Search "$query" → ${_searchResults.length} results',
+        );
+      } catch (e) {
+        debugPrint('❌ [VIP] Search error: $e');
+        if (!mounted) return;
+        setState(() {
+          _searchResults = [];
+          _isSearching = false;
+        });
       }
-    } catch (e) {
-      debugPrint('Error loading holidays: $e');
-    }
-  }
-
-  Future<void> _checkDateAvailability(DateTime date) async {
-    if (_selectedSalon == null) return;
-    try {
-      final schedules = await supabase
-          .from('barber_schedules')
-          .select('barber_id')
-          .eq('salon_id', _selectedSalon!['id'])
-          .eq('day_of_week', date.weekday)
-          .eq('is_working', true);
-      setState(() {
-        _isDateUnavailable = schedules.isEmpty;
-        _unavailableReason = schedules.isEmpty
-            ? 'No barbers working on ${DateFormat('EEEE').format(date)}'
-            : null;
-      });
-    } catch (e) {
-      debugPrint('Error checking date availability: $e');
-    }
+    });
   }
 
   // ============================================
-  // STEP 3: SERVICE SELECTION
-  // ✅ FIX: no nested !inner embedding. Services, variants, categories,
-  //    genders and age-categories are fetched as separate flat queries and
-  //    joined on the Dart side (same fix as booking-flow screen). The old
-  //    3-level-deep embedded select silently dropped a whole service the
-  //    moment ANY one nested child row failed its RLS check, because
-  //    !inner embedding is a real SQL INNER JOIN and RLS policies apply as
-  //    extra WHERE conditions on every joined table. Flat queries don't
-  //    have that failure mode.
+  // STEP 1: SERVICE LOADING
   // ============================================
 
   Future<void> _loadSalonServices() async {
     if (_servicesLoaded) return;
     if (_selectedSalon == null) {
-      debugPrint('⚠️ [VIP] _loadSalonServices: no salon selected yet');
+      debugPrint('⚠️ _loadSalonServices: no salon selected yet');
       return;
     }
     setState(() => _isLoadingServices = true);
@@ -568,7 +591,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final salonId = _selectedSalon!['id'];
       debugPrint('🔍 [VIP SERVICE] Loading services for salon_id: $salonId');
 
-      // STEP 1: services
       final servicesResponse = await supabase
           .from('services')
           .select('id, name, description, is_active, category_id')
@@ -582,7 +604,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           _isLoadingServices = false;
           _servicesLoaded = true;
         });
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text('This salon has no services available yet.'),
@@ -595,7 +616,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
       final serviceIds = servicesResponse.map((s) => s['id'] as int).toList();
 
-      // STEP 2: variants
       final variantsResponse = await supabase
           .from('service_variants')
           .select(
@@ -603,8 +623,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           )
           .inFilter('service_id', serviceIds);
 
+      // ✅ FIX 6: NULL-safe is_active
       final activeVariants = variantsResponse
-          .where((v) => v['is_active'] == true)
+          .where((v) => v['is_active'] != false)
           .toList();
 
       if (activeVariants.isEmpty) {
@@ -614,7 +635,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           _isLoadingServices = false;
           _servicesLoaded = true;
         });
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: const Text(
@@ -627,13 +647,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         return;
       }
 
-      // STEP 3: categories
       final categoryIds = servicesResponse
           .map((s) => s['category_id'] as int?)
           .whereType<int>()
           .toSet()
           .toList();
-
       Map<int, String> categoryMap = {};
       if (categoryIds.isNotEmpty) {
         try {
@@ -641,22 +659,20 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               .from('salon_categories')
               .select('id, display_name')
               .inFilter('id', categoryIds);
-          for (final c in rows) {
-            categoryMap[c['id'] as int] =
-                c['display_name']?.toString() ?? 'Other';
+          for (var cat in rows) {
+            categoryMap[cat['id'] as int] =
+                cat['display_name']?.toString() ?? 'Other';
           }
         } catch (e) {
-          debugPrint('⚠️ [VIP] categories failed: $e');
+          debugPrint('⚠️ Categories failed: $e');
         }
       }
 
-      // STEP 4: genders
       final genderIds = activeVariants
           .map((v) => v['salon_gender_id'] as int?)
           .whereType<int>()
           .toSet()
           .toList();
-
       Map<int, String> genderMap = {};
       if (genderIds.isNotEmpty) {
         try {
@@ -664,21 +680,19 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               .from('salon_genders')
               .select('id, display_name')
               .inFilter('id', genderIds);
-          for (final g in rows) {
+          for (var g in rows) {
             genderMap[g['id'] as int] = g['display_name']?.toString() ?? '';
           }
         } catch (e) {
-          debugPrint('⚠️ [VIP] genders failed: $e');
+          debugPrint('⚠️ Genders failed: $e');
         }
       }
 
-      // STEP 5: age categories
       final ageIds = activeVariants
           .map((v) => v['salon_age_category_id'] as int?)
           .whereType<int>()
           .toSet()
           .toList();
-
       Map<int, String> ageMap = {};
       if (ageIds.isNotEmpty) {
         try {
@@ -686,18 +700,17 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               .from('salon_age_categories')
               .select('id, display_name')
               .inFilter('id', ageIds);
-          for (final a in rows) {
+          for (var a in rows) {
             ageMap[a['id'] as int] = a['display_name']?.toString() ?? '';
           }
         } catch (e) {
-          debugPrint('⚠️ [VIP] age categories failed: $e');
+          debugPrint('⚠️ Age categories failed: $e');
         }
       }
 
-      // STEP 6: group services with variants
       final Map<int, Map<String, dynamic>> groupedServices = {};
 
-      for (final service in servicesResponse) {
+      for (var service in servicesResponse) {
         final serviceId = service['id'] as int;
         final categoryId = service['category_id'] as int?;
 
@@ -712,12 +725,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         };
       }
 
-      for (final variant in activeVariants) {
+      for (var variant in activeVariants) {
         final serviceId = variant['service_id'] as int;
         final genderId = variant['salon_gender_id'] as int?;
         final ageId = variant['salon_age_category_id'] as int?;
 
-        (groupedServices[serviceId]?['variants'] as List?)?.add({
+        groupedServices[serviceId]?['variants'].add({
           'id': variant['id'],
           'gender': genderId != null ? (genderMap[genderId] ?? '') : '',
           'age': ageId != null ? (ageMap[ageId] ?? '') : '',
@@ -731,7 +744,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           .toList();
 
       debugPrint(
-        '✅ [VIP] Grouped into ${servicesList.length} service(s) with variants',
+        '✅ [VIP SERVICE] Grouped into ${servicesList.length} service(s)',
       );
 
       if (!mounted) return;
@@ -741,14 +754,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         _servicesLoaded = true;
       });
     } catch (e, stackTrace) {
-      debugPrint('❌ [VIP] Failed to load services: $e');
-      debugPrint('📚 $stackTrace');
+      debugPrint('❌ [VIP SERVICE ERROR] $e');
+      debugPrint('📚 Stack: $stackTrace');
       if (!mounted) return;
       setState(() => _isLoadingServices = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Failed to load services: ${e.toString()}'),
           backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
         ),
       );
     }
@@ -802,8 +816,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'price': 0.0,
           'duration': 30,
         });
-        _updateTotalAndDiscount();
       });
+      _updateTotalAndDiscount();
     }
   }
 
@@ -817,22 +831,80 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return Icons.build;
   }
 
-  double _getDiscountedPrice(double originalPrice) {
-    if (_appliedOffer == null) return originalPrice;
-    final discountType = _appliedOffer!['discount_type'];
-    final discountValue = _appliedOffer!['discount_value'];
-    if (discountType == 'percentage') {
-      return originalPrice * (1 - discountValue / 100);
-    } else if (discountType == 'fixed') {
-      return (originalPrice - discountValue).clamp(0, double.infinity);
-    } else if (discountType == 'free_service') {
-      return 0;
+  // ============================================
+  // STEP 2: DATE - HOLIDAYS + AVAILABILITY
+  // ============================================
+
+  Future<void> _loadHolidays() async {
+    if (_selectedSalon == null) return;
+    try {
+      final response = await supabase
+          .from('salon_holidays')
+          .select('holiday_date, name')
+          .eq('salon_id', _selectedSalon!['id']);
+      if (!mounted) return;
+      setState(() {
+        _holidays.clear();
+        _holidayNames.clear();
+        for (var holiday in response) {
+          final date = DateTime.parse(holiday['holiday_date']);
+          _holidays.add(date);
+          _holidayNames[date] = holiday['name'];
+        }
+      });
+
+      final today = DateTime(
+        DateTime.now().year,
+        DateTime.now().month,
+        DateTime.now().day,
+      );
+
+      if (_holidays.contains(today) && _selectedDate == null) {
+        DateTime nextDate = today.add(const Duration(days: 1));
+        for (int i = 0; i < 30; i++) {
+          if (!_holidays.contains(nextDate)) {
+            setState(() {
+              _selectedDate = nextDate;
+            });
+            await _checkDateAvailability(nextDate);
+            break;
+          }
+          nextDate = nextDate.add(const Duration(days: 1));
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading holidays: $e');
     }
-    return originalPrice;
+  }
+
+  Future<void> _checkDateAvailability(DateTime date) async {
+    if (_selectedSalon == null) return;
+    try {
+      final schedules = await supabase
+          .from('barber_schedules')
+          .select('barber_id')
+          .eq('salon_id', _selectedSalon!['id'])
+          .eq('day_of_week', date.weekday)
+          .eq('is_working', true);
+      if (!mounted) return;
+      setState(() {
+        _isDateUnavailable = schedules.isEmpty;
+        _unavailableReason = schedules.isEmpty
+            ? 'No barbers working on ${DateFormat('EEEE').format(date)}'
+            : null;
+        // ✅ FIX: invalidate barber cache on date change
+        _barbersLoaded = false;
+        _availableBarbers = [];
+        _barberAvailability = {};
+        _selectedBarber = null;
+      });
+    } catch (e) {
+      debugPrint('Error checking date availability: $e');
+    }
   }
 
   // ============================================
-  // STEP 4: BARBER SELECTION
+  // STEP 3: BARBER SELECTION
   // ============================================
 
   Future<Map<String, dynamic>> _checkBarberFullAvailability(
@@ -980,6 +1052,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
+        if (!mounted) return;
         setState(() {
           _availableBarbers = [];
           _isLoadingBarbers = false;
@@ -997,6 +1070,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           ).format(_selectedDate ?? DateTime.now()),
         },
       );
+
+      if (!mounted) return;
 
       if (result == null || result.isEmpty) {
         setState(() {
@@ -1040,6 +1115,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         return (b['avg_rating'] as num).compareTo(a['avg_rating'] as num);
       });
 
+      if (!mounted) return;
       setState(() {
         _availableBarbers = barberList;
         _isLoadingBarbers = false;
@@ -1047,6 +1123,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       });
     } catch (e) {
       debugPrint('❌ Error loading barbers: $e');
+      if (!mounted) return;
       setState(() {
         _isLoadingBarbers = false;
         _barbersLoaded = false;
@@ -1056,7 +1133,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 5: PERSON SELECTION
+  // STEP 4: PERSON SELECTION
   // ============================================
 
   Future<void> _checkDuplicateBooking() async {
@@ -1077,15 +1154,16 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           .eq('appointment_date', dateStr)
           .eq('child_name', childName)
           .not('status', 'in', '("cancelled","no_show")');
+      if (!mounted) return;
       setState(() {
         _duplicateError = existing.isNotEmpty
-            ? '⚠️ You already have a booking for ${childName.isEmpty ? "yourself" : childName} on ${DateFormat('MMM dd').format(_selectedDate!)}.'
+            ? '⚠️ You already have a VIP booking for ${childName.isEmpty ? "yourself" : childName} on ${DateFormat('MMM dd').format(_selectedDate!)}.'
             : null;
       });
     } catch (e) {
       debugPrint('Error checking duplicate: $e');
     } finally {
-      setState(() => _isCheckingDuplicate = false);
+      if (mounted) setState(() => _isCheckingDuplicate = false);
     }
   }
 
@@ -1102,7 +1180,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 6: VIP TIME SLOT SELECTION
+  // STEP 5: VIP TIME SLOT SELECTION
   // ============================================
 
   Widget _buildTimezoneIndicator() {
@@ -1189,7 +1267,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final totalDuration = _calculateTotalDuration();
 
       final barberId = _selectedBarber!['barber_id'] ?? _selectedBarber!['id'];
-      debugPrint('🔍 Loading slots for barber: $barberId');
+      debugPrint('🔍 [VIP] Loading slots for barber: $barberId');
 
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
@@ -1475,6 +1553,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         });
       }
     } catch (e) {
+      debugPrint('❌ [VIP] Load slots error: $e');
       if (mounted) {
         setState(() {
           _isLoadingSlots = false;
@@ -1550,10 +1629,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 7: CONFIRMATION
-  // ✅ FIX: create_vip_booking now takes p_variant_ids (INTEGER[]) instead
-  //    of p_service_id / p_variant_id. appointments no longer has those
-  //    columns at all - appointment_services holds every selected service.
+  // STEP 6: CONFIRMATION
+  // ✅ FIX 3, 4, 5: variantIds safety + p_notes null + error_code
   // ============================================
 
   Future<void> _confirmBooking() async {
@@ -1569,30 +1646,27 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final utcStartTime = _selectedSlot!['utc_start_time'];
       final utcEndTime = _selectedSlot!['utc_end_time'];
 
-      // ✅ FIX: build the variant_ids array from ALL selected services
       final variantIds = _selectedServices
           .map((s) => s['variant_id'])
           .whereType<int>()
           .toList();
 
-      // ✅ Guard: catch missing variant_id before the RPC round-trip
-      final missingVariants = _selectedServices
-          .where((s) => s['variant_id'] == null)
-          .toList();
-      if (missingVariants.isNotEmpty) {
-        final names = missingVariants.map((s) => s['name']).join(', ');
-        throw Exception(
-          'Missing variant for: $names. Please re-select these services.',
-        );
-      }
-
+      // ✅ FIX 4: Safety checks
       if (variantIds.isEmpty) {
         throw Exception(
-          'No variants selected. Please select at least one service.',
+          'No valid services selected. Please go back and select services.',
         );
       }
 
-      debugPrint('📤 [VIP] Sending variant_ids: $variantIds');
+      if (variantIds.length != _selectedServices.length) {
+        throw Exception(
+          'Some services have invalid variants. Please re-select your services.',
+        );
+      }
+
+      final offerId = (_appliedOffer != null && _discountAmount > 0)
+          ? _appliedOffer!['id']
+          : null;
 
       final result = await supabase.rpc(
         'create_vip_booking',
@@ -1605,26 +1679,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'p_utc_start_time': utcStartTime,
           'p_utc_end_time': utcEndTime,
           'p_child_name': _getChildNameForBooking(),
-          'p_notes': _selectedServices.length > 1
-              ? 'Combined: ${_selectedServices.map((s) => s['name']).join(", ")}'
-              : null,
+          'p_notes': null, // ✅ FIX 3: services already in appointment_services
+          'p_offer_id': offerId,
         },
       );
 
       if (!mounted) return;
 
       if (result['success'] == true) {
-        if (_appliedOffer != null) {
-          await supabase
-              .from('customer_offers')
-              .update({
-                'status': 'used',
-                'used_at': DateTime.now().toIso8601String(),
-              })
-              .eq('customer_id', user.id)
-              .eq('offer_id', _appliedOffer!['id']);
-        }
-
         final confirmedVipNumber = result['vip_number'] ?? _generatedVipNumber;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1636,7 +1698,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           Navigator.pop(context, true);
         }
       } else {
-        throw Exception(result['message'] ?? 'VIP booking failed');
+        // ✅ FIX 5: show detailed server error
+        final errorMessage = result['message'] ?? 'VIP booking failed';
+        final errorCode = result['error_code']?.toString() ?? '';
+        throw Exception(
+          errorCode.isNotEmpty ? '$errorMessage ($errorCode)' : errorMessage,
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -1729,7 +1796,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP BUILDERS
+  // STEP 0: SALON SEARCH
   // ============================================
 
   Widget _buildSalonSearchStep() {
@@ -1749,7 +1816,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               color: isDark ? Colors.white : Colors.black87,
             ),
             decoration: InputDecoration(
-              hintText: 'Search your followed salons...',
+              hintText: 'Search salons by name or address...', // ✅ FIX 7
               hintStyle: TextStyle(
                 fontSize: 15,
                 color: isDark ? Colors.white70 : Colors.grey[400],
@@ -1769,20 +1836,21 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ),
                     )
                   : (_searchController.text.isNotEmpty
-                      ? IconButton(
-                          icon: Icon(
-                            Icons.clear,
-                            color: isDark ? Colors.white70 : Colors.grey[400],
-                          ),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() {
-                              _searchResults = List.from(_followedSalons);
-                              _isSearching = false;
-                            });
-                          },
-                        )
-                      : null),
+                        ? IconButton(
+                            icon: Icon(
+                              Icons.clear,
+                              color: isDark ? Colors.white70 : Colors.grey[400],
+                            ),
+                            onPressed: () {
+                              _searchController.clear();
+                              _salonSearchDebounce?.cancel();
+                              setState(() {
+                                _searchResults = List.from(_allSalons);
+                                _isSearching = false;
+                              });
+                            },
+                          )
+                        : null),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(16),
                 borderSide: BorderSide(
@@ -1803,7 +1871,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           ),
         ),
         Expanded(
-          child: _isLoadingFollowedSalons
+          child: _isLoadingSalons
               ? Center(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(24),
@@ -1814,7 +1882,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         CircularProgressIndicator(color: AppTheme.primary),
                         const SizedBox(height: 16),
                         Text(
-                          'Loading your followed salons...',
+                          'Loading salons...',
                           style: TextStyle(
                             color: isDark ? Colors.white60 : Colors.black87,
                           ),
@@ -1823,23 +1891,22 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                   ),
                 )
-              : _searchResults.isEmpty && !_isSearching && _followedSalons.isEmpty
+              : _searchResults.isEmpty && !_isSearching && _allSalons.isEmpty
               ? _buildEmptyState(isDark)
-              : _searchResults.isEmpty &&
-                      !_isSearching &&
-                      _followedSalons.isNotEmpty
-                  ? _buildNoResultsState(isDark)
-                  : ListView.builder(
-                      padding: const EdgeInsets.all(16),
-                      itemCount: _searchResults.length,
-                      itemBuilder: (context, index) =>
-                          _buildSalonCard(_searchResults[index]),
-                    ),
+              : _searchResults.isEmpty && !_isSearching && _allSalons.isNotEmpty
+              ? _buildNoResultsState(isDark)
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _searchResults.length,
+                  itemBuilder: (context, index) =>
+                      _buildSalonCard(_searchResults[index]),
+                ),
         ),
       ],
     );
   }
 
+  // ✅ FIX 8: Empty state retry
   Widget _buildEmptyState(bool isDark) {
     return Center(
       child: SingleChildScrollView(
@@ -1855,7 +1922,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ),
             const SizedBox(height: 20),
             Text(
-              'No salons followed yet',
+              'No salons available',
               style: TextStyle(
                 fontSize: 18,
                 color: isDark ? Colors.white60 : Colors.grey[500],
@@ -1863,7 +1930,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Follow salons to book VIP appointments',
+              'No active salons found',
               style: TextStyle(
                 fontSize: 14,
                 color: isDark ? Colors.white70 : Colors.grey[400],
@@ -1871,9 +1938,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
-              onPressed: () => context.push('/customer/search-salons'),
-              icon: const Icon(Icons.search),
-              label: const Text('Find Salons to Follow'),
+              onPressed: _loadAllSalons,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primary,
                 foregroundColor: Colors.white,
@@ -1914,8 +1981,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             TextButton.icon(
               onPressed: () {
                 _searchController.clear();
+                _salonSearchDebounce?.cancel();
                 setState(() {
-                  _searchResults = List.from(_followedSalons);
+                  _searchResults = List.from(_allSalons);
+                  _isSearching = false;
                 });
               },
               icon: const Icon(Icons.clear),
@@ -1930,8 +1999,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   Widget _buildSalonCard(Map<String, dynamic> salon) {
     final isDark = context.isDarkMode;
     final logoUrl = salon['logo_url'];
-    final followerCount = salon['follower_count'] ?? 0;
-    final bookingCount = salon['booking_count'] ?? 0;
+    final avgRating = (salon['avg_rating'] as num?)?.toDouble() ?? 0.0;
+    final totalBookings = salon['total_bookings'] ?? 0;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -2032,16 +2101,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     Row(
                       children: [
                         Icon(
-                          Icons.people,
+                          Icons.star,
                           size: 14,
-                          color: isDark ? Colors.white60 : Colors.grey[500],
+                          color: isDark
+                              ? Colors.amber.shade300
+                              : Colors.amber[700],
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '$followerCount followers',
+                          avgRating > 0 ? avgRating.toStringAsFixed(1) : 'New',
                           style: TextStyle(
                             fontSize: 11,
-                            color: isDark ? Colors.white70 : Colors.grey[500],
+                            color: isDark ? Colors.white70 : Colors.grey[600],
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -2052,7 +2123,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '$bookingCount bookings',
+                          '$totalBookings bookings',
                           style: TextStyle(
                             fontSize: 11,
                             color: isDark ? Colors.white70 : Colors.grey[500],
@@ -2075,31 +2146,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  Future<void> _searchSalons(String query) async {
-    if (query.isEmpty) {
-      setState(() {
-        _searchResults = List.from(_followedSalons);
-        _isSearching = false;
-      });
-      return;
-    }
-
-    setState(() => _isSearching = true);
-
-    final filtered = _followedSalons.where((salon) {
-      final name = (salon['name'] as String?)?.toLowerCase() ?? '';
-      final address = (salon['address'] as String?)?.toLowerCase() ?? '';
-      final searchTerm = query.toLowerCase();
-      return name.contains(searchTerm) || address.contains(searchTerm);
-    }).toList();
-
-    setState(() {
-      _searchResults = filtered;
-      _isSearching = false;
-    });
-  }
-
   void _selectSalon(Map<String, dynamic> salon) {
+    debugPrint('🏪 [VIP] Salon selected: ${salon['id']} - ${salon['name']}');
     setState(() {
       _selectedSalon = salon;
       _currentStep = 1;
@@ -2107,12 +2155,1201 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _salonServices = [];
       _selectedServices = [];
       _selectedDate = null;
+      _appliedOffer = null;
+      _offerServiceIds = {};
+      _discountAmount = 0;
+      _originalTotalPrice = 0;
+      _finalTotalPrice = 0;
     });
     _loadHolidays();
+    _loadSalonServices();
   }
 
   // ============================================
-  // DATE SELECTION STEP
+  // STEP 1: SERVICE SELECTION
+  // ============================================
+
+  Widget _buildServiceSelectionStep() {
+    final isDark = context.isDarkMode;
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
+    for (var s in _salonServices) {
+      final catName = s['category_name']?.toString() ?? 'Other';
+      (grouped[catName] ??= []).add(s);
+    }
+    final categories = grouped.keys.toList();
+    if (_selectedCategoryTab == null && categories.isNotEmpty) {
+      _selectedCategoryTab = categories.first;
+    }
+    final servicesToShow = _selectedCategoryTab == null
+        ? _salonServices
+        : grouped[_selectedCategoryTab] ?? [];
+    final isMobile = MediaQuery.of(context).size.width < 600;
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          child: Row(
+            children: [
+              Container(
+                width: 45,
+                height: 45,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  image:
+                      (_selectedSalon?['logo_url'] as String?) != null &&
+                          (_selectedSalon!['logo_url'] as String).isNotEmpty
+                      ? DecorationImage(
+                          image: NetworkImage(_selectedSalon!['logo_url']),
+                          fit: BoxFit.cover,
+                        )
+                      : null,
+                ),
+                child:
+                    (_selectedSalon?['logo_url'] == null ||
+                        (_selectedSalon!['logo_url'] as String).isEmpty)
+                    ? Center(
+                        child: Text(
+                          (_selectedSalon?['name'] as String?)
+                                  ?.substring(0, 1)
+                                  .toUpperCase() ??
+                              'S',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Selected Salon',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _selectedSalon?['name'] ?? '',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () => setState(() => _currentStep = 0),
+                child: Text(
+                  'Change',
+                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+        ),
+        _buildOfferBanner(isDark),
+        if (_selectedServices.isNotEmpty)
+          GestureDetector(
+            onTap: () => _showSelectedServicesSheet(),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: AppTheme.primary,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.primary.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      '${_selectedServices.length}',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '${_selectedServices.length} Service${_selectedServices.length > 1 ? 's' : ''} Selected',
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _selectedServices
+                              .map((s) => s['name']?.toString() ?? '')
+                              .take(2)
+                              .join(', '),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.white.withValues(alpha: 0.8),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Rs. ${_getDisplayTotalPrice().toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(
+                          Icons.chevron_right,
+                          size: 16,
+                          color: Colors.white,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        SizedBox(
+          height: 45,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            children: [
+              FilterChip(
+                label: Text(
+                  'All',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: _selectedCategoryTab == null
+                        ? Colors.white
+                        : (isDark ? Colors.white70 : Colors.grey[700]),
+                  ),
+                ),
+                selected: _selectedCategoryTab == null,
+                onSelected: (_) => setState(() => _selectedCategoryTab = null),
+                backgroundColor: isDark
+                    ? const Color(0xFF2A2A2A)
+                    : Colors.white,
+                selectedColor: AppTheme.primary,
+              ),
+              const SizedBox(width: 8),
+              ...categories.map(
+                (c) => Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    label: Text(
+                      c,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: _selectedCategoryTab == c
+                            ? Colors.white
+                            : (isDark ? Colors.white70 : Colors.grey[700]),
+                      ),
+                    ),
+                    selected: _selectedCategoryTab == c,
+                    onSelected: (_) => setState(() => _selectedCategoryTab = c),
+                    backgroundColor: isDark
+                        ? const Color(0xFF2A2A2A)
+                        : Colors.white,
+                    selectedColor: AppTheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _isLoadingServices
+              ? Center(
+                  child: CircularProgressIndicator(color: AppTheme.primary),
+                )
+              : servicesToShow.isEmpty
+              ? Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.content_cut,
+                          size: 80,
+                          color: isDark ? Colors.white30 : Colors.grey[300],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No services available',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: isDark ? Colors.white60 : Colors.grey[500],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: servicesToShow.length,
+                  itemBuilder: (context, index) =>
+                      _buildServiceCard(servicesToShow[index], index, isMobile),
+                ),
+        ),
+        Padding(
+          padding: const EdgeInsets.all(16),
+          child: SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: _selectedServices.isEmpty
+                  ? null
+                  : () {
+                      setState(() => _currentStep = 2);
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _selectedServices.isNotEmpty
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[700] : Colors.grey[400]),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                elevation: 2,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _selectedServices.isEmpty
+                        ? 'Select a Service'
+                        : 'Continue to Date',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (_selectedServices.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    const Icon(Icons.arrow_forward, size: 18),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOfferBanner(bool isDark) {
+    if (_appliedOffer == null) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.green.shade900 : Colors.green.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.green.shade700 : Colors.green.shade300,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.green.shade800 : Colors.green.shade100,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              Icons.local_offer,
+              color: isDark ? Colors.green.shade300 : Colors.green.shade700,
+              size: 20,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '🎉 VIP Offer Applied!',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade700,
+                  ),
+                ),
+                Text(
+                  _appliedOffer!['title']?.toString() ?? '',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade600,
+                  ),
+                ),
+                Text(
+                  'Save ${_getDiscountText()} on eligible services',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: isDark
+                        ? Colors.green.shade300
+                        : Colors.green.shade600,
+                  ),
+                ),
+                if (_selectedServices.isNotEmpty && _discountAmount == 0)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      'This offer does not apply to the selected services',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark
+                            ? Colors.orange.shade300
+                            : Colors.orange.shade700,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          TextButton(
+            onPressed: _removeOffer,
+            style: TextButton.styleFrom(
+              foregroundColor: isDark
+                  ? Colors.green.shade300
+                  : Colors.green.shade700,
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildServiceCard(
+    Map<String, dynamic> service,
+    int index,
+    bool isMobile,
+  ) {
+    final isDark = context.isDarkMode;
+    final variants = service['variants'] as List? ?? [];
+    final isAnyVariantSelected = _selectedServices.any(
+      (s) => s['id'] == service['id'],
+    );
+    final int serviceId = service['id'] as int;
+    final isExpanded = _expandedServiceId == serviceId;
+    final bool offerAppliesHere = _isOfferApplicable(serviceId);
+
+    final String serviceName = service['name']?.toString() ?? 'Service';
+    final String categoryName = service['category_name']?.toString() ?? '';
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      color: isDark
+          ? const Color(0xFF2A2A2A)
+          : _cardColors[index % _cardColors.length],
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: isAnyVariantSelected ? AppTheme.primary : Colors.transparent,
+          width: 2,
+        ),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: isDark
+              ? const Color(0xFF2A2A2A)
+              : _cardColors[index % _cardColors.length],
+        ),
+        child: Column(
+          children: [
+            InkWell(
+              onTap: () {
+                if (isMobile && variants.isNotEmpty) {
+                  setState(() {
+                    if (isExpanded) {
+                      _expandedServiceId = null;
+                    } else {
+                      _expandedServiceId = serviceId;
+                    }
+                  });
+                }
+              },
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(16),
+                topRight: Radius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF3A3A3A) : Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        _getServiceIcon(serviceName),
+                        color: AppTheme.primary,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  serviceName,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                  ),
+                                ),
+                              ),
+                              if (offerAppliesHere)
+                                Container(
+                                  margin: const EdgeInsets.only(left: 6),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 1,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Text(
+                                    _getDiscountText(),
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark
+                                          ? Colors.green.shade300
+                                          : Colors.green.shade700,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          Text(
+                            categoryName,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                          ),
+                          if (isAnyVariantSelected) ...[
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${_selectedServices.where((s) => s['id'] == service['id']).length} selected',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w500,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (isMobile && variants.isNotEmpty)
+                      Icon(
+                        isExpanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        color: isDark ? Colors.white60 : Colors.grey[500],
+                        size: 24,
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            if (variants.isNotEmpty && (!isMobile || isExpanded))
+              Column(
+                children: [
+                  const Divider(color: Colors.grey, height: 1),
+                  Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      children: variants
+                          .map((v) => _buildVariantRow(service, v))
+                          .toList(),
+                    ),
+                  ),
+                ],
+              ),
+            if (variants.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => _selectServiceWithoutVariant(service),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppTheme.primary,
+                      side: BorderSide(color: AppTheme.primary),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                    child: const Text('Select Service'),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVariantRow(
+    Map<String, dynamic> service,
+    Map<String, dynamic> variant,
+  ) {
+    final isDark = context.isDarkMode;
+    final isSelected = _selectedServices.any(
+      (s) => s['id'] == service['id'] && s['variant_id'] == variant['id'],
+    );
+    final isMobile = MediaQuery.of(context).size.width < 600;
+
+    final String gender = variant['gender']?.toString() ?? '';
+    final String age = variant['age']?.toString() ?? '';
+    final String genderLower = gender.toLowerCase();
+
+    IconData genderIcon;
+    if (genderLower.contains('male')) {
+      genderIcon = Icons.male;
+    } else if (genderLower.contains('female')) {
+      genderIcon = Icons.female;
+    } else {
+      genderIcon = Icons.people;
+    }
+
+    final int serviceId = service['id'] as int;
+    final double price = (variant['price'] as num?)?.toDouble() ?? 0.0;
+    final double discountedPrice = _getDiscountedPrice(serviceId, price);
+    final bool hasDiscount = discountedPrice < price;
+    final int duration = variant['duration'] ?? 30;
+
+    final String displayText = '$gender $age'.trim();
+
+    return GestureDetector(
+      onTap: () => _toggleVariant(service, variant),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: EdgeInsets.all(isMobile ? 10 : 12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppTheme.primary.withValues(alpha: 0.1)
+              : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected
+                ? AppTheme.primary
+                : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: isMobile ? 40 : 44,
+              height: isMobile ? 40 : 44,
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppTheme.primary.withValues(alpha: 0.2)
+                    : (isDark ? const Color(0xFF3A3A3A) : Colors.white),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                genderIcon,
+                size: isMobile ? 22 : 24,
+                color: isSelected
+                    ? AppTheme.primary
+                    : (isDark ? Colors.white60 : Colors.grey[600]),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    displayText.isEmpty ? 'Variant' : displayText,
+                    style: TextStyle(
+                      fontWeight: isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                      fontSize: isMobile ? 13 : 15,
+                      color: isSelected
+                          ? AppTheme.primary
+                          : (isDark ? Colors.white : _textDark),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 4,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.currency_rupee,
+                            size: 12,
+                            color: isDark ? Colors.white60 : Colors.grey[500],
+                          ),
+                          const SizedBox(width: 2),
+                          if (hasDiscount) ...[
+                            Text(
+                              price.toStringAsFixed(0),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark
+                                    ? Colors.white70
+                                    : Colors.grey[500],
+                                decoration: TextDecoration.lineThrough,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                          Text(
+                            discountedPrice.toStringAsFixed(0),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: (isSelected || hasDiscount)
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                              color: hasDiscount
+                                  ? (isDark
+                                        ? Colors.green.shade300
+                                        : Colors.green.shade700)
+                                  : (isDark
+                                        ? Colors.white70
+                                        : Colors.grey[700]),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.timer,
+                            size: 12,
+                            color: isDark ? Colors.white60 : Colors.grey[500],
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            '$duration min',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: isMobile ? 10 : 12,
+                vertical: isMobile ? 6 : 8,
+              ),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppTheme.primary
+                    : (isDark ? Colors.grey[800] : Colors.grey[100]),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isSelected ? Icons.check : Icons.add,
+                    size: isMobile ? 14 : 16,
+                    color: isSelected ? Colors.white : AppTheme.primary,
+                  ),
+                  if (!isMobile) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      isSelected ? 'Selected' : 'Select',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: isSelected ? Colors.white : AppTheme.primary,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSelectedServicesSheet() {
+    final isDark = context.isDarkMode;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) => DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (context, scrollController) {
+            return Container(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey[700] : Colors.grey[300],
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Icon(
+                          Icons.checklist,
+                          color: AppTheme.primary,
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Selected Services',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                            Text(
+                              '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} selected',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_selectedServices.isNotEmpty)
+                        TextButton(
+                          onPressed: () {
+                            setState(() {
+                              _selectedServices.clear();
+                            });
+                            _updateTotalAndDiscount();
+                            Navigator.pop(context);
+                          },
+                          child: Text(
+                            'Clear All',
+                            style: TextStyle(
+                              color: isDark ? Colors.red.shade300 : Colors.red,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Expanded(
+                    child: _selectedServices.isEmpty
+                        ? Center(
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.shopping_cart_outlined,
+                                    size: 64,
+                                    color: isDark
+                                        ? Colors.white30
+                                        : Colors.grey[300],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    'No services selected',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      color: isDark
+                                          ? Colors.white60
+                                          : Colors.grey[500],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Tap on service variants to add',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.grey[400],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            controller: scrollController,
+                            itemCount: _selectedServices.length,
+                            separatorBuilder: (context, index) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final service = _selectedServices[index];
+                              return _buildSelectedServiceItem(
+                                service,
+                                index,
+                                setSheetState,
+                              );
+                            },
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppTheme.primary.withValues(alpha: 0.2),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Total Duration',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isDark ? Colors.white60 : Colors.grey,
+                              ),
+                            ),
+                            Text(
+                              '${_calculateTotalDuration()} min',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (_discountAmount > 0) ...[
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Subtotal',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: isDark ? Colors.white60 : Colors.grey,
+                                ),
+                              ),
+                              Text(
+                                'Rs. ${_originalTotalPrice.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
+                                  decoration: TextDecoration.lineThrough,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Discount',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: isDark ? Colors.white60 : Colors.grey,
+                                ),
+                              ),
+                              Text(
+                                '- Rs. ${_discountAmount.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.green.shade600,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                        ],
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Total Price',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: isDark ? Colors.white60 : Colors.grey,
+                              ),
+                            ),
+                            Text(
+                              'Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text('Close'),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectedServiceItem(
+    Map<String, dynamic> service,
+    int index,
+    StateSetter setSheetState,
+  ) {
+    final isDark = context.isDarkMode;
+    final String serviceName = service['name']?.toString() ?? 'Service';
+    final String gender = service['gender']?.toString() ?? '';
+    final String age = service['age']?.toString() ?? '';
+    final double price = (service['price'] as num?)?.toDouble() ?? 0.0;
+    final int duration = service['duration'] ?? 30;
+    final double discount = _discountForItem(service);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: _cardColors[index % _cardColors.length],
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(
+              child: Icon(
+                _getServiceIcon(serviceName),
+                color: AppTheme.primary,
+                size: 20,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  serviceName,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '$gender $age • $duration min',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              if (discount > 0)
+                Text(
+                  'Rs. ${price.toStringAsFixed(2)}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Colors.grey[500],
+                    decoration: TextDecoration.lineThrough,
+                  ),
+                ),
+              Text(
+                'Rs. ${(price - discount).toStringAsFixed(2)}',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: discount > 0
+                      ? Colors.green.shade600
+                      : AppTheme.primary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () {
+              setSheetState(() {
+                _selectedServices.removeAt(index);
+              });
+              setState(() {});
+              _updateTotalAndDiscount();
+            },
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(
+                Icons.close,
+                size: 16,
+                color: isDark ? Colors.red.shade300 : Colors.red,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================
+  // STEP 2: DATE SELECTION
   // ============================================
 
   Widget _buildDateSelectionStep() {
@@ -2515,8 +3752,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       !_isDateUnavailable &&
                       !_holidays.contains(_selectedDate))
                   ? () async {
-                      setState(() => _currentStep = 2);
-                      await _loadSalonServices();
+                      setState(() {
+                        _currentStep = 3;
+                        _barbersLoaded = false;
+                        _barberAvailability.clear();
+                        _availableBarbers = [];
+                        _selectedBarber = null;
+                      });
+                      await _loadAvailableBarbers();
                     }
                   : null,
               style: ElevatedButton.styleFrom(
@@ -2543,7 +3786,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               ? '🚫 Holiday - Not Available'
                               : (_isDateUnavailable
                                     ? 'No Barbers Available'
-                                    : 'Continue to Services')),
+                                    : 'Continue to Barber')),
                     style: const TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
@@ -2567,1149 +3810,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // SERVICE SELECTION STEP
-  // ============================================
-
-  Widget _buildServiceSelectionStep() {
-    final isDark = context.isDarkMode;
-    final Map<String, List<Map<String, dynamic>>> grouped = {};
-    for (var s in _salonServices) {
-      final catName = s['category_name']?.toString() ?? 'Other';
-      (grouped[catName] ??= []).add(s);
-    }
-    final categories = grouped.keys.toList();
-    if (_selectedCategoryTab == null && categories.isNotEmpty) {
-      _selectedCategoryTab = categories.first;
-    }
-    final servicesToShow = _selectedCategoryTab == null
-        ? _salonServices
-        : grouped[_selectedCategoryTab] ?? [];
-    final isMobile = MediaQuery.of(context).size.width < 600;
-
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          child: Row(
-            children: [
-              Container(
-                width: 45,
-                height: 45,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  image:
-                      (_selectedSalon?['logo_url'] as String?) != null &&
-                          (_selectedSalon!['logo_url'] as String).isNotEmpty
-                      ? DecorationImage(
-                          image: NetworkImage(_selectedSalon!['logo_url']),
-                          fit: BoxFit.cover,
-                        )
-                      : null,
-                ),
-                child:
-                    (_selectedSalon?['logo_url'] == null ||
-                        (_selectedSalon!['logo_url'] as String).isEmpty)
-                    ? Center(
-                        child: Text(
-                          (_selectedSalon?['name'] as String?)
-                                  ?.substring(0, 1)
-                                  .toUpperCase() ??
-                              'S',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      )
-                    : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Selected Salon',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _selectedSalon?['name'] ?? '',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              TextButton(
-                onPressed: () => setState(() => _currentStep = 1),
-                child: Text(
-                  'Change',
-                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
-                ),
-              ),
-            ],
-          ),
-        ),
-        _buildOfferBanner(isDark),
-        if (_selectedServices.isNotEmpty)
-          GestureDetector(
-            onTap: () => _showSelectedServicesSheet(),
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: AppTheme.primary,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primary.withValues(alpha: 0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      '${_selectedServices.length}',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: AppTheme.primary,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${_selectedServices.length} Service${_selectedServices.length > 1 ? 's' : ''} Selected',
-                          style: const TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          _selectedServices
-                              .map((s) => s['name']?.toString() ?? '')
-                              .take(2)
-                              .join(', '),
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.white.withValues(alpha: 0.8),
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      children: [
-                        Text(
-                          'Rs. ${_calculateTotalPrice().toStringAsFixed(0)}',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(
-                          Icons.chevron_right,
-                          size: 16,
-                          color: Colors.white,
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        SizedBox(
-          height: 45,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              FilterChip(
-                label: Text(
-                  'All',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: _selectedCategoryTab == null
-                        ? Colors.white
-                        : (isDark ? Colors.white70 : Colors.grey[700]),
-                  ),
-                ),
-                selected: _selectedCategoryTab == null,
-                onSelected: (_) => setState(() => _selectedCategoryTab = null),
-                backgroundColor: isDark
-                    ? const Color(0xFF2A2A2A)
-                    : Colors.white,
-                selectedColor: AppTheme.primary,
-              ),
-              const SizedBox(width: 8),
-              ...categories.map(
-                (c) => Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: Text(
-                      c,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: _selectedCategoryTab == c
-                            ? Colors.white
-                            : (isDark ? Colors.white70 : Colors.grey[700]),
-                      ),
-                    ),
-                    selected: _selectedCategoryTab == c,
-                    onSelected: (_) => setState(() => _selectedCategoryTab = c),
-                    backgroundColor: isDark
-                        ? const Color(0xFF2A2A2A)
-                        : Colors.white,
-                    selectedColor: AppTheme.primary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: _isLoadingServices
-              ? Center(
-                  child: CircularProgressIndicator(color: AppTheme.primary),
-                )
-              : servicesToShow.isEmpty
-              ? Center(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.content_cut,
-                          size: 80,
-                          color: isDark ? Colors.white30 : Colors.grey[300],
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No services available',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: isDark ? Colors.white60 : Colors.grey[500],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: servicesToShow.length,
-                  itemBuilder: (context, index) =>
-                      _buildServiceCard(servicesToShow[index], index, isMobile),
-                ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _selectedServices.isEmpty
-                  ? null
-                  : () {
-                      setState(() {
-                        _currentStep = 3;
-                        _barbersLoaded = false;
-                        _barberAvailability.clear();
-                        _availableBarbers = [];
-                        _selectedBarber = null;
-                      });
-                      _loadAvailableBarbers();
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _selectedServices.isNotEmpty
-                    ? AppTheme.primary
-                    : (isDark ? Colors.grey[700] : Colors.grey[400]),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 2,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _selectedServices.isEmpty
-                        ? 'Select a Service'
-                        : 'Continue to Barber',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (_selectedServices.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    const Icon(Icons.arrow_forward, size: 18),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildOfferBanner(bool isDark) {
-    if (_appliedOffer == null) return const SizedBox.shrink();
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.green.shade900 : Colors.green.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.green.shade700 : Colors.green.shade300,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: isDark ? Colors.green.shade800 : Colors.green.shade100,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              Icons.local_offer,
-              color: isDark ? Colors.green.shade300 : Colors.green.shade700,
-              size: 20,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '🎉 VIP Offer Applied!',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: isDark
-                        ? Colors.green.shade300
-                        : Colors.green.shade700,
-                  ),
-                ),
-                Text(
-                  _appliedOffer!['title']?.toString() ?? '',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark
-                        ? Colors.green.shade300
-                        : Colors.green.shade600,
-                  ),
-                ),
-                Text(
-                  'Save ${_getDiscountText()}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: isDark
-                        ? Colors.green.shade300
-                        : Colors.green.shade600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          TextButton(
-            onPressed: _removeOffer,
-            style: TextButton.styleFrom(
-              foregroundColor: isDark
-                  ? Colors.green.shade300
-                  : Colors.green.shade700,
-            ),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildServiceCard(
-    Map<String, dynamic> service,
-    int index,
-    bool isMobile,
-  ) {
-    final isDark = context.isDarkMode;
-    final variants = service['variants'] as List? ?? [];
-    final isAnyVariantSelected = _selectedServices.any(
-      (s) => s['id'] == service['id'],
-    );
-    final int serviceId = service['id'] as int;
-    final isExpanded = _expandedServiceId == serviceId;
-
-    final String serviceName = service['name']?.toString() ?? 'Service';
-    final String categoryName = service['category_name']?.toString() ?? '';
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      color: isDark
-          ? const Color(0xFF2A2A2A)
-          : _cardColors[index % _cardColors.length],
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: isAnyVariantSelected ? AppTheme.primary : Colors.transparent,
-          width: 2,
-        ),
-      ),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isDark
-              ? const Color(0xFF2A2A2A)
-              : _cardColors[index % _cardColors.length],
-        ),
-        child: Column(
-          children: [
-            InkWell(
-              onTap: () {
-                if (isMobile && variants.isNotEmpty) {
-                  setState(() {
-                    if (isExpanded) {
-                      _expandedServiceId = null;
-                    } else {
-                      _expandedServiceId = serviceId;
-                    }
-                  });
-                }
-              },
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF3A3A3A) : Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        _getServiceIcon(serviceName),
-                        color: AppTheme.primary,
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            serviceName,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                          Text(
-                            categoryName,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark ? Colors.white60 : Colors.grey[600],
-                            ),
-                          ),
-                          if (isAnyVariantSelected) ...[
-                            const SizedBox(height: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '${_selectedServices.where((s) => s['id'] == service['id']).length} selected',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppTheme.primary,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    if (isMobile && variants.isNotEmpty)
-                      Icon(
-                        isExpanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        color: isDark ? Colors.white60 : Colors.grey[500],
-                        size: 24,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            if (variants.isNotEmpty && (!isMobile || isExpanded))
-              Column(
-                children: [
-                  const Divider(color: Colors.grey, height: 1),
-                  Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      children: variants
-                          .map((v) => _buildVariantRow(service, v))
-                          .toList(),
-                    ),
-                  ),
-                ],
-              ),
-            if (variants.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton(
-                    onPressed: () => _selectServiceWithoutVariant(service),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.primary,
-                      side: BorderSide(color: AppTheme.primary),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                    ),
-                    child: const Text('Select Service'),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildVariantRow(
-    Map<String, dynamic> service,
-    Map<String, dynamic> variant,
-  ) {
-    final isDark = context.isDarkMode;
-    final isSelected = _selectedServices.any(
-      (s) => s['id'] == service['id'] && s['variant_id'] == variant['id'],
-    );
-    final isMobile = MediaQuery.of(context).size.width < 600;
-
-    final String gender = variant['gender']?.toString() ?? '';
-    final String age = variant['age']?.toString() ?? '';
-    final String genderLower = gender.toLowerCase();
-
-    IconData genderIcon;
-    if (genderLower.contains('male')) {
-      genderIcon = Icons.male;
-    } else if (genderLower.contains('female')) {
-      genderIcon = Icons.female;
-    } else {
-      genderIcon = Icons.people;
-    }
-
-    final double price = (variant['price'] as num?)?.toDouble() ?? 0.0;
-    final double discountedPrice = _getDiscountedPrice(price);
-    final int duration = variant['duration'] ?? 30;
-
-    final String displayText = '$gender $age'.trim();
-
-    return GestureDetector(
-      onTap: () => _toggleVariant(service, variant),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: EdgeInsets.all(isMobile ? 10 : 12),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppTheme.primary.withValues(alpha: 0.1)
-              : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected
-                ? AppTheme.primary
-                : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
-            width: 1.5,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: isMobile ? 40 : 44,
-              height: isMobile ? 40 : 44,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppTheme.primary.withValues(alpha: 0.2)
-                    : (isDark ? const Color(0xFF3A3A3A) : Colors.white),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                genderIcon,
-                size: isMobile ? 22 : 24,
-                color: isSelected
-                    ? AppTheme.primary
-                    : (isDark ? Colors.white60 : Colors.grey[600]),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    displayText.isEmpty ? 'Variant' : displayText,
-                    style: TextStyle(
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w500,
-                      fontSize: isMobile ? 13 : 15,
-                      color: isSelected
-                          ? AppTheme.primary
-                          : (isDark ? Colors.white : _textDark),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 4,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.currency_rupee,
-                            size: 12,
-                            color: isDark ? Colors.white60 : Colors.grey[500],
-                          ),
-                          const SizedBox(width: 2),
-                          if (_discountAmount > 0 && isSelected)
-                            Text(
-                              price.toStringAsFixed(0),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark
-                                    ? Colors.white70
-                                    : Colors.grey[500],
-                                decoration: TextDecoration.lineThrough,
-                              ),
-                            ),
-                          if (_discountAmount > 0 && isSelected)
-                            const SizedBox(width: 4),
-                          Text(
-                            discountedPrice.toStringAsFixed(0),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: isSelected
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
-                              color: _discountAmount > 0 && isSelected
-                                  ? (isDark
-                                        ? Colors.green.shade300
-                                        : Colors.green.shade700)
-                                  : (isDark ? Colors.white70 : Colors.grey[700]),
-                            ),
-                          ),
-                        ],
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.timer,
-                            size: 12,
-                            color: isDark ? Colors.white60 : Colors.grey[500],
-                          ),
-                          const SizedBox(width: 2),
-                          Text(
-                            '$duration min',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark ? Colors.white60 : Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: isMobile ? 10 : 12,
-                vertical: isMobile ? 6 : 8,
-              ),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppTheme.primary
-                    : (isDark ? Colors.grey[800] : Colors.grey[100]),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isSelected ? Icons.check : Icons.add,
-                    size: isMobile ? 14 : 16,
-                    color: isSelected ? Colors.white : AppTheme.primary,
-                  ),
-                  if (!isMobile) ...[
-                    const SizedBox(width: 4),
-                    Text(
-                      isSelected ? 'Selected' : 'Select',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
-                        color: isSelected ? Colors.white : AppTheme.primary,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showSelectedServicesSheet() {
-    final isDark = context.isDarkMode;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setSheetState) => DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          minChildSize: 0.4,
-          maxChildSize: 0.9,
-          expand: false,
-          builder: (context, scrollController) {
-            return Container(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.grey[700] : Colors.grey[300],
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          Icons.checklist,
-                          color: AppTheme.primary,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Selected Services',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                            Text(
-                              '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} selected',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      if (_selectedServices.isNotEmpty)
-                        TextButton(
-                          onPressed: () {
-                            setSheetState(() {
-                              _selectedServices.clear();
-                            });
-                            setState(() {});
-                            _updateTotalAndDiscount();
-                          },
-                          child: Text(
-                            'Clear All',
-                            style: TextStyle(
-                              color: isDark ? Colors.red.shade300 : Colors.red,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: _selectedServices.isEmpty
-                        ? Center(
-                            child: SingleChildScrollView(
-                              padding: const EdgeInsets.all(24),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.shopping_cart_outlined,
-                                    size: 64,
-                                    color: isDark
-                                        ? Colors.white30
-                                        : Colors.grey[300],
-                                  ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    'No services selected',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: isDark
-                                          ? Colors.white60
-                                          : Colors.grey[500],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Tap on service variants to add',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: isDark
-                                          ? Colors.white70
-                                          : Colors.grey[400],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )
-                        : ListView.separated(
-                            controller: scrollController,
-                            itemCount: _selectedServices.length,
-                            separatorBuilder: (context, index) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final service = _selectedServices[index];
-                              return _buildSelectedServiceItem(
-                                service,
-                                index,
-                                setSheetState,
-                              );
-                            },
-                          ),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: AppTheme.primary.withValues(alpha: 0.2),
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Total Duration',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: isDark ? Colors.white60 : Colors.grey,
-                              ),
-                            ),
-                            Text(
-                              '${_calculateTotalDuration()} min',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.primary,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        if (_discountAmount > 0) ...[
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Subtotal',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: isDark ? Colors.white60 : Colors.grey,
-                                ),
-                              ),
-                              Text(
-                                'Rs. ${_originalTotalPrice.toStringAsFixed(2)}',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: isDark
-                                      ? Colors.white60
-                                      : Colors.grey[600],
-                                  decoration: TextDecoration.lineThrough,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Discount',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  color: isDark ? Colors.white60 : Colors.grey,
-                                ),
-                              ),
-                              Text(
-                                '- Rs. ${_discountAmount.toStringAsFixed(2)}',
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.green.shade600,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                        ],
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Total Price',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: isDark ? Colors.white60 : Colors.grey,
-                              ),
-                            ),
-                            Text(
-                              'Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.primary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      child: const Text('Close'),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSelectedServiceItem(
-    Map<String, dynamic> service,
-    int index,
-    StateSetter setSheetState,
-  ) {
-    final isDark = context.isDarkMode;
-    final String serviceName = service['name']?.toString() ?? 'Service';
-    final String gender = service['gender']?.toString() ?? '';
-    final String age = service['age']?.toString() ?? '';
-    final double price = (service['price'] as num?)?.toDouble() ?? 0.0;
-    final int duration = service['duration'] ?? 30;
-    final double discountedPrice = _getDiscountedPrice(price);
-    final bool hasDiscount = _appliedOffer != null;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: _cardColors[index % _cardColors.length],
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Center(
-              child: Icon(
-                _getServiceIcon(serviceName),
-                color: AppTheme.primary,
-                size: 20,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  serviceName,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '$gender $age • $duration min',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: isDark ? Colors.white60 : Colors.grey[600],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              if (hasDiscount)
-                Text(
-                  'Rs. ${price.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.grey[500],
-                    decoration: TextDecoration.lineThrough,
-                  ),
-                ),
-              Text(
-                'Rs. ${(hasDiscount ? discountedPrice : price).toStringAsFixed(2)}',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: hasDiscount
-                      ? Colors.green.shade600
-                      : AppTheme.primary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () {
-              setSheetState(() {
-                _selectedServices.removeAt(index);
-              });
-              setState(() {});
-              _updateTotalAndDiscount();
-            },
-            child: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Icon(
-                Icons.close,
-                size: 16,
-                color: isDark ? Colors.red.shade300 : Colors.red,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================
-  // BARBER SELECTION STEP
+  // STEP 3: BARBER SELECTION
   // ============================================
 
   Widget _buildBarberSelectionStep() {
@@ -3787,7 +3888,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () => setState(() => _currentStep = 2),
+                onPressed: () => setState(() => _currentStep = 1),
                 child: Text(
                   'Change',
                   style: TextStyle(color: AppTheme.primary, fontSize: 14),
@@ -4136,9 +4237,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       border: Border.all(
                         color: isSelected
                             ? AppTheme.primary
-                            : (isDark
-                                  ? Colors.grey[600]!
-                                  : Colors.grey[400]!),
+                            : (isDark ? Colors.grey[600]! : Colors.grey[400]!),
                         width: 2,
                       ),
                     ),
@@ -4161,7 +4260,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // PERSON SELECTION STEP
+  // STEP 4: PERSON SELECTION
   // ============================================
 
   Widget _buildPersonSelectionStep() {
@@ -4233,11 +4332,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
-                Icon(
-                  Icons.calendar_today,
-                  size: 18,
-                  color: _secondaryColor,
-                ),
+                Icon(Icons.calendar_today, size: 18, color: _secondaryColor),
                 const SizedBox(width: 8),
                 Text(
                   DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
@@ -4249,7 +4344,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 ),
                 const Spacer(),
                 TextButton(
-                  onPressed: () => setState(() => _currentStep = 1),
+                  onPressed: () => setState(() => _currentStep = 2),
                   child: Text(
                     'Change',
                     style: TextStyle(color: AppTheme.primary, fontSize: 14),
@@ -4610,7 +4705,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // TIME SLOT STEP
+  // STEP 5: TIME SLOT SELECTION (VIP)
   // ============================================
 
   Widget _buildTimeSlotStep() {
@@ -4695,7 +4790,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 ),
                 const Spacer(),
                 TextButton(
-                  onPressed: () => setState(() => _currentStep = 1),
+                  onPressed: () => setState(() => _currentStep = 2),
                   child: Text(
                     'Change',
                     style: TextStyle(color: AppTheme.primary, fontSize: 14),
@@ -4831,23 +4926,19 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           spacing: 12,
                           runSpacing: 12,
                           children: availableSlots.map((slot) {
-                            final isSelected =
-                                _selectedSlot?['utc_start_time'] ==
-                                slot['utc_start_time'];
+                            final isSelected = _selectedSlot == slot;
                             final displayTime = slot['start_time_display'];
                             final willGetVipNumber = slot['vip_number'];
 
                             return ElevatedButton(
                               onPressed: () => _bookSlot(slot),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor:
-                                    isSelected && _showingVipNumber
+                                backgroundColor: isSelected && _showingVipNumber
                                     ? AppTheme.primary
                                     : (isDark
                                           ? const Color(0xFF2A2A2A)
                                           : Colors.white),
-                                foregroundColor:
-                                    isSelected && _showingVipNumber
+                                foregroundColor: isSelected && _showingVipNumber
                                     ? Colors.white
                                     : AppTheme.primary,
                                 shape: RoundedRectangleBorder(
@@ -4865,8 +4956,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   horizontal: 16,
                                   vertical: 12,
                                 ),
-                                elevation:
-                                    isSelected && _showingVipNumber ? 2 : 0,
+                                elevation: isSelected && _showingVipNumber
+                                    ? 2
+                                    : 0,
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -5043,10 +5135,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   await _checkDateAvailability(nextDate);
                                   await _loadAvailableSlots();
                                 },
-                                icon: const Icon(
-                                  Icons.arrow_forward,
-                                  size: 18,
-                                ),
+                                icon: const Icon(Icons.arrow_forward, size: 18),
                                 label: Text(
                                   'Try Next Day (${DateFormat('MMM dd').format(_selectedDate!.add(const Duration(days: 1)))})',
                                 ),
@@ -5137,10 +5226,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ),
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 24,
-                vertical: 12,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
               child: Text(
                 _slotErrorMessage!,
                 textAlign: TextAlign.center,
@@ -5160,7 +5246,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   onPressed: () {
                     setState(() {
                       _selectedDate = null;
-                      _currentStep = 1;
+                      _currentStep = 2;
                       _slotErrorMessage = null;
                     });
                   },
@@ -5209,7 +5295,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // CONFIRMATION STEP
+  // STEP 6: CONFIRMATION
   // ============================================
 
   Widget _buildConfirmationStep() {
@@ -5244,10 +5330,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: () {
-                  setState(() {
-                    _currentStep = 0;
-                    _resetBooking();
-                  });
+                  _resetBooking();
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primary,
@@ -5325,18 +5408,32 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ..._selectedServices.map(
-                        (s) => Text(
-                          '• ${s['name']}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? Colors.white : Colors.black87,
+                      ..._selectedServices.map((s) {
+                        final p = (s['price'] as num?)?.toDouble() ?? 0;
+                        final d = _discountForItem(s);
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 2),
+                          child: Text(
+                            d > 0
+                                ? '• ${s['name']}  Rs. ${p.toStringAsFixed(2)} → Rs. ${(p - d).toStringAsFixed(2)}'
+                                : '• ${s['name']}  Rs. ${p.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: d > 0
+                                  ? Colors.green.shade600
+                                  : (isDark ? Colors.white : Colors.black87),
+                              fontWeight: d > 0
+                                  ? FontWeight.w500
+                                  : FontWeight.normal,
+                            ),
                           ),
-                        ),
-                      ),
+                        );
+                      }),
                       const SizedBox(height: 8),
                       Text(
-                        'Total: Rs. ${_calculateTotalPrice().toStringAsFixed(2)}',
+                        _discountAmount > 0
+                            ? 'Subtotal: Rs. ${_originalTotalPrice.toStringAsFixed(2)}'
+                            : 'Total: Rs. ${_originalTotalPrice.toStringAsFixed(2)}',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -5492,8 +5589,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               ),
               _buildStepIndicatorResponsive(
                 1,
-                showLabels ? 'Date' : '',
-                Icons.calendar_today,
+                showLabels ? 'Service' : '',
+                Icons.content_cut,
                 stepSize,
                 iconSize,
                 stepFontSize,
@@ -5507,8 +5604,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               ),
               _buildStepIndicatorResponsive(
                 2,
-                showLabels ? 'Service' : '',
-                Icons.content_cut,
+                showLabels ? 'Date' : '',
+                Icons.calendar_today,
                 stepSize,
                 iconSize,
                 stepFontSize,
@@ -5649,17 +5746,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   Widget _buildContent() {
-    // ✅ Guards against transient near-zero height constraints that Flutter
-    // Web can hand down to IndexedStack during a window/metrics resize.
-    // OverflowBox (not SizedBox alone) is required because a SizedBox can
-    // only ever come out smaller than what its own parent allows - it can
-    // never force extra height.
     return LayoutBuilder(
       builder: (context, constraints) {
         final double safeHeight =
             (constraints.maxHeight.isFinite && constraints.maxHeight >= 200)
-                ? constraints.maxHeight
-                : 600.0;
+            ? constraints.maxHeight
+            : 600.0;
 
         return OverflowBox(
           alignment: Alignment.topCenter,
@@ -5671,8 +5763,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               index: _currentStep,
               children: [
                 _buildSalonSearchStep(),
-                _buildDateSelectionStep(),
                 _buildServiceSelectionStep(),
+                _buildDateSelectionStep(),
                 _buildBarberSelectionStep(),
                 _buildPersonSelectionStep(),
                 _buildTimeSlotStep(),
@@ -5772,8 +5864,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final double safeHeight =
-                (constraints.maxHeight.isFinite &&
-                    constraints.maxHeight >= 200)
+                (constraints.maxHeight.isFinite && constraints.maxHeight >= 200)
                 ? constraints.maxHeight
                 : 600.0;
 
