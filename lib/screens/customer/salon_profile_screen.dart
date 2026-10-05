@@ -32,7 +32,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   String _userTimezone = '';
   bool _isTimezoneLoaded = false;
 
-  // Salon hours in local time (converted from UTC using user's timezone)
   String _openTimeLocal = '';
   String _closeTimeLocal = '';
 
@@ -40,9 +39,27 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   bool _isUserActive = false;
   bool _isUserLoaded = false;
 
+  // ==================== SERVICE MENU ====================
+  late Future<List<Map<String, dynamic>>> _menuTreeFuture;
+  final Map<String, Map<String, dynamic>> _selectedBookingItems = {};
+
+  final List<Map<String, dynamic>> _menuIconSuggestions = [
+    {'icon': Icons.content_cut, 'name': 'content_cut'},
+    {'icon': Icons.face, 'name': 'face'},
+    {'icon': Icons.face_retouching_natural, 'name': 'face_retouching_natural'},
+    {'icon': Icons.spa, 'name': 'spa'},
+    {'icon': Icons.handshake, 'name': 'handshake'},
+    {'icon': Icons.build, 'name': 'build'},
+    {'icon': Icons.brush, 'name': 'brush'},
+    {'icon': Icons.water_drop, 'name': 'water_drop'},
+    {'icon': Icons.masks, 'name': 'masks'},
+    {'icon': Icons.spa_outlined, 'name': 'spa_outlined'},
+  ];
+
   @override
   void initState() {
     super.initState();
+    _menuTreeFuture = _loadCategoryTree();
     _initialize();
   }
 
@@ -78,9 +95,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     debugPrint('✅ User timezone: $_userTimezone');
   }
 
-  // ============================================================
-  // ✅ LOAD USER STATUS
-  // ============================================================
   Future<void> _loadUserStatus() async {
     try {
       final user = supabase.auth.currentUser;
@@ -566,7 +580,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             Expanded(
               child: Text(
                 offer['title'],
-                style: context.titleLarge.copyWith(color: context.textColor),
+                style: context.titleLarge.copyWith(
+                  color: context.textColor,
+                ),
               ),
             ),
           ],
@@ -638,7 +654,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 const SizedBox(width: 4),
                 Text(
                   'Valid until: ${DateFormat('MMM dd, yyyy').format(DateTime.parse(offer['valid_to']))}',
-                  style: context.bodySmall.copyWith(color: Colors.grey[500]),
+                  style: context.bodySmall.copyWith(
+                    color: Colors.grey[500],
+                  ),
                 ),
               ],
             ),
@@ -751,7 +769,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               padding: const EdgeInsets.all(16),
               child: Text(
                 'All Offers',
-                style: context.titleLarge.copyWith(color: context.textColor),
+                style: context.titleLarge.copyWith(
+                  color: context.textColor,
+                ),
               ),
             ),
             Expanded(
@@ -866,7 +886,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               child: Center(
                 child: Container(
                   width: contentWidth,
-                  constraints: BoxConstraints(maxHeight: constraints.maxHeight),
+                  constraints: BoxConstraints(
+                    maxHeight: constraints.maxHeight,
+                  ),
                   decoration: BoxDecoration(
                     color: context.backgroundColor,
                     boxShadow: [
@@ -878,12 +900,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     ],
                   ),
                   child: _buildContent(
-                    isWeb,
-                    isTablet,
-                    openTime,
-                    closeTime,
-                    isOpen,
-                  ),
+                      isWeb, isTablet, openTime, closeTime, isOpen),
                 ),
               ),
             );
@@ -918,14 +935,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildSalonInfoSection(
-                      isWeb,
-                      isTablet,
-                      openTime,
-                      closeTime,
-                      isOpen,
-                    ),
-                    const SizedBox(height: 24),
-                    _buildBookingButtons(isWeb, isTablet),
+                        isWeb, isTablet, openTime, closeTime, isOpen),
+                    const SizedBox(height: 20),
+                    _buildMenuTreeSection(),
+                    // ✅ Removed: _buildBookingButtons() — moved to top icons
                     const SizedBox(height: 32),
                     Divider(color: context.dividerColor, height: 1),
                     const SizedBox(height: 24),
@@ -934,8 +947,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     _buildAboutSection(),
                     const SizedBox(height: 24),
                     _buildContactSection(),
-                    const SizedBox(height: 24),
-                    _buildServicesSection(),
                     const SizedBox(height: 40),
                   ],
                 ),
@@ -948,7 +959,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ============================================================
-  // ✅ BUILD: COVER SECTION
+  // COVER SECTION
   // ============================================================
 
   Widget _buildCoverSection(bool isWeb) {
@@ -1009,7 +1020,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     color: Colors.black.withValues(alpha: 0.3),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.share, color: Colors.white, size: 22),
+                  child: const Icon(
+                    Icons.share,
+                    color: Colors.white,
+                    size: 22,
+                  ),
                 ),
                 onPressed: () {},
               ),
@@ -1036,6 +1051,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
+  // ============================================================
+  // LOGO + ACTIONS (with NEW icon buttons)
+  // ============================================================
+
   Widget _buildLogoAndActionsSection(bool isWeb) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1051,12 +1070,62 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             child: Wrap(
               alignment: WrapAlignment.end,
               crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 12,
+              spacing: 10,
               runSpacing: 8,
-              children: [_buildWhatsAppButton(), _buildFollowButton()],
+              children: [
+                // ✅ NEW: Book Appointment (icon-only)
+                _buildIconActionButton(
+                  icon: Icons.calendar_today,
+                  tooltip: 'Book Appointment',
+                  color: context.primaryColor,
+                  onTap: _startBookingFlow,
+                ),
+                // ✅ NEW: VIP Booking (icon-only, amber)
+                _buildIconActionButton(
+                  icon: Icons.star,
+                  tooltip: 'VIP Booking',
+                  color: Colors.amber.shade700,
+                  onTap: _navigateToVipBooking,
+                ),
+                // Existing WhatsApp button (unchanged)
+                _buildWhatsAppButton(),
+                // Existing Follow button (unchanged)
+                _buildFollowButton(),
+              ],
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ✅ NEW: Icon-only circular action button
+  Widget _buildIconActionButton({
+    required IconData icon,
+    required String tooltip,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: color,
+        shape: const CircleBorder(),
+        elevation: 2,
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            child: Icon(
+              icon,
+              color: Colors.white,
+              size: 22,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -1089,7 +1158,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           children: [
             Text(
               widget.salon['name'] ?? 'Salon',
-              style: context.headlineMedium.copyWith(color: context.textColor),
+              style: context.headlineMedium.copyWith(
+                color: context.textColor,
+              ),
             ),
             const SizedBox(height: 6),
             if (!_isLoadingRating)
@@ -1230,120 +1301,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
-  Widget _buildBookingButtons(bool isWeb, bool isTablet) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: isWeb || isTablet
-          ? Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: ElevatedButton.icon(
-                    onPressed: _startBookingFlow,
-                    icon: const Icon(
-                      Icons.calendar_today,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                    label: const Text(
-                      'Book Appointment',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: context.primaryColor,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 2,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 1,
-                  child: OutlinedButton.icon(
-                    onPressed: _navigateToVipBooking,
-                    icon: const Icon(Icons.star, color: Colors.amber, size: 20),
-                    label: const Text(
-                      'VIP',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.amber,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.amber, width: 1.5),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            )
-          : Column(
-              children: [
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: _startBookingFlow,
-                    icon: const Icon(
-                      Icons.calendar_today,
-                      color: Colors.white,
-                      size: 20,
-                    ),
-                    label: const Text(
-                      'Book Appointment',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: context.primaryColor,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 2,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: _navigateToVipBooking,
-                    icon: const Icon(Icons.star, color: Colors.amber, size: 20),
-                    label: const Text(
-                      'VIP Booking',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.amber,
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.amber, width: 1.5),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-    );
-  }
+  // ✅ REMOVED: _buildBookingButtons() — no longer called
 
   Widget _buildOffersSection() {
     if (_offers.isEmpty && !_isLoadingOffers) {
@@ -1360,7 +1318,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             children: [
               Text(
                 '🔥 Special Offers',
-                style: context.titleLarge.copyWith(color: context.textColor),
+                style: context.titleLarge.copyWith(
+                  color: context.textColor,
+                ),
               ),
               if (_offers.length > 2)
                 TextButton(
@@ -1380,7 +1340,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               ? const Center(
                   child: Padding(
                     padding: EdgeInsets.all(32),
-                    child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                    child:
+                        CircularProgressIndicator(color: Color(0xFFFF6B8B)),
                   ),
                 )
               : SizedBox(
@@ -1412,7 +1373,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         children: [
           Text(
             'About',
-            style: context.titleLarge.copyWith(color: context.textColor),
+            style: context.titleLarge.copyWith(
+              color: context.textColor,
+            ),
           ),
           const SizedBox(height: 12),
           Container(
@@ -1446,7 +1409,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         children: [
           Text(
             'Contact & Location',
-            style: context.titleLarge.copyWith(color: context.textColor),
+            style: context.titleLarge.copyWith(
+              color: context.textColor,
+            ),
           ),
           const SizedBox(height: 12),
           Container(
@@ -1468,7 +1433,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       leading: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: context.primaryColor.withValues(alpha: 0.1),
+                          color:
+                              context.primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
@@ -1503,7 +1469,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       leading: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: context.primaryColor.withValues(alpha: 0.1),
+                          color:
+                              context.primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
@@ -1538,7 +1505,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       leading: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: context.primaryColor.withValues(alpha: 0.1),
+                          color:
+                              context.primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Icon(
@@ -1578,25 +1546,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
-  Widget _buildServicesSection() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Popular Services',
-            style: context.titleLarge.copyWith(color: context.textColor),
-          ),
-          const SizedBox(height: 16),
-          _buildServicesPreview(),
-        ],
-      ),
-    );
-  }
-
   // ============================================================
-  // ✅ HELPER WIDGETS
+  // HELPER WIDGETS
   // ============================================================
 
   Widget _buildLogo() {
@@ -1624,7 +1575,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           ),
         ],
         image: hasLogo
-            ? DecorationImage(image: NetworkImage(logoUrl), fit: BoxFit.cover)
+            ? DecorationImage(
+                image: NetworkImage(logoUrl), fit: BoxFit.cover)
             : null,
       ),
       child: !hasLogo
@@ -1683,14 +1635,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     return OutlinedButton(
       onPressed: hasPhone ? _openWhatsApp : null,
       style: OutlinedButton.styleFrom(
-        foregroundColor: hasPhone
-            ? const Color(0xFF25D366)
-            : context.secondaryTextColor,
+        foregroundColor:
+            hasPhone ? const Color(0xFF25D366) : context.secondaryTextColor,
         side: BorderSide(
-          color: hasPhone ? const Color(0xFF25D366) : context.dividerColor,
+          color: hasPhone
+              ? const Color(0xFF25D366)
+              : context.dividerColor,
         ),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1716,9 +1670,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       return ElevatedButton(
         onPressed: null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: context.isDarkMode
-              ? Colors.grey[800]
-              : Colors.grey[200],
+          backgroundColor:
+              context.isDarkMode ? Colors.grey[800] : Colors.grey[200],
           foregroundColor: context.secondaryTextColor,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           shape: RoundedRectangleBorder(
@@ -1742,11 +1695,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         backgroundColor: _isFollowing
             ? (context.isDarkMode ? Colors.grey[800] : Colors.grey[200])
             : context.primaryColor,
-        foregroundColor: _isFollowing
-            ? context.secondaryTextColor
-            : Colors.white,
+        foregroundColor:
+            _isFollowing ? context.secondaryTextColor : Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
         elevation: 0,
       ),
       child: Text(
@@ -1853,11 +1806,19 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: context.isDarkMode
-              ? [color.withValues(alpha: 0.15), const Color(0xFF1E1E1E)]
-              : [color.withValues(alpha: 0.1), Colors.white],
+              ? [
+                  color.withValues(alpha: 0.15),
+                  const Color(0xFF1E1E1E),
+                ]
+              : [
+                  color.withValues(alpha: 0.1),
+                  Colors.white,
+                ],
         ),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(
+          color: color.withValues(alpha: 0.3),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.05),
@@ -1934,9 +1895,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 Text(
                   offer['description'] ?? '',
                   style: context.bodySmall.copyWith(
-                    color: context.isDarkMode
-                        ? Colors.white60
-                        : Colors.grey[600],
+                    color:
+                        context.isDarkMode ? Colors.white60 : Colors.grey[600],
                   ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -1982,8 +1942,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         color: daysLeft <= 3
                             ? Colors.red.withValues(alpha: 0.1)
                             : (context.isDarkMode
-                                  ? Colors.white10
-                                  : Colors.grey.withValues(alpha: 0.1)),
+                                ? Colors.white10
+                                : Colors.grey.withValues(alpha: 0.1)),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -1995,8 +1955,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             color: daysLeft <= 3
                                 ? Colors.red
                                 : (context.isDarkMode
-                                      ? Colors.white60
-                                      : Colors.grey[600]),
+                                    ? Colors.white60
+                                    : Colors.grey[600]),
                           ),
                           const SizedBox(width: 2),
                           Text(
@@ -2005,8 +1965,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                               color: daysLeft <= 3
                                   ? Colors.red
                                   : (context.isDarkMode
-                                        ? Colors.white60
-                                        : Colors.grey[600]),
+                                      ? Colors.white60
+                                      : Colors.grey[600]),
                             ),
                           ),
                         ],
@@ -2045,256 +2005,496 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ============================================================
-  // ✅ SERVICES PREVIEW — with proper variants loading
+  // SERVICE MENU — unchanged
   // ============================================================
 
-  Widget _buildServicesPreview() {
-    return FutureBuilder<List<Map<String, dynamic>>>(
-      future: _loadServicesWithVariants(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(
-            child: Padding(
-              padding: EdgeInsets.all(32),
-              child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+  Widget _buildMenuTreeSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: context.cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: context.dividerColor),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
             ),
-          );
-        }
-
-        if (!snapshot.hasData || snapshot.data!.isEmpty) {
-          return Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: context.cardColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: context.dividerColor),
-            ),
-            child: Center(
-              child: Text(
-                'No services available',
-                style: context.bodyMedium.copyWith(
-                  color: context.secondaryTextColor,
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.menu_book_rounded,
+                    color: context.primaryColor, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Services Menu',
+                  style: context.titleLarge.copyWith(color: context.textColor),
                 ),
-              ),
+              ],
             ),
-          );
-        }
+            const SizedBox(height: 4),
+            Text(
+              'Tick the options you want, then choose Regular or VIP booking',
+              style: context.bodySmall
+                  .copyWith(color: context.secondaryTextColor),
+            ),
+            const SizedBox(height: 14),
+            FutureBuilder<List<Map<String, dynamic>>>(
+              future: _menuTreeFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(
+                      child:
+                          CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                    ),
+                  );
+                }
 
-        final services = snapshot.data!;
+                final tree = snapshot.data ?? [];
+                if (tree.isEmpty) {
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Text(
+                      'No services available yet',
+                      style: context.bodyMedium
+                          .copyWith(color: context.secondaryTextColor),
+                    ),
+                  );
+                }
 
-        return Column(
-          children: services.map((service) {
-            final variants = service['variants'] as List<Map<String, dynamic>>;
-            final lowestPrice = (service['lowest_price'] as num?)?.toDouble();
-            final hasPrice = service['has_price'] == true;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children:
+                      tree.map((cat) => _buildMenuCategoryBlock(cat)).toList(),
+                );
+              },
+            ),
+            const SizedBox(height: 4),
+            Divider(color: context.dividerColor, height: 1),
+            const SizedBox(height: 12),
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              decoration: BoxDecoration(
-                color: context.cardColor,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: context.dividerColor),
-              ),
-              child: Theme(
-                data: Theme.of(context).copyWith(
-                  dividerColor: Colors.transparent,
-                  splashColor: Colors.transparent,
-                  highlightColor: Colors.transparent,
-                ),
-                child: ExpansionTile(
-                  tilePadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 4,
+            // ✅ Two buttons side by side (VIP + Regular)
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isWide = constraints.maxWidth > 500;
+
+                final regularButton = ElevatedButton.icon(
+                  onPressed: _selectedBookingItems.isEmpty
+                      ? null
+                      : _bookSelectedServices,
+                  icon: const Icon(Icons.calendar_today, size: 18),
+                  label: Text(
+                    _selectedBookingItems.isEmpty
+                        ? 'Select to book'
+                        : 'Book Selected (${_selectedBookingItems.length})',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                  childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
-                  iconColor: context.primaryColor,
-                  collapsedIconColor: context.secondaryTextColor,
-                  leading: Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: context.primaryColor.withValues(alpha: 0.1),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _selectedBookingItems.isEmpty
+                        ? (context.isDarkMode
+                            ? Colors.grey[800]
+                            : Colors.grey[300])
+                        : context.primaryColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Icon(
-                      Icons.content_cut,
-                      color: context.primaryColor,
-                      size: 24,
-                    ),
                   ),
-                  title: Text(
-                    service['name'] ?? 'Service',
-                    style: context.bodyMedium.copyWith(
+                );
+
+                final vipButton = ElevatedButton.icon(
+                  onPressed: _selectedBookingItems.isEmpty
+                      ? null
+                      : _bookSelectedServicesVIP,
+                  icon: const Icon(Icons.star, size: 18),
+                  label: Text(
+                    _selectedBookingItems.isEmpty
+                        ? 'Select for VIP'
+                        : 'VIP Book Selected (${_selectedBookingItems.length})',
+                    style: const TextStyle(
+                      fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: context.textColor,
                     ),
                   ),
-                  subtitle:
-                      (service['description'] != null &&
-                          (service['description'] as String).isNotEmpty)
-                      ? Text(
-                          service['description'],
-                          style: context.bodySmall.copyWith(
-                            color: context.secondaryTextColor,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        )
-                      : null,
-                  trailing: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (hasPrice && lowestPrice != null)
-                        Text(
-                          'From Rs. ${lowestPrice.toInt()}',
-                          style: context.bodyMedium.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: context.primaryColor,
-                          ),
-                        )
-                      else
-                        Text(
-                          'Price N/A',
-                          style: context.bodySmall.copyWith(
-                            color: context.secondaryTextColor,
-                            fontStyle: FontStyle.italic,
-                          ),
-                        ),
-                      if (variants.isNotEmpty)
-                        Text(
-                          '${variants.length} option${variants.length > 1 ? 's' : ''}',
-                          style: context.bodySmall.copyWith(
-                            fontSize: 10,
-                            color: context.secondaryTextColor,
-                          ),
-                        ),
-                    ],
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _selectedBookingItems.isEmpty
+                        ? (context.isDarkMode
+                            ? Colors.grey[800]
+                            : Colors.grey[300])
+                        : Colors.amber.shade700,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
-                  // ✅ The variants (gender / age / duration / price)
-                  children: variants.isEmpty
-                      ? [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            child: Text(
-                              'No variants for this service yet',
-                              style: context.bodySmall.copyWith(
-                                color: context.secondaryTextColor,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ),
-                        ]
-                      : variants.map((v) {
-                          final price = (v['price'] as num?)?.toDouble();
-                          final duration = (v['duration'] as num?)?.toInt();
-                          final gender = v['gender'] as String?;
-                          final age = v['age'] as String?;
+                );
 
-                          // Build a "Gender • Age" label, skipping empties
-                          final parts = <String>[];
-                          if (gender != null && gender.isNotEmpty) {
-                            parts.add(gender);
-                          }
-                          if (age != null && age.isNotEmpty) parts.add(age);
-                          final label = parts.isEmpty
-                              ? 'Standard'
-                              : parts.join(' • ');
+                if (isWide) {
+                  return Row(
+                    children: [
+                      Expanded(child: regularButton),
+                      const SizedBox(width: 10),
+                      Expanded(child: vipButton),
+                    ],
+                  );
+                }
 
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 8,
-                            ),
-                            decoration: BoxDecoration(
-                              color: context.backgroundColor.withValues(
-                                alpha: 0.5,
-                              ),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: context.dividerColor),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    label,
-                                    style: context.bodySmall.copyWith(
-                                      color: context.textColor,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ),
-                                if (duration != null && duration > 0) ...[
-                                  Icon(
-                                    Icons.timer,
-                                    size: 12,
-                                    color: context.secondaryTextColor,
-                                  ),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    '$duration min',
-                                    style: context.bodySmall.copyWith(
-                                      color: context.secondaryTextColor,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                ],
-                                Text(
-                                  price != null
-                                      ? 'Rs. ${price.toStringAsFixed(0)}'
-                                      : '—',
-                                  style: context.bodySmall.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                    color: price != null
-                                        ? context.primaryColor
-                                        : context.secondaryTextColor,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                ),
-              ),
-            );
-          }).toList(),
-        );
-      },
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    regularButton,
+                    const SizedBox(height: 10),
+                    vipButton,
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  // ✅ NEW helper: fetch services + variants, resolve gender/age names,
-  //    compute the lowest price per service — all on the client so we
-  //    never depend on PostgREST nested-join behaviour.
-  Future<List<Map<String, dynamic>>> _loadServicesWithVariants() async {
+  Widget _buildMenuCategoryBlock(Map<String, dynamic> cat) {
+    final color = _hexToMenuColor(cat['color']?.toString() ?? '#FF6B8B');
+    final icon = _menuIconFromName(cat['icon_name'] as String?);
+    final services = cat['services'] as List;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  cat['display_name']?.toString() ?? 'Category',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: context.textColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...services.asMap().entries.map((e) {
+            final isLast = e.key == services.length - 1;
+            return _buildMenuServiceBlock(
+              e.value as Map<String, dynamic>,
+              color,
+              isLast,
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuServiceBlock(
+    Map<String, dynamic> service,
+    Color catColor,
+    bool isLastService,
+  ) {
+    final variants = service['variants'] as List;
+    final connector = isLastService ? '└─' : '├─';
+    final childBar = isLastService ? '   ' : '│  ';
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                connector,
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: catColor.withValues(alpha: 0.6),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  service['name']?.toString() ?? 'Service',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: context.textColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (variants.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 20, top: 2),
+              child: Text(
+                'No pricing options yet',
+                style: context.bodySmall.copyWith(
+                  color: context.secondaryTextColor,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            )
+          else
+            ...variants.map(
+              (v) => _buildMenuVariantRow(
+                service,
+                v as Map<String, dynamic>,
+                childBar,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMenuVariantRow(
+    Map<String, dynamic> service,
+    Map<String, dynamic> variant,
+    String childBar,
+  ) {
+    final sid = service['id'] as int;
+    final vid = variant['id'] as int;
+    final key = '${sid}_$vid';
+    final isSelected = _selectedBookingItems.containsKey(key);
+    final price = variant['price'] as double?;
+    final duration = variant['duration'] as int?;
+    final gender = variant['gender']?.toString() ?? '';
+    final age = variant['age']?.toString() ?? '';
+    final label = [gender, age].where((x) => x.isNotEmpty).join(' • ');
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 20, top: 2, bottom: 2),
+      child: InkWell(
+        onTap: () => _toggleMenuSelection(service, variant),
+        borderRadius: BorderRadius.circular(8),
+        child: Row(
+          children: [
+            Text(
+              childBar,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                color: context.secondaryTextColor,
+              ),
+            ),
+            SizedBox(
+              width: 22,
+              height: 22,
+              child: Checkbox(
+                value: isSelected,
+                onChanged: (_) => _toggleMenuSelection(service, variant),
+                activeColor: context.primaryColor,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                label.isEmpty ? 'Standard' : label,
+                style: context.bodySmall.copyWith(color: context.textColor),
+              ),
+            ),
+            if (duration != null && duration > 0) ...[
+              Icon(Icons.timer, size: 11, color: context.secondaryTextColor),
+              const SizedBox(width: 2),
+              Text(
+                '$duration min',
+                style:
+                    context.bodySmall.copyWith(color: context.secondaryTextColor),
+              ),
+              const SizedBox(width: 8),
+            ],
+            Text(
+              price != null ? 'Rs. ${price.toStringAsFixed(0)}' : '—',
+              style: context.bodySmall.copyWith(
+                fontWeight: FontWeight.w600,
+                color: price != null
+                    ? context.primaryColor
+                    : context.secondaryTextColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _toggleMenuSelection(
+    Map<String, dynamic> service,
+    Map<String, dynamic> variant,
+  ) {
+    final sid = service['id'] as int;
+    final vid = variant['id'] as int;
+    final key = '${sid}_$vid';
+    setState(() {
+      if (_selectedBookingItems.containsKey(key)) {
+        _selectedBookingItems.remove(key);
+      } else {
+        _selectedBookingItems[key] = {'service_id': sid, 'variant_id': vid};
+      }
+    });
+  }
+
+  // ============================================================
+  // REGULAR BOOKING
+  // ============================================================
+  void _bookSelectedServices() async {
     try {
-      // Step 1: services for this salon (preview — 10 items max)
-      final servicesResponse = await supabase
-          .from('services')
-          .select('id, name, description, icon_name')
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        _showSnackBar('Please login to book appointments', Colors.orange);
+        return;
+      }
+
+      if (!_isUserLoaded) {
+        await _loadUserStatus();
+      }
+
+      if (!_isUserActive) {
+        _showSnackBar(
+          'Your account is not active. Please contact support.',
+          Colors.red,
+        );
+        return;
+      }
+
+      if (_selectedBookingItems.isEmpty) return;
+      if (!mounted) return;
+
+      debugPrint(
+        '🚀 Booking ${_selectedBookingItems.length} pre-selected service(s) for salon: ${widget.salon['name']}',
+      );
+      final salonWithExtras = Map<String, dynamic>.from(widget.salon);
+      salonWithExtras['preselected_services'] =
+          _selectedBookingItems.values.toList();
+
+      debugPrint('🚀 Booking with salon id: ${salonWithExtras['id']}');
+      debugPrint('   Preselected: ${_selectedBookingItems.length}');
+
+      context.push('/customer/booking-flow', extra: salonWithExtras);
+    } catch (e) {
+      debugPrint('❌ Navigation error: $e');
+      _showSnackBar('Error starting booking. Please try again.', Colors.red);
+    }
+  }
+
+  // ============================================================
+  // VIP BOOKING
+  // ============================================================
+  void _bookSelectedServicesVIP() async {
+    try {
+      final user = supabase.auth.currentUser;
+      if (user == null) {
+        _showSnackBar('Please login to book VIP appointments', Colors.orange);
+        return;
+      }
+
+      if (!_isUserLoaded) {
+        await _loadUserStatus();
+      }
+
+      if (!_isUserActive) {
+        _showSnackBar(
+          'Your account is not active. Please contact support.',
+          Colors.red,
+        );
+        return;
+      }
+
+      if (_selectedBookingItems.isEmpty) return;
+      if (!mounted) return;
+
+      debugPrint(
+        '⭐ [VIP] Booking ${_selectedBookingItems.length} pre-selected service(s) for salon: ${widget.salon['name']}',
+      );
+
+      final salonWithExtras = Map<String, dynamic>.from(widget.salon);
+      salonWithExtras['preselected_services'] =
+          _selectedBookingItems.values.toList();
+
+      debugPrint('⭐ [VIP] Salon id: ${salonWithExtras['id']}');
+      debugPrint('   Preselected: ${_selectedBookingItems.length}');
+
+      context.push('/customer/vip-booking', extra: salonWithExtras);
+    } catch (e) {
+      debugPrint('❌ VIP navigation error: $e');
+      _showSnackBar(
+        'Error starting VIP booking. Please try again.',
+        Colors.red,
+      );
+    }
+  }
+
+  Color _hexToMenuColor(String hex) {
+    if (hex.startsWith('#')) {
+      try {
+        return Color(int.parse('0xFF${hex.substring(1)}'));
+      } catch (_) {}
+    }
+    return const Color(0xFFFF6B8B);
+  }
+
+  IconData _menuIconFromName(String? name) {
+    final found = _menuIconSuggestions.firstWhere(
+      (i) => i['name'] == name,
+      orElse: () => _menuIconSuggestions.first,
+    );
+    return found['icon'] as IconData;
+  }
+
+  Future<List<Map<String, dynamic>>> _loadCategoryTree() async {
+    try {
+      final categoriesResponse = await supabase
+          .from('salon_categories')
+          .select('id, display_name, icon_name, color, display_order')
           .eq('salon_id', widget.salon['id'])
           .eq('is_active', true)
-          .order('name')
-          .limit(10);
+          .order('display_order');
+
+      final servicesResponse = await supabase
+          .from('services')
+          .select('id, name, description, icon_name, category_id')
+          .eq('salon_id', widget.salon['id'])
+          .eq('is_active', true)
+          .order('name');
 
       if (servicesResponse.isEmpty) return [];
 
-      final serviceIds = servicesResponse
-          .map<int>((s) => s['id'] as int)
-          .toList();
+      final serviceIds =
+          servicesResponse.map<int>((s) => s['id'] as int).toList();
 
-      // Step 2: variants for those services (only active ones)
       final variantsResponse = await supabase
           .from('service_variants')
           .select(
-            'id, service_id, price, duration, salon_gender_id, salon_age_category_id',
-          )
+              'id, service_id, price, duration, salon_gender_id, salon_age_category_id')
           .inFilter('service_id', serviceIds)
           .eq('is_active', true);
 
-      // Step 3: resolve gender / age-category names in bulk
       final genderIds = variantsResponse
           .map<int?>((v) => v['salon_gender_id'] as int?)
           .whereType<int>()
@@ -2336,7 +2536,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         }
       }
 
-      // Step 4: group variants by service, compute lowest non-null price
       final Map<int, List<Map<String, dynamic>>> variantsByService = {};
       for (var v in variantsResponse) {
         final sid = v['service_id'] as int;
@@ -2352,33 +2551,50 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         });
       }
 
-      // Step 5: final list
-      final List<Map<String, dynamic>> result = [];
+      final Map<int, List<Map<String, dynamic>>> servicesByCategory = {};
+      final List<Map<String, dynamic>> uncategorized = [];
       for (var s in servicesResponse) {
         final sid = s['id'] as int;
-        final variants = variantsByService[sid] ?? [];
-
-        final validPrices = variants
-            .map<double?>((v) => v['price'] as double?)
-            .whereType<double>()
-            .toList();
-        final lowestPrice = validPrices.isEmpty
-            ? null
-            : validPrices.reduce((a, b) => a < b ? a : b);
-
-        result.add({
+        final catId = s['category_id'] as int?;
+        final entry = {
           'id': sid,
           'name': s['name'] ?? 'Service',
           'description': s['description'] ?? '',
-          'variants': variants,
-          'lowest_price': lowestPrice,
-          'has_price': lowestPrice != null && lowestPrice > 0,
-        });
+          'icon_name': s['icon_name'],
+          'variants': variantsByService[sid] ?? <Map<String, dynamic>>[],
+        };
+        if (catId != null) {
+          servicesByCategory.putIfAbsent(catId, () => []).add(entry);
+        } else {
+          uncategorized.add(entry);
+        }
       }
 
-      return result;
+      final List<Map<String, dynamic>> tree = [];
+      for (var c in categoriesResponse) {
+        final cid = c['id'] as int;
+        final services = servicesByCategory[cid] ?? [];
+        if (services.isEmpty) continue;
+        tree.add({
+          'id': cid,
+          'display_name': c['display_name'] ?? 'Category',
+          'icon_name': c['icon_name'],
+          'color': c['color'],
+          'services': services,
+        });
+      }
+      if (uncategorized.isNotEmpty) {
+        tree.add({
+          'id': null,
+          'display_name': 'Other',
+          'icon_name': null,
+          'color': '#9E9E9E',
+          'services': uncategorized,
+        });
+      }
+      return tree;
     } catch (e) {
-      debugPrint('Error loading services with variants: $e');
+      debugPrint('Error loading category tree: $e');
       return [];
     }
   }
