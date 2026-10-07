@@ -23,6 +23,7 @@ import 'package:flutter_application_1/screens/baber/barber_schedule_screen.dart'
 import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart';
 import 'package:flutter_application_1/screens/customer/customer_history_screen.dart';
 import 'package:flutter_application_1/screens/customer/followed_salons_screen.dart';
+import 'package:flutter_application_1/screens/customer/loyalty_screen.dart';
 import 'package:flutter_application_1/screens/customer/my_bookings_screen.dart';
 import 'package:flutter_application_1/screens/customer/offers_screen.dart';
 import 'package:flutter_application_1/screens/customer/salon_profile_screen.dart';
@@ -207,12 +208,13 @@ void applySystemUIOverlayStyle(bool isDark) {
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       statusBarBrightness: isDark ? Brightness.dark : Brightness.light, // iOS
-
       // Navigation bar
-      systemNavigationBarColor:
-          isDark ? AppTheme.darkSurface : AppTheme.lightBackground,
-      systemNavigationBarIconBrightness:
-          isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarColor: isDark
+          ? AppTheme.darkSurface
+          : AppTheme.lightBackground,
+      systemNavigationBarIconBrightness: isDark
+          ? Brightness.light
+          : Brightness.dark,
       systemNavigationBarDividerColor: Colors.transparent,
     ),
   );
@@ -1507,7 +1509,8 @@ GoRouter _createRouter() {
           // web, or a bug elsewhere) threw an uncaught type-cast
           // exception and crashed the screen. Now falls back to an
           // empty map instead of crashing.
-          final salon = state.extra as Map<String, dynamic>? ?? <String, dynamic>{};
+          final salon =
+              state.extra as Map<String, dynamic>? ?? <String, dynamic>{};
           return SalonProfileScreen(salon: salon);
         },
       ),
@@ -1535,6 +1538,10 @@ GoRouter _createRouter() {
         path: '/customer/history',
         name: 'customer-history',
         builder: (context, state) => const CustomerHistoryScreen(),
+      ),
+      GoRoute(
+        path: '/customer/loyalty',
+        builder: (context, state) => const LoyaltyScreen(),
       ),
 
       // ============================================

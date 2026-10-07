@@ -53,6 +53,12 @@ class AppTheme {
   static const Color error = Color(0xFFEF4444);
   static const Color info = Color(0xFF3B82F6);
 
+  // ✅ TIER COLORS
+  static const Color bronze = Color(0xFFCD7F32); // 🥉
+  static const Color silver = Color(0xFF9E9E9E); // 🥈
+  static const Color gold = Color(0xFFFFB300); // 🥇
+  static const Color platinum = Color(0xFF5E5CE6); // 💎
+
   // ============================================================
   // ✅ 6. SHADOW COLORS
   // ============================================================
