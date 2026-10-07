@@ -10,13 +10,16 @@ import '../../extensions/context_extensions.dart';
 
 // ====================================================================
 // CREATE / EDIT OFFER SCREEN — step-by-step wizard
-// (same design language as CreateSalonScreen)
 //
-// Steps:
-//  0. Details   (title, description, discount)
-//  1. Validity  (date range, time-of-day restriction)
-//  2. Scope     (services, limits, notify followers)
-//  3. Review & Create / Update
+// Selection rules:
+//   • Variant ☑           → ඒ variant එකට විතරයි (variant_id = X)
+//   • Service ☑ (full)    → හැම variant එකටම (variant_id = NULL)
+//   • Service ▣ (partial) → සමහර variants
+//
+// Disabled:
+//   • Services with no variants
+//   • Services with no priced variants
+//   • Individual variants with NULL/0 price
 // ====================================================================
 class CreateOfferScreen extends StatefulWidget {
   final int salonId;
@@ -34,6 +37,72 @@ class CreateOfferScreen extends StatefulWidget {
 
   @override
   State<CreateOfferScreen> createState() => _CreateOfferScreenState();
+}
+
+/// Selection state for service + variant-level offers.
+class _ServiceSelection {
+  /// Services where ALL priced variants are covered (variant_id = NULL in DB)
+  final Set<int> allVariantServices = {};
+
+  /// Individual variant ids that are selected (variant_id = X)
+  final Set<int> variantIds = {};
+
+  /// serviceId -> list of ALL variant ids (including NULL-priced, used only
+  /// for tri-state detection)
+  final Map<int, List<int>> serviceVariantIds = {};
+
+  /// serviceId -> list of PRICED variant ids (used for toggle)
+  final Map<int, List<int>> servicePricedVariantIds = {};
+
+  bool isServiceFullySelected(int serviceId) =>
+      allVariantServices.contains(serviceId);
+
+  bool isVariantSelected(int variantId) => variantIds.contains(variantId);
+
+  /// Service has at least one priced variant selected but is NOT fully selected.
+  bool isServicePartial(int serviceId) {
+    if (allVariantServices.contains(serviceId)) return false;
+    final vars = servicePricedVariantIds[serviceId] ?? const [];
+    return vars.any(variantIds.contains);
+  }
+
+  void toggleServiceAll(int serviceId, List<int> pricedVariants) {
+    if (allVariantServices.contains(serviceId)) {
+      allVariantServices.remove(serviceId);
+      for (final v in pricedVariants) {
+        variantIds.remove(v);
+      }
+    } else {
+      allVariantServices.add(serviceId);
+      for (final v in pricedVariants) {
+        variantIds.remove(v);
+      }
+    }
+  }
+
+  void toggleVariant(int serviceId, int variantId, List<int> pricedVariants) {
+    if (allVariantServices.contains(serviceId)) {
+      // Service was fully selected → switch to specific
+      allVariantServices.remove(serviceId);
+      for (final v in pricedVariants) {
+        if (v != variantId) variantIds.add(v);
+      }
+      variantIds.remove(variantId);
+    } else {
+      if (variantIds.contains(variantId)) {
+        variantIds.remove(variantId);
+      } else {
+        variantIds.add(variantId);
+      }
+    }
+  }
+
+  bool get isEmpty => allVariantServices.isEmpty && variantIds.isEmpty;
+
+  void clear() {
+    allVariantServices.clear();
+    variantIds.clear();
+  }
 }
 
 class _CreateOfferScreenState extends State<CreateOfferScreen> {
@@ -67,13 +136,28 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   TimeOfDay? _validFromTime;
   TimeOfDay? _validToTime;
 
-  // Service-specific offers
-  bool _allServices = true;
-  final Set<int> _selectedServiceIds = {};
+  // ✅ Selection
+  final _ServiceSelection _selection = _ServiceSelection();
   List<Map<String, dynamic>> _availableServices = [];
+  List<Map<String, dynamic>> _serviceMenuTree = [];
   bool _isLoadingServices = false;
 
-  // UI
+  // variant metadata: variant_id -> {service_id, price}
+  final Map<int, Map<String, dynamic>> _variantMeta = {};
+
+  final List<Map<String, dynamic>> _menuIconSuggestions = [
+    {'icon': Icons.content_cut, 'name': 'content_cut'},
+    {'icon': Icons.face, 'name': 'face'},
+    {'icon': Icons.face_retouching_natural, 'name': 'face_retouching_natural'},
+    {'icon': Icons.spa, 'name': 'spa'},
+    {'icon': Icons.handshake, 'name': 'handshake'},
+    {'icon': Icons.build, 'name': 'build'},
+    {'icon': Icons.brush, 'name': 'brush'},
+    {'icon': Icons.water_drop, 'name': 'water_drop'},
+    {'icon': Icons.masks, 'name': 'masks'},
+    {'icon': Icons.spa_outlined, 'name': 'spa_outlined'},
+  ];
+
   bool _isSaving = false;
 
   bool get _isEditing => widget.editingOffer != null;
@@ -106,8 +190,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       final offer = widget.editingOffer!;
       _titleController.text = offer['title'] ?? '';
       _descriptionController.text = offer['description'] ?? '';
-      _discountValueController.text =
-          offer['discount_value']?.toString() ?? '';
+      _discountValueController.text = offer['discount_value']?.toString() ?? '';
       _pointsRequiredController.text =
           offer['points_required']?.toString() ?? '0';
       _usageLimitController.text = offer['usage_limit']?.toString() ?? '';
@@ -115,8 +198,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       _validFrom = DateTime.parse(offer['valid_from']);
       _validTo = DateTime.parse(offer['valid_to']);
 
-      if (offer['valid_from_time'] != null &&
-          offer['valid_to_time'] != null) {
+      if (offer['valid_from_time'] != null && offer['valid_to_time'] != null) {
         final fromStr = offer['valid_from_time'].toString();
         final toStr = offer['valid_to_time'].toString();
         if (fromStr.isNotEmpty && toStr.isNotEmpty) {
@@ -125,20 +207,9 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
           _validToTime = _parseTime(toStr);
         }
       }
-
-      final offerServices = offer['offer_services'] as List? ?? [];
-      if (offerServices.isEmpty) {
-        _allServices = true;
-      } else {
-        _allServices = false;
-        for (var os in offerServices) {
-          final sid = os['service_id'] as int?;
-          if (sid != null) _selectedServiceIds.add(sid);
-        }
-      }
     }
 
-    _loadAvailableServices();
+    _loadServiceMenuTree();
   }
 
   @override
@@ -153,36 +224,247 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
   TimeOfDay _parseTime(String timeStr) {
     final parts = timeStr.split(':');
-    return TimeOfDay(
-      hour: int.parse(parts[0]),
-      minute: int.parse(parts[1]),
-    );
+    return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+  }
+
+  String _ageRangeText(int? minAge, int? maxAge) {
+    if (minAge == null || maxAge == null) return '';
+    if (maxAge >= 100) return '$minAge+ yrs';
+    return '$minAge–$maxAge yrs';
   }
 
   // ============================================
-  // LOAD SERVICES
+  // LOAD SERVICE MENU (category → service → variants)
   // ============================================
-  Future<void> _loadAvailableServices() async {
+  Future<void> _loadServiceMenuTree() async {
     setState(() => _isLoadingServices = true);
 
     try {
-      final result = await supabase
+      final categoriesResponse = await supabase
+          .from('salon_categories')
+          .select('id, display_name, icon_name, color, display_order')
+          .eq('salon_id', widget.salonId)
+          .eq('is_active', true)
+          .order('display_order');
+
+      final servicesResponse = await supabase
           .from('services')
-          .select('id, name, description, is_active')
+          .select('id, name, description, icon_name, category_id, is_active')
           .eq('salon_id', widget.salonId)
           .eq('is_active', true)
           .order('name');
 
+      final flatServices = List<Map<String, dynamic>>.from(servicesResponse);
+      final serviceIds = flatServices.map<int>((s) => s['id'] as int).toList();
+
+      final variantsResponse = serviceIds.isEmpty
+          ? <Map<String, dynamic>>[]
+          : List<Map<String, dynamic>>.from(
+              await supabase
+                  .from('service_variants')
+                  .select(
+                    'id, service_id, price, duration, salon_gender_id, salon_age_category_id, is_active',
+                  )
+                  .inFilter('service_id', serviceIds)
+                  .eq('is_active', true),
+            );
+
+      final genderIds = variantsResponse
+          .map<int?>((v) => v['salon_gender_id'] as int?)
+          .whereType<int>()
+          .toSet()
+          .toList();
+      final ageIds = variantsResponse
+          .map<int?>((v) => v['salon_age_category_id'] as int?)
+          .whereType<int>()
+          .toSet()
+          .toList();
+
+      final Map<int, String> genderMap = {};
+      if (genderIds.isNotEmpty) {
+        try {
+          final genders = await supabase
+              .from('salon_genders')
+              .select('id, display_name')
+              .inFilter('id', genderIds);
+          for (var g in genders) {
+            genderMap[g['id'] as int] = g['display_name']?.toString() ?? '';
+          }
+        } catch (e) {
+          debugPrint('Error loading genders: $e');
+        }
+      }
+
+      final Map<int, String> ageMap = {};
+      final Map<int, String> ageRangeMap = {};
+      if (ageIds.isNotEmpty) {
+        try {
+          final ages = await supabase
+              .from('salon_age_categories')
+              .select('id, display_name, min_age, max_age')
+              .inFilter('id', ageIds);
+          for (var a in ages) {
+            ageMap[a['id'] as int] = a['display_name']?.toString() ?? '';
+            ageRangeMap[a['id'] as int] = _ageRangeText(
+              (a['min_age'] as num?)?.toInt(),
+              (a['max_age'] as num?)?.toInt(),
+            );
+          }
+        } catch (e) {
+          debugPrint('Error loading age categories: $e');
+        }
+      }
+
+      final Map<int, List<Map<String, dynamic>>> variantsByService = {};
+      _variantMeta.clear();
+      for (var v in variantsResponse) {
+        final sid = v['service_id'] as int;
+        final vid = v['id'] as int;
+        final genderId = v['salon_gender_id'] as int?;
+        final ageId = v['salon_age_category_id'] as int?;
+
+        final gender = genderId != null ? (genderMap[genderId] ?? '') : '';
+        final age = ageId != null ? (ageMap[ageId] ?? '') : '';
+        final ageRange = ageId != null ? (ageRangeMap[ageId] ?? '') : '';
+
+        final labelParts = <String>[];
+        if (gender.isNotEmpty) labelParts.add(gender);
+        if (age.isNotEmpty) {
+          labelParts.add(ageRange.isEmpty ? age : '$age ($ageRange)');
+        }
+        final label = labelParts.isEmpty ? 'Standard' : labelParts.join(' · ');
+
+        final price = (v['price'] as num?)?.toDouble();
+        final duration = (v['duration'] as num?)?.toInt();
+
+        variantsByService.putIfAbsent(sid, () => []).add({
+          'id': vid,
+          'price': price,
+          'duration': duration,
+          'gender': gender,
+          'age': age,
+          'age_range': ageRange,
+          'label': label,
+        });
+
+        _variantMeta[vid] = {'service_id': sid, 'price': price ?? 0};
+      }
+
+      final Map<int, List<Map<String, dynamic>>> servicesByCategory = {};
+      final List<Map<String, dynamic>> uncategorized = [];
+      for (final s in flatServices) {
+        final sid = s['id'] as int;
+        final catId = s['category_id'] as int?;
+        final entry = {
+          'id': sid,
+          'name': s['name'] ?? 'Service',
+          'description': s['description'] ?? '',
+          'icon_name': s['icon_name'],
+          'variants': variantsByService[sid] ?? <Map<String, dynamic>>[],
+        };
+        if (catId != null) {
+          servicesByCategory.putIfAbsent(catId, () => []).add(entry);
+        } else {
+          uncategorized.add(entry);
+        }
+      }
+
+      final List<Map<String, dynamic>> tree = [];
+      for (final c in categoriesResponse) {
+        final cid = c['id'] as int;
+        final services = servicesByCategory[cid] ?? [];
+        if (services.isEmpty) continue;
+        tree.add({
+          'id': cid,
+          'display_name': c['display_name'] ?? 'Category',
+          'icon_name': c['icon_name'],
+          'color': c['color'],
+          'services': services,
+        });
+      }
+      if (uncategorized.isNotEmpty) {
+        tree.add({
+          'id': null,
+          'display_name': 'Other',
+          'icon_name': null,
+          'color': '#9E9E9E',
+          'services': uncategorized,
+        });
+      }
+
       if (!mounted) return;
       setState(() {
-        _availableServices = List<Map<String, dynamic>>.from(result);
+        _availableServices = flatServices;
+        _serviceMenuTree = tree;
         _isLoadingServices = false;
       });
+
+      // Build variant id maps
+      for (final s in flatServices) {
+        final sid = s['id'] as int;
+        final variants = variantsByService[sid] ?? <Map<String, dynamic>>[];
+        _selection.serviceVariantIds[sid] = variants
+            .map<int>((v) => v['id'] as int)
+            .toList();
+        _selection.servicePricedVariantIds[sid] = variants
+            .where((v) {
+              final p = v['price'];
+              return p != null && (p as num) > 0;
+            })
+            .map<int>((v) => v['id'] as int)
+            .toList();
+      }
+
+      // Apply editing state
+      if (_isEditing) {
+        _applyEditingOffer();
+      }
     } catch (e) {
-      debugPrint('Error loading services: $e');
+      debugPrint('Error loading service menu: $e');
       if (!mounted) return;
       setState(() => _isLoadingServices = false);
     }
+  }
+
+  void _applyEditingOffer() {
+    final offerServices = widget.editingOffer!['offer_services'] as List? ?? [];
+
+    if (offerServices.isEmpty) {
+      // No specific services → offer applies to everything historically.
+      // Since we no longer have "All Services" mode, leave selection empty.
+      return;
+    }
+
+    _selection.clear();
+
+    for (final os in offerServices) {
+      final sid = os['service_id'] as int?;
+      final vid = os['variant_id'] as int?;
+      if (sid == null) continue;
+
+      if (vid == null) {
+        _selection.allVariantServices.add(sid);
+      } else {
+        _selection.variantIds.add(vid);
+      }
+    }
+  }
+
+  Color _hexToMenuColor(String hex) {
+    if (hex.startsWith('#')) {
+      try {
+        return Color(int.parse('0xFF${hex.substring(1)}'));
+      } catch (_) {}
+    }
+    return const Color(0xFFFF6B8B);
+  }
+
+  IconData _menuIconFromName(String? name) {
+    final found = _menuIconSuggestions.firstWhere(
+      (i) => i['name'] == name,
+      orElse: () => _menuIconSuggestions.first,
+    );
+    return found['icon'] as IconData;
   }
 
   // ============================================
@@ -191,9 +473,9 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   Widget _pickerTheme(BuildContext context, Widget? child) {
     return Theme(
       data: Theme.of(context).copyWith(
-        colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: AppTheme.primary,
-            ),
+        colorScheme: Theme.of(
+          context,
+        ).colorScheme.copyWith(primary: AppTheme.primary),
       ),
       child: child!,
     );
@@ -202,8 +484,11 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   Future<void> _selectDateRange() async {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
-    final validFromDay =
-        DateTime(_validFrom.year, _validFrom.month, _validFrom.day);
+    final validFromDay = DateTime(
+      _validFrom.year,
+      _validFrom.month,
+      _validFrom.day,
+    );
     final validToDay = DateTime(_validTo.year, _validTo.month, _validTo.day);
     final firstDate = validFromDay.isBefore(today) ? validFromDay : today;
     final farthest = today.add(const Duration(days: 365));
@@ -234,7 +519,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   // ============================================
-  // STEP VALIDATION / NAVIGATION
+  // STEP VALIDATION
   // ============================================
   String? _stepError(int step) {
     switch (step) {
@@ -270,8 +555,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         }
         return null;
       case 2:
-        if (!_allServices && _selectedServiceIds.isEmpty) {
-          return 'Please select at least one service';
+        if (_selection.isEmpty) {
+          return 'Please select at least one service or variant';
         }
         final pts = _pointsRequiredController.text;
         if (pts.isNotEmpty) {
@@ -290,7 +575,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   void _goNext() {
-    // show inline field errors
     if (_currentStep == 0) _detailsFormKey.currentState?.validate();
     if (_currentStep == 2) _limitsFormKey.currentState?.validate();
 
@@ -377,17 +661,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         offerId = offerId_;
 
         await supabase.from('offer_services').delete().eq('offer_id', offerId);
-
-        if (!_allServices && _selectedServiceIds.isNotEmpty) {
-          await supabase.from('offer_services').insert(
-                _selectedServiceIds
-                    .map((sid) => {
-                          'offer_id': offerId,
-                          'service_id': sid,
-                        })
-                    .toList(),
-              );
-        }
       } else {
         offerData['created_at'] = DateTime.now().toUtc().toIso8601String();
         offerData['used_count'] = 0;
@@ -398,21 +671,36 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
             .select('id')
             .single();
         offerId = inserted['id'] as int;
+      }
 
-        if (!_allServices && _selectedServiceIds.isNotEmpty) {
-          await supabase.from('offer_services').insert(
-                _selectedServiceIds
-                    .map((sid) => {
-                          'offer_id': offerId,
-                          'service_id': sid,
-                        })
-                    .toList(),
-              );
+      // ✅ Build offer_services rows (service + variant level)
+      if (!_selection.isEmpty) {
+        final rows = <Map<String, dynamic>>[];
+
+        // Service-level rows (variant_id = NULL)
+        for (final sid in _selection.allVariantServices) {
+          rows.add({
+            'offer_id': offerId,
+            'service_id': sid,
+            'variant_id': null,
+          });
         }
 
-        if (_sendNotification) {
-          await _sendOfferNotifications(offerData, offerId);
+        // Variant-level rows
+        for (final vid in _selection.variantIds) {
+          final meta = _variantMeta[vid];
+          if (meta == null) continue;
+          final sid = meta['service_id'] as int;
+          rows.add({'offer_id': offerId, 'service_id': sid, 'variant_id': vid});
         }
+
+        if (rows.isNotEmpty) {
+          await supabase.from('offer_services').insert(rows);
+        }
+      }
+
+      if (!_isEditing && _sendNotification) {
+        await _sendOfferNotifications(offerData, offerId);
       }
 
       if (!mounted) return;
@@ -502,10 +790,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: TextStyle(fontSize: 13, color: _subTextColor),
-          ),
+          Text(subtitle, style: TextStyle(fontSize: 13, color: _subTextColor)),
         ],
       ),
     );
@@ -540,7 +825,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     );
   }
 
-  /// Card with the same look as the Create Salon cards.
   Widget _buildCard({
     required IconData icon,
     required Color color,
@@ -642,8 +926,10 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
           borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: Colors.red, width: 2),
         ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 12,
+        ),
         fillColor: _fieldFill,
         filled: true,
       ),
@@ -651,7 +937,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   // ============================================
-  // STEP INDICATOR (centered, with labels)
+  // STEP INDICATOR
   // ============================================
   static const List<Map<String, dynamic>> _stepMeta = [
     {'label': 'Details', 'icon': Icons.local_offer},
@@ -686,7 +972,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                   isMobile,
                 ),
                 if (i != _stepMeta.length - 1)
-                  // line is aligned with the middle of the circles
                   Container(
                     width: isMobile ? 24 : 44,
                     height: 2,
@@ -732,8 +1017,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                 color: isCompleted
                     ? AppTheme.primary
                     : (isActive
-                        ? AppTheme.primary.withValues(alpha: 0.1)
-                        : (isDark ? Colors.grey[800] : Colors.grey[200])),
+                          ? AppTheme.primary.withValues(alpha: 0.1)
+                          : (isDark ? Colors.grey[800] : Colors.grey[200])),
                 border: Border.all(
                   color: isActive
                       ? AppTheme.primary
@@ -772,7 +1057,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   // ============================================
-  // STEP 0 — Details + Discount
+  // STEP 0 — Details
   // ============================================
   Widget _buildStep0() {
     return Form(
@@ -828,12 +1113,15 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                   label: _discountType == 'percentage'
                       ? 'Discount Value (%) *'
                       : 'Discount Amount ($_salonCurrencySymbol) *',
-                  hint: _discountType == 'percentage' ? 'e.g., 20' : 'e.g., 500',
+                  hint: _discountType == 'percentage'
+                      ? 'e.g., 20'
+                      : 'e.g., 500',
                   icon: _discountType == 'percentage'
                       ? Icons.percent
                       : Icons.payments,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                   ],
@@ -878,7 +1166,11 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       runSpacing: 8,
       children: [
         _buildChoiceChip('Percentage %', 'percentage', Icons.percent),
-        _buildChoiceChip('Fixed $_salonCurrencySymbol', 'fixed', Icons.payments),
+        _buildChoiceChip(
+          'Fixed $_salonCurrencySymbol',
+          'fixed',
+          Icons.payments,
+        ),
         _buildChoiceChip('Free Service', 'free_service', Icons.card_giftcard),
       ],
     );
@@ -1032,7 +1324,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     );
   }
 
-  // Uses the same TimePickerField dialog as the Create Salon screen
   Widget _buildTimeRangePicker() {
     return Row(
       children: [
@@ -1062,7 +1353,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   // ============================================
-  // STEP 2 — Services + Limits + Notify
+  // STEP 2 — Scope + Limits + Notify
   // ============================================
   Widget _buildStep2() {
     return Form(
@@ -1072,13 +1363,13 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         children: [
           _buildStepHeader(
             'Scope & Limits',
-            'Pick the services and set optional limits.',
+            'Pick the services or variants and set optional limits.',
           ),
           _buildCard(
             icon: Icons.content_cut,
             color: Colors.indigo,
-            title: 'Applicable Services',
-            children: [_buildServiceScopeSelector()],
+            title: 'Service Menu',
+            children: [_buildServiceMenuTree()],
           ),
           const SizedBox(height: 16),
           _buildCard(
@@ -1144,8 +1435,10 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                           const SizedBox(height: 2),
                           Text(
                             'Send a push notification to all salon followers',
-                            style:
-                                TextStyle(fontSize: 12, color: _subTextColor),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: _subTextColor,
+                            ),
                           ),
                         ],
                       ),
@@ -1165,185 +1458,374 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     );
   }
 
-  Widget _buildServiceScopeSelector() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildScopeOption(
-          isSelected: _allServices,
-          icon: Icons.public,
-          title: 'All Services',
-          subtitle: 'Offer applies to every service in your salon',
-          onTap: () => setState(() {
-            _allServices = true;
-            _selectedServiceIds.clear();
-          }),
+  // ============================================
+  // SERVICE MENU TREE (always visible, no All/Specific toggle)
+  // ============================================
+  Widget _buildServiceMenuTree() {
+    if (_isLoadingServices) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(
+          child: CircularProgressIndicator(color: AppTheme.primary),
         ),
-        const SizedBox(height: 8),
-        _buildScopeOption(
-          isSelected: !_allServices,
-          icon: Icons.checklist,
-          title: 'Specific Services',
-          subtitle: 'Choose which services get this offer',
-          onTap: () => setState(() => _allServices = false),
+      );
+    }
+
+    if (_availableServices.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text(
+          'No services available. Add services first.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: _subTextColor),
         ),
-        if (!_allServices) ...[
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: _fieldFill,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
-              ),
-            ),
-            child: _isLoadingServices
-                ? const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(
-                      child: CircularProgressIndicator(
-                        color: AppTheme.primary,
-                      ),
-                    ),
-                  )
-                : _availableServices.isEmpty
-                    ? Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Text(
-                          'No services available. Add services first.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: _subTextColor),
-                        ),
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                '${_selectedServiceIds.length} selected',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppTheme.primary,
-                                ),
-                              ),
-                              const Spacer(),
-                              TextButton(
-                                onPressed: () {
-                                  setState(() {
-                                    if (_selectedServiceIds.length ==
-                                        _availableServices.length) {
-                                      _selectedServiceIds.clear();
-                                    } else {
-                                      _selectedServiceIds.addAll(
-                                        _availableServices
-                                            .map((s) => s['id'] as int),
-                                      );
-                                    }
-                                  });
-                                },
-                                child: Text(
-                                  _selectedServiceIds.length ==
-                                          _availableServices.length
-                                      ? 'Clear All'
-                                      : 'Select All',
-                                ),
-                              ),
-                            ],
-                          ),
-                          const Divider(height: 8),
-                          ..._availableServices.map((s) {
-                            final sid = s['id'] as int;
-                            final isChecked = _selectedServiceIds.contains(sid);
-                            return CheckboxListTile(
-                              dense: true,
-                              contentPadding: EdgeInsets.zero,
-                              controlAffinity: ListTileControlAffinity.leading,
-                              value: isChecked,
-                              onChanged: (v) {
-                                setState(() {
-                                  if (v == true) {
-                                    _selectedServiceIds.add(sid);
-                                  } else {
-                                    _selectedServiceIds.remove(sid);
-                                  }
-                                });
-                              },
-                              title: Text(
-                                s['name'] ?? 'Service',
-                                style: TextStyle(color: _textColor),
-                              ),
-                              subtitle: s['description'] != null &&
-                                      s['description'].toString().isNotEmpty
-                                  ? Text(
-                                      s['description'],
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: _subTextColor,
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    )
-                                  : null,
-                              activeColor: AppTheme.primary,
-                            );
-                          }),
-                        ],
-                      ),
-          ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _fieldFill,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSelectionSummary(),
+          const Divider(height: 12),
+          ..._serviceMenuTree.map((cat) => _buildOfferMenuCategoryBlock(cat)),
         ],
+      ),
+    );
+  }
+
+  Widget _buildSelectionSummary() {
+    final serviceCount = _selection.allVariantServices.length;
+    final variantCount = _selection.variantIds.length;
+    final parts = <String>[];
+    if (serviceCount > 0) parts.add('$serviceCount service(s)');
+    if (variantCount > 0) parts.add('$variantCount variant(s)');
+
+    // Check if any selectable option exists
+    final hasSelectable = _serviceMenuTree.any((cat) {
+      for (final s in (cat['services'] as List)) {
+        final variants = s['variants'] as List;
+        if (variants.any((v) {
+          final p = v['price'];
+          return p != null && (p as num) > 0;
+        })) {
+          return true;
+        }
+      }
+      return false;
+    });
+
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            parts.isEmpty ? 'Nothing selected' : parts.join(' · '),
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: parts.isEmpty ? _subTextColor : AppTheme.primary,
+            ),
+          ),
+        ),
+        TextButton(
+          onPressed: hasSelectable
+              ? () {
+                  setState(() {
+                    if (_selection.isEmpty) {
+                      // Select all services with priced variants
+                      for (final cat in _serviceMenuTree) {
+                        for (final s in (cat['services'] as List)) {
+                          final sid = s['id'] as int;
+                          final priced =
+                              _selection.servicePricedVariantIds[sid] ?? [];
+                          if (priced.isNotEmpty) {
+                            _selection.allVariantServices.add(sid);
+                          }
+                        }
+                      }
+                      _selection.variantIds.clear();
+                    } else {
+                      _selection.clear();
+                    }
+                  });
+                }
+              : null,
+          child: Text(_selection.isEmpty ? 'Select All' : 'Clear All'),
+        ),
       ],
     );
   }
 
-  Widget _buildScopeOption({
-    required bool isSelected,
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppTheme.primary.withValues(alpha: 0.08)
-              : _fieldFill,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected ? AppTheme.primary : _borderColor,
-            width: isSelected ? 2 : 1,
+  Widget _buildOfferMenuCategoryBlock(Map<String, dynamic> cat) {
+    final color = _hexToMenuColor(cat['color']?.toString() ?? '#FF6B8B');
+    final icon = _menuIconFromName(cat['icon_name'] as String?);
+    final services = cat['services'] as List;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10, top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 15, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  cat['display_name']?.toString() ?? 'Category',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: _textColor,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: isSelected ? AppTheme.primary : _subTextColor),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: 4),
+          ...services.map(
+            (s) => _buildOfferServiceBlock(s as Map<String, dynamic>, color),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOfferServiceBlock(Map<String, dynamic> service, Color catColor) {
+    final sid = service['id'] as int;
+    final variants = service['variants'] as List;
+
+    final pricedVariantIds =
+        _selection.servicePricedVariantIds[sid] ?? const <int>[];
+
+    final hasVariants = variants.isNotEmpty;
+    final hasPricedVariants = pricedVariantIds.isNotEmpty;
+
+    final isFull = _selection.isServiceFullySelected(sid);
+    final isPartial = _selection.isServicePartial(sid);
+
+    // ✅ Service is selectable only if it has at least one priced variant
+    final canSelectService = hasVariants && hasPricedVariants;
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Service row
+          InkWell(
+            onTap: canSelectService
+                ? () {
+                    setState(() {
+                      _selection.toggleServiceAll(sid, pricedVariantIds);
+                    });
+                  }
+                : null,
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+              child: Row(
                 children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: isSelected ? AppTheme.primary : _textColor,
+                  SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: Checkbox(
+                      tristate: true,
+                      value: isFull ? true : (isPartial ? null : false),
+                      onChanged: canSelectService
+                          ? (_) {
+                              setState(() {
+                                _selection.toggleServiceAll(
+                                  sid,
+                                  pricedVariantIds,
+                                );
+                              });
+                            }
+                          : null,
+                      activeColor: AppTheme.primary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
                   ),
-                  Text(
-                    subtitle,
-                    style: TextStyle(fontSize: 12, color: _subTextColor),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      service['name']?.toString() ?? 'Service',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: canSelectService ? _textColor : _subTextColor,
+                      ),
+                    ),
                   ),
+                  // ✅ Status badge
+                  if (!hasVariants)
+                    _buildStatusBadge(
+                      'No variants',
+                      Colors.orange,
+                      Icons.warning_amber,
+                    )
+                  else if (!hasPricedVariants)
+                    _buildStatusBadge(
+                      'No price set',
+                      Colors.orange,
+                      Icons.warning_amber,
+                    )
+                  else
+                    _buildStatusBadge(
+                      '${pricedVariantIds.length} priced',
+                      Colors.green,
+                      Icons.check_circle_outline,
+                    ),
                 ],
               ),
             ),
-            if (isSelected)
-              const Icon(Icons.check_circle, color: AppTheme.primary),
+          ),
+          // Variants
+          if (hasVariants)
+            Padding(
+              padding: const EdgeInsets.only(left: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: variants.asMap().entries.map((e) {
+                  final isLast = e.key == variants.length - 1;
+                  return _buildOfferVariantRow(
+                    service,
+                    e.value as Map<String, dynamic>,
+                    catColor,
+                    isLast,
+                  );
+                }).toList(),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(String text, Color color, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOfferVariantRow(
+    Map<String, dynamic> service,
+    Map<String, dynamic> variant,
+    Color catColor,
+    bool isLast,
+  ) {
+    final sid = service['id'] as int;
+    final vid = variant['id'] as int;
+    final price = variant['price'] as double?;
+    final duration = variant['duration'] as int?;
+    final label = variant['label']?.toString() ?? 'Standard';
+    final connector = isLast ? '└─' : '├─';
+
+    // ✅ Variant is selectable only if it has a valid price
+    final hasPrice = price != null && price > 0;
+
+    final serviceFull = _selection.isServiceFullySelected(sid);
+    final variantChecked = serviceFull || _selection.isVariantSelected(vid);
+
+    final pricedVariantIds =
+        _selection.servicePricedVariantIds[sid] ?? const <int>[];
+
+    return InkWell(
+      onTap: hasPrice
+          ? () {
+              setState(() {
+                _selection.toggleVariant(sid, vid, pricedVariantIds);
+              });
+            }
+          : null,
+      borderRadius: BorderRadius.circular(6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 2),
+        child: Row(
+          children: [
+            Text(
+              connector,
+              style: TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: catColor.withValues(alpha: 0.6),
+              ),
+            ),
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: Checkbox(
+                value: variantChecked,
+                onChanged: hasPrice
+                    ? (_) {
+                        setState(() {
+                          _selection.toggleVariant(sid, vid, pricedVariantIds);
+                        });
+                      }
+                    : null,
+                activeColor: AppTheme.primary,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: hasPrice ? _textColor : _subTextColor,
+                ),
+              ),
+            ),
+            if (duration != null && duration > 0) ...[
+              Icon(Icons.timer_outlined, size: 11, color: _subTextColor),
+              const SizedBox(width: 2),
+              Text(
+                '${duration}m',
+                style: TextStyle(fontSize: 11, color: _subTextColor),
+              ),
+              const SizedBox(width: 8),
+            ],
+            // ✅ Price or "No price" badge
+            if (!hasPrice)
+              _buildStatusBadge('No price', Colors.orange, Icons.warning_amber)
+            else
+              Text(
+                'Rs. ${price.toStringAsFixed(0)}',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.primary,
+                ),
+              ),
           ],
         ),
       ),
@@ -1361,6 +1843,43 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       return '${_discountValueController.text}% OFF';
     }
     return '${_currencyService.format(price: v, currencyCode: widget.currencyCode)} OFF';
+  }
+
+  String get _servicesSummary {
+    final serviceCount = _selection.allVariantServices.length;
+    final variantCount = _selection.variantIds.length;
+
+    if (serviceCount == 0 && variantCount == 0) {
+      return 'No selection';
+    }
+
+    final List<String> labels = [];
+
+    for (final cat in _serviceMenuTree) {
+      for (final s in (cat['services'] as List)) {
+        final sid = s['id'] as int;
+        if (_selection.allVariantServices.contains(sid)) {
+          labels.add('${s['name']} (all variants)');
+        } else {
+          for (final v in (s['variants'] as List)) {
+            final vid = v['id'] as int;
+            if (_selection.variantIds.contains(vid)) {
+              final vLabel = v['label']?.toString() ?? 'Variant';
+              labels.add('${s['name']} · $vLabel');
+            }
+          }
+        }
+      }
+    }
+
+    if (labels.isEmpty) {
+      return '$serviceCount service(s) · $variantCount variant(s)';
+    }
+
+    if (labels.length <= 3) {
+      return labels.join(', ');
+    }
+    return '${labels.take(3).join(', ')} +${labels.length - 3} more';
   }
 
   Widget _buildReviewTile({
@@ -1421,21 +1940,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     final df = DateFormat('MMM dd, yyyy');
     final timeText =
         _hasTimeRestriction && _validFromTime != null && _validToTime != null
-            ? '\n${_formatTime(_validFromTime!)} - ${_formatTime(_validToTime!)} daily'
-            : '';
-
-    String servicesText;
-    if (_allServices) {
-      servicesText = 'All services';
-    } else {
-      final names = _availableServices
-          .where((s) => _selectedServiceIds.contains(s['id'] as int))
-          .map((s) => (s['name'] ?? 'Service').toString())
-          .toList();
-      servicesText = names.isEmpty
-          ? '${_selectedServiceIds.length} service(s) selected'
-          : names.join(', ');
-    }
+        ? '\n${_formatTime(_validFromTime!)} - ${_formatTime(_validToTime!)} daily'
+        : '';
 
     final points = int.tryParse(_pointsRequiredController.text) ?? 0;
     final limit = _usageLimitController.text.isEmpty
@@ -1471,8 +1977,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         ),
         _buildReviewTile(
           icon: Icons.content_cut,
-          title: 'Applicable Services',
-          value: servicesText,
+          title: 'Service / Variant Scope',
+          value: _servicesSummary,
           onEdit: () => _goToStep(2),
         ),
         _buildReviewTile(
@@ -1515,7 +2021,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   // ============================================
-  // STEP ACTIONS (Back / Continue / Create)
+  // STEP ACTIONS
   // ============================================
   Widget _buildStepActions() {
     final isDark = _isDark;
@@ -1596,8 +2102,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                             Text(
                               isLastStep
                                   ? (_isEditing
-                                      ? 'Update Offer'
-                                      : 'Create Offer')
+                                        ? 'Update Offer'
+                                        : 'Create Offer')
                                   : 'Continue',
                               style: const TextStyle(
                                 fontSize: 16,

@@ -216,12 +216,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
         return;
       }
 
-      // Check owner role
+      // ✅ Role check by NAME (no hardcoded role_id)
       final ownerCheck = await supabase
           .from('user_roles')
-          .select('status')
+          .select('status, roles!inner(name)')
           .eq('user_id', user.id)
-          .eq('role_id', 3)
+          .eq('roles.name', 'owner')
           .maybeSingle();
 
       if (ownerCheck == null || ownerCheck['status'] != 'active') {
@@ -290,6 +290,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     }
   }
 
+  // ============================================
+  // ✅ LOAD OFFERS (variant-aware)
+  // ============================================
   Future<void> _loadOffers() async {
     final salonId = _currentSalonId;
     if (salonId == null) return;
@@ -300,6 +303,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     });
 
     try {
+      // ✅ Load offers with variant info
       final result = await supabase
           .from('offers')
           .select('''
@@ -322,10 +326,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
             updated_at,
             offer_services (
               service_id,
-              services (
-                id,
-                name
-              )
+              variant_id,
+              services:service_id (id, name),
+              service_variants:variant_id (id, salon_gender_id, salon_age_category_id)
             )
           ''')
           .eq('salon_id', salonId)
@@ -333,7 +336,85 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
       if (!mounted) return;
 
-      final offers = List<Map<String, dynamic>>.from(result);
+      // ✅ Load gender/age lookups for variant labels
+      final genderIds = <int>{};
+      final ageIds = <int>{};
+      for (final o in result) {
+        final svcList = o['offer_services'] as List? ?? [];
+        for (final os in svcList) {
+          final variant = os['service_variants'];
+          if (variant != null) {
+            final gid = variant['salon_gender_id'] as int?;
+            final aid = variant['salon_age_category_id'] as int?;
+            if (gid != null) genderIds.add(gid);
+            if (aid != null) ageIds.add(aid);
+          }
+        }
+      }
+
+      final Map<int, String> genderMap = {};
+      if (genderIds.isNotEmpty) {
+        try {
+          final genders = await supabase
+              .from('salon_genders')
+              .select('id, display_name')
+              .inFilter('id', genderIds.toList());
+          for (var g in genders) {
+            genderMap[g['id'] as int] = g['display_name']?.toString() ?? '';
+          }
+        } catch (e) {
+          debugPrint('Gender lookup failed: $e');
+        }
+      }
+
+      final Map<int, String> ageMap = {};
+      if (ageIds.isNotEmpty) {
+        try {
+          final ages = await supabase
+              .from('salon_age_categories')
+              .select('id, display_name')
+              .inFilter('id', ageIds.toList());
+          for (var a in ages) {
+            ageMap[a['id'] as int] = a['display_name']?.toString() ?? '';
+          }
+        } catch (e) {
+          debugPrint('Age lookup failed: $e');
+        }
+      }
+
+      // ✅ Enrich offers with scope summary
+      final offers = List<Map<String, dynamic>>.from(result).map((o) {
+        final offer = Map<String, dynamic>.from(o);
+        final svcList = (offer['offer_services'] as List? ?? []);
+        final scopeParts = <String>[];
+
+        for (final os in svcList) {
+          final service = os['services'];
+          final variant = os['service_variants'];
+          final serviceName = service?['name']?.toString() ?? 'Service';
+
+          if (variant == null) {
+            // Service-level → all variants
+            scopeParts.add(serviceName);
+          } else {
+            // Variant-level
+            final gid = variant['salon_gender_id'] as int?;
+            final aid = variant['salon_age_category_id'] as int?;
+            final gender = gid != null ? (genderMap[gid] ?? '') : '';
+            final age = aid != null ? (ageMap[aid] ?? '') : '';
+            final labelParts = <String>[];
+            if (gender.isNotEmpty) labelParts.add(gender);
+            if (age.isNotEmpty) labelParts.add(age);
+            final vLabel =
+                labelParts.isEmpty ? 'Standard' : labelParts.join(' ');
+            scopeParts.add('$serviceName · $vLabel');
+          }
+        }
+
+        offer['scope_summary'] =
+            scopeParts.isEmpty ? 'All Services' : scopeParts.join(', ');
+        return offer;
+      }).toList();
 
       int total = offers.length;
       int active = 0;
@@ -557,13 +638,28 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     return daysLeft == 0 ? 'Ends today' : '$daysLeft days left';
   }
 
+  // ✅ UPDATED: Use pre-built scope_summary (variant-aware)
   String _getServiceScopeSummary(Map<String, dynamic> offer) {
+    // Use backend-built scope summary if available
+    final summary = offer['scope_summary']?.toString();
+    if (summary != null && summary.isNotEmpty) {
+      return '✂️ $summary';
+    }
+
+    // Fallback: build from offer_services
     final offerServices = offer['offer_services'] as List? ?? [];
     if (offerServices.isEmpty) return '🌐 All Services';
 
     if (offerServices.length == 1) {
-      final svc = offerServices.first['services'] as Map?;
-      return '✂️ ${svc?['name'] ?? 'Service'}';
+      final row = offerServices.first as Map;
+      final svc = row['services'] as Map?;
+      final variant = row['service_variants'] as Map?;
+
+      if (variant == null) {
+        return '✂️ ${svc?['name'] ?? 'Service'}';
+      }
+
+      return '✂️ ${svc?['name'] ?? 'Service'} · Variant';
     }
 
     return '✂️ ${offerServices.length} Services';
@@ -624,12 +720,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
       ),
       floatingActionButton:
           _showFloatingButton && !_isLoading && !_hasError && _offers.isNotEmpty
-          ? FloatingActionButton(
-              onPressed: _openCreateOffer,
-              backgroundColor: AppTheme.primary,
-              child: const Icon(Icons.add, color: Colors.white),
-            )
-          : null,
+              ? FloatingActionButton(
+                  onPressed: _openCreateOffer,
+                  backgroundColor: AppTheme.primary,
+                  child: const Icon(Icons.add, color: Colors.white),
+                )
+              : null,
     );
   }
 
@@ -704,7 +800,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   }
 
   // ============================================
-  // WEB LAYOUT (scrollable - no more overflow)
+  // WEB LAYOUT
   // ============================================
   Widget _buildWebLayout() {
     return Center(
@@ -758,7 +854,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
                         maxCrossAxisExtent: 420,
                         crossAxisSpacing: 16,
                         mainAxisSpacing: 16,
-                        mainAxisExtent: 340, // fixed height -> no overflow
+                        mainAxisExtent: 340,
                       ),
                       delegate: SliverChildBuilderDelegate(
                         (context, index) =>
@@ -925,7 +1021,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     );
   }
 
-  // Mobile list only (web uses the sliver grid in _buildWebLayout)
   Widget _buildOfferList() {
     if (_filteredOffers.isEmpty) {
       return RefreshIndicator(
@@ -1038,7 +1133,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   }
 
   // =====================================================
-  // OFFER CARD - Matches Appointments Card Design
+  // OFFER CARD
   // =====================================================
   Widget _buildOfferCard(Map<String, dynamic> offer, bool isSmallScreen) {
     final isDark = _isDark;
@@ -1084,12 +1179,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // =====================================================
               // ROW 1: Status badge + Discount badge
-              // =====================================================
               Row(
                 children: [
-                  // Status badge
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
@@ -1127,7 +1219,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
                   ),
                   const SizedBox(width: 8),
 
-                  // Discount badge
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
@@ -1154,7 +1245,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
                   const Spacer(),
 
-                  // Days left indicator (if active)
                   if (isActive && !isExpired && daysLeft >= 0)
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -1198,9 +1288,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
               const SizedBox(height: 12),
 
-              // =====================================================
               // ROW 2: Title + Description
-              // =====================================================
               Text(
                 offer['title'] ?? 'Offer',
                 style: TextStyle(
@@ -1229,12 +1317,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
               const SizedBox(height: 12),
 
-              // =====================================================
               // ROW 3: Service scope + Points
-              // =====================================================
               Row(
                 children: [
-                  // Service scope
                   Expanded(
                     child: Container(
                       padding: const EdgeInsets.symmetric(
@@ -1292,12 +1377,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
               const SizedBox(height: 10),
 
-              // =====================================================
               // ROW 4: Usage + Validity
-              // =====================================================
               Row(
                 children: [
-                  // Validity
                   Icon(
                     Icons.calendar_today,
                     size: 12,
@@ -1314,7 +1396,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
                   const Spacer(),
 
-                  // Usage count
                   if (usageLimit != null)
                     Container(
                       padding: const EdgeInsets.symmetric(
@@ -1354,12 +1435,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
               const SizedBox(height: 12),
 
-              // =====================================================
               // ACTION BUTTONS
-              // =====================================================
               Row(
                 children: [
-                  // Toggle Active/Inactive
                   Expanded(
                     flex: 2,
                     child: OutlinedButton.icon(
@@ -1395,7 +1473,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
                   ),
                   const SizedBox(width: 8),
 
-                  // Edit
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: _isProcessing
@@ -1421,7 +1498,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
                   ),
                   const SizedBox(width: 8),
 
-                  // Delete
                   Expanded(
                     child: OutlinedButton.icon(
                       onPressed: _isProcessing

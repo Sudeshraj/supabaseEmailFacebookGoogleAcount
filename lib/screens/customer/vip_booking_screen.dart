@@ -82,7 +82,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   // Preselected
   List<Map<String, dynamic>>? _preselectedServices;
   bool _preselectedServicesApplied = false;
-  bool _skipToDate = false; // ✅ NEW
+  bool _skipToDate = false;
 
   // Legacy offer support
   Map<String, dynamic>? _appliedOffer;
@@ -175,7 +175,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       }
     }
 
-    // ✅ NEW: Extract skip_to_date flag
     if (initial.containsKey('skip_to_date')) {
       _skipToDate = initial['skip_to_date'] == true;
     }
@@ -252,7 +251,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         }
       }
 
-      // ✅ NEW: Read skip_to_date from extra
       if (map.containsKey('skip_to_date')) {
         _skipToDate = map['skip_to_date'] == true;
         debugPrint('🎯 [VIP] skip_to_date (from extra): $_skipToDate');
@@ -277,17 +275,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // PER-SERVICE OFFER HELPERS (✅ NEW)
+  // PER-SERVICE OFFER HELPERS (variant-aware)
   // ============================================
 
   String _serviceKey(int serviceId, int? variantId) =>
       '${serviceId}_${variantId ?? 0}';
 
-  /// ✅ Load offers for a specific service (matches BookingFlow)
+  /// ✅ Load offers for a specific service (variant-aware)
   Future<List<Map<String, dynamic>>> _loadOffersForService(
     int serviceId,
-    double price,
-  ) async {
+    double price, {
+    int? variantId,
+  }) async {
     if (_selectedSalon == null) return [];
 
     try {
@@ -300,13 +299,16 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'p_service_id': serviceId,
           'p_service_price': price,
           'p_customer_id': user?.id,
+          'p_variant_id': variantId, // ✅ NEW: variant-aware offers
         },
       );
 
       if (result == null) return [];
       return List<Map<String, dynamic>>.from(result as List);
     } catch (e) {
-      debugPrint('⚠️ [VIP] Error loading offers for service $serviceId: $e');
+      debugPrint(
+        '⚠️ [VIP] Error loading offers for service $serviceId (variant $variantId): $e',
+      );
       return [];
     }
   }
@@ -418,7 +420,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return isClaimed ? '⭐ $label (Applied)' : label;
   }
 
-  /// ✅ Auto-apply any claimed offers for currently selected services
+  /// ✅ Auto-apply any claimed offers for currently selected services (variant-aware)
   Future<void> _autoApplyClaimedOffers() async {
     debugPrint('🎁 [VIP Auto-Apply] Checking claimed offers...');
 
@@ -438,7 +440,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
       if (offers.isEmpty) {
         final price = (service['price'] as num?)?.toDouble() ?? 0;
-        offers = await _loadOffersForService(sid, price);
+        // ✅ Pass variant ID for variant-aware offer loading
+        offers = await _loadOffersForService(sid, price, variantId: vid);
 
         if (offers.isNotEmpty && mounted) {
           setState(() {
@@ -491,7 +494,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final serviceId = item['id'];
     if (serviceId is! int) return 0;
 
-    // If per-service offer exists, use that
     final variantId = item['variant_id'] as int?;
     final key = _serviceKey(serviceId, variantId);
     final perServiceOffer = _serviceOffers[key];
@@ -506,7 +508,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     if (!_isOfferApplicable(serviceId)) return 0;
     return _discountForPrice((item['price'] as num?)?.toDouble() ?? 0);
   }
-
 
   void _updateTotalAndDiscount() {
     _recalculateTotals();
@@ -635,7 +636,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final hasPreselected =
         _preselectedServices != null && _preselectedServices!.isNotEmpty;
 
-    // ✅ Decide starting step
     final int startingStep;
     if (hasPreselected && _skipToDate) {
       startingStep = 2; // Salon Profile → Date
@@ -643,8 +643,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       startingStep = 1; // Dashboard offer / default → Service
     }
 
-    debugPrint('🎯 [VIP] Starting step: $startingStep '
-        '(${startingStep == 2 ? "Date" : "Service"})');
+    debugPrint(
+      '🎯 [VIP] Starting step: $startingStep '
+      '(${startingStep == 2 ? "Date" : "Service"})',
+    );
 
     setState(() {
       _selectedSalon = normalized;
@@ -655,7 +657,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     await _loadSalonServices();
     await _applyPreselectedServices();
 
-    // ✅ Always load holidays (needed for Date step)
     await _loadHolidays();
   }
 
@@ -1083,7 +1084,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
   }
 
-  /// ✅ Toggle variant + auto-load offers + auto-apply claimed
+  /// ✅ Toggle variant + auto-load offers + auto-apply claimed (variant-aware)
   Future<void> _toggleVariant(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
@@ -1128,8 +1129,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _recalculateTotals();
     });
 
-    // ✅ Load offers for this service
-    final offers = await _loadOffersForService(sid, price);
+    // ✅ Load offers for this specific service + variant
+    final offers = await _loadOffersForService(
+      sid,
+      price,
+      variantId: vid,
+    );
 
     if (offers.isNotEmpty && mounted) {
       setState(() {
@@ -3279,6 +3284,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
+  /// ✅ Variant row with service-only support
   Widget _buildVariantRow(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
@@ -3297,8 +3303,13 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final String age = variant['age']?.toString() ?? '';
     final String genderLower = gender.toLowerCase();
 
+    // ✅ Service-only variant detection (no gender, no age)
+    final bool isServiceOnly = gender.isEmpty && age.isEmpty;
+
     IconData genderIcon;
-    if (genderLower.contains('male')) {
+    if (isServiceOnly) {
+      genderIcon = Icons.spa_outlined; // ✅ Service-only icon
+    } else if (genderLower.contains('male')) {
       genderIcon = Icons.male;
     } else if (genderLower.contains('female')) {
       genderIcon = Icons.female;
@@ -3316,7 +3327,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final finalPrice = price - discount;
     final hasOffer = selectedOffer != null && discount > 0;
 
-    final String displayText = '$gender $age'.trim();
+    // ✅ Service-only → "Standard", else "$gender $age"
+    final String displayText = isServiceOnly
+        ? 'Standard'
+        : '$gender $age'.trim();
 
     return Column(
       children: [
@@ -3362,7 +3376,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        displayText.isEmpty ? 'Variant' : displayText,
+                        displayText, // ✅ "Standard" හෝ "Male Adult"
                         style: TextStyle(
                           fontWeight: isSelected
                               ? FontWeight.w600
@@ -3892,6 +3906,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
+  /// ✅ Selected service item with "Standard" label support
   Widget _buildSelectedServiceItem(
     Map<String, dynamic> service,
     int index,
@@ -3904,6 +3919,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final double price = (service['price'] as num?)?.toDouble() ?? 0.0;
     final int duration = (service['duration'] as num?)?.toInt() ?? 30;
     final double discount = _discountForItem(service);
+
+    // ✅ Service-only → "Standard"
+    final String variantLabel = (gender.isEmpty && age.isEmpty)
+        ? 'Standard'
+        : '$gender $age'.trim();
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -3939,7 +3959,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '$gender $age • $duration min',
+                  '$variantLabel • $duration min', // ✅ "Standard • 30 min"
                   style: TextStyle(
                     fontSize: 11,
                     color: isDark ? Colors.white60 : Colors.grey[600],
@@ -6137,6 +6157,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         final d = _discountForItem(s);
                         final offer =
                             s['offer'] as Map<String, dynamic>?;
+                        final gender = s['gender']?.toString() ?? '';
+                        final age = s['age']?.toString() ?? '';
+                        // ✅ Service-only → "Standard"
+                        final variantLabel =
+                            (gender.isEmpty && age.isEmpty)
+                                ? 'Standard'
+                                : '$gender $age'.trim();
+
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 4),
                           child: Column(
@@ -6145,8 +6173,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             children: [
                               Text(
                                 d > 0
-                                    ? '• ${s['name']}  Rs. ${p.toStringAsFixed(2)} → Rs. ${(p - d).toStringAsFixed(2)}'
-                                    : '• ${s['name']}  Rs. ${p.toStringAsFixed(2)}',
+                                    ? '• ${s['name']} ($variantLabel)  Rs. ${p.toStringAsFixed(2)} → Rs. ${(p - d).toStringAsFixed(2)}'
+                                    : '• ${s['name']} ($variantLabel)  Rs. ${p.toStringAsFixed(2)}',
                                 style: TextStyle(
                                   fontSize: 13,
                                   color: d > 0
@@ -6548,7 +6576,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
           onPressed: () {
-            // ✅ Simple step-by-step back (natural navigation)
             if (_currentStep > 0) {
               setState(() => _currentStep--);
             } else {

@@ -64,8 +64,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // Special Offers
   List<Map<String, dynamic>> _offers = [];
 
-  // ✅ Claimed offers (customer has already applied these)
-  Set<int> _claimedOfferIds = {};
+  // ✅ Track claim state per offer (for spinner)
+  final Set<int> _claimingOfferIds = {};
 
   // Followed Salons
   List<Map<String, dynamic>> _followedSalons = [];
@@ -86,7 +86,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   bool _showSearchResults = false;
   OverlayEntry? _searchOverlay;
 
-  // ✅ Used to make the search results overlay match the search bar's size
   final LayerLink _searchLayerLink = LayerLink();
   final GlobalKey _searchFieldKey = GlobalKey();
 
@@ -165,7 +164,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // CHECK CUSTOMER STATUS
+  // CHECK CUSTOMER STATUS (role by name, no hardcoded role_id)
   // ============================================================
   Future<void> _checkCustomerStatus() async {
     try {
@@ -175,11 +174,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
+      // ✅ Role check by name
       final roleCheck = await supabase
           .from('user_roles')
-          .select('status')
+          .select('status, roles!inner(name)')
           .eq('user_id', user.id)
-          .eq('role_id', 1)
+          .eq('roles.name', 'customer')
           .maybeSingle();
 
       if (roleCheck == null || roleCheck['status'] != 'active') {
@@ -353,7 +353,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   // ============================================================
   // ✅ SHARED HELPER — Build extra payload for a SPECIFIC offer
-  //    Called by offer-card buttons: Book Now / VIP Booking
+  //    Now variant-aware: uses offer_services to pick variant
   // ============================================================
   Future<Map<String, dynamic>> _buildBookingExtraWithOffer(
     Map<String, dynamic> offer,
@@ -388,54 +388,95 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         }
       }
 
-      // 2. Load offer's applicable services + first variant
-      List<int> offerServiceIds = [];
+      // 2. ✅ Load offer's applicable services + variants (variant-aware)
+      //    offer_services rows may have variant_id null (service-level)
+      //    or a specific variant_id (variant-level)
+      List<Map<String, dynamic>> offerServiceRows = [];
       try {
         final offerServicesResp = await supabase
             .from('offer_services')
-            .select('service_id')
+            .select('service_id, variant_id')
             .eq('offer_id', offerId);
 
         for (var row in offerServicesResp) {
-          final sid = row['service_id'];
-          if (sid is int) offerServiceIds.add(sid);
+          offerServiceRows.add({
+            'service_id': row['service_id'] as int?,
+            'variant_id': row['variant_id'] as int?,
+          });
         }
       } catch (e) {
         debugPrint('⚠️ Failed to load offer services: $e');
       }
 
-      List<int> targetServiceIds = offerServiceIds;
-      if (targetServiceIds.isEmpty && offerSalonId != null) {
+      if (offerServiceRows.isNotEmpty) {
+        // ✅ Prefer variant-level rows (more specific)
+        final variantRows = offerServiceRows
+            .where((r) => r['variant_id'] != null)
+            .toList();
+
+        if (variantRows.isNotEmpty) {
+          final first = variantRows.first;
+          preselectedServices.add({
+            'service_id': first['service_id'],
+            'variant_id': first['variant_id'],
+          });
+          debugPrint(
+            '🎯 Preselected (variant-level): sid=${first['service_id']} vid=${first['variant_id']}',
+          );
+        } else {
+          // Service-level → pick first active variant
+          final serviceRow = offerServiceRows.first;
+          final sid = serviceRow['service_id'] as int?;
+          if (sid != null) {
+            final variantsResp = await supabase
+                .from('service_variants')
+                .select('id')
+                .eq('service_id', sid)
+                .eq('is_active', true)
+                .order('id', ascending: true)
+                .limit(1);
+
+            if (variantsResp.isNotEmpty) {
+              final variantId = variantsResp.first['id'] as int;
+              preselectedServices.add({
+                'service_id': sid,
+                'variant_id': variantId,
+              });
+              debugPrint(
+                '🎯 Preselected (service-level→first variant): sid=$sid vid=$variantId',
+              );
+            }
+          }
+        }
+      } else if (offerSalonId != null) {
+        // Fallback: offer has no offer_services rows → all services
         final allServicesResp = await supabase
             .from('services')
             .select('id')
             .eq('salon_id', offerSalonId)
-            .eq('is_active', true);
-
-        for (var row in allServicesResp) {
-          final sid = row['id'];
-          if (sid is int) targetServiceIds.add(sid);
-        }
-      }
-
-      if (targetServiceIds.isNotEmpty) {
-        final firstServiceId = targetServiceIds.first;
-
-        final variantsResp = await supabase
-            .from('service_variants')
-            .select('id, service_id')
-            .eq('service_id', firstServiceId)
             .eq('is_active', true)
-            .order('id', ascending: true)
             .limit(1);
 
-        if (variantsResp.isNotEmpty) {
-          final variantId = variantsResp.first['id'] as int;
-          preselectedServices.add({
-            'service_id': firstServiceId,
-            'variant_id': variantId,
-          });
-          debugPrint('🎯 Preselected: sid=$firstServiceId vid=$variantId');
+        if (allServicesResp.isNotEmpty) {
+          final sid = allServicesResp.first['id'] as int;
+          final variantsResp = await supabase
+              .from('service_variants')
+              .select('id')
+              .eq('service_id', sid)
+              .eq('is_active', true)
+              .order('id', ascending: true)
+              .limit(1);
+
+          if (variantsResp.isNotEmpty) {
+            final variantId = variantsResp.first['id'] as int;
+            preselectedServices.add({
+              'service_id': sid,
+              'variant_id': variantId,
+            });
+            debugPrint(
+              '🎯 Preselected (fallback): sid=$sid vid=$variantId',
+            );
+          }
         }
       }
     } catch (e) {
@@ -457,19 +498,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       'offer': offer,
       if (preselectedServices.isNotEmpty)
         'preselected_services': preselectedServices,
-        'skip_to_date': false,
+      'skip_to_date': false,
     };
   }
 
   // ============================================================
-  // ✅ TOP BUTTON: Book Now — Normal redirect (no offer)
+  // TOP BUTTON: Book Now
   // ============================================================
   Future<void> _bookAppointment() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) {
-        return;
-      }
+      if (_showPermissionCard) return;
     }
 
     final result = await context.push('/customer/booking-flow');
@@ -480,14 +519,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ TOP BUTTON: VIP Booking — Normal redirect (no offer)
+  // TOP BUTTON: VIP Booking
   // ============================================================
   Future<void> _createVipBooking() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'vip');
-      if (_showPermissionCard) {
-        return;
-      }
+      if (_showPermissionCard) return;
     }
 
     final result = await context.push('/customer/vip-booking');
@@ -498,19 +535,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ OFFER CARD BUTTON: Book Now (with this specific offer)
-  //    Auto-selects salon + service + offer
+  // OFFER CARD BUTTON: Book Now (with this specific offer)
   // ============================================================
   Future<void> _bookAppointmentWithOffer(Map<String, dynamic> offer) async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) {
-        return;
-      }
+      if (_showPermissionCard) return;
     }
 
     final extra = await _buildBookingExtraWithOffer(offer);
-
     if (!mounted) return;
 
     final result = await context.push(
@@ -525,18 +558,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ OFFER CARD BUTTON: VIP Booking (with this specific offer)
+  // OFFER CARD BUTTON: VIP Booking (with this specific offer)
   // ============================================================
   Future<void> _createVipBookingWithOffer(Map<String, dynamic> offer) async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'vip');
-      if (_showPermissionCard) {
-        return;
-      }
+      if (_showPermissionCard) return;
     }
 
     final extra = await _buildBookingExtraWithOffer(offer);
-
     if (!mounted) return;
 
     final result = await context.push(
@@ -556,9 +586,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   Future<void> _viewAllOffers() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'offer');
-      if (_showPermissionCard) {
-        return;
-      }
+      if (_showPermissionCard) return;
     }
     final result = await context.push('/customer/offers');
     if (result == true && mounted) {
@@ -569,9 +597,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   Future<void> _viewNotifications() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'notification');
-      if (_showPermissionCard) {
-        return;
-      }
+      if (_showPermissionCard) return;
     }
 
     final result = await context.push('/notifications?role=customer');
@@ -881,8 +907,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       final favoriteBarbers = await _getFavoriteBarbers(user.id);
       final offers = await _loadOffersFromDatabase();
 
-      final claimedOfferIds = await _loadClaimedOfferIds(user.id);
-
       await _loadUnreadCount();
 
       if (mounted) {
@@ -897,7 +921,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           _loyaltyPoints = (totalSpent / 10).round();
           _favoriteBarbers = favoriteBarbers;
           _offers = offers;
-          _claimedOfferIds = claimedOfferIds;
         });
       }
 
@@ -924,27 +947,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       debugPrint(
         '✅ Dashboard loaded: $upcoming upcoming, ${offers.length} offers, '
-        '${_claimedOfferIds.length} claimed, $_unreadNotificationCount unread',
+        '$_unreadNotificationCount unread',
       );
     } catch (e) {
       debugPrint('❌ Error loading dashboard data: $e');
     } finally {
       if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<Set<int>> _loadClaimedOfferIds(String customerId) async {
-    try {
-      final result = await supabase
-          .from('customer_offers')
-          .select('offer_id')
-          .eq('customer_id', customerId)
-          .eq('status', 'active');
-
-      return result.map<int>((row) => row['offer_id'] as int).toSet();
-    } catch (e) {
-      debugPrint('❌ Error loading claimed offers: $e');
-      return {};
     }
   }
 
@@ -1070,6 +1078,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
+  // ============================================================
+  // ✅ LOAD OFFERS (variant-aware + claim status)
+  // ============================================================
   Future<List<Map<String, dynamic>>> _loadOffersFromDatabase() async {
     try {
       final user = supabase.auth.currentUser;
@@ -1104,12 +1115,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             valid_from,
             valid_to,
             image_url,
+            usage_limit,
+            used_count,
             salon_id,
             salons:salons!offers_salon_id_fkey (
               id,
               name,
               logo_url,
               address
+            ),
+            offer_services (
+              service_id,
+              variant_id,
+              services:service_id (id, name),
+              service_variants:variant_id (id, salon_gender_id, salon_age_category_id)
             )
           ''')
           .inFilter('salon_id', followedSalonIds)
@@ -1119,10 +1138,97 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           .order('created_at', ascending: false)
           .limit(20);
 
-      if (result.isNotEmpty) {
-        debugPrint('✅ Loaded ${result.length} offers from followed salons');
-        return List<Map<String, dynamic>>.from(result);
+      if (result.isEmpty) return [];
+
+      // ✅ Load claims for this customer
+      final offerIds = result.map<int>((o) => o['id'] as int).toList();
+      Map<int, String> claimStatus = {};
+      try {
+        final claims = await supabase
+            .from('customer_offers')
+            .select('offer_id, status')
+            .eq('customer_id', user.id)
+            .inFilter('offer_id', offerIds);
+
+        for (var claim in claims) {
+          claimStatus[claim['offer_id'] as int] = claim['status'] as String;
+        }
+      } catch (e) {
+        debugPrint('Error loading claims: $e');
       }
+
+      // ✅ Load gender/age lookups for variant labels
+      final genderIds = <int>{};
+      final ageIds = <int>{};
+      for (final o in result) {
+        final svcList = o['offer_services'] as List? ?? [];
+        for (final os in svcList) {
+          final variant = os['service_variants'];
+          if (variant != null) {
+            final gid = variant['salon_gender_id'] as int?;
+            final aid = variant['salon_age_category_id'] as int?;
+            if (gid != null) genderIds.add(gid);
+            if (aid != null) ageIds.add(aid);
+          }
+        }
+      }
+
+      final Map<int, String> genderMap = {};
+      if (genderIds.isNotEmpty) {
+        final genders = await supabase
+            .from('salon_genders')
+            .select('id, display_name')
+            .inFilter('id', genderIds.toList());
+        for (var g in genders) {
+          genderMap[g['id'] as int] = g['display_name']?.toString() ?? '';
+        }
+      }
+
+      final Map<int, String> ageMap = {};
+      if (ageIds.isNotEmpty) {
+        final ages = await supabase
+            .from('salon_age_categories')
+            .select('id, display_name')
+            .inFilter('id', ageIds.toList());
+        for (var a in ages) {
+          ageMap[a['id'] as int] = a['display_name']?.toString() ?? '';
+        }
+      }
+
+      // ✅ Build variant/scope summary for each offer
+      final enriched = result.map<Map<String, dynamic>>((o) {
+        final offer = Map<String, dynamic>.from(o);
+        final svcList = (offer['offer_services'] as List? ?? []);
+        final scopeParts = <String>[];
+
+        for (final os in svcList) {
+          final service = os['services'];
+          final variant = os['service_variants'];
+          final serviceName = service?['name']?.toString() ?? 'Service';
+
+          if (variant == null) {
+            scopeParts.add(serviceName);
+          } else {
+            final gid = variant['salon_gender_id'] as int?;
+            final aid = variant['salon_age_category_id'] as int?;
+            final gender = gid != null ? (genderMap[gid] ?? '') : '';
+            final age = aid != null ? (ageMap[aid] ?? '') : '';
+            final labelParts = <String>[];
+            if (gender.isNotEmpty) labelParts.add(gender);
+            if (age.isNotEmpty) labelParts.add(age);
+            final vLabel = labelParts.isEmpty ? 'Standard' : labelParts.join(' ');
+            scopeParts.add('$serviceName · $vLabel');
+          }
+        }
+
+        offer['scope_summary'] =
+            scopeParts.isEmpty ? 'All services' : scopeParts.join(', ');
+        offer['claim_status'] = claimStatus[offer['id'] as int];
+        return offer;
+      }).toList();
+
+      debugPrint('✅ Loaded ${enriched.length} offers from followed salons');
+      return enriched;
     } catch (e) {
       debugPrint('❌ Error loading offers from followed salons: $e');
     }
@@ -1161,7 +1267,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             _followedSalons = salons;
           });
         }
-        debugPrint('✅ Loaded ${_followedSalons.length} followed salons');
       } else {
         if (mounted) {
           setState(() {
@@ -1235,7 +1340,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ APPLY OFFER — Claim only, NO navigation
+  // ✅ APPLY OFFER — Atomic via claim_offer RPC
   // ============================================================
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
@@ -1250,21 +1355,27 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   Future<void> _applyOffer(Map<String, dynamic> offer) async {
+    final offerId = offer['id'] as int;
+
+    // ✅ Prevent double-tap
+    if (_claimingOfferIds.contains(offerId)) return;
+
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
         if (mounted) {
           _showSnackBar('Please login to apply offers', Colors.orange);
+          context.push('/login');
         }
-        if (mounted) context.push('/login');
         return;
       }
 
+      // ✅ Role check by name
       final customerCheck = await supabase
           .from('user_roles')
-          .select('status')
+          .select('status, roles!inner(name)')
           .eq('user_id', user.id)
-          .eq('role_id', 1)
+          .eq('roles.name', 'customer')
           .maybeSingle();
 
       if (customerCheck == null || customerCheck['status'] != 'active') {
@@ -1311,54 +1422,19 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      final pointsRequired = offer['points_required'] ?? 0;
-      if (pointsRequired > 0) {
-        final loyaltyResult = await supabase
-            .from('customer_loyalty')
-            .select('current_points')
-            .eq('customer_id', user.id)
-            .maybeSingle();
-
-        final userPoints = loyaltyResult?['current_points'] ?? 0;
-        if (userPoints < pointsRequired) {
-          if (mounted) {
-            _showSnackBar(
-              'You need $pointsRequired points to apply this offer',
-              Colors.orange,
-            );
-          }
-          return;
-        }
-      }
-
-      final usageLimit = offer['usage_limit'];
-      final usedCount = offer['used_count'] ?? 0;
-      if (usageLimit != null && usedCount >= usageLimit) {
+      // ✅ Already claimed/used guard
+      final claimStatus = offer['claim_status'];
+      if (claimStatus == 'active') {
         if (mounted) {
-          _showSnackBar('This offer has reached its usage limit', Colors.red);
+          _showSnackBar('You have already applied this offer', Colors.orange);
         }
         return;
       }
-
-      final existingOffer = await supabase
-          .from('customer_offers')
-          .select('id, status')
-          .eq('customer_id', user.id)
-          .eq('offer_id', offer['id'])
-          .maybeSingle();
-
-      if (existingOffer != null) {
-        if (existingOffer['status'] == 'active') {
-          if (mounted) {
-            _showSnackBar('You have already applied this offer', Colors.orange);
-          }
-          return;
-        } else if (existingOffer['status'] == 'used') {
-          if (mounted) {
-            _showSnackBar('You have already used this offer', Colors.red);
-          }
-          return;
+      if (claimStatus == 'used') {
+        if (mounted) {
+          _showSnackBar('You have already used this offer', Colors.red);
         }
+        return;
       }
 
       if (!mounted) return;
@@ -1414,7 +1490,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   ),
                 ),
               ),
-              if (pointsRequired > 0) ...[
+              if ((offer['scope_summary'] ?? '').toString().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Scope: ${offer['scope_summary']}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+              if ((offer['points_required'] ?? 0) > 0) ...[
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -1422,7 +1506,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     const Icon(Icons.star, color: Colors.amber, size: 20),
                     const SizedBox(width: 8),
                     Text(
-                      'Requires $pointsRequired loyalty points',
+                      'Requires ${offer['points_required']} loyalty points',
                       style: const TextStyle(fontSize: 14),
                     ),
                   ],
@@ -1457,67 +1541,36 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       if (!mounted) return;
       if (confirmed != true) return;
 
-      // DB INSERTS
-      await supabase.from('customer_offers').insert({
-        'customer_id': user.id,
-        'offer_id': offer['id'],
-        'claimed_at': DateTime.now().toIso8601String(),
-        'expires_at': offer['valid_to'],
-        'status': 'active',
-      });
+      // ✅ Set claiming state
+      setState(() => _claimingOfferIds.add(offerId));
 
-      await supabase
-          .from('offers')
-          .update({'used_count': (usedCount + 1)})
-          .eq('id', offer['id']);
-
-      if (pointsRequired > 0) {
-        final loyaltyResult = await supabase
-            .from('customer_loyalty')
-            .select('current_points')
-            .eq('customer_id', user.id)
-            .maybeSingle();
-
-        final currentPoints = loyaltyResult?['current_points'] ?? 0;
-        final newPoints = currentPoints - pointsRequired;
-
-        await supabase
-            .from('customer_loyalty')
-            .update({
-              'current_points': newPoints,
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('customer_id', user.id);
-
-        await supabase.from('loyalty_transactions').insert({
-          'customer_id': user.id,
-          'points': -pointsRequired,
-          'type': 'redeem',
-          'source': 'promotion',
-          'reference_id': offer['id'].toString(),
-          'description':
-              'Redeemed $pointsRequired points for ${offer['title']}',
-          'created_at': DateTime.now().toIso8601String(),
-        });
-      }
-
-      if (!mounted) return;
-
-      setState(() {
-        _claimedOfferIds = {..._claimedOfferIds, offer['id'] as int};
-      });
-
-      _showSnackBar(
-        '✅ "${offer['title']}" applied! Tap "Book Now" or "VIP" to use it.',
-        Colors.green,
+      // ✅ Atomic RPC — handles: points, used_count, race safe
+      final response = await supabase.rpc(
+        'claim_offer',
+        params: {'p_offer_id': offerId},
       );
 
-      // ✅ NO NAVIGATION — User stays on dashboard
-      debugPrint('✅ Offer claimed. User can click Book/VIP on card.');
+      if (!mounted) return;
+      setState(() => _claimingOfferIds.remove(offerId));
+
+      final result = response is Map ? response : <String, dynamic>{};
+      if (result['success'] == true) {
+        _showSnackBar(
+          '✅ "${offer['title']}" applied! Tap "Book Now" or "VIP" to use it.',
+          Colors.green,
+        );
+        // ✅ Full refresh so badges update
+        await _loadDashboardData();
+      } else {
+        final msg = (result['message'] ?? 'Failed to apply offer').toString();
+        _showSnackBar(msg, Colors.red);
+        await _loadDashboardData();
+      }
     } catch (e, stackTrace) {
       debugPrint('❌ Error applying offer: $e');
       debugPrint('   Stack: $stackTrace');
       if (mounted) {
+        setState(() => _claimingOfferIds.remove(offerId));
         _showSnackBar('Error applying offer. Please try again.', Colors.red);
       }
     }
@@ -1533,7 +1586,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ✅ Card accent colour (same palette as the Salon Profile offers)
   Color _getOfferColor(int index) {
     final colors = [
       AppTheme.primary,
@@ -1743,10 +1795,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ============================================================
-  // ✅ SEARCH OVERLAY — same width as the search bar, follows it,
-  //    height-limited so it never fills the whole screen
-  // ============================================================
   void _showSearchOverlay() {
     _removeSearchOverlay();
 
@@ -2459,8 +2507,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ✅ AppBar actions that can never overflow: when the AppBar gets very
-  //    little width (web resize / page transition) they scale down instead.
   List<Widget> _safeActions(List<Widget> children) {
     return [
       Flexible(
@@ -2757,9 +2803,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ OFFER CARD — same design as the Salon Profile offer card
-  //    Not applied → only "Apply Offer" button + pulse animation
-  //    Applied     → "Applied" chip + "Book Now" + "VIP" buttons (no pulse)
+  // ✅ OFFER CARD — same design as Salon Profile offer card
+  //    Variant-aware scope chip + claim state handling
   // ============================================================
   Widget _buildFacebookStyleOfferPost(
     Map<String, dynamic> offer,
@@ -2776,6 +2821,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final isExpired = daysLeft <= 0;
     final points = (offer['points_required'] as num?)?.toInt() ?? 0;
     final description = (offer['description'] as String?) ?? '';
+    final scopeSummary = offer['scope_summary']?.toString() ?? '';
 
     // image_url holds an emoji in this app; ignore real URLs
     final rawIcon = (offer['image_url'] as String?) ?? '';
@@ -2784,9 +2830,31 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         : _getDiscountIcon(offer['discount_type']);
 
     final offerId = offer['id'] as int?;
-    final isClaimed = offerId != null && _claimedOfferIds.contains(offerId);
+    final isClaimed = offer['claim_status'] == 'active';
+    final isUsed = offer['claim_status'] == 'used';
+    final isClaiming = offerId != null && _claimingOfferIds.contains(offerId);
 
     final secondaryColor = isDark ? Colors.white60 : Colors.grey[600];
+
+    // ✅ Button state
+    final String buttonLabel;
+    final bool buttonEnabled;
+    if (isUsed) {
+      buttonLabel = 'Used';
+      buttonEnabled = false;
+    } else if (isClaimed) {
+      buttonLabel = 'Applied';
+      buttonEnabled = false;
+    } else if (isClaiming) {
+      buttonLabel = 'Applying...';
+      buttonEnabled = false;
+    } else if (isExpired) {
+      buttonLabel = 'Expired';
+      buttonEnabled = false;
+    } else {
+      buttonLabel = 'Apply Offer';
+      buttonEnabled = true;
+    }
 
     final card = Container(
       margin: inGrid
@@ -2802,10 +2870,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isClaimed
+          color: isClaimed || isUsed
               ? Colors.green.shade400
               : color.withValues(alpha: 0.3),
-          width: isClaimed ? 1.5 : 1,
+          width: isClaimed || isUsed ? 1.5 : 1,
         ),
         boxShadow: [
           BoxShadow(
@@ -2821,7 +2889,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ───── HEADER: emoji + title + salon + discount chip ─────
+            // ───── HEADER ─────
             Row(
               children: [
                 Container(
@@ -2885,31 +2953,38 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                               ),
                             ),
                           ),
-                          if (isClaimed)
+                          if (isClaimed || isUsed)
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 8,
                                 vertical: 2,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.green.withValues(alpha: 0.12),
+                                color: (isUsed ? Colors.grey : Colors.green)
+                                    .withValues(alpha: 0.12),
                                 borderRadius: BorderRadius.circular(12),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Icon(
-                                    Icons.check_circle,
+                                    isUsed
+                                        ? Icons.check_circle
+                                        : Icons.bookmark,
                                     size: 12,
-                                    color: Colors.green.shade600,
+                                    color: isUsed
+                                        ? Colors.grey.shade700
+                                        : Colors.green.shade600,
                                   ),
                                   const SizedBox(width: 3),
                                   Text(
-                                    'Applied',
+                                    isUsed ? 'Used' : 'Applied',
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: Colors.green.shade600,
+                                      color: isUsed
+                                          ? Colors.grey.shade700
+                                          : Colors.green.shade600,
                                     ),
                                   ),
                                 ],
@@ -2933,9 +3008,41 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 style: TextStyle(fontSize: 12, color: secondaryColor),
               ),
             ],
+
+            // ───── SCOPE SUMMARY (variant-aware) ─────
+            if (scopeSummary.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.content_cut, size: 11, color: color),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        scopeSummary,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: color,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 12),
 
-            // ───── META: points + days left ─────
+            // ───── META ─────
             Row(
               children: [
                 if (points > 0)
@@ -3004,12 +3111,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             // ───── ACTIONS ─────
             SizedBox(
               height: 36,
-              child: isClaimed
+              child: isClaimed || isUsed
                   ? Row(
                       children: [
                         Expanded(
                           child: ElevatedButton.icon(
-                            onPressed: () => _bookAppointmentWithOffer(offer),
+                            onPressed: isUsed
+                                ? null
+                                : () => _bookAppointmentWithOffer(offer),
                             icon: const Icon(Icons.calendar_today, size: 14),
                             label: const Text(
                               'Book Now',
@@ -3023,6 +3132,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppTheme.primary,
                               foregroundColor: Colors.white,
+                              disabledBackgroundColor: isDark
+                                  ? Colors.grey[800]
+                                  : Colors.grey[300],
+                              disabledForegroundColor: isDark
+                                  ? Colors.white38
+                                  : Colors.grey[600],
                               elevation: 0,
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 6,
@@ -3036,7 +3151,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         const SizedBox(width: 8),
                         Expanded(
                           child: OutlinedButton.icon(
-                            onPressed: () => _createVipBookingWithOffer(offer),
+                            onPressed: isUsed
+                                ? null
+                                : () => _createVipBookingWithOffer(offer),
                             icon: const Icon(
                               Icons.star,
                               size: 14,
@@ -3070,10 +3187,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   : SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: isExpired ? null : () => _applyOffer(offer),
-                        icon: const Icon(Icons.local_offer, size: 15),
+                        onPressed:
+                            buttonEnabled ? () => _applyOffer(offer) : null,
+                        icon: isClaiming
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(Icons.local_offer, size: 15),
                         label: Text(
-                          isExpired ? 'Expired' : 'Apply Offer',
+                          buttonLabel,
                           style: const TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -3101,8 +3228,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       ),
     );
 
-    // ✨ Pulse only the offers that are NOT applied yet (new offers)
-    if (!isClaimed && !isExpired) {
+    // ✨ Pulse only the offers that are NOT applied yet AND not expired
+    if (!isClaimed && !isUsed && !isExpired && !isClaiming) {
       return ScaleTransition(scale: _pulseAnim, child: card);
     }
     return card;
@@ -3271,8 +3398,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
-                  // ✅ Margin lives on the outer container; the link/key are on
-                  //    the inner decorated box so the overlay matches its size
                   Container(
                     margin: const EdgeInsets.only(bottom: 20),
                     child: CompositedTransformTarget(
@@ -3576,13 +3701,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _offers.length,
-                    // ✅ Fixed card height (works for both Apply / Applied states)
+                    // ✅ Match SalonProfile card height (~300-320)
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           crossAxisSpacing: 16,
                           mainAxisSpacing: 16,
-                          mainAxisExtent: 240,
+                          mainAxisExtent: 320,
                         ),
                     itemBuilder: (context, index) =>
                         _buildFacebookStyleOfferPost(
@@ -3742,7 +3867,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           ),
         ],
         const SizedBox(height: 4),
-        // ✅ Activity Summary — at the very bottom of the screen
         _buildActivitySummaryCard(),
         const SizedBox(height: 20),
       ],

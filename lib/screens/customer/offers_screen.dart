@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../services/timezone_service.dart';
 import '../../theme/app_theme.dart';
 import '../../extensions/context_extensions.dart';
 
@@ -25,25 +23,16 @@ class _OffersScreenState extends State<OffersScreen> {
   String _selectedFilter = 'all';
   String _selectedSort = 'newest';
 
-  // ============================================
-  // TIMEZONE VARIABLES
-  // ============================================
-  String _userTimezone = '';
-  bool _isTimezoneLoaded = false;
-
-  // ✅ Web Scroll Controller
+  // Web Scroll Controller
   final ScrollController _scrollController = ScrollController();
+
+  // Track claiming state per offer
+  final Set<int> _claimingOfferIds = {};
 
   @override
   void initState() {
     super.initState();
-    _initializeTimezone();
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _checkForTimezoneChange();
+    _initialize();
   }
 
   @override
@@ -53,127 +42,67 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // TIMEZONE INITIALIZATION
+  // INITIALIZATION
   // ============================================
 
-  Future<void> _initializeTimezone() async {
-    await TimezoneService.initialize();
-
-    final prefs = await SharedPreferences.getInstance();
-    _userTimezone =
-        prefs.getString('cached_timezone') ??
-        TimezoneService.getCurrentTimezone();
-    await TimezoneService.setTimezone(_userTimezone);
-
-    if (mounted) {
-      setState(() {
-        _isTimezoneLoaded = true;
-      });
-    }
-
-    debugPrint('✅ User timezone: $_userTimezone');
-
+  Future<void> _initialize() async {
     await _loadOffers();
   }
 
-  Future<void> _checkForTimezoneChange() async {
-    final prefs = await SharedPreferences.getInstance();
-    final currentTimezone =
-        prefs.getString('cached_timezone') ??
-        TimezoneService.getCurrentTimezone();
+  // ============================================
+  // ✅ ROLE CHECK (role name based)
+  // ============================================
 
-    if (_userTimezone != currentTimezone && _userTimezone.isNotEmpty) {
-      _userTimezone = currentTimezone;
-      await TimezoneService.setTimezone(_userTimezone);
-      if (mounted) {
-        await _loadOffers();
+  Future<bool> _checkCustomerActive() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return false;
+
+    try {
+      final result = await supabase
+          .from('user_roles')
+          .select('status, roles!inner(name)')
+          .eq('user_id', user.id)
+          .eq('roles.name', 'customer')
+          .maybeSingle();
+
+      return result != null && result['status'] == 'active';
+    } catch (e) {
+      debugPrint('Role check error: $e');
+      return false;
+    }
+  }
+
+  Future<String?> _checkProfileStatus() async {
+    final user = supabase.auth.currentUser;
+    if (user == null) return 'Please login to continue';
+
+    try {
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', user.id)
+          .maybeSingle();
+
+      if (profileCheck == null) return null;
+
+      if (profileCheck['is_blocked'] == true) {
+        return 'Your account has been blocked. Please contact support.';
       }
-    }
-  }
-
-  // ============================================
-  // ✅ TIMEZONE HELPER METHODS
-  // ============================================
-
-  int _getDaysLeftLocal(String validToUtc) {
-    try {
-      final utcDate = DateTime.parse(validToUtc);
-      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
-        '00:00:00',
-        utcDate,
-      );
-      final localDate = DateTime(
-        localDateTime.year,
-        localDateTime.month,
-        localDateTime.day,
-      );
-
-      final now = DateTime.now();
-      final todayLocal = DateTime(now.year, now.month, now.day);
-
-      return localDate.difference(todayLocal).inDays;
+      if (profileCheck['is_active'] == false) {
+        return 'Your profile is inactive. Please contact support.';
+      }
+      return null;
     } catch (e) {
-      debugPrint('Error calculating days left: $e');
-      return -1;
+      debugPrint('Profile check error: $e');
+      return null;
     }
-  }
-
-  bool _isOfferActiveLocally(Map<String, dynamic> offer) {
-    try {
-      final validFromUtc = DateTime.parse(offer['valid_from']);
-      final validToUtc = DateTime.parse(offer['valid_to']);
-
-      final validFromLocal = TimezoneService.utcToLocalDateTimeForDate(
-        '00:00:00',
-        validFromUtc,
-      );
-      final validToLocal = TimezoneService.utcToLocalDateTimeForDate(
-        '00:00:00',
-        validToUtc,
-      );
-
-      final fromLocal = DateTime(
-        validFromLocal.year,
-        validFromLocal.month,
-        validFromLocal.day,
-      );
-      final toLocal = DateTime(
-        validToLocal.year,
-        validToLocal.month,
-        validToLocal.day,
-      );
-
-      final now = DateTime.now();
-      final todayLocal = DateTime(now.year, now.month, now.day);
-
-      return !fromLocal.isAfter(todayLocal) && toLocal.isAfter(todayLocal);
-    } catch (e) {
-      debugPrint('Error checking offer active: $e');
-      return false;
-    }
-  }
-
-  String _getTimezoneDisplay() {
-    return TimezoneService.getFullTimezoneDisplay();
-  }
-
-  bool _isDST() {
-    final timezone = _userTimezone;
-    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
-      return false;
-    }
-    final now = DateTime.now();
-    final month = now.month;
-    return month > 3 && month < 11;
   }
 
   // ============================================
-  // LOAD OFFERS
+  // ✅ LOAD OFFERS (variant-aware + claim status)
   // ============================================
 
   Future<void> _loadOffers() async {
-    if (!_isTimezoneLoaded) return;
-
     if (mounted) {
       setState(() {
         _isLoading = true;
@@ -194,14 +123,9 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
-      final customerCheck = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', user.id)
-          .eq('role_id', 3)
-          .maybeSingle();
-
-      if (customerCheck == null || customerCheck['status'] != 'active') {
+      // ✅ Role check by name
+      final isCustomer = await _checkCustomerActive();
+      if (!isCustomer) {
         if (mounted) {
           setState(() {
             _hasError = true;
@@ -213,35 +137,17 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
-      final profileCheck = await supabase
-          .from('profiles')
-          .select('is_active, is_blocked')
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (profileCheck != null) {
-        if (profileCheck['is_blocked'] == true) {
-          if (mounted) {
-            setState(() {
-              _hasError = true;
-              _errorMessage =
-                  'Your account has been blocked. Please contact support.';
-              _isLoading = false;
-            });
-          }
-          return;
+      // ✅ Profile status check
+      final profileError = await _checkProfileStatus();
+      if (profileError != null) {
+        if (mounted) {
+          setState(() {
+            _hasError = true;
+            _errorMessage = profileError;
+            _isLoading = false;
+          });
         }
-        if (profileCheck['is_active'] == false) {
-          if (mounted) {
-            setState(() {
-              _hasError = true;
-              _errorMessage =
-                  'Your profile is inactive. Please contact support.';
-              _isLoading = false;
-            });
-          }
-          return;
-        }
+        return;
       }
 
       final followedSalonsResult = await supabase
@@ -266,6 +172,7 @@ class _OffersScreenState extends State<OffersScreen> {
 
       final todayUtc = DateTime.now().toUtc().toIso8601String().split('T')[0];
 
+      // ✅ Load offers + offer_services (variant-aware)
       final result = await supabase
           .from('offers')
           .select('''
@@ -288,6 +195,12 @@ class _OffersScreenState extends State<OffersScreen> {
               logo_url,
               address,
               phone
+            ),
+            offer_services (
+              service_id,
+              variant_id,
+              services:service_id (id, name),
+              service_variants:variant_id (id, salon_gender_id, salon_age_category_id)
             )
           ''')
           .inFilter('salon_id', followedSalonIds)
@@ -296,9 +209,110 @@ class _OffersScreenState extends State<OffersScreen> {
           .gte('valid_to', todayUtc)
           .order('created_at', ascending: false);
 
+      if (result.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _offers = [];
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+
+      // ✅ Load customer claims
+      final offerIds = result.map<int>((o) => o['id'] as int).toList();
+      Map<int, String> claimStatus = {};
+
+      try {
+        final claims = await supabase
+            .from('customer_offers')
+            .select('offer_id, status')
+            .eq('customer_id', user.id)
+            .inFilter('offer_id', offerIds);
+
+        for (var claim in claims) {
+          claimStatus[claim['offer_id'] as int] = claim['status'] as String;
+        }
+      } catch (e) {
+        debugPrint('Error loading claims: $e');
+      }
+
+      // ✅ Load gender/age lookups for variant labels
+      final genderIds = <int>{};
+      final ageIds = <int>{};
+      for (final o in result) {
+        final svcList = o['offer_services'] as List? ?? [];
+        for (final os in svcList) {
+          final variant = os['service_variants'];
+          if (variant != null) {
+            final gid = variant['salon_gender_id'] as int?;
+            final aid = variant['salon_age_category_id'] as int?;
+            if (gid != null) genderIds.add(gid);
+            if (aid != null) ageIds.add(aid);
+          }
+        }
+      }
+
+      final Map<int, String> genderMap = {};
+      if (genderIds.isNotEmpty) {
+        final genders = await supabase
+            .from('salon_genders')
+            .select('id, display_name')
+            .inFilter('id', genderIds.toList());
+        for (var g in genders) {
+          genderMap[g['id'] as int] = g['display_name']?.toString() ?? '';
+        }
+      }
+
+      final Map<int, String> ageMap = {};
+      if (ageIds.isNotEmpty) {
+        final ages = await supabase
+            .from('salon_age_categories')
+            .select('id, display_name')
+            .inFilter('id', ageIds.toList());
+        for (var a in ages) {
+          ageMap[a['id'] as int] = a['display_name']?.toString() ?? '';
+        }
+      }
+
+      // ✅ Build variant/scope summary + merge claim status
+      final enriched = result.map<Map<String, dynamic>>((o) {
+        final offer = Map<String, dynamic>.from(o);
+        final svcList = (offer['offer_services'] as List? ?? []);
+        final scopeParts = <String>[];
+
+        for (final os in svcList) {
+          final service = os['services'];
+          final variant = os['service_variants'];
+          final serviceName = service?['name']?.toString() ?? 'Service';
+
+          if (variant == null) {
+            // Service-level → applies to all variants
+            scopeParts.add(serviceName);
+          } else {
+            // Variant-level
+            final gid = variant['salon_gender_id'] as int?;
+            final aid = variant['salon_age_category_id'] as int?;
+            final gender = gid != null ? (genderMap[gid] ?? '') : '';
+            final age = aid != null ? (ageMap[aid] ?? '') : '';
+            final labelParts = <String>[];
+            if (gender.isNotEmpty) labelParts.add(gender);
+            if (age.isNotEmpty) labelParts.add(age);
+            final vLabel =
+                labelParts.isEmpty ? 'Standard' : labelParts.join(' ');
+            scopeParts.add('$serviceName · $vLabel');
+          }
+        }
+
+        offer['scope_summary'] =
+            scopeParts.isEmpty ? 'All services' : scopeParts.join(', ');
+        offer['claim_status'] = claimStatus[offer['id'] as int];
+        return offer;
+      }).toList();
+
       if (mounted) {
         setState(() {
-          _offers = List<Map<String, dynamic>>.from(result);
+          _offers = enriched;
           _isLoading = false;
         });
       }
@@ -315,6 +329,58 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
+  // DATE HELPERS
+  // ============================================
+
+  int _getDaysLeft(String validTo) {
+    try {
+      final utcDate = DateTime.parse(validTo);
+      final nowUtc = DateTime.now().toUtc();
+      final todayUtcMidnight = DateTime.utc(
+        nowUtc.year,
+        nowUtc.month,
+        nowUtc.day,
+      );
+      final validToUtcMidnight = DateTime.utc(
+        utcDate.year,
+        utcDate.month,
+        utcDate.day,
+      );
+      return validToUtcMidnight.difference(todayUtcMidnight).inDays;
+    } catch (e) {
+      debugPrint('Error calculating days left: $e');
+      return -1;
+    }
+  }
+
+  bool _isOfferActive(Map<String, dynamic> offer) {
+    try {
+      final validFromUtc = DateTime.parse(offer['valid_from']);
+      final validToUtc = DateTime.parse(offer['valid_to']);
+
+      final now = DateTime.now().toUtc();
+      final todayUtcMidnight =
+          DateTime.utc(now.year, now.month, now.day);
+      final fromUtcMidnight = DateTime.utc(
+        validFromUtc.year,
+        validFromUtc.month,
+        validFromUtc.day,
+      );
+      final toUtcMidnight = DateTime.utc(
+        validToUtc.year,
+        validToUtc.month,
+        validToUtc.day,
+      );
+
+      return !fromUtcMidnight.isAfter(todayUtcMidnight) &&
+          toUtcMidnight.isAfter(todayUtcMidnight);
+    } catch (e) {
+      debugPrint('Error checking offer active: $e');
+      return false;
+    }
+  }
+
+  // ============================================
   // FILTERED AND SORTED OFFERS
   // ============================================
 
@@ -324,12 +390,12 @@ class _OffersScreenState extends State<OffersScreen> {
     switch (_selectedFilter) {
       case 'active':
         filtered = filtered
-            .where((offer) => _isOfferActiveLocally(offer))
+            .where((offer) => _isOfferActive(offer))
             .toList();
         break;
       case 'expiring':
         filtered = filtered.where((offer) {
-          final daysLeft = _getDaysLeftLocal(offer['valid_to']);
+          final daysLeft = _getDaysLeft(offer['valid_to']);
           return daysLeft <= 7 && daysLeft >= 0;
         }).toList();
         break;
@@ -424,10 +490,14 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // APPLY OFFER
+  // ✅ APPLY OFFER - uses claim_offer RPC
   // ============================================
 
   Future<void> _applyOffer(Map<String, dynamic> offer) async {
+    final offerId = offer['id'] as int;
+
+    if (_claimingOfferIds.contains(offerId)) return;
+
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
@@ -438,14 +508,23 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
-      final customerCheck = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', user.id)
-          .eq('role_id', 3)
-          .maybeSingle();
+      // Already claimed check
+      if (offer['claim_status'] == 'active') {
+        if (mounted) {
+          _showSnackBar('You have already claimed this offer', Colors.orange);
+        }
+        return;
+      }
+      if (offer['claim_status'] == 'used') {
+        if (mounted) {
+          _showSnackBar('You have already used this offer', Colors.red);
+        }
+        return;
+      }
 
-      if (customerCheck == null || customerCheck['status'] != 'active') {
+      // Role check by name
+      final isCustomer = await _checkCustomerActive();
+      if (!isCustomer) {
         if (mounted) {
           _showSnackBar(
             'Your account is not active. Please contact support.',
@@ -455,40 +534,19 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
-      final profileCheck = await supabase
-          .from('profiles')
-          .select('is_active, is_blocked')
-          .eq('id', user.id)
-          .maybeSingle();
-
-      if (profileCheck != null) {
-        if (profileCheck['is_blocked'] == true) {
-          if (mounted) {
-            _showSnackBar(
-              'Your account has been blocked. Please contact support.',
-              Colors.red,
-            );
-          }
-          return;
-        }
-        if (profileCheck['is_active'] == false) {
-          if (mounted) {
-            _showSnackBar(
-              'Your profile is inactive. Please contact support.',
-              Colors.red,
-            );
-          }
-          return;
-        }
-      }
-
-      if (!_isOfferActiveLocally(offer)) {
-        if (mounted) {
-          _showSnackBar('This offer has expired', Colors.red);
-        }
+      // Profile status check
+      final profileError = await _checkProfileStatus();
+      if (profileError != null) {
+        if (mounted) _showSnackBar(profileError, Colors.red);
         return;
       }
 
+      if (!_isOfferActive(offer)) {
+        if (mounted) _showSnackBar('This offer has expired', Colors.red);
+        return;
+      }
+
+      // Points check
       final pointsRequired = offer['points_required'] ?? 0;
       if (pointsRequired > 0) {
         final loyaltyResult = await supabase
@@ -509,6 +567,7 @@ class _OffersScreenState extends State<OffersScreen> {
         }
       }
 
+      // Usage limit check
       final usageLimit = offer['usage_limit'];
       final usedCount = offer['used_count'] ?? 0;
       if (usageLimit != null && usedCount >= usageLimit) {
@@ -518,29 +577,9 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
-      final existingOffer = await supabase
-          .from('customer_offers')
-          .select('id, status')
-          .eq('customer_id', user.id)
-          .eq('offer_id', offer['id'])
-          .maybeSingle();
-
-      if (existingOffer != null) {
-        if (existingOffer['status'] == 'active') {
-          if (mounted) {
-            _showSnackBar('You have already applied this offer', Colors.orange);
-          }
-          return;
-        } else if (existingOffer['status'] == 'used') {
-          if (mounted) {
-            _showSnackBar('You have already used this offer', Colors.red);
-          }
-          return;
-        }
-      }
-
       if (!mounted) return;
 
+      // Confirm dialog
       final confirmed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -597,6 +636,15 @@ class _OffersScreenState extends State<OffersScreen> {
                   ),
                 ),
               ),
+              // ✅ Scope summary
+              if ((offer['scope_summary'] ?? '').toString().isNotEmpty) ...[
+                const SizedBox(height: 10),
+                Text(
+                  'Scope: ${offer['scope_summary']}',
+                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  textAlign: TextAlign.center,
+                ),
+              ],
               if (pointsRequired > 0) ...[
                 const SizedBox(height: 12),
                 Row(
@@ -615,22 +663,14 @@ class _OffersScreenState extends State<OffersScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () {
-                if (mounted) {
-                  Navigator.pop(dialogContext, false);
-                }
-              },
+              onPressed: () => Navigator.pop(dialogContext, false),
               child: Text(
                 'Cancel',
                 style: TextStyle(color: context.secondaryTextColor),
               ),
             ),
             ElevatedButton(
-              onPressed: () {
-                if (mounted) {
-                  Navigator.pop(dialogContext, true);
-                }
-              },
+              onPressed: () => Navigator.pop(dialogContext, true),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primary,
                 foregroundColor: Colors.white,
@@ -647,62 +687,43 @@ class _OffersScreenState extends State<OffersScreen> {
       if (!mounted) return;
       if (confirmed != true) return;
 
-      await supabase.from('customer_offers').insert({
-        'customer_id': user.id,
-        'offer_id': offer['id'],
-        'claimed_at': DateTime.now().toIso8601String(),
-        'expires_at': offer['valid_to'],
-        'status': 'active',
-      });
+      setState(() => _claimingOfferIds.add(offerId));
 
-      await supabase
-          .from('offers')
-          .update({'used_count': (usedCount + 1)})
-          .eq('id', offer['id']);
+      // ✅ Atomic RPC
+      final response = await supabase.rpc(
+        'claim_offer',
+        params: {'p_offer_id': offerId},
+      );
 
-      if (pointsRequired > 0) {
-        final loyaltyResult = await supabase
-            .from('customer_loyalty')
-            .select('current_points')
-            .eq('customer_id', user.id)
-            .maybeSingle();
+      if (!mounted) return;
+      setState(() => _claimingOfferIds.remove(offerId));
 
-        final currentPoints = loyaltyResult?['current_points'] ?? 0;
-        final newPoints = currentPoints - pointsRequired;
+      final result = response is Map ? response : <String, dynamic>{};
+      final success = result['success'] == true;
 
-        await supabase
-            .from('customer_loyalty')
-            .update({
-              'current_points': newPoints,
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('customer_id', user.id);
-
-        await supabase.from('loyalty_transactions').insert({
-          'customer_id': user.id,
-          'points': -pointsRequired,
-          'type': 'redeem',
-          'source': 'offer',
-          'reference_id': offer['id'].toString(),
-          'description':
-              'Redeemed $pointsRequired points for ${offer['title']}',
-          'created_at': DateTime.now().toIso8601String(),
-        });
+      if (!success) {
+        final msg = (result['message'] ?? 'Failed to claim offer').toString();
+        _showSnackBar(msg, Colors.red);
+        await _loadOffers();
+        return;
       }
 
-      if (mounted) {
-        _showSnackBar(
-          '✅ "${offer['title']}" applied successfully!',
-          Colors.green,
-        );
-      }
+      _showSnackBar(
+        '✅ "${offer['title']}" applied successfully!',
+        Colors.green,
+      );
 
+      // Refresh in background
+      _loadOffers();
+
+      // Navigate to booking flow with offer
       if (mounted) {
         context.push('/customer/booking-flow', extra: {'offer': offer});
       }
     } catch (e) {
       debugPrint('Error applying offer: $e');
       if (mounted) {
+        setState(() => _claimingOfferIds.remove(offerId));
         _showSnackBar('Error applying offer. Please try again.', Colors.red);
       }
     }
@@ -712,7 +733,8 @@ class _OffersScreenState extends State<OffersScreen> {
   // NAVIGATION METHODS
   // ============================================
 
-  void _navigateToSalonProfile(Map<String, dynamic> salonData) {
+  void _navigateToSalonProfile(Map<String, dynamic>? salonData) {
+    if (salonData == null) return;
     final salon = {
       'id': salonData['id'],
       'name': salonData['name'],
@@ -724,68 +746,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // TIMEZONE INFO WIDGET - WITH DARK MODE
-  // ============================================
-
-  Widget _buildTimezoneInfoCard() {
-    final isDark = context.isDarkMode;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.blue[900]!.withValues(alpha: 0.2)
-            : Colors.blue.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark
-              ? Colors.blue[700]!.withValues(alpha: 0.3)
-              : Colors.blue.shade200,
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.access_time,
-            size: 16,
-            color: isDark ? Colors.blue[300] : Colors.blue,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '⏰ Offers shown in your local timezone: ${_getTimezoneDisplay()}',
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.blue[300] : Colors.blueGrey,
-              ),
-            ),
-          ),
-          if (_isDST())
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.amber[800]!.withValues(alpha: 0.3)
-                    : Colors.amber.shade100,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                'DST',
-                style: TextStyle(
-                  fontSize: 9,
-                  color: isDark ? Colors.amber[300] : Colors.amber.shade800,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  // ============================================
-  // OFFER CARD - WITH DARK MODE
+  // ✅ OFFER CARD (with variant scope + claim status)
   // ============================================
 
   Widget _buildOfferCard(Map<String, dynamic> offer, {required bool isMobile}) {
@@ -795,10 +756,17 @@ class _OffersScreenState extends State<OffersScreen> {
     final salonLogo = salonData != null ? salonData['logo_url'] : null;
     final salonAddress = salonData != null ? salonData['address'] : null;
 
-    final daysLeft = _getDaysLeftLocal(offer['valid_to']);
+    final offerId = offer['id'] as int;
+    final isClaiming = _claimingOfferIds.contains(offerId);
+    final claimStatus = offer['claim_status'] as String?;
+    final isClaimed = claimStatus == 'active';
+    final isUsed = claimStatus == 'used';
+
+    final daysLeft = _getDaysLeft(offer['valid_to']);
     final discountColor = _getDiscountColor(offer['discount_type']);
     final discountIcon = _getDiscountIcon(offer['discount_type']);
     final discountText = _getDiscountText(offer);
+    final scopeSummary = offer['scope_summary']?.toString() ?? '';
 
     String statusText = '';
     Color? statusColor = Colors.green;
@@ -820,17 +788,38 @@ class _OffersScreenState extends State<OffersScreen> {
       statusColor = isDark ? Colors.green[300] : Colors.green;
     }
 
+    // Button label / state
+    final String buttonLabel;
+    final bool buttonEnabled;
+    if (isClaiming) {
+      buttonLabel = 'Claiming...';
+      buttonEnabled = false;
+    } else if (isUsed) {
+      buttonLabel = 'Used';
+      buttonEnabled = false;
+    } else if (isClaimed) {
+      buttonLabel = 'Claimed';
+      buttonEnabled = false;
+    } else if (daysLeft < 0) {
+      buttonLabel = 'Expired';
+      buttonEnabled = false;
+    } else {
+      buttonLabel = 'Apply Offer';
+      buttonEnabled = true;
+    }
+
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: InkWell(
-        onTap: () => _applyOffer(offer),
+        onTap: buttonEnabled ? () => _applyOffer(offer) : null,
         borderRadius: BorderRadius.circular(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Header
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -891,7 +880,8 @@ class _OffersScreenState extends State<OffersScreen> {
                             salonAddress,
                             style: TextStyle(
                               fontSize: 12,
-                              color: isDark ? Colors.white60 : Colors.grey[500],
+                              color:
+                                  isDark ? Colors.white60 : Colors.grey[500],
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -899,44 +889,80 @@ class _OffersScreenState extends State<OffersScreen> {
                       ],
                     ),
                   ),
-                  Container(
-                    constraints: const BoxConstraints(minWidth: 70),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: statusColor?.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.access_time, size: 12, color: statusColor),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            statusText,
+                  // Claim badge OR day badge
+                  if (isUsed || isClaimed)
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 70),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: (isUsed ? Colors.grey : Colors.green)
+                            .withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isUsed ? Icons.check_circle : Icons.bookmark,
+                            size: 12,
+                            color: isUsed ? Colors.grey : Colors.green,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isUsed ? 'Used' : 'Claimed',
                             style: TextStyle(
                               fontSize: 11,
-                              fontWeight: FontWeight.w500,
-                              color: statusColor,
+                              fontWeight: FontWeight.w600,
+                              color: isUsed ? Colors.grey : Colors.green,
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
+                    )
+                  else
+                    Container(
+                      constraints: const BoxConstraints(minWidth: 70),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: statusColor?.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.access_time, size: 12, color: statusColor),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              statusText,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: statusColor,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
                 ],
               ),
             ),
 
+            // Body
             Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Discount chip
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -992,6 +1018,44 @@ class _OffersScreenState extends State<OffersScreen> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
+
+                  // ✅ Scope summary chip
+                  if (scopeSummary.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: discountColor.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.content_cut,
+                            size: 12,
+                            color: discountColor,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              scopeSummary,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: discountColor,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
                   const SizedBox(height: 16),
 
                   if ((offer['points_required'] ?? 0) > 0)
@@ -1009,7 +1073,11 @@ class _OffersScreenState extends State<OffersScreen> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.star, color: Colors.amber, size: 14),
+                          const Icon(
+                            Icons.star,
+                            color: Colors.amber,
+                            size: 14,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             '${offer['points_required']} points required',
@@ -1030,19 +1098,38 @@ class _OffersScreenState extends State<OffersScreen> {
                     children: [
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: () => _applyOffer(offer),
+                          onPressed: buttonEnabled
+                              ? () => _applyOffer(offer)
+                              : null,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: discountColor,
                             foregroundColor: Colors.white,
+                            disabledBackgroundColor: isDark
+                                ? Colors.grey[800]
+                                : Colors.grey[300],
+                            disabledForegroundColor: isDark
+                                ? Colors.white38
+                                : Colors.grey[600],
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12),
                             ),
                           ),
-                          child: const Text(
-                            'Apply Offer',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
+                          child: isClaiming
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : Text(
+                                  buttonLabel,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -1068,7 +1155,8 @@ class _OffersScreenState extends State<OffersScreen> {
                         child: Text(
                           'View Salon',
                           style: TextStyle(
-                            color: isDark ? Colors.white60 : Colors.grey[600],
+                            color:
+                                isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                       ),
@@ -1098,7 +1186,6 @@ class _OffersScreenState extends State<OffersScreen> {
           constraints: const BoxConstraints(maxWidth: 1200),
           child: Column(
             children: [
-              _buildTimezoneInfoCard(),
               _buildFilterSortBar(),
               const SizedBox(height: 16),
               Expanded(
@@ -1112,7 +1199,7 @@ class _OffersScreenState extends State<OffersScreen> {
                               maxCrossAxisExtent: 400,
                               crossAxisSpacing: 16,
                               mainAxisSpacing: 16,
-                              childAspectRatio: 0.9,
+                              childAspectRatio: 0.75,
                             ),
                         itemCount: filteredOffers.length,
                         itemBuilder: (context, index) => _buildOfferCard(
@@ -1137,7 +1224,6 @@ class _OffersScreenState extends State<OffersScreen> {
 
     return Column(
       children: [
-        _buildTimezoneInfoCard(),
         _buildFilterSortBar(),
         const SizedBox(height: 16),
         Expanded(
@@ -1156,7 +1242,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // FILTER AND SORT BAR - WITH DARK MODE
+  // FILTER AND SORT BAR
   // ============================================
 
   Widget _buildFilterSortBar() {
@@ -1194,9 +1280,8 @@ class _OffersScreenState extends State<OffersScreen> {
                     color: isDark ? Colors.white60 : Colors.grey[600],
                   ),
                   isExpanded: true,
-                  dropdownColor: isDark
-                      ? const Color(0xFF2A2A2A)
-                      : Colors.white,
+                  dropdownColor:
+                      isDark ? const Color(0xFF2A2A2A) : Colors.white,
                   style: TextStyle(
                     color: isDark ? Colors.white : Colors.black87,
                   ),
@@ -1240,9 +1325,8 @@ class _OffersScreenState extends State<OffersScreen> {
                     color: isDark ? Colors.white60 : Colors.grey[600],
                   ),
                   isExpanded: true,
-                  dropdownColor: isDark
-                      ? const Color(0xFF2A2A2A)
-                      : Colors.white,
+                  dropdownColor:
+                      isDark ? const Color(0xFF2A2A2A) : Colors.white,
                   style: TextStyle(
                     color: isDark ? Colors.white : Colors.black87,
                   ),
@@ -1291,7 +1375,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // EMPTY FILTER WIDGET - WITH DARK MODE
+  // EMPTY FILTER WIDGET
   // ============================================
 
   Widget _buildEmptyFilterWidget() {
@@ -1330,7 +1414,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // ✅ MAIN BUILD METHOD - WITH EDGE-TO-EDGE
+  // MAIN BUILD METHOD
   // ============================================
 
   @override
@@ -1338,37 +1422,6 @@ class _OffersScreenState extends State<OffersScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isWeb = screenWidth > 800;
     final isDark = context.isDarkMode;
-
-    if (!_isTimezoneLoaded) {
-      return Scaffold(
-        backgroundColor: isDark ? const Color(0xFF121212) : Colors.grey[50],
-        appBar: AppBar(
-          title: const Text(
-            'Special Offers',
-            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
-          ),
-          backgroundColor: AppTheme.primary,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          centerTitle: false,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: Colors.white),
-            onPressed: () => Navigator.pop(context),
-            tooltip: 'Back',
-          ),
-        ),
-        body: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: AppTheme.primary),
-              SizedBox(height: 16),
-              Text('Loading timezone...'),
-            ],
-          ),
-        ),
-      );
-    }
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.grey[50],
@@ -1388,13 +1441,12 @@ class _OffersScreenState extends State<OffersScreen> {
         ),
         actions: [
           IconButton(
-            icon: Icon(Icons.refresh, color: Colors.white),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadOffers,
             tooltip: 'Refresh',
           ),
         ],
       ),
-      // ✅ EDGE-TO-EDGE: SafeArea with Web/Mobile Layout
       body: SafeArea(
         child: _isLoading
             ? Center(
@@ -1413,18 +1465,18 @@ class _OffersScreenState extends State<OffersScreen> {
                 ),
               )
             : _hasError
-            ? _buildErrorWidget()
-            : _offers.isEmpty
-            ? _buildEmptyOffersWidget()
-            : isWeb
-            ? _buildWebLayout()
-            : _buildMobileLayout(),
+                ? _buildErrorWidget()
+                : _offers.isEmpty
+                    ? _buildEmptyOffersWidget()
+                    : isWeb
+                        ? _buildWebLayout()
+                        : _buildMobileLayout(),
       ),
     );
   }
 
   // ============================================
-  // ERROR WIDGET - WITH DARK MODE
+  // ERROR WIDGET
   // ============================================
 
   Widget _buildErrorWidget() {
@@ -1463,7 +1515,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // EMPTY OFFERS WIDGET - WITH DARK MODE
+  // EMPTY OFFERS WIDGET
   // ============================================
 
   Widget _buildEmptyOffersWidget() {
@@ -1476,17 +1528,13 @@ class _OffersScreenState extends State<OffersScreen> {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: isDark
-                  ? AppTheme.primary.withValues(alpha: 0.1)
-                  : AppTheme.primary.withValues(alpha: 0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.local_offer_outlined,
               size: 64,
-              color: isDark
-                  ? AppTheme.primary.withValues(alpha: 0.5)
-                  : AppTheme.primary.withValues(alpha: 0.5),
+              color: AppTheme.primary.withValues(alpha: 0.5),
             ),
           ),
           const SizedBox(height: 24),

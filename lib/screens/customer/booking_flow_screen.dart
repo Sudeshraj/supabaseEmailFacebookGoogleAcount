@@ -156,7 +156,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       }
     }
 
-    // ✅ NEW: Extract skip_to_date flag
+    // ✅ Extract skip_to_date flag
     //   true  → Salon Profile path  → jump to Date step (2)
     //   false → Dashboard offer path → stay on Service step (1)
     if (initial.containsKey('skip_to_date')) {
@@ -237,7 +237,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         }
       }
 
-      // ✅ NEW: Read skip_to_date from extra map
+      // ✅ Read skip_to_date from extra map
       if (map.containsKey('skip_to_date')) {
         _skipToDate = map['skip_to_date'] == true;
         debugPrint('🎯 skip_to_date (from extra): $_skipToDate');
@@ -246,17 +246,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // PER-SERVICE OFFER HELPERS
+  // PER-SERVICE OFFER HELPERS (variant-aware)
   // ============================================
 
   String _serviceKey(int serviceId, int? variantId) =>
       '${serviceId}_${variantId ?? 0}';
 
-  // ✅ FIX 1: Pass p_customer_id for claim tracking
+  // ✅ UPDATED: variant_id parameter added (variant-level offers)
   Future<List<Map<String, dynamic>>> _loadOffersForService(
     int serviceId,
-    double price,
-  ) async {
+    double price, {
+    int? variantId,
+  }) async {
     if (_selectedSalon == null) return [];
 
     try {
@@ -269,13 +270,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'p_service_id': serviceId,
           'p_service_price': price,
           'p_customer_id': user?.id,
+          'p_variant_id': variantId, // ✅ NEW: variant-aware offers
         },
       );
 
       if (result == null) return [];
       return List<Map<String, dynamic>>.from(result as List);
     } catch (e) {
-      debugPrint('⚠️ Error loading offers for service $serviceId: $e');
+      debugPrint(
+        '⚠️ Error loading offers for service $serviceId (variant $variantId): $e',
+      );
       return [];
     }
   }
@@ -360,7 +364,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     });
   }
 
-  // ✅ FIX 2: Show ⭐ "Applied" badge for claimed offers
+  // ✅ Show ⭐ "Applied" badge for claimed offers
   String _getOfferLabel(Map<String, dynamic> offer) {
     final title = offer['title']?.toString() ?? 'Offer';
     final type = offer['discount_type']?.toString();
@@ -468,7 +472,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final hasPreselected =
         _preselectedServices != null && _preselectedServices!.isNotEmpty;
 
- // ✅ Decide starting step:
+    // ✅ Decide starting step:
     //   - skip_to_date = true  → Date step (2)  [Salon Profile path]
     //   - skip_to_date = false → Service step (1) [Dashboard offer path]
     final int startingStep;
@@ -478,8 +482,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       startingStep = 1;
     }
 
-    debugPrint('🎯 Starting step: $startingStep '
-        '(${startingStep == 2 ? "Date" : "Service"})');
+    debugPrint(
+      '🎯 Starting step: $startingStep '
+      '(${startingStep == 2 ? "Date" : "Service"})',
+    );
 
     setState(() {
       _selectedSalon = normalized;
@@ -934,7 +940,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 
-  // ✅ FIX 3: Auto-select claimed offer
+  // ✅ Variant-aware + auto-select claimed offer
   Future<void> _toggleVariant(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
@@ -979,14 +985,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _recalculateTotals();
     });
 
-    final offers = await _loadOffersForService(sid, price);
+    // ✅ Pass variant ID for variant-aware offer loading
+    final offers = await _loadOffersForService(sid, price, variantId: vid);
 
     if (offers.isNotEmpty && mounted) {
       setState(() {
         _availableOffersPerService[key] = offers;
       });
 
-      // ✅ FIX: Auto-select claimed offer
+      // ✅ Auto-select claimed offer
       final claimedOffer = offers.firstWhere(
         (o) => o['is_claimed'] == true,
         orElse: () => <String, dynamic>{},
@@ -1043,11 +1050,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       await _toggleVariant(service, variant);
     }
 
-    // ✅ FIX 5: Backup auto-apply for any missed claimed offers
+    // ✅ Backup auto-apply for any missed claimed offers
     await _autoApplyClaimedOffers();
   }
 
-  // ✅ FIX 5: Backup auto-apply for missed claimed offers
+  // ✅ Variant-aware backup auto-apply
   Future<void> _autoApplyClaimedOffers() async {
     debugPrint('🎁 [Auto-Apply] Checking claimed offers...');
 
@@ -1067,7 +1074,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
       if (offers.isEmpty) {
         final price = (service['price'] as num?)?.toDouble() ?? 0;
-        offers = await _loadOffersForService(sid, price);
+        // ✅ Pass variant ID for variant-aware offer loading
+        offers = await _loadOffersForService(sid, price, variantId: vid);
 
         if (offers.isNotEmpty && mounted) {
           setState(() {
@@ -2012,7 +2020,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : _bgLight,
-         appBar: AppBar(
+      appBar: AppBar(
         title: Text(
           'Book Appointment',
           style: TextStyle(
@@ -2028,7 +2036,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
           onPressed: () {
-            // ✅ FIX: Natural step-by-step back
+            // ✅ Natural step-by-step back
             //    6 → 5 → 4 → 3 → 2 → 1 → 0 → Close
             if (_currentStep > 0) {
               setState(() => _currentStep--);
@@ -3290,6 +3298,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
+  // ✅ Variant row with service-only support
   Widget _buildVariantRow(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
@@ -3308,8 +3317,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final String age = variant['age']?.toString() ?? '';
     final String genderLower = gender.toLowerCase();
 
+    // ✅ Service-only variant detection (no gender, no age)
+    final bool isServiceOnly = gender.isEmpty && age.isEmpty;
+
     IconData genderIcon;
-    if (genderLower.contains('male')) {
+    if (isServiceOnly) {
+      genderIcon = Icons.spa_outlined; // ✅ Service-only icon
+    } else if (genderLower.contains('male')) {
       genderIcon = Icons.male;
     } else if (genderLower.contains('female')) {
       genderIcon = Icons.female;
@@ -3326,7 +3340,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final finalPrice = price - discount;
     final hasOffer = selectedOffer != null && discount > 0;
 
-    final String displayText = '$gender $age'.trim();
+    // ✅ Service-only → "Standard", else "$gender $age"
+    final String displayText = isServiceOnly
+        ? 'Standard'
+        : '$gender $age'.trim();
 
     return Column(
       children: [
@@ -3372,7 +3389,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        displayText.isEmpty ? 'Variant' : displayText,
+                        displayText, // ✅ "Standard" හෝ "Male Adult"
                         style: TextStyle(
                           fontWeight: isSelected
                               ? FontWeight.w600
@@ -3536,7 +3553,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  // ✅ FIX 4: Add key to force rebuild
                   DropdownButtonFormField<Map<String, dynamic>?>(
                     key: ValueKey(
                       'offer_${key}_${selectedOffer?['id'] ?? 'none'}',
@@ -3918,6 +3934,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
+  // ✅ Selected service item with "Standard" label support
   Widget _buildSelectedServiceItem(Map<String, dynamic> service, int index) {
     final isDark = context.isDarkMode;
     final String serviceName = service['name']?.toString() ?? 'Service';
@@ -3930,6 +3947,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         (service['final_price'] as num?)?.toDouble() ?? price;
     final int duration = (service['duration'] as num?)?.toInt() ?? 30;
     final offer = service['offer'] as Map<String, dynamic>?;
+
+    // ✅ Service-only → "Standard", else "$gender $age"
+    final String variantLabel = (gender.isEmpty && age.isEmpty)
+        ? 'Standard'
+        : '$gender $age'.trim();
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -3968,7 +3990,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$gender $age • $duration min',
+                      '$variantLabel • $duration min', // ✅ "Standard • 30 min"
                       style: TextStyle(
                         fontSize: 11,
                         color: isDark ? Colors.white60 : Colors.grey[600],
@@ -6173,7 +6195,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         final offer = s['offer'] as Map<String, dynamic>?;
                         final gender = s['gender']?.toString() ?? '';
                         final age = s['age']?.toString() ?? '';
-                        final details = '$gender $age'.trim();
+
+                        // ✅ Service-only → "Standard"
+                        final details = (gender.isEmpty && age.isEmpty)
+                            ? 'Standard'
+                            : '$gender $age'.trim();
 
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 8),
@@ -6184,7 +6210,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      '• ${s['name']?.toString() ?? 'Service'}${details.isNotEmpty ? ' ($details)' : ''}',
+                                      '• ${s['name']?.toString() ?? 'Service'} ($details)',
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: isDark
