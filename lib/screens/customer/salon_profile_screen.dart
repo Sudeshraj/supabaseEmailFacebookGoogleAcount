@@ -27,6 +27,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
   List<Map<String, dynamic>> _offers = [];
   bool _isLoadingOffers = true;
+  bool _isClaimingOffer = false;
 
   // ==================== TIMEZONE VARIABLES ====================
   String _userTimezone = '';
@@ -525,6 +526,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
+  // ============================================================
+  // OFFER CLAIM (follow required, NO redirect)
+  // ============================================================
+
   void _claimOffer(Map<String, dynamic> offer) {
     _checkAndShowOfferDialog(offer);
   }
@@ -545,6 +550,15 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         _showSnackBar(
           'Your account is not active. Please contact support.',
           Colors.red,
+        );
+        return;
+      }
+
+      // ✅ Must follow the salon first
+      if (!_isFollowing) {
+        _showSnackBar(
+          'Please follow ${widget.salon['name'] ?? 'this salon'} to claim offers',
+          Colors.orange,
         );
         return;
       }
@@ -670,24 +684,28 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              _applyOffer(offer);
+              _confirmClaimOffer(offer);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: context.primaryColor,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Apply Offer'),
+            child: const Text('Claim Offer'),
           ),
         ],
       ),
     );
   }
 
-  void _applyOffer(Map<String, dynamic> offer) async {
+  /// Saves the offer to the customer's claimed offers.
+  /// ✅ No navigation / redirect any more.
+  Future<void> _confirmClaimOffer(Map<String, dynamic> offer) async {
+    if (_isClaimingOffer) return;
+
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
-        _showSnackBar('Please login to apply offers', Colors.orange);
+        _showSnackBar('Please login to claim offers', Colors.orange);
         return;
       }
 
@@ -703,15 +721,58 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      _showSnackBar('✅ Offer "${offer['title']}" applied!', Colors.green);
-      if (!mounted) return;
-      context.push(
-        '/customer/booking-flow',
-        extra: {'salon': widget.salon, 'offer': offer},
-      );
+      if (!_isFollowing) {
+        _showSnackBar(
+          'Please follow ${widget.salon['name'] ?? 'this salon'} to claim offers',
+          Colors.orange,
+        );
+        return;
+      }
+
+      setState(() => _isClaimingOffer = true);
+
+      final existing = await supabase
+          .from('customer_offers')
+          .select('id, status')
+          .eq('customer_id', user.id)
+          .eq('offer_id', offer['id'])
+          .maybeSingle();
+
+      if (existing != null) {
+        final status = existing['status'];
+        if (status == 'used') {
+          _showSnackBar('You have already used this offer', Colors.orange);
+        } else if (status == 'active') {
+          _showSnackBar('You have already claimed this offer', Colors.orange);
+        } else {
+          // expired / cancelled → re-activate
+          await supabase
+              .from('customer_offers')
+              .update({
+                'status': 'active',
+                'claimed_at': DateTime.now().toUtc().toIso8601String(),
+              })
+              .eq('id', existing['id']);
+          _showSnackBar('✅ Offer "${offer['title']}" claimed!', Colors.green);
+        }
+      } else {
+        await supabase.from('customer_offers').insert({
+          'customer_id': user.id,
+          'offer_id': offer['id'],
+          'status': 'active',
+          'expires_at': offer['valid_to'] != null
+              ? DateTime.parse(offer['valid_to'].toString())
+                  .toUtc()
+                  .toIso8601String()
+              : null,
+        });
+        _showSnackBar('✅ Offer "${offer['title']}" claimed!', Colors.green);
+      }
     } catch (e) {
-      debugPrint('Error applying offer: $e');
-      _showSnackBar('Error applying offer. Please try again.', Colors.red);
+      debugPrint('Error claiming offer: $e');
+      _showSnackBar('Error claiming offer. Please try again.', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isClaimingOffer = false);
     }
   }
 
@@ -937,8 +998,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     _buildSalonInfoSection(
                         isWeb, isTablet, openTime, closeTime, isOpen),
                     const SizedBox(height: 20),
-                    _buildMenuTreeSection(),
-                    // ✅ Removed: _buildBookingButtons() — moved to top icons
+                    _buildMenuTreeSection(isWeb),
                     const SizedBox(height: 32),
                     Divider(color: context.dividerColor, height: 1),
                     const SizedBox(height: 24),
@@ -1052,7 +1112,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ============================================================
-  // LOGO + ACTIONS (with NEW icon buttons)
+  // LOGO + ACTIONS (with icon buttons)
   // ============================================================
 
   Widget _buildLogoAndActionsSection(bool isWeb) {
@@ -1067,31 +1127,34 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Wrap(
-              alignment: WrapAlignment.end,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              spacing: 10,
-              runSpacing: 8,
-              children: [
-                // ✅ NEW: Book Appointment (icon-only)
-                _buildIconActionButton(
-                  icon: Icons.calendar_today,
-                  tooltip: 'Book Appointment',
-                  color: context.primaryColor,
-                  onTap: _startBookingFlow,
-                ),
-                // ✅ NEW: VIP Booking (icon-only, amber)
-                _buildIconActionButton(
-                  icon: Icons.star,
-                  tooltip: 'VIP Booking',
-                  color: Colors.amber.shade700,
-                  onTap: _navigateToVipBooking,
-                ),
-                // Existing WhatsApp button (unchanged)
-                _buildWhatsAppButton(),
-                // Existing Follow button (unchanged)
-                _buildFollowButton(),
-              ],
+            // ✅ Always one single line – scales down slightly on narrow
+            // screens instead of wrapping the Follow button to a new line.
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  _buildIconActionButton(
+                    icon: Icons.calendar_today,
+                    tooltip: 'Book Appointment',
+                    color: context.primaryColor,
+                    onTap: _startBookingFlow,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildIconActionButton(
+                    icon: Icons.star,
+                    tooltip: 'VIP Booking',
+                    color: Colors.amber.shade700,
+                    onTap: _navigateToVipBooking,
+                  ),
+                  const SizedBox(width: 8),
+                  _buildWhatsAppButton(),
+                  const SizedBox(width: 8),
+                  _buildFollowButton(),
+                ],
+              ),
             ),
           ),
         ],
@@ -1099,7 +1162,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
-  // ✅ NEW: Icon-only circular action button
   Widget _buildIconActionButton({
     required IconData icon,
     required String tooltip,
@@ -1301,8 +1363,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
-  // ✅ REMOVED: _buildBookingButtons() — no longer called
-
   Widget _buildOffersSection() {
     if (_offers.isEmpty && !_isLoadingOffers) {
       return const SizedBox.shrink();
@@ -1335,6 +1395,37 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 ),
             ],
           ),
+          // ✅ Hint when the customer is not following the salon
+          if (!_isLoadingOffers && _offers.isNotEmpty && !_isFollowing) ...[
+            const SizedBox(height: 4),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline,
+                      size: 16, color: Colors.orange),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Follow this salon to claim its offers',
+                      style: context.bodySmall.copyWith(
+                        color: Colors.orange.shade800,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           _isLoadingOffers
               ? const Center(
@@ -1539,8 +1630,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               ),
             ),
           ),
-          const SizedBox(height: 24),
-          Divider(color: context.dividerColor, height: 1),
         ],
       ),
     );
@@ -1603,64 +1692,34 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   Widget _buildWhatsAppButton() {
     final phone = widget.salon['phone'];
     final hasPhone = phone != null && phone.toString().isNotEmpty;
+    final enabled = _isUserLoaded && _isUserActive && hasPhone;
 
-    if (!_isUserLoaded || !_isUserActive) {
-      return OutlinedButton(
-        onPressed: null,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: context.secondaryTextColor,
-          side: BorderSide(color: context.dividerColor),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(30),
+    const whatsappGreen = Color(0xFF25D366);
+
+    return Tooltip(
+      message: 'WhatsApp',
+      child: Material(
+        color: Colors.transparent,
+        shape: CircleBorder(
+          side: BorderSide(
+            color: enabled ? whatsappGreen : context.dividerColor,
+            width: 1.5,
           ),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.chat, size: 18, color: context.secondaryTextColor),
-            const SizedBox(width: 6),
-            Text(
-              'WhatsApp',
-              style: context.bodyMedium.copyWith(
-                fontWeight: FontWeight.w600,
-                color: context.secondaryTextColor,
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return OutlinedButton(
-      onPressed: hasPhone ? _openWhatsApp : null,
-      style: OutlinedButton.styleFrom(
-        foregroundColor:
-            hasPhone ? const Color(0xFF25D366) : context.secondaryTextColor,
-        side: BorderSide(
-          color: hasPhone
-              ? const Color(0xFF25D366)
-              : context.dividerColor,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.chat, size: 18),
-          const SizedBox(width: 6),
-          Text(
-            'WhatsApp',
-            style: context.bodyMedium.copyWith(
-              fontWeight: FontWeight.w600,
-              color: hasPhone
-                  ? const Color(0xFF25D366)
-                  : context.secondaryTextColor,
+        child: InkWell(
+          onTap: enabled ? _openWhatsApp : null,
+          customBorder: const CircleBorder(),
+          child: Container(
+            width: 44,
+            height: 44,
+            alignment: Alignment.center,
+            child: Icon(
+              Icons.chat,
+              size: 22,
+              color: enabled ? whatsappGreen : context.secondaryTextColor,
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1798,6 +1857,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     final validTo = DateTime.parse(offer['valid_to']);
     final daysLeft = validTo.difference(DateTime.now()).inDays;
 
+    // ✅ Claim is only enabled when the customer follows this salon
+    final canClaim = _isFollowing && _isUserActive && !_isClaimingOffer;
+
     return Container(
       width: 280,
       margin: const EdgeInsets.only(right: 12),
@@ -1830,7 +1892,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: () => _claimOffer(offer),
+          onTap: canClaim ? () => _claimOffer(offer) : null,
           borderRadius: BorderRadius.circular(16),
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -1978,18 +2040,25 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () => _claimOffer(offer),
+                    // ✅ disabled (null) when not following
+                    onPressed: canClaim ? () => _claimOffer(offer) : null,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: color,
                       foregroundColor: Colors.white,
+                      disabledBackgroundColor: context.isDarkMode
+                          ? Colors.grey[800]
+                          : Colors.grey[300],
+                      disabledForegroundColor: context.isDarkMode
+                          ? Colors.white38
+                          : Colors.grey[600],
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    child: const Text(
-                      'Claim Offer',
-                      style: TextStyle(
+                    child: Text(
+                      _isFollowing ? 'Claim Offer' : 'Follow to Claim',
+                      style: const TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
                       ),
@@ -2008,46 +2077,97 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   // SERVICE MENU — unchanged
   // ============================================================
 
-  Widget _buildMenuTreeSection() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: context.dividerColor),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
+  Widget _buildMenuTreeSection(bool isWeb) {
+    final hPad = isWeb ? 20.0 : 10.0;
+
+    final section = Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: context.cardColor,
+        borderRadius: isWeb ? BorderRadius.circular(16) : null,
+        border: isWeb
+            ? Border.all(color: context.dividerColor)
+            : Border.symmetric(
+                horizontal: BorderSide(color: context.dividerColor),
+              ),
+        boxShadow: isWeb
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 10,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ---------- CENTERED HEADER ----------
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.fromLTRB(hPad, 22, hPad, 16),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  context.primaryColor.withValues(alpha: 0.12),
+                  context.primaryColor.withValues(alpha: 0.0),
+                ],
+              ),
+              borderRadius: isWeb
+                  ? const BorderRadius.vertical(top: Radius.circular(16))
+                  : null,
             ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+            child: Column(
               children: [
-                Icon(Icons.menu_book_rounded,
-                    color: context.primaryColor, size: 20),
-                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: context.primaryColor.withValues(alpha: 0.15),
+                  ),
+                  child: Icon(
+                    Icons.menu_book_rounded,
+                    color: context.primaryColor,
+                    size: 26,
+                  ),
+                ),
+                const SizedBox(height: 10),
                 Text(
-                  'Services Menu',
-                  style: context.titleLarge.copyWith(color: context.textColor),
+                  'Service Menu',
+                  textAlign: TextAlign.center,
+                  style: context.titleLarge.copyWith(
+                    color: context.textColor,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  width: 40,
+                  height: 3,
+                  decoration: BoxDecoration(
+                    color: context.primaryColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Tick the options you want, then choose Regular or VIP booking',
+                  textAlign: TextAlign.center,
+                  style: context.bodySmall.copyWith(
+                    color: context.secondaryTextColor,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Tick the options you want, then choose Regular or VIP booking',
-              style: context.bodySmall
-                  .copyWith(color: context.secondaryTextColor),
-            ),
-            const SizedBox(height: 14),
-            FutureBuilder<List<Map<String, dynamic>>>(
+          ),
+
+          // ---------- TREE ----------
+          Padding(
+            padding: EdgeInsets.fromLTRB(hPad, 8, hPad, 0),
+            child: FutureBuilder<List<Map<String, dynamic>>>(
               future: _menuTreeFuture,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
@@ -2063,11 +2183,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 final tree = snapshot.data ?? [];
                 if (tree.isEmpty) {
                   return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      'No services available yet',
-                      style: context.bodyMedium
-                          .copyWith(color: context.secondaryTextColor),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    child: Center(
+                      child: Text(
+                        'No services available yet',
+                        style: context.bodyMedium
+                            .copyWith(color: context.secondaryTextColor),
+                      ),
                     ),
                   );
                 }
@@ -2079,12 +2201,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 );
               },
             ),
-            const SizedBox(height: 4),
-            Divider(color: context.dividerColor, height: 1),
-            const SizedBox(height: 12),
+          ),
 
-            // ✅ Two buttons side by side (VIP + Regular)
-            LayoutBuilder(
+          Divider(color: context.dividerColor, height: 1),
+
+          // ---------- BOOKING BUTTONS ----------
+          Padding(
+            padding: EdgeInsets.fromLTRB(hPad, 14, hPad, 16),
+            child: LayoutBuilder(
               builder: (context, constraints) {
                 final isWide = constraints.maxWidth > 500;
 
@@ -2164,10 +2288,19 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 );
               },
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
+
+    // Web: keep the card with side margin. Mobile: full screen width.
+    if (isWeb) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: section,
+      );
+    }
+    return section;
   }
 
   Widget _buildMenuCategoryBlock(Map<String, dynamic> cat) {
@@ -2176,35 +2309,83 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     final services = cat['services'] as List;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.only(top: 12, bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  cat['display_name']?.toString() ?? 'Category',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: context.textColor,
+          // Category header (root of the tree)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color.withValues(alpha: 0.18),
+                  ),
+                  child: Icon(icon, size: 16, color: color),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    cat['display_name']?.toString() ?? 'Category',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: context.textColor,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${services.length}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: color,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          // Services branch (vertical trunk line)
+          Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    color: color.withValues(alpha: 0.45),
+                    width: 2,
                   ),
                 ),
               ),
-            ],
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: services.asMap().entries.map((e) {
+                  final isLast = e.key == services.length - 1;
+                  return _buildMenuServiceBlock(
+                    e.value as Map<String, dynamic>,
+                    color,
+                    isLast,
+                  );
+                }).toList(),
+              ),
+            ),
           ),
-          const SizedBox(height: 6),
-          ...services.asMap().entries.map((e) {
-            final isLast = e.key == services.length - 1;
-            return _buildMenuServiceBlock(
-              e.value as Map<String, dynamic>,
-              color,
-              isLast,
-            );
-          }),
         ],
       ),
     );
@@ -2216,32 +2397,27 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     bool isLastService,
   ) {
     final variants = service['variants'] as List;
-    final connector = isLastService ? '└─' : '├─';
-    final childBar = isLastService ? '   ' : '│  ';
 
     return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 4),
+      padding: EdgeInsets.only(top: 8, bottom: isLastService ? 2 : 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Service node: horizontal tick + name
           Row(
             children: [
-              Text(
-                connector,
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                  color: catColor.withValues(alpha: 0.6),
-                ),
+              Container(
+                width: 14,
+                height: 2,
+                color: catColor.withValues(alpha: 0.45),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   service['name']?.toString() ?? 'Service',
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
                     color: context.textColor,
                   ),
                 ),
@@ -2250,7 +2426,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           ),
           if (variants.isEmpty)
             Padding(
-              padding: const EdgeInsets.only(left: 20, top: 2),
+              padding: const EdgeInsets.only(left: 22, top: 4),
               child: Text(
                 'No pricing options yet',
                 style: context.bodySmall.copyWith(
@@ -2260,11 +2436,29 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               ),
             )
           else
-            ...variants.map(
-              (v) => _buildMenuVariantRow(
-                service,
-                v as Map<String, dynamic>,
-                childBar,
+            // Variants branch (thin trunk line)
+            Padding(
+              padding: const EdgeInsets.only(left: 14),
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border(
+                    left: BorderSide(
+                      color: catColor.withValues(alpha: 0.25),
+                      width: 1.5,
+                    ),
+                  ),
+                ),
+                child: Column(
+                  children: variants
+                      .map(
+                        (v) => _buildMenuVariantRow(
+                          service,
+                          v as Map<String, dynamic>,
+                          catColor,
+                        ),
+                      )
+                      .toList(),
+                ),
               ),
             ),
         ],
@@ -2275,7 +2469,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   Widget _buildMenuVariantRow(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
-    String childBar,
+    Color catColor,
   ) {
     final sid = service['id'] as int;
     final vid = variant['id'] as int;
@@ -2285,63 +2479,163 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     final duration = variant['duration'] as int?;
     final gender = variant['gender']?.toString() ?? '';
     final age = variant['age']?.toString() ?? '';
-    final label = [gender, age].where((x) => x.isNotEmpty).join(' • ');
+    final ageRange = variant['age_range']?.toString() ?? '';
+
+    final ageText = age.isEmpty
+        ? ''
+        : (ageRange.isEmpty ? age : '$age ($ageRange)');
 
     return Padding(
-      padding: const EdgeInsets.only(left: 20, top: 2, bottom: 2),
-      child: InkWell(
-        onTap: () => _toggleMenuSelection(service, variant),
-        borderRadius: BorderRadius.circular(8),
-        child: Row(
-          children: [
-            Text(
-              childBar,
-              style: TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-                color: context.secondaryTextColor,
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          // horizontal tick
+          Container(
+            width: 10,
+            height: 1.5,
+            color: catColor.withValues(alpha: 0.35),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () => _toggleMenuSelection(service, variant),
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? context.primaryColor.withValues(alpha: 0.08)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isSelected
+                          ? context.primaryColor.withValues(alpha: 0.5)
+                          : context.dividerColor.withValues(alpha: 0.6),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: Checkbox(
+                          value: isSelected,
+                          onChanged: (_) =>
+                              _toggleMenuSelection(service, variant),
+                          activeColor: context.primaryColor,
+                          materialTapTargetSize:
+                              MaterialTapTargetSize.shrinkWrap,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              children: [
+                                if (gender.isNotEmpty)
+                                  _buildInfoChip(
+                                    Icons.person_outline,
+                                    gender,
+                                    Colors.blue.shade400,
+                                  ),
+                                if (ageText.isNotEmpty)
+                                  _buildInfoChip(
+                                    Icons.cake_outlined,
+                                    ageText,
+                                    Colors.purple.shade400,
+                                  ),
+                                if (gender.isEmpty && ageText.isEmpty)
+                                  _buildInfoChip(
+                                    Icons.check_circle_outline,
+                                    'Standard',
+                                    Colors.grey.shade600,
+                                  ),
+                              ],
+                            ),
+                            if (duration != null && duration > 0) ...[
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.timer_outlined,
+                                    size: 12,
+                                    color: context.secondaryTextColor,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    '$duration min',
+                                    style: context.bodySmall.copyWith(
+                                      color: context.secondaryTextColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        price != null
+                            ? 'Rs. ${price.toStringAsFixed(0)}'
+                            : '—',
+                        style: context.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: price != null
+                              ? context.primaryColor
+                              : context.secondaryTextColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
-            SizedBox(
-              width: 22,
-              height: 22,
-              child: Checkbox(
-                value: isSelected,
-                onChanged: (_) => _toggleMenuSelection(service, variant),
-                activeColor: context.primaryColor,
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                label.isEmpty ? 'Standard' : label,
-                style: context.bodySmall.copyWith(color: context.textColor),
-              ),
-            ),
-            if (duration != null && duration > 0) ...[
-              Icon(Icons.timer, size: 11, color: context.secondaryTextColor),
-              const SizedBox(width: 2),
-              Text(
-                '$duration min',
-                style:
-                    context.bodySmall.copyWith(color: context.secondaryTextColor),
-              ),
-              const SizedBox(width: 8),
-            ],
-            Text(
-              price != null ? 'Rs. ${price.toStringAsFixed(0)}' : '—',
-              style: context.bodySmall.copyWith(
-                fontWeight: FontWeight.w600,
-                color: price != null
-                    ? context.primaryColor
-                    : context.secondaryTextColor,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
+  }
+
+  Widget _buildInfoChip(IconData icon, String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _ageRangeText(int? minAge, int? maxAge) {
+    if (minAge == null || maxAge == null) return '';
+    if (maxAge >= 100) return '$minAge+ yrs';
+    return '$minAge–$maxAge yrs';
   }
 
   void _toggleMenuSelection(
@@ -2392,6 +2686,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       final salonWithExtras = Map<String, dynamic>.from(widget.salon);
       salonWithExtras['preselected_services'] =
           _selectedBookingItems.values.toList();
+      salonWithExtras['skip_to_date'] = true;
 
       debugPrint('🚀 Booking with salon id: ${salonWithExtras['id']}');
       debugPrint('   Preselected: ${_selectedBookingItems.length}');
@@ -2436,6 +2731,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       final salonWithExtras = Map<String, dynamic>.from(widget.salon);
       salonWithExtras['preselected_services'] =
           _selectedBookingItems.values.toList();
+      salonWithExtras['skip_to_date'] = true;
 
       debugPrint('⭐ [VIP] Salon id: ${salonWithExtras['id']}');
       debugPrint('   Preselected: ${_selectedBookingItems.length}');
@@ -2522,14 +2818,19 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       }
 
       final Map<int, String> ageMap = {};
+      final Map<int, String> ageRangeMap = {};
       if (ageIds.isNotEmpty) {
         try {
           final ages = await supabase
               .from('salon_age_categories')
-              .select('id, display_name')
+              .select('id, display_name, min_age, max_age')
               .inFilter('id', ageIds);
           for (var a in ages) {
             ageMap[a['id'] as int] = a['display_name']?.toString() ?? '';
+            ageRangeMap[a['id'] as int] = _ageRangeText(
+              (a['min_age'] as num?)?.toInt(),
+              (a['max_age'] as num?)?.toInt(),
+            );
           }
         } catch (e) {
           debugPrint('Error loading age categories: $e');
@@ -2548,6 +2849,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           'duration': (v['duration'] as num?)?.toInt(),
           'gender': genderId != null ? (genderMap[genderId] ?? '') : '',
           'age': ageId != null ? (ageMap[ageId] ?? '') : '',
+          'age_range': ageId != null ? (ageRangeMap[ageId] ?? '') : '',
         });
       }
 

@@ -40,6 +40,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   String? _selectedCategoryTab;
   int? _expandedServiceId;
 
+  // Per-service offers
+  final Map<String, List<Map<String, dynamic>>> _availableOffersPerService = {};
+  final Map<String, Map<String, dynamic>> _serviceOffers = {};
+
   // Step 2: Date
   DateTime? _selectedDate;
   Set<DateTime> _holidays = {};
@@ -78,8 +82,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   // Preselected
   List<Map<String, dynamic>>? _preselectedServices;
   bool _preselectedServicesApplied = false;
+  bool _skipToDate = false; // ✅ NEW
 
-  // Offer
+  // Legacy offer support
   Map<String, dynamic>? _appliedOffer;
   Set<int> _offerServiceIds = {};
   double _discountAmount = 0;
@@ -169,6 +174,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         );
       }
     }
+
+    // ✅ NEW: Extract skip_to_date flag
+    if (initial.containsKey('skip_to_date')) {
+      _skipToDate = initial['skip_to_date'] == true;
+    }
+    debugPrint('🎯 [VIP] skip_to_date: $_skipToDate');
   }
 
   Map<String, dynamic>? _normalizedInitialSalon() {
@@ -203,11 +214,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final normalized = Map<String, dynamic>.from(initial);
     normalized['id'] = salonId;
     normalized.remove('preselected_services');
+    normalized.remove('skip_to_date');
     return normalized;
   }
 
   // ============================================
-  // OFFER FROM NAVIGATION
+  // OFFER + PRESELECTED FROM NAVIGATION
   // ============================================
 
   void _checkForOffer() {
@@ -235,9 +247,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               .map((e) => Map<String, dynamic>.from(e))
               .toList();
           debugPrint(
-            '🎯 [VIP] Preselected services (via extra): ${_preselectedServices!.length}',
+            '🎯 [VIP] Preselected (via extra): ${_preselectedServices!.length}',
           );
         }
+      }
+
+      // ✅ NEW: Read skip_to_date from extra
+      if (map.containsKey('skip_to_date')) {
+        _skipToDate = map['skip_to_date'] == true;
+        debugPrint('🎯 [VIP] skip_to_date (from extra): $_skipToDate');
       }
     }
   }
@@ -259,7 +277,190 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // DISCOUNT CALCULATION
+  // PER-SERVICE OFFER HELPERS (✅ NEW)
+  // ============================================
+
+  String _serviceKey(int serviceId, int? variantId) =>
+      '${serviceId}_${variantId ?? 0}';
+
+  /// ✅ Load offers for a specific service (matches BookingFlow)
+  Future<List<Map<String, dynamic>>> _loadOffersForService(
+    int serviceId,
+    double price,
+  ) async {
+    if (_selectedSalon == null) return [];
+
+    try {
+      final user = supabase.auth.currentUser;
+
+      final result = await supabase.rpc(
+        'get_offers_for_service',
+        params: {
+          'p_salon_id': _selectedSalon!['id'],
+          'p_service_id': serviceId,
+          'p_service_price': price,
+          'p_customer_id': user?.id,
+        },
+      );
+
+      if (result == null) return [];
+      return List<Map<String, dynamic>>.from(result as List);
+    } catch (e) {
+      debugPrint('⚠️ [VIP] Error loading offers for service $serviceId: $e');
+      return [];
+    }
+  }
+
+  /// ✅ Apply offer to a specific service (per-service)
+  void _applyOfferToService(
+    int serviceId,
+    int variantId,
+    Map<String, dynamic>? offer,
+  ) {
+    final key = _serviceKey(serviceId, variantId);
+    final index = _selectedServices.indexWhere(
+      (s) => s['id'] == serviceId && s['variant_id'] == variantId,
+    );
+
+    if (index < 0) return;
+
+    final price = (_selectedServices[index]['price'] as num?)?.toDouble() ?? 0;
+    final discount = _calculateOfferDiscountForService(price, offer);
+    final finalPrice = price - discount;
+
+    debugPrint(
+      '🎯 [VIP ApplyOffer] sid=$serviceId vid=$variantId '
+      'offer=${offer?['title']} discount=$discount final=$finalPrice',
+    );
+
+    setState(() {
+      _selectedServices[index] = {
+        ..._selectedServices[index],
+        'offer': offer,
+        'offer_id': offer?['id'],
+        'discount_amount': discount,
+        'final_price': finalPrice,
+      };
+
+      if (offer == null) {
+        _serviceOffers.remove(key);
+      } else {
+        _serviceOffers[key] = offer;
+      }
+
+      _recalculateTotals();
+    });
+  }
+
+  /// ✅ Calculate discount for a specific offer + price
+  double _calculateOfferDiscountForService(
+    double price,
+    Map<String, dynamic>? offer,
+  ) {
+    if (offer == null) return 0;
+
+    final discountType = offer['discount_type']?.toString();
+    final discountValue = (offer['discount_value'] as num?)?.toDouble() ?? 0;
+
+    double discount = 0;
+    if (discountType == 'percentage') {
+      discount = price * (discountValue / 100);
+    } else if (discountType == 'fixed') {
+      discount = discountValue;
+    } else if (discountType == 'free_service') {
+      discount = price;
+    }
+
+    return discount.clamp(0, price);
+  }
+
+  /// ✅ Recalculate all totals from services
+  void _recalculateTotals() {
+    double subtotal = 0;
+    double totalDiscount = 0;
+    double finalTotal = 0;
+
+    for (final service in _selectedServices) {
+      final price = (service['price'] as num?)?.toDouble() ?? 0;
+      final discount = (service['discount_amount'] as num?)?.toDouble() ?? 0;
+      final finalPrice = (service['final_price'] as num?)?.toDouble() ?? price;
+
+      subtotal += price;
+      totalDiscount += discount;
+      finalTotal += finalPrice;
+    }
+
+    setState(() {
+      _originalTotalPrice = subtotal;
+      _discountAmount = totalDiscount;
+      _finalTotalPrice = finalTotal;
+    });
+  }
+
+  /// ✅ Get offer display label with ⭐ for claimed offers
+  String _getOfferLabel(Map<String, dynamic> offer) {
+    final title = offer['title']?.toString() ?? 'Offer';
+    final type = offer['discount_type']?.toString();
+    final value = (offer['discount_value'] as num?)?.toDouble() ?? 0;
+    final isClaimed = offer['is_claimed'] == true;
+
+    String label;
+    if (type == 'percentage') {
+      label = '$title (${value.toStringAsFixed(0)}% OFF)';
+    } else if (type == 'fixed') {
+      label = '$title (Rs. ${value.toStringAsFixed(0)} OFF)';
+    } else if (type == 'free_service') {
+      label = '$title (FREE)';
+    } else {
+      label = title;
+    }
+
+    return isClaimed ? '⭐ $label (Applied)' : label;
+  }
+
+  /// ✅ Auto-apply any claimed offers for currently selected services
+  Future<void> _autoApplyClaimedOffers() async {
+    debugPrint('🎁 [VIP Auto-Apply] Checking claimed offers...');
+
+    for (int i = 0; i < _selectedServices.length; i++) {
+      final service = _selectedServices[i];
+      final sid = service['id'] as int?;
+      final vid = service['variant_id'] as int?;
+      if (sid == null || vid == null) continue;
+
+      if (service['offer_id'] != null) {
+        debugPrint('   ✓ [VIP] Service $sid already has offer');
+        continue;
+      }
+
+      final key = _serviceKey(sid, vid);
+      var offers = _availableOffersPerService[key] ?? [];
+
+      if (offers.isEmpty) {
+        final price = (service['price'] as num?)?.toDouble() ?? 0;
+        offers = await _loadOffersForService(sid, price);
+
+        if (offers.isNotEmpty && mounted) {
+          setState(() {
+            _availableOffersPerService[key] = offers;
+          });
+        }
+      }
+
+      final claimed = offers.firstWhere(
+        (o) => o['is_claimed'] == true,
+        orElse: () => <String, dynamic>{},
+      );
+
+      if (claimed.isNotEmpty && claimed['id'] != null) {
+        _applyOfferToService(sid, vid, claimed);
+        debugPrint('   ✅ [VIP] Auto-applied: ${claimed['title']}');
+      }
+    }
+  }
+
+  // ============================================
+  // LEGACY DISCOUNT CALCULATION (from _appliedOffer)
   // ============================================
 
   double _round2(double v) => (v * 100).round() / 100;
@@ -286,39 +487,33 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   double _discountForItem(Map<String, dynamic> item) {
+    // ✅ Prefer per-service offer (from _serviceOffers)
     final serviceId = item['id'];
-    if (serviceId is! int || !_isOfferApplicable(serviceId)) return 0;
+    if (serviceId is! int) return 0;
+
+    // If per-service offer exists, use that
+    final variantId = item['variant_id'] as int?;
+    final key = _serviceKey(serviceId, variantId);
+    final perServiceOffer = _serviceOffers[key];
+    if (perServiceOffer != null) {
+      return _calculateOfferDiscountForService(
+        (item['price'] as num?)?.toDouble() ?? 0,
+        perServiceOffer,
+      );
+    }
+
+    // Fallback to legacy _appliedOffer
+    if (!_isOfferApplicable(serviceId)) return 0;
     return _discountForPrice((item['price'] as num?)?.toDouble() ?? 0);
   }
 
-  double _getDiscountedPrice(int serviceId, double price) {
-    if (!_isOfferApplicable(serviceId)) return price;
-    return price - _discountForPrice(price);
-  }
-
-  void _calculateDiscount() {
-    _originalTotalPrice = _calculateTotalPrice();
-    if (_appliedOffer == null) {
-      _discountAmount = 0;
-      _finalTotalPrice = _originalTotalPrice;
-      return;
-    }
-    _discountAmount = _selectedServices.fold(
-      0.0,
-      (sum, s) => sum + _discountForItem(s),
-    );
-    final result = _originalTotalPrice - _discountAmount;
-    _finalTotalPrice = result < 0 ? 0 : result;
-  }
 
   void _updateTotalAndDiscount() {
-    setState(() {
-      _calculateDiscount();
-    });
+    _recalculateTotals();
   }
 
   double _getDisplayTotalPrice() {
-    if (_appliedOffer != null && _discountAmount > 0) {
+    if (_finalTotalPrice > 0 || _discountAmount > 0) {
       return _finalTotalPrice;
     }
     return _calculateTotalPrice();
@@ -342,6 +537,16 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _discountAmount = 0;
       _finalTotalPrice = 0;
       _originalTotalPrice = 0;
+      _serviceOffers.clear();
+      for (int i = 0; i < _selectedServices.length; i++) {
+        _selectedServices[i] = {
+          ..._selectedServices[i],
+          'offer': null,
+          'offer_id': null,
+          'discount_amount': 0,
+          'final_price': _selectedServices[i]['price'],
+        };
+      }
     });
     debugPrint('🎁 [VIP] Offer removed');
   }
@@ -416,54 +621,42 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     if (_isInitialized) return;
     if (widget.initialSalon == null) return;
 
-    debugPrint('════════════════════════════════════════');
-    debugPrint('🎯 [VIP INIT] Received initialSalon');
-    debugPrint('   Keys: ${widget.initialSalon!.keys.toList()}');
-    debugPrint('   id: ${widget.initialSalon!['id']}');
-    debugPrint('   id type: ${widget.initialSalon!['id'].runtimeType}');
-    debugPrint('   name: ${widget.initialSalon!['name']}');
-    debugPrint('════════════════════════════════════════');
-
     final normalized = _normalizedInitialSalon();
     if (normalized == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Salon data is incomplete. Please go back and try again.',
-            ),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
+      debugPrint('⚠️ [VIP] Invalid initialSalon — falling back to Salon step');
+      setState(() {
+        _selectedSalon = null;
+        _currentStep = 0;
+        _isInitialized = true;
+      });
       return;
     }
-
-    debugPrint('✅ [VIP] Normalized salon_id: ${normalized['id']}');
 
     final hasPreselected =
         _preselectedServices != null && _preselectedServices!.isNotEmpty;
 
-    debugPrint(
-      '🎯 [VIP] Has preselected: $hasPreselected (${_preselectedServices?.length ?? 0})',
-    );
+    // ✅ Decide starting step
+    final int startingStep;
+    if (hasPreselected && _skipToDate) {
+      startingStep = 2; // Salon Profile → Date
+    } else {
+      startingStep = 1; // Dashboard offer / default → Service
+    }
+
+    debugPrint('🎯 [VIP] Starting step: $startingStep '
+        '(${startingStep == 2 ? "Date" : "Service"})');
 
     setState(() {
       _selectedSalon = normalized;
-      _currentStep = hasPreselected ? 2 : 1;
+      _currentStep = startingStep;
       _isInitialized = true;
     });
 
     await _loadSalonServices();
     await _applyPreselectedServices();
 
-    // Load holidays either way
+    // ✅ Always load holidays (needed for Date step)
     await _loadHolidays();
-
-    if (hasPreselected) {
-      debugPrint('✅ [VIP] Jumped to Date step (preselected applied)');
-    }
   }
 
   // ============================================
@@ -530,6 +723,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _originalTotalPrice = 0;
       _finalTotalPrice = 0;
       _preselectedServicesApplied = false;
+      _availableOffersPerService.clear();
+      _serviceOffers.clear();
     });
   }
 
@@ -666,10 +861,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
   }
 
-  // ============================================
-  // SERVER-SIDE SEARCH WITH DEBOUNCE
-  // ============================================
-
   Future<void> _searchSalons(String query) async {
     _salonSearchDebounce?.cancel();
 
@@ -702,10 +893,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               : [];
           _isSearching = false;
         });
-
-        debugPrint(
-          '🔍 [VIP] Search "$query" → ${_searchResults.length} results',
-        );
       } catch (e) {
         debugPrint('❌ [VIP] Search error: $e');
         if (!mounted) return;
@@ -723,10 +910,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   Future<void> _loadSalonServices() async {
     if (_servicesLoaded) return;
-    if (_selectedSalon == null) {
-      debugPrint('⚠️ [VIP] _loadSalonServices: no salon');
-      return;
-    }
+    if (_selectedSalon == null) return;
+
     setState(() => _isLoadingServices = true);
 
     try {
@@ -736,8 +921,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           : (rawSalonId is num
               ? rawSalonId.toInt()
               : int.tryParse(rawSalonId?.toString() ?? '') ?? 0);
-
-      debugPrint('🔍 [VIP SERVICE] Loading for salon_id: $salonId');
 
       if (salonId <= 0) {
         throw Exception('Invalid salon id: $rawSalonId');
@@ -756,13 +939,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           _isLoadingServices = false;
           _servicesLoaded = true;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('This salon has no services available yet.'),
-            backgroundColor: Colors.orange.shade700,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
         return;
       }
 
@@ -775,7 +951,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           )
           .inFilter('service_id', serviceIds);
 
-      // NULL-safe is_active
       final activeVariants = variantsResponse
           .where((v) => v['is_active'] != false)
           .toList();
@@ -787,15 +962,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           _isLoadingServices = false;
           _servicesLoaded = true;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text(
-              'Services have no active variants. Please contact the salon.',
-            ),
-            backgroundColor: Colors.orange.shade700,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
         return;
       }
 
@@ -895,10 +1061,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           .where((s) => (s['variants'] as List).isNotEmpty)
           .toList();
 
-      debugPrint(
-        '✅ [VIP SERVICE] Grouped into ${servicesList.length} service(s)',
-      );
-
       if (!mounted) return;
       setState(() {
         _salonServices = servicesList;
@@ -909,18 +1071,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       debugPrint('❌ [VIP SERVICE ERROR] $e');
       debugPrint('📚 Stack: $stackTrace');
 
-      String errorMsg = 'Failed to load services';
-      if (e is PostgrestException) {
-        errorMsg = 'DB error: ${e.message}';
-      } else {
-        errorMsg = 'Error: ${e.toString().replaceFirst('Exception: ', '')}';
-      }
-
       if (!mounted) return;
       setState(() => _isLoadingServices = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(errorMsg),
+          content: Text('Failed to load services: $e'),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 4),
         ),
@@ -928,10 +1083,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
   }
 
-  void _toggleVariant(
+  /// ✅ Toggle variant + auto-load offers + auto-apply claimed
+  Future<void> _toggleVariant(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
-  ) {
+  ) async {
     final sid = service['id'] as int;
     final vid = variant['id'] as int;
     final serviceName = service['name']?.toString() ?? 'Service';
@@ -939,29 +1095,60 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final age = variant['age']?.toString() ?? '';
     final price = (variant['price'] as num?)?.toDouble() ?? 0.0;
     final duration = (variant['duration'] as num?)?.toInt() ?? 30;
+    final key = _serviceKey(sid, vid);
 
-    if (_selectedServices.any(
+    final existingIndex = _selectedServices.indexWhere(
       (s) => s['id'] == sid && s['variant_id'] == vid,
-    )) {
-      setState(
-        () => _selectedServices.removeWhere(
-          (s) => s['id'] == sid && s['variant_id'] == vid,
-        ),
-      );
-    } else {
-      setState(
-        () => _selectedServices.add({
-          'id': sid,
-          'name': serviceName,
-          'variant_id': vid,
-          'gender': gender,
-          'age': age,
-          'price': price,
-          'duration': duration,
-        }),
-      );
+    );
+
+    if (existingIndex >= 0) {
+      setState(() {
+        _selectedServices.removeAt(existingIndex);
+        _serviceOffers.remove(key);
+        _availableOffersPerService.remove(key);
+        _recalculateTotals();
+      });
+      return;
     }
-    _updateTotalAndDiscount();
+
+    setState(() {
+      _selectedServices.add({
+        'id': sid,
+        'name': serviceName,
+        'variant_id': vid,
+        'gender': gender,
+        'age': age,
+        'price': price,
+        'duration': duration,
+        'offer': null,
+        'offer_id': null,
+        'discount_amount': 0,
+        'final_price': price,
+      });
+      _recalculateTotals();
+    });
+
+    // ✅ Load offers for this service
+    final offers = await _loadOffersForService(sid, price);
+
+    if (offers.isNotEmpty && mounted) {
+      setState(() {
+        _availableOffersPerService[key] = offers;
+      });
+
+      // ✅ Auto-select claimed offer
+      final claimedOffer = offers.firstWhere(
+        (o) => o['is_claimed'] == true,
+        orElse: () => <String, dynamic>{},
+      );
+
+      if (claimedOffer.isNotEmpty && claimedOffer['id'] != null) {
+        debugPrint(
+          '🎁 [VIP] Auto-applying claimed offer: ${claimedOffer['title']}',
+        );
+        _applyOfferToService(sid, vid, claimedOffer);
+      }
+    }
   }
 
   Future<void> _applyPreselectedServices() async {
@@ -969,16 +1156,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     _preselectedServicesApplied = true;
 
     final toApply = _preselectedServices;
-    if (toApply == null || toApply.isEmpty) {
-      debugPrint('ℹ️ [VIP] No preselected services');
-      return;
-    }
-    if (_salonServices.isEmpty) {
-      debugPrint('⚠️ [VIP] Cannot apply preselected — services not loaded');
-      return;
-    }
-
-    debugPrint('🎯 [VIP] Applying ${toApply.length} preselected service(s)');
+    if (toApply == null || toApply.isEmpty) return;
+    if (_salonServices.isEmpty) return;
 
     for (final item in toApply) {
       final sid = item['service_id'] is int
@@ -1003,18 +1182,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           break;
         }
       }
-      if (service == null || variant == null) {
-        debugPrint('⚠️ [VIP] Preselected not found: $sid/$vid');
-        continue;
-      }
+      if (service == null || variant == null) continue;
 
       final already = _selectedServices.any(
         (x) => x['id'] == sid && x['variant_id'] == vid,
       );
       if (already) continue;
 
-      _toggleVariant(service, variant);
+      await _toggleVariant(service, variant);
     }
+
+    // ✅ Backup auto-apply
+    await _autoApplyClaimedOffers();
   }
 
   void _selectServiceWithoutVariant(Map<String, dynamic> service) {
@@ -1034,6 +1213,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'age': '',
           'price': 0.0,
           'duration': 30,
+          'offer': null,
+          'offer_id': null,
+          'discount_amount': 0,
+          'final_price': 0.0,
         });
       });
       _updateTotalAndDiscount();
@@ -1111,7 +1294,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         _unavailableReason = schedules.isEmpty
             ? 'No barbers working on ${DateFormat('EEEE').format(date)}'
             : null;
-        // Invalidate barber cache
         _barbersLoaded = false;
         _availableBarbers = [];
         _barberAvailability = {};
@@ -1463,11 +1645,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   Future<void> _loadAvailableSlots() async {
-    // ═══════════════════════════════════════════════════
-    // GUARDS
-    // ═══════════════════════════════════════════════════
     if (_selectedDate == null) {
-      debugPrint('⚠️ [VIP] _loadAvailableSlots: date is null');
       if (mounted) {
         setState(() {
           _isLoadingSlots = false;
@@ -1478,7 +1656,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       return;
     }
     if (_selectedBarber == null) {
-      debugPrint('⚠️ [VIP] _loadAvailableSlots: barber is null');
       if (mounted) {
         setState(() {
           _isLoadingSlots = false;
@@ -1489,7 +1666,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       return;
     }
     if (_selectedSalon == null) {
-      debugPrint('⚠️ [VIP] _loadAvailableSlots: salon is null');
       if (mounted) {
         setState(() {
           _isLoadingSlots = false;
@@ -1530,7 +1706,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final totalDuration = _calculateTotalDuration();
 
       final barberId = _selectedBarber!['barber_id'] ?? _selectedBarber!['id'];
-      debugPrint('🔍 [VIP] Loading slots for barber: $barberId');
 
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
@@ -1807,29 +1982,21 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         );
       }
 
-      // ═══════════════════════════════════════════════════
-      // ✅ FIX: Handle empty slots + no available slots
-      // ═══════════════════════════════════════════════════
       final availableSlots =
           slots.where((s) => s['is_available'] == true).toList();
       final hasAnySlots = slots.isNotEmpty;
       final hasAvailableSlots = availableSlots.isNotEmpty;
-
-      debugPrint('🔍 [VIP] Built ${slots.length} slots '
-          '(${availableSlots.length} available)');
 
       if (mounted) {
         setState(() {
           _allTimeSlots = slots;
 
           if (!hasAnySlots) {
-            // No slots at all — barber has no work hours
             _slotErrorMessage =
                 'No time slots available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
                 'The barber has no working hours on this date.';
             _slotErrorType = 'barber';
           } else if (!hasAvailableSlots) {
-            // Slots exist but ALL unavailable — determine why
             final allBooked = slots.every((s) => s['is_booked'] == true);
             final allPast = slots.every((s) => s['is_past'] == true);
             final allBreak = slots.every((s) => s['is_break'] == true);
@@ -1856,7 +2023,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               _slotErrorType = 'date_full';
             }
           } else {
-            // Has available slots
             _slotErrorMessage = null;
             _slotErrorType = null;
           }
@@ -1980,9 +2146,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         );
       }
 
-      final offerId = (_appliedOffer != null && _discountAmount > 0)
-          ? _appliedOffer!['id']
-          : null;
+      // ✅ Build per-service offer ids
+      final offerIds = _selectedServices
+          .map((s) => s['offer_id'] as int?)
+          .toList();
 
       final result = await supabase.rpc(
         'create_vip_booking',
@@ -1997,7 +2164,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'p_utc_end_time': utcEndTime,
           'p_child_name': _getChildNameForBooking(),
           'p_notes': null,
-          'p_offer_id': offerId,
+          'p_offer_ids': offerIds, // ✅ per-service offers
         },
       );
 
@@ -2248,14 +2415,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 color: isDark ? Colors.white60 : Colors.grey[500],
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'No active salons found',
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white70 : Colors.grey[400],
-              ),
-            ),
             const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: _loadAllSalons,
@@ -2480,8 +2639,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
     normalized['id'] = salonId;
 
-    debugPrint('🏪 [VIP] Salon selected: $salonId - ${normalized['name']}');
-
     setState(() {
       _selectedSalon = normalized;
       _currentStep = 1;
@@ -2494,13 +2651,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _discountAmount = 0;
       _originalTotalPrice = 0;
       _finalTotalPrice = 0;
+      _availableOffersPerService.clear();
+      _serviceOffers.clear();
     });
     _loadHolidays();
     _loadSalonServices();
   }
 
   // ============================================
-  // STEP 1: SERVICE SELECTION
+  // STEP 1: SERVICE SELECTION (with per-service offers)
   // ============================================
 
   Widget _buildServiceSelectionStep() {
@@ -2671,6 +2830,17 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                     child: Row(
                       children: [
+                        if (_discountAmount > 0) ...[
+                          Text(
+                            'Rs. ${_calculateTotalPrice().toStringAsFixed(0)}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.white.withValues(alpha: 0.7),
+                              decoration: TextDecoration.lineThrough,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                        ],
                         Text(
                           'Rs. ${_getDisplayTotalPrice().toStringAsFixed(0)}',
                           style: const TextStyle(
@@ -2792,6 +2962,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ? null
                   : () {
                       setState(() => _currentStep = 2);
+                      _loadHolidays();
                     },
               style: ElevatedButton.styleFrom(
                 backgroundColor: _selectedServices.isNotEmpty
@@ -2862,7 +3033,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '🎉 VIP Offer Applied!',
+                  '🎉 VIP Offer Detected',
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
@@ -2881,7 +3052,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ),
                 ),
                 Text(
-                  'Save ${_getDiscountText()} on eligible services',
+                  'Apply to a service below',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
@@ -2890,19 +3061,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         : Colors.green.shade600,
                   ),
                 ),
-                if (_selectedServices.isNotEmpty && _discountAmount == 0)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      'This offer does not apply to the selected services',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isDark
-                            ? Colors.orange.shade300
-                            : Colors.orange.shade700,
-                      ),
-                    ),
-                  ),
               ],
             ),
           ),
@@ -3126,8 +3284,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     Map<String, dynamic> variant,
   ) {
     final isDark = context.isDarkMode;
+    final int serviceId = service['id'] as int;
+    final int variantId = variant['id'] as int;
+    final key = _serviceKey(serviceId, variantId);
+
     final isSelected = _selectedServices.any(
-      (s) => s['id'] == service['id'] && s['variant_id'] == variant['id'],
+      (s) => s['id'] == serviceId && s['variant_id'] == variantId,
     );
     final isMobile = MediaQuery.of(context).size.width < 600;
 
@@ -3144,172 +3306,323 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       genderIcon = Icons.people;
     }
 
-    final int serviceId = service['id'] as int;
     final double price = (variant['price'] as num?)?.toDouble() ?? 0.0;
-    final double discountedPrice = _getDiscountedPrice(serviceId, price);
-    final bool hasDiscount = discountedPrice < price;
     final int duration = (variant['duration'] as num?)?.toInt() ?? 30;
+
+    final availableOffers = _availableOffersPerService[key] ?? [];
+    final selectedOffer = _serviceOffers[key];
+    final discount =
+        _calculateOfferDiscountForService(price, selectedOffer);
+    final finalPrice = price - discount;
+    final hasOffer = selectedOffer != null && discount > 0;
 
     final String displayText = '$gender $age'.trim();
 
-    return GestureDetector(
-      onTap: () => _toggleVariant(service, variant),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: EdgeInsets.all(isMobile ? 10 : 12),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? AppTheme.primary.withValues(alpha: 0.1)
-              : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isSelected
-                ? AppTheme.primary
-                : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
-            width: 1.5,
-          ),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: isMobile ? 40 : 44,
-              height: isMobile ? 40 : 44,
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppTheme.primary.withValues(alpha: 0.2)
-                    : (isDark ? const Color(0xFF3A3A3A) : Colors.white),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                genderIcon,
-                size: isMobile ? 22 : 24,
+    return Column(
+      children: [
+        GestureDetector(
+          onTap: () => _toggleVariant(service, variant),
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: EdgeInsets.all(isMobile ? 10 : 12),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppTheme.primary.withValues(alpha: 0.1)
+                  : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
                 color: isSelected
                     ? AppTheme.primary
-                    : (isDark ? Colors.white60 : Colors.grey[600]),
+                    : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
+                width: 1.5,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    displayText.isEmpty ? 'Variant' : displayText,
-                    style: TextStyle(
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w500,
-                      fontSize: isMobile ? 13 : 15,
-                      color: isSelected
-                          ? AppTheme.primary
-                          : (isDark ? Colors.white : _textDark),
-                    ),
+            child: Row(
+              children: [
+                Container(
+                  width: isMobile ? 40 : 44,
+                  height: isMobile ? 40 : 44,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppTheme.primary.withValues(alpha: 0.2)
+                        : (isDark ? const Color(0xFF3A3A3A) : Colors.white),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 4,
+                  child: Icon(
+                    genderIcon,
+                    size: isMobile ? 22 : 24,
+                    color: isSelected
+                        ? AppTheme.primary
+                        : (isDark ? Colors.white60 : Colors.grey[600]),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.currency_rupee,
-                            size: 12,
-                            color: isDark ? Colors.white60 : Colors.grey[500],
-                          ),
-                          const SizedBox(width: 2),
-                          if (hasDiscount) ...[
-                            Text(
-                              price.toStringAsFixed(0),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: isDark
-                                    ? Colors.white70
-                                    : Colors.grey[500],
-                                decoration: TextDecoration.lineThrough,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                          ],
-                          Text(
-                            discountedPrice.toStringAsFixed(0),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: (isSelected || hasDiscount)
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
-                              color: hasDiscount
-                                  ? (isDark
-                                        ? Colors.green.shade300
-                                        : Colors.green.shade700)
-                                  : (isDark
-                                        ? Colors.white70
-                                        : Colors.grey[700]),
-                            ),
-                          ),
-                        ],
+                      Text(
+                        displayText.isEmpty ? 'Variant' : displayText,
+                        style: TextStyle(
+                          fontWeight: isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          fontSize: isMobile ? 13 : 15,
+                          color: isSelected
+                              ? AppTheme.primary
+                              : (isDark ? Colors.white : _textDark),
+                        ),
                       ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 4,
                         children: [
-                          Icon(
-                            Icons.timer,
-                            size: 12,
-                            color: isDark ? Colors.white60 : Colors.grey[500],
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.currency_rupee,
+                                size: 12,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[500],
+                              ),
+                              const SizedBox(width: 2),
+                              if (hasOffer && isSelected)
+                                Text(
+                                  price.toStringAsFixed(0),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.grey[500],
+                                    decoration: TextDecoration.lineThrough,
+                                  ),
+                                ),
+                              if (hasOffer && isSelected)
+                                const SizedBox(width: 4),
+                              Text(
+                                (isSelected && hasOffer ? finalPrice : price)
+                                    .toStringAsFixed(0),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                                  color: hasOffer && isSelected
+                                      ? (isDark
+                                          ? Colors.green.shade300
+                                          : Colors.green.shade700)
+                                      : (isDark
+                                          ? Colors.white70
+                                          : Colors.grey[700]),
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 2),
-                          Text(
-                            '$duration min',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color:
-                                  isDark ? Colors.white60 : Colors.grey[600],
-                            ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.timer,
+                                size: 12,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[500],
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                '$duration min',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-            Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: isMobile ? 10 : 12,
-                vertical: isMobile ? 6 : 8,
-              ),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppTheme.primary
-                    : (isDark ? Colors.grey[800] : Colors.grey[100]),
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isSelected ? Icons.check : Icons.add,
-                    size: isMobile ? 14 : 16,
-                    color: isSelected ? Colors.white : AppTheme.primary,
+                ),
+                Container(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: isMobile ? 10 : 12,
+                    vertical: isMobile ? 6 : 8,
                   ),
-                  if (!isMobile) ...[
-                    const SizedBox(width: 4),
-                    Text(
-                      isSelected ? 'Selected' : 'Select',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppTheme.primary
+                        : (isDark ? Colors.grey[800] : Colors.grey[100]),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isSelected ? Icons.check : Icons.add,
+                        size: isMobile ? 14 : 16,
                         color: isSelected ? Colors.white : AppTheme.primary,
+                      ),
+                      if (!isMobile) ...[
+                        const SizedBox(width: 4),
+                        Text(
+                          isSelected ? 'Selected' : 'Select',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: isSelected ? Colors.white : AppTheme.primary,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // ✅ Per-service offer dropdown
+        if (isSelected && availableOffers.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.only(left: 8, right: 8, bottom: 12),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.amber.shade900.withValues(alpha: 0.2)
+                    : Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isDark ? Colors.amber.shade700 : Colors.amber.shade200,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.local_offer,
+                        size: 14,
+                        color: isDark
+                            ? Colors.amber.shade300
+                            : Colors.amber.shade700,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Available Offers (${availableOffers.length})',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: isDark
+                              ? Colors.amber.shade200
+                              : Colors.amber.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<Map<String, dynamic>?>(
+                    key: ValueKey(
+                      'offer_${key}_${selectedOffer?['id'] ?? 'none'}',
+                    ),
+                    initialValue: selectedOffer,
+                    isExpanded: true,
+                    isDense: true,
+                    decoration: InputDecoration(
+                      hintText: 'No offer applied',
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      filled: true,
+                      fillColor:
+                          isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                      isDense: true,
+                    ),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    items: [
+                      DropdownMenuItem<Map<String, dynamic>?>(
+                        value: null,
+                        child: Text(
+                          'No offer',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: isDark ? Colors.white60 : Colors.grey,
+                          ),
+                        ),
+                      ),
+                      ...availableOffers.map((offer) {
+                        return DropdownMenuItem<Map<String, dynamic>?>(
+                          value: offer,
+                          child: Text(
+                            _getOfferLabel(offer),
+                            style: const TextStyle(fontSize: 12),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }),
+                    ],
+                    onChanged: (offer) {
+                      _applyOfferToService(serviceId, variantId, offer);
+                    },
+                  ),
+                  if (hasOffer) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.green.shade900.withValues(alpha: 0.5)
+                            : Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            size: 14,
+                            color: isDark
+                                ? Colors.green.shade300
+                                : Colors.green.shade700,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Save Rs. ${discount.toStringAsFixed(2)} → Pay Rs. ${finalPrice.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? Colors.green.shade200
+                                    : Colors.green.shade800,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ],
               ),
             ),
-          ],
-        ),
-      ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -3390,6 +3703,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           onPressed: () {
                             setState(() {
                               _selectedServices.clear();
+                              _availableOffersPerService.clear();
+                              _serviceOffers.clear();
                             });
                             _updateTotalAndDiscount();
                             Navigator.pop(context);
@@ -3429,16 +3744,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                       color: isDark
                                           ? Colors.white60
                                           : Colors.grey[500],
-                                    ),
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Tap on service variants to add',
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      color: isDark
-                                          ? Colors.white70
-                                          : Colors.grey[400],
                                     ),
                                   ),
                                 ],
@@ -3505,7 +3810,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 ),
                               ),
                               Text(
-                                'Rs. ${_originalTotalPrice.toStringAsFixed(2)}',
+                                'Rs. ${_calculateTotalPrice().toStringAsFixed(2)}',
                                 style: TextStyle(
                                   fontSize: 13,
                                   color: isDark
@@ -3670,8 +3975,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           const SizedBox(width: 8),
           GestureDetector(
             onTap: () {
+              final removed = _selectedServices[index];
+              final key = _serviceKey(
+                removed['id'] as int,
+                removed['variant_id'] as int?,
+              );
               setSheetState(() {
                 _selectedServices.removeAt(index);
+                _serviceOffers.remove(key);
+                _availableOffersPerService.remove(key);
               });
               setState(() {});
               _updateTotalAndDiscount();
@@ -3842,16 +4154,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                       : Colors.red.shade600,
                                 ),
                               ),
-                              Text(
-                                'Auto-selected next available date: ${DateFormat('EEEE, MMM dd').format(_selectedDate ?? getFirstAvailableDate())}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isDark
-                                      ? Colors.blue.shade300
-                                      : Colors.blue.shade700,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
                             ],
                           ),
                         ),
@@ -3899,50 +4201,23 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                     child: Row(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.red.shade800
-                                : Colors.red.shade100,
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          child: Icon(
-                            Icons.event_busy,
-                            color: isDark
-                                ? Colors.red.shade300
-                                : Colors.red.shade700,
-                            size: 24,
-                          ),
+                        Icon(
+                          Icons.event_busy,
+                          color: isDark
+                              ? Colors.red.shade300
+                              : Colors.red.shade700,
+                          size: 24,
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                isSelectedToday
-                                    ? '🚫 TODAY IS A HOLIDAY'
-                                    : '⛔ HOLIDAY',
-                                style: TextStyle(
-                                  color: isDark
-                                      ? Colors.red.shade300
-                                      : Colors.red.shade700,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${selectedHolidayName ?? 'Salon is closed'} ${isSelectedToday ? 'today' : 'on this date'}',
-                                style: TextStyle(
-                                  color: isDark
-                                      ? Colors.red.shade300
-                                      : Colors.red.shade600,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ],
+                          child: Text(
+                            '${selectedHolidayName ?? 'Salon is closed'} ${isSelectedToday ? 'today' : 'on this date'}',
+                            style: TextStyle(
+                              color: isDark
+                                  ? Colors.red.shade300
+                                  : Colors.red.shade600,
+                              fontSize: 14,
+                            ),
                           ),
                         ),
                       ],
@@ -5043,7 +5318,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // STEP 5: TIME SLOT SELECTION (VIP)
+  // STEP 5: VIP TIME SLOT SELECTION
   // ============================================
 
   Widget _buildTimeSlotStep() {
@@ -5068,7 +5343,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     AppTheme.primary.withValues(alpha: 0.1),
                 child: Text(
                   _selectedBarber?['full_name']
-                          ?.substring(0, 1)
+                          ?.toString()
+                          .substring(0, 1)
                           .toUpperCase() ??
                       'B',
                   style: TextStyle(
@@ -5084,7 +5360,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _selectedBarber?['full_name'] ?? 'Barber',
+                      _selectedBarber?['full_name']?.toString() ??
+                          'Barber',
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -5092,7 +5369,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ),
                     ),
                     Text(
-                      '${_calculateTotalDuration()} min service • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
+                      '${_calculateTotalDuration()} min • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
                       style: TextStyle(
                         fontSize: 13,
                         color: isDark
@@ -5150,10 +5427,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               ? Center(
                   child: CircularProgressIndicator(color: AppTheme.primary),
                 )
-              // ✅ Show error state if:
-              //    - explicit error message, OR
-              //    - no slots at all, OR
-              //    - no available slots
               : (_slotErrorMessage != null ||
                       _allTimeSlots.isEmpty ||
                       _allTimeSlots.every((s) => s['is_available'] != true))
@@ -5285,8 +5558,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               spacing: 12,
                               runSpacing: 12,
                               children: availableSlots.map((slot) {
-                                final isSelected =
-                                    _selectedSlot == slot;
+                                final isSelected = _selectedSlot == slot;
                                 final displayTime =
                                     slot['start_time_display'];
                                 final willGetVipNumber =
@@ -5350,7 +5622,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                         'VIP-$willGetVipNumber',
                                         style: TextStyle(
                                           fontSize: 10,
-                                          fontWeight: FontWeight.w400,
                                           color: isSelected &&
                                                   _showingVipNumber
                                               ? Colors.white70
@@ -5407,7 +5678,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   statusColor = Colors.grey[500]!;
                                 } else if (statusText.isNotEmpty) {
                                   displayStatus = statusText;
-                                  statusColor = Colors.grey[500]!;
                                 }
 
                                 return Container(
@@ -5517,7 +5787,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  // ✅ DYNAMIC BUTTONS based on error type
   Widget _buildNoSlotsState(bool isDark) {
     final errorType = _slotErrorType ?? 'general';
 
@@ -5528,8 +5797,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     final showBarberButton = errorType == 'barber';
     final showGoBack = errorType == 'general';
-
-    debugPrint('🎨 [VIP NoSlotsState] type: $errorType');
 
     return Center(
       child: SingleChildScrollView(
@@ -5574,11 +5841,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               spacing: 16,
               runSpacing: 12,
               children: [
-                // ✅ Change Date button
                 if (showDateButtons)
                   OutlinedButton.icon(
                     onPressed: () {
-                      debugPrint('🔄 [VIP Change Date] → Step 2');
                       setState(() {
                         _slotErrorMessage = null;
                         _slotErrorType = null;
@@ -5595,8 +5860,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                     label: const Text('Change Date'),
                   ),
-
-                // ✅ Try Tomorrow button — same barber validation
                 if (showDateButtons)
                   ElevatedButton.icon(
                     onPressed: () async {
@@ -5607,10 +5870,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       );
                       final savedBarber = _selectedBarber;
                       final savedSalon = _selectedSalon;
-
-                      debugPrint(
-                        '🔄 [VIP Try Tomorrow] ${DateFormat('yyyy-MM-dd').format(tomorrow)}',
-                      );
 
                       setState(() {
                         _selectedDate = tomorrow;
@@ -5623,7 +5882,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       });
 
                       try {
-                        // Holiday check
                         if (_holidays.contains(tomorrow)) {
                           if (!mounted) return;
                           setState(() {
@@ -5635,7 +5893,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           return;
                         }
 
-                        // No barber
                         if (savedBarber == null || savedSalon == null) {
                           if (!mounted) return;
                           setState(() {
@@ -5649,7 +5906,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           return;
                         }
 
-                        // Validate same barber for tomorrow
                         final availability =
                             await _checkBarberFullAvailability(
                           savedBarber['barber_id'] ?? savedBarber['id'],
@@ -5675,34 +5931,17 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 '${savedBarber['full_name']} is not available tomorrow. Please select another barber.',
                               ),
                               backgroundColor: Colors.orange.shade800,
-                              behavior: SnackBarBehavior.floating,
                             ),
                           );
                           return;
                         }
 
-                        // Same barber available → keep him
                         setState(() {
                           _selectedBarber = savedBarber;
                         });
 
                         await _loadAvailableSlots();
-
-                        if (!mounted) return;
-                        if (_slotErrorMessage == null &&
-                            _allTimeSlots.isNotEmpty) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Date changed to ${DateFormat('MMM dd').format(tomorrow)}. Same barber.',
-                              ),
-                              backgroundColor: Colors.green.shade700,
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        }
                       } catch (e) {
-                        debugPrint('❌ [VIP Try Tomorrow] error: $e');
                         if (!mounted) return;
                         setState(() {
                           _isLoadingSlots = false;
@@ -5725,13 +5964,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ),
               ],
             ),
-
-            // ✅ Try Another Barber button
             if (showBarberButton) ...[
               const SizedBox(height: 16),
               TextButton.icon(
                 onPressed: () {
-                  debugPrint('🔄 [VIP Try Another Barber] → Step 3');
                   setState(() {
                     _slotErrorMessage = null;
                     _slotErrorType = null;
@@ -5753,13 +5989,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 ),
               ),
             ],
-
-            // ✅ Go Back button
             if (showGoBack) ...[
               const SizedBox(height: 16),
               TextButton.icon(
                 onPressed: () {
-                  debugPrint('🔄 [VIP Go Back] → Step 3');
                   setState(() {
                     _slotErrorMessage = null;
                     _slotErrorType = null;
@@ -5902,23 +6135,47 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         final p =
                             (s['price'] as num?)?.toDouble() ?? 0;
                         final d = _discountForItem(s);
+                        final offer =
+                            s['offer'] as Map<String, dynamic>?;
                         return Padding(
-                          padding: const EdgeInsets.only(bottom: 2),
-                          child: Text(
-                            d > 0
-                                ? '• ${s['name']}  Rs. ${p.toStringAsFixed(2)} → Rs. ${(p - d).toStringAsFixed(2)}'
-                                : '• ${s['name']}  Rs. ${p.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: d > 0
-                                  ? Colors.green.shade600
-                                  : (isDark
-                                      ? Colors.white
-                                      : Colors.black87),
-                              fontWeight: d > 0
-                                  ? FontWeight.w500
-                                  : FontWeight.normal,
-                            ),
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Column(
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                d > 0
+                                    ? '• ${s['name']}  Rs. ${p.toStringAsFixed(2)} → Rs. ${(p - d).toStringAsFixed(2)}'
+                                    : '• ${s['name']}  Rs. ${p.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: d > 0
+                                      ? Colors.green.shade600
+                                      : (isDark
+                                          ? Colors.white
+                                          : Colors.black87),
+                                  fontWeight: d > 0
+                                      ? FontWeight.w500
+                                      : FontWeight.normal,
+                                ),
+                              ),
+                              if (offer != null && d > 0)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 8,
+                                    top: 1,
+                                  ),
+                                  child: Text(
+                                    '🎁 ${offer['title']}',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: isDark
+                                          ? Colors.green.shade300
+                                          : Colors.green.shade700,
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         );
                       }),
@@ -5937,13 +6194,13 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ],
                   ),
                 ),
-                if (_appliedOffer != null && _discountAmount > 0) ...[
+                if (_discountAmount > 0) ...[
                   const SizedBox(height: 12),
                   _buildConfirmationTile(
                     Icons.local_offer,
-                    'Discount Applied',
+                    'Total Discount',
                     '- Rs. ${_discountAmount.toStringAsFixed(2)}',
-                    _appliedOffer!['title'],
+                    '',
                   ),
                 ],
                 const SizedBox(height: 12),
@@ -6067,102 +6324,68 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           child: Row(
             children: [
               _buildStepIndicatorResponsive(
-                0,
-                showLabels ? 'Salon' : '',
-                Icons.store,
-                stepSize,
-                iconSize,
-                stepFontSize,
+                0, showLabels ? 'Salon' : '', Icons.store,
+                stepSize, iconSize, stepFontSize,
               ),
               Container(
-                width: connectorWidth,
-                height: 2,
+                width: connectorWidth, height: 2,
                 color: _currentStep > 0
                     ? AppTheme.primary
                     : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
-                1,
-                showLabels ? 'Service' : '',
-                Icons.content_cut,
-                stepSize,
-                iconSize,
-                stepFontSize,
+                1, showLabels ? 'Service' : '', Icons.content_cut,
+                stepSize, iconSize, stepFontSize,
               ),
               Container(
-                width: connectorWidth,
-                height: 2,
+                width: connectorWidth, height: 2,
                 color: _currentStep > 1
                     ? AppTheme.primary
                     : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
-                2,
-                showLabels ? 'Date' : '',
-                Icons.calendar_today,
-                stepSize,
-                iconSize,
-                stepFontSize,
+                2, showLabels ? 'Date' : '', Icons.calendar_today,
+                stepSize, iconSize, stepFontSize,
               ),
               Container(
-                width: connectorWidth,
-                height: 2,
+                width: connectorWidth, height: 2,
                 color: _currentStep > 2
                     ? AppTheme.primary
                     : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
-                3,
-                showLabels ? 'Barber' : '',
-                Icons.person,
-                stepSize,
-                iconSize,
-                stepFontSize,
+                3, showLabels ? 'Barber' : '', Icons.person,
+                stepSize, iconSize, stepFontSize,
               ),
               Container(
-                width: connectorWidth,
-                height: 2,
+                width: connectorWidth, height: 2,
                 color: _currentStep > 3
                     ? AppTheme.primary
                     : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
-                4,
-                showLabels ? 'Person' : '',
-                Icons.badge,
-                stepSize,
-                iconSize,
-                stepFontSize,
+                4, showLabels ? 'Person' : '', Icons.badge,
+                stepSize, iconSize, stepFontSize,
               ),
               Container(
-                width: connectorWidth,
-                height: 2,
+                width: connectorWidth, height: 2,
                 color: _currentStep > 4
                     ? AppTheme.primary
                     : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
-                5,
-                showLabels ? 'Time' : '',
-                Icons.access_time,
-                stepSize,
-                iconSize,
-                stepFontSize,
+                5, showLabels ? 'Time' : '', Icons.access_time,
+                stepSize, iconSize, stepFontSize,
               ),
               Container(
-                width: connectorWidth,
-                height: 2,
+                width: connectorWidth, height: 2,
                 color: _currentStep > 5
                     ? AppTheme.primary
                     : (isDark ? Colors.grey[700] : Colors.grey[300]),
               ),
               _buildStepIndicatorResponsive(
-                6,
-                showLabels ? 'Confirm' : '',
-                Icons.check_circle,
-                stepSize,
-                iconSize,
-                stepFontSize,
+                6, showLabels ? 'Confirm' : '', Icons.check_circle,
+                stepSize, iconSize, stepFontSize,
               ),
             ],
           ),
@@ -6272,10 +6495,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  // ============================================
-  // MAIN BUILD METHOD
-  // ============================================
-
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -6294,22 +6513,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           elevation: 0,
         ),
         body: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: AppTheme.primary),
-                const SizedBox(height: 16),
-                Text(
-                  'Loading timezone...',
-                  style: TextStyle(
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: AppTheme.primary),
+              const SizedBox(height: 16),
+              Text(
+                'Loading timezone...',
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       );
@@ -6333,12 +6548,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
           onPressed: () {
-            final hasPreselected = _preselectedServices != null &&
-                _preselectedServices!.isNotEmpty;
-
-            if (_currentStep == 2 && hasPreselected) {
-              setState(() => _currentStep = 0);
-            } else if (_currentStep > 0) {
+            // ✅ Simple step-by-step back (natural navigation)
+            if (_currentStep > 0) {
               setState(() => _currentStep--);
             } else {
               Navigator.pop(context);

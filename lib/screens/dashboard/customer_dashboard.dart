@@ -22,7 +22,10 @@ class CustomerDashboard extends StatefulWidget {
 }
 
 class _CustomerDashboardState extends State<CustomerDashboard>
-    with WidgetsBindingObserver, AutomaticKeepAliveClientMixin {
+    with
+        WidgetsBindingObserver,
+        AutomaticKeepAliveClientMixin,
+        SingleTickerProviderStateMixin {
   @override
   bool get wantKeepAlive => true;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -61,6 +64,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // Special Offers
   List<Map<String, dynamic>> _offers = [];
 
+  // ✅ Claimed offers (customer has already applied these)
+  Set<int> _claimedOfferIds = {};
+
   // Followed Salons
   List<Map<String, dynamic>> _followedSalons = [];
   bool _isLoadingSalons = false;
@@ -80,18 +86,33 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   bool _showSearchResults = false;
   OverlayEntry? _searchOverlay;
 
-  // ✅ Responsive variables
+  // ✅ Used to make the search results overlay match the search bar's size
+  final LayerLink _searchLayerLink = LayerLink();
+  final GlobalKey _searchFieldKey = GlobalKey();
+
+  // ✨ Pulse animation for offers that are not applied yet
+  late final AnimationController _pulseCtrl;
+  late final Animation<double> _pulseAnim;
+
+  // Responsive variables
   bool _isLargeScreen = false;
   bool _isTablet = false;
   bool _isWeb = false;
 
-  // ✅ Scroll Controller for web
+  // Scroll Controller for web
   final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 1.0, end: 1.04).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
     _initializeTimezone();
     _loadCustomerData();
     _checkCustomerStatus();
@@ -119,6 +140,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   @override
   void dispose() {
+    _pulseCtrl.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     _scrollController.dispose();
@@ -127,7 +149,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     super.dispose();
   }
 
-  // ✅ Check screen size for responsive layout
   void _checkScreenSize() {
     final size = MediaQuery.of(context).size;
     final isLarge = size.width > 800 || size.height > 800;
@@ -144,9 +165,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ CHECK CUSTOMER STATUS
+  // CHECK CUSTOMER STATUS
   // ============================================================
-
   Future<void> _checkCustomerStatus() async {
     try {
       final user = supabase.auth.currentUser;
@@ -229,9 +249,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // 🔥 SHOW PERMISSION CARD
+  // PERMISSION CARD
   // ============================================================
-
   Future<void> _showPermissionCardContext({String? action}) async {
     final shouldShow = await _permissionManager.shouldShowPermissionCard(
       screen: 'customer_dashboard',
@@ -244,10 +263,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       });
     }
   }
-
-  // ============================================================
-  // 🔥 ENABLE NOTIFICATIONS
-  // ============================================================
 
   Future<void> _enableNotifications({String? action}) async {
     setState(() => _showPermissionCard = false);
@@ -337,9 +352,118 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // 🔥 CONTEXTUAL ACTIONS
+  // ✅ SHARED HELPER — Build extra payload for a SPECIFIC offer
+  //    Called by offer-card buttons: Book Now / VIP Booking
   // ============================================================
+  Future<Map<String, dynamic>> _buildBookingExtraWithOffer(
+    Map<String, dynamic> offer,
+  ) async {
+    Map<String, dynamic>? offerSalon;
+    List<Map<String, dynamic>> preselectedServices = [];
 
+    try {
+      final offerSalonId = offer['salon_id'] as int?;
+      final offerId = offer['id'] as int?;
+      if (offerId == null) return {};
+
+      debugPrint('🎁 Building extra for offer: ${offer['title']}');
+
+      // 1. Load salon info
+      if (offerSalonId != null) {
+        try {
+          final salonResp = await supabase
+              .from('salons')
+              .select(
+                'id, name, address, logo_url, open_time, close_time, phone, currency_code',
+              )
+              .eq('id', offerSalonId)
+              .maybeSingle();
+
+          if (salonResp != null) {
+            offerSalon = Map<String, dynamic>.from(salonResp);
+            offerSalon['id'] = offerSalonId;
+          }
+        } catch (e) {
+          debugPrint('⚠️ Failed to load offer salon: $e');
+        }
+      }
+
+      // 2. Load offer's applicable services + first variant
+      List<int> offerServiceIds = [];
+      try {
+        final offerServicesResp = await supabase
+            .from('offer_services')
+            .select('service_id')
+            .eq('offer_id', offerId);
+
+        for (var row in offerServicesResp) {
+          final sid = row['service_id'];
+          if (sid is int) offerServiceIds.add(sid);
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to load offer services: $e');
+      }
+
+      List<int> targetServiceIds = offerServiceIds;
+      if (targetServiceIds.isEmpty && offerSalonId != null) {
+        final allServicesResp = await supabase
+            .from('services')
+            .select('id')
+            .eq('salon_id', offerSalonId)
+            .eq('is_active', true);
+
+        for (var row in allServicesResp) {
+          final sid = row['id'];
+          if (sid is int) targetServiceIds.add(sid);
+        }
+      }
+
+      if (targetServiceIds.isNotEmpty) {
+        final firstServiceId = targetServiceIds.first;
+
+        final variantsResp = await supabase
+            .from('service_variants')
+            .select('id, service_id')
+            .eq('service_id', firstServiceId)
+            .eq('is_active', true)
+            .order('id', ascending: true)
+            .limit(1);
+
+        if (variantsResp.isNotEmpty) {
+          final variantId = variantsResp.first['id'] as int;
+          preselectedServices.add({
+            'service_id': firstServiceId,
+            'variant_id': variantId,
+          });
+          debugPrint('🎯 Preselected: sid=$firstServiceId vid=$variantId');
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error building booking extra: $e');
+    }
+
+    // Build extra payload
+    if (offerSalon != null) {
+      final salonWithExtras = Map<String, dynamic>.from(offerSalon);
+      if (preselectedServices.isNotEmpty) {
+        salonWithExtras['preselected_services'] = preselectedServices;
+      }
+      salonWithExtras['offer'] = offer;
+      salonWithExtras['skip_to_date'] = false;
+      return salonWithExtras;
+    }
+
+    return {
+      'offer': offer,
+      if (preselectedServices.isNotEmpty)
+        'preselected_services': preselectedServices,
+        'skip_to_date': false,
+    };
+  }
+
+  // ============================================================
+  // ✅ TOP BUTTON: Book Now — Normal redirect (no offer)
+  // ============================================================
   Future<void> _bookAppointment() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'booking');
@@ -347,15 +471,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
     }
+
     final result = await context.push('/customer/booking-flow');
     if (result == true && mounted) {
-      debugPrint(
-        '✅ Returned from booking flow with success - refreshing dashboard',
-      );
+      debugPrint('✅ Returned from booking flow — refreshing dashboard');
       _loadDashboardData();
     }
   }
 
+  // ============================================================
+  // ✅ TOP BUTTON: VIP Booking — Normal redirect (no offer)
+  // ============================================================
   Future<void> _createVipBooking() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'vip');
@@ -363,15 +489,70 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
     }
+
     final result = await context.push('/customer/vip-booking');
     if (result == true && mounted) {
-      debugPrint(
-        '✅ Returned from VIP booking with success - refreshing dashboard',
-      );
+      debugPrint('✅ Returned from VIP booking — refreshing dashboard');
       _loadDashboardData();
     }
   }
 
+  // ============================================================
+  // ✅ OFFER CARD BUTTON: Book Now (with this specific offer)
+  //    Auto-selects salon + service + offer
+  // ============================================================
+  Future<void> _bookAppointmentWithOffer(Map<String, dynamic> offer) async {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'booking');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
+
+    final extra = await _buildBookingExtraWithOffer(offer);
+
+    if (!mounted) return;
+
+    final result = await context.push(
+      '/customer/booking-flow',
+      extra: extra.isEmpty ? null : extra,
+    );
+
+    if (result == true && mounted) {
+      debugPrint('✅ Returned from booking flow — refreshing dashboard');
+      _loadDashboardData();
+    }
+  }
+
+  // ============================================================
+  // ✅ OFFER CARD BUTTON: VIP Booking (with this specific offer)
+  // ============================================================
+  Future<void> _createVipBookingWithOffer(Map<String, dynamic> offer) async {
+    if (!_hasPermission) {
+      _showPermissionCardContext(action: 'vip');
+      if (_showPermissionCard) {
+        return;
+      }
+    }
+
+    final extra = await _buildBookingExtraWithOffer(offer);
+
+    if (!mounted) return;
+
+    final result = await context.push(
+      '/customer/vip-booking',
+      extra: extra.isEmpty ? null : extra,
+    );
+
+    if (result == true && mounted) {
+      debugPrint('✅ Returned from VIP booking — refreshing dashboard');
+      _loadDashboardData();
+    }
+  }
+
+  // ============================================================
+  // VIEW ALL OFFERS
+  // ============================================================
   Future<void> _viewAllOffers() async {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'offer');
@@ -412,10 +593,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     context.push('/profile');
   }
 
-  // ============================================================
-  // 🔥 SHOW WEB PERMISSION HELP
-  // ============================================================
+  void _viewMyBookings() {
+    context.push('/customer/my-bookings');
+  }
 
+  void _viewVipBookings() {
+    context.push('/customer/vip-bookings');
+  }
+
+  // ============================================================
+  // WEB PERMISSION HELP
+  // ============================================================
   void _showWebPermissionHelp() {
     if (!mounted) return;
 
@@ -570,9 +758,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // TIMEZONE INITIALIZATION
+  // TIMEZONE
   // ============================================================
-
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
 
@@ -595,12 +782,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   // ============================================================
   // LOAD DASHBOARD DATA
-  // ✅ FIX: appointments no longer has service_id / variant_id.
-  //    Every service lives in appointment_services now. Reading
-  //    appointments.price directly (server-synced total) instead of
-  //    trying to join services / service_variants.
   // ============================================================
-
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
@@ -666,9 +848,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         final status = apt['status'] as String;
         final isVip = apt['is_vip'] == true;
 
-        // ✅ appointments.price is the authoritative server-synced total.
-        // Fall back to summing appointment_services.final_price if it's
-        // null (older rows / defensive).
         double price = (apt['price'] as num?)?.toDouble() ?? 0.0;
         if (price <= 0) {
           final servicesList = (apt['appointment_services'] as List?) ?? [];
@@ -702,6 +881,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       final favoriteBarbers = await _getFavoriteBarbers(user.id);
       final offers = await _loadOffersFromDatabase();
 
+      final claimedOfferIds = await _loadClaimedOfferIds(user.id);
+
       await _loadUnreadCount();
 
       if (mounted) {
@@ -716,6 +897,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           _loyaltyPoints = (totalSpent / 10).round();
           _favoriteBarbers = favoriteBarbers;
           _offers = offers;
+          _claimedOfferIds = claimedOfferIds;
         });
       }
 
@@ -741,7 +923,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       }
 
       debugPrint(
-        '✅ Dashboard loaded: $upcoming upcoming, ${offers.length} offers, $_unreadNotificationCount unread notifications',
+        '✅ Dashboard loaded: $upcoming upcoming, ${offers.length} offers, '
+        '${_claimedOfferIds.length} claimed, $_unreadNotificationCount unread',
       );
     } catch (e) {
       debugPrint('❌ Error loading dashboard data: $e');
@@ -750,13 +933,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ============================================================
-  // GET FAVORITE BARBERS
-  // ✅ FIX: explicit FK constraint name
-  //    (appointments_barber_id_fkey). `profiles!barber_id` was ambiguous
-  //    because appointments has TWO FKs to profiles (customer_id +
-  //    barber_id). Also barber_id is nullable now (barber delete වුණාම).
-  // ============================================================
+  Future<Set<int>> _loadClaimedOfferIds(String customerId) async {
+    try {
+      final result = await supabase
+          .from('customer_offers')
+          .select('offer_id')
+          .eq('customer_id', customerId)
+          .eq('status', 'active');
+
+      return result.map<int>((row) => row['offer_id'] as int).toSet();
+    } catch (e) {
+      debugPrint('❌ Error loading claimed offers: $e');
+      return {};
+    }
+  }
 
   Future<List<Map<String, dynamic>>> _getFavoriteBarbers(
     String customerId,
@@ -776,7 +966,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       final Map<String, Map<String, dynamic>> barberCount = {};
       for (var apt in response) {
-        // ✅ barber_id can be NULL (barber account deleted) - skip those.
         final barberId = apt['barber_id'] as String?;
         if (barberId == null) continue;
 
@@ -820,10 +1009,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       return [];
     }
   }
-
-  // ============================================================
-  // NOTIFICATION LISTENERS
-  // ============================================================
 
   void _setupNotificationListeners() {
     try {
@@ -885,23 +1070,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ============================================================
-  // NAVIGATION METHODS
-  // ============================================================
-
-  void _viewMyBookings() {
-    context.push('/customer/my-bookings');
-  }
-
-  void _viewVipBookings() {
-    context.push('/customer/vip-bookings');
-  }
-
-  // ============================================================
-  // LOAD OFFERS FROM FOLLOWED SALONS
-  // ✅ FIX: explicit salon FK hint to avoid ambiguity.
-  // ============================================================
-
   Future<List<Map<String, dynamic>>> _loadOffersFromDatabase() async {
     try {
       final user = supabase.auth.currentUser;
@@ -921,8 +1089,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       for (var item in followedSalonsResult) {
         followedSalonIds.add(item['salon_id'] as int);
       }
-
-      debugPrint('📋 Followed salon IDs: $followedSalonIds');
 
       final today = DateTime.now().toIso8601String().split('T')[0];
 
@@ -956,8 +1122,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       if (result.isNotEmpty) {
         debugPrint('✅ Loaded ${result.length} offers from followed salons');
         return List<Map<String, dynamic>>.from(result);
-      } else {
-        debugPrint('📭 No active offers found in followed salons');
       }
     } catch (e) {
       debugPrint('❌ Error loading offers from followed salons: $e');
@@ -965,10 +1129,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
     return [];
   }
-
-  // ============================================================
-  // LOAD FOLLOWED SALONS
-  // ============================================================
 
   Future<void> _loadFollowedSalons(String userId) async {
     try {
@@ -1008,7 +1168,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             _followedSalons = [];
           });
         }
-        debugPrint('📭 No followed salons found');
       }
     } catch (e) {
       debugPrint('❌ Error loading followed salons: $e');
@@ -1021,10 +1180,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       if (mounted) setState(() => _isLoadingSalons = false);
     }
   }
-
-  // ============================================================
-  // LOAD UNREAD NOTIFICATION COUNT
-  // ============================================================
 
   Future<void> _loadUnreadCount() async {
     if (_isRefreshingCount) return;
@@ -1052,8 +1207,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           _unreadNotificationCount = count;
         });
       }
-
-      debugPrint('📬 Unread notifications: $_unreadNotificationCount');
     } catch (e) {
       debugPrint('❌ Error loading unread count: $e');
     } finally {
@@ -1076,20 +1229,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           _unreadNotificationCount = count;
         });
       }
-
-      debugPrint('🔄 Refreshed unread count: $_unreadNotificationCount');
     } catch (e) {
       debugPrint('❌ Error refreshing unread count: $e');
     }
   }
 
   // ============================================================
-  // APPLY OFFER METHOD
-  // ✅ FIX: loyalty_transactions.source check constraint allows only:
-  //    ('booking', 'review', 'referral', 'birthday', 'promotion',
-  //     'cancellation'). 'offer' is NOT allowed - using 'promotion'.
+  // ✅ APPLY OFFER — Claim only, NO navigation
   // ============================================================
-
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1108,8 +1255,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       if (user == null) {
         if (mounted) {
           _showSnackBar('Please login to apply offers', Colors.orange);
-          context.push('/login');
         }
+        if (mounted) context.push('/login');
         return;
       }
 
@@ -1286,17 +1433,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           actions: [
             TextButton(
               onPressed: () {
-                if (mounted) {
-                  Navigator.pop(dialogContext, false);
-                }
+                if (mounted) Navigator.pop(dialogContext, false);
               },
               child: const Text('Cancel'),
             ),
             ElevatedButton(
               onPressed: () {
-                if (mounted) {
-                  Navigator.pop(dialogContext, true);
-                }
+                if (mounted) Navigator.pop(dialogContext, true);
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primary,
@@ -1314,6 +1457,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       if (!mounted) return;
       if (confirmed != true) return;
 
+      // DB INSERTS
       await supabase.from('customer_offers').insert({
         'customer_id': user.id,
         'offer_id': offer['id'],
@@ -1345,9 +1489,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             })
             .eq('customer_id', user.id);
 
-        // ✅ FIX: source check constraint only allows
-        // ('booking','review','referral','birthday','promotion',
-        //  'cancellation'). 'offer' is not allowed - use 'promotion'.
         await supabase.from('loyalty_transactions').insert({
           'customer_id': user.id,
           'points': -pointsRequired,
@@ -1360,24 +1501,22 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         });
       }
 
-      if (mounted) {
-        _showSnackBar(
-          '✅ "${offer['title']}" applied successfully!',
-          Colors.green,
-        );
-      }
+      if (!mounted) return;
 
-      if (mounted) {
-        final result = await context.push(
-          '/customer/booking-flow',
-          extra: {'offer': offer},
-        );
-        if (result == true && mounted) {
-          _loadDashboardData();
-        }
-      }
-    } catch (e) {
-      debugPrint('Error applying offer: $e');
+      setState(() {
+        _claimedOfferIds = {..._claimedOfferIds, offer['id'] as int};
+      });
+
+      _showSnackBar(
+        '✅ "${offer['title']}" applied! Tap "Book Now" or "VIP" to use it.',
+        Colors.green,
+      );
+
+      // ✅ NO NAVIGATION — User stays on dashboard
+      debugPrint('✅ Offer claimed. User can click Book/VIP on card.');
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error applying offer: $e');
+      debugPrint('   Stack: $stackTrace');
       if (mounted) {
         _showSnackBar('Error applying offer. Please try again.', Colors.red);
       }
@@ -1392,6 +1531,18 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     } else {
       return 'FREE SERVICE';
     }
+  }
+
+  // ✅ Card accent colour (same palette as the Salon Profile offers)
+  Color _getOfferColor(int index) {
+    final colors = [
+      AppTheme.primary,
+      Colors.purple.shade400,
+      Colors.blue.shade400,
+      Colors.green.shade400,
+      Colors.orange.shade400,
+    ];
+    return colors[index % colors.length];
   }
 
   String _getDiscountIcon(String? discountType) {
@@ -1423,7 +1574,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
   // DATE HELPERS
   // ============================================================
-
   DateTime _parseDateSafely(String dateStr) {
     String processedStr = dateStr;
     if (!dateStr.contains('T') && dateStr.length == 10) {
@@ -1506,10 +1656,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return '$openLocal - $closeLocal';
   }
 
-  // ============================================================
-  // LOAD CUSTOMER DATA
-  // ============================================================
-
   Future<void> _loadCustomerData() async {
     try {
       final user = supabase.auth.currentUser;
@@ -1536,16 +1682,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           _customerName = user.email?.split('@').first ?? 'Guest User';
         });
       }
-
-      debugPrint('✅ Loaded customer: $_customerName ($_customerEmail)');
     } catch (e) {
       debugPrint('❌ Error loading customer data: $e');
     }
   }
-
-  // ============================================================
-  // SEARCH METHODS
-  // ============================================================
 
   void _onSearchTextChanged() {
     final query = _searchController.text.trim();
@@ -1603,64 +1743,81 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
+  // ============================================================
+  // ✅ SEARCH OVERLAY — same width as the search bar, follows it,
+  //    height-limited so it never fills the whole screen
+  // ============================================================
   void _showSearchOverlay() {
     _removeSearchOverlay();
 
+    final box = _searchFieldKey.currentContext?.findRenderObject() as RenderBox?;
+    final fieldWidth =
+        box?.size.width ?? (MediaQuery.of(context).size.width - 32);
+
     _searchOverlay = OverlayEntry(
-      builder: (context) => Positioned(
-        top: MediaQuery.of(context).padding.top + kToolbarHeight + 65,
-        left: 0,
-        right: 0,
-        child: Material(
-          elevation: 4,
-          color: Colors.transparent,
-          child: Container(
-            decoration: BoxDecoration(
-              color: context.cardColor,
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.15),
-                  blurRadius: 8,
-                  offset: const Offset(0, 2),
+      builder: (overlayContext) {
+        final maxHeight = (MediaQuery.of(overlayContext).size.height * 0.4)
+            .clamp(120.0, 320.0);
+
+        return Positioned(
+          width: fieldWidth,
+          child: CompositedTransformFollower(
+            link: _searchLayerLink,
+            showWhenUnlinked: false,
+            targetAnchor: Alignment.bottomLeft,
+            followerAnchor: Alignment.topLeft,
+            offset: const Offset(0, 6),
+            child: Material(
+              elevation: 6,
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                constraints: BoxConstraints(maxHeight: maxHeight),
+                decoration: BoxDecoration(
+                  color: overlayContext.cardColor,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: overlayContext.dividerColor),
                 ),
-              ],
-            ),
-            margin: const EdgeInsets.symmetric(horizontal: 16),
-            child: _isSearching
-                ? const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(
-                      child: SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppTheme.primary,
+                clipBehavior: Clip.antiAlias,
+                child: _isSearching
+                    ? const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Center(
+                          child: SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppTheme.primary,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  )
-                : _searchResults.isEmpty
-                ? Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Center(
-                      child: Text(
-                        'No salons found',
-                        style: TextStyle(color: context.textColor),
-                      ),
-                    ),
-                  )
-                : ListView.builder(
-                    shrinkWrap: true,
-                    physics: const ClampingScrollPhysics(),
-                    itemCount: _searchResults.length,
-                    itemBuilder: (context, index) =>
-                        _buildSearchResultTile(_searchResults[index]),
-                  ),
+                      )
+                    : _searchResults.isEmpty
+                        ? Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Center(
+                              child: Text(
+                                'No salons found',
+                                style: TextStyle(
+                                  color: overlayContext.textColor,
+                                ),
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            padding: EdgeInsets.zero,
+                            physics: const ClampingScrollPhysics(),
+                            itemCount: _searchResults.length,
+                            itemBuilder: (_, index) =>
+                                _buildSearchResultTile(_searchResults[index]),
+                          ),
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
 
     Overlay.of(context).insert(_searchOverlay!);
@@ -1723,6 +1880,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 children: [
                   Text(
                     salon['name'] ?? 'Salon',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
@@ -1749,11 +1908,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         color: context.secondaryTextColor,
                       ),
                       const SizedBox(width: 2),
-                      Text(
-                        _getFormattedSalonHours(salon),
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: context.secondaryTextColor,
+                      Flexible(
+                        child: Text(
+                          _getFormattedSalonHours(salon),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: context.secondaryTextColor,
+                          ),
                         ),
                       ),
                     ],
@@ -1761,6 +1924,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 ],
               ),
             ),
+            const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
@@ -1821,7 +1985,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ UI WIDGETS
+  // UI WIDGETS
   // ============================================================
 
   Widget _buildResponsiveBookButton() {
@@ -1890,7 +2054,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               '$_vipBookings',
               Icons.star,
               Colors.amber,
-              _viewVipBookings,
+              _viewMyBookings,
             ),
             _buildStatCard(
               'Points',
@@ -2295,6 +2459,20 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
+  // ✅ AppBar actions that can never overflow: when the AppBar gets very
+  //    little width (web resize / page transition) they scale down instead.
+  List<Widget> _safeActions(List<Widget> children) {
+    return [
+      Flexible(
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Row(mainAxisSize: MainAxisSize.min, children: children),
+        ),
+      ),
+    ];
+  }
+
   Widget _buildOffersButton() {
     return IconButton(
       icon: const Icon(Icons.local_offer_outlined, color: Colors.white),
@@ -2578,62 +2756,84 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
+  // ============================================================
+  // ✅ OFFER CARD — same design as the Salon Profile offer card
+  //    Not applied → only "Apply Offer" button + pulse animation
+  //    Applied     → "Applied" chip + "Book Now" + "VIP" buttons (no pulse)
+  // ============================================================
   Widget _buildFacebookStyleOfferPost(
     Map<String, dynamic> offer,
     int index, {
     bool inGrid = false,
   }) {
-    final salonData = offer['salons'];
-    final salonName = salonData != null ? salonData['name'] : 'Special Offer';
-    final salonLogo = salonData != null ? salonData['logo_url'] : null;
+    final isDark = context.isDarkMode;
+    final color = _getOfferColor(index);
+
+    final salonData = offer['salons'] as Map?;
+    final salonName = (salonData?['name'] as String?) ?? 'Special Offer';
 
     final daysLeft = _getDaysLeft(offer['valid_to']);
-    final discountColor = _getDiscountColor(offer['discount_type']);
-    final discountText = _getDiscountText(offer);
-    final isDark = context.isDarkMode;
+    final isExpired = daysLeft <= 0;
+    final points = (offer['points_required'] as num?)?.toInt() ?? 0;
+    final description = (offer['description'] as String?) ?? '';
 
-    return Container(
+    // image_url holds an emoji in this app; ignore real URLs
+    final rawIcon = (offer['image_url'] as String?) ?? '';
+    final emoji = (rawIcon.isNotEmpty && !rawIcon.startsWith('http'))
+        ? rawIcon
+        : _getDiscountIcon(offer['discount_type']);
+
+    final offerId = offer['id'] as int?;
+    final isClaimed = offerId != null && _claimedOfferIds.contains(offerId);
+
+    final secondaryColor = isDark ? Colors.white60 : Colors.grey[600];
+
+    final card = Container(
       margin: inGrid
           ? EdgeInsets.zero
           : const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: context.cardColor,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [color.withValues(alpha: 0.15), const Color(0xFF1E1E1E)]
+              : [color.withValues(alpha: 0.1), Colors.white],
+        ),
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isClaimed
+              ? Colors.green.shade400
+              : color.withValues(alpha: 0.3),
+          width: isClaimed ? 1.5 : 1,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.1),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
         ],
-        border: Border.all(color: context.dividerColor),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ───── HEADER: emoji + title + salon + discount chip ─────
+            Row(
               children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
-                  backgroundImage: salonLogo != null
-                      ? NetworkImage(salonLogo)
-                      : null,
-                  child: salonLogo == null
-                      ? Text(
-                          salonName.isNotEmpty
-                              ? salonName[0].toUpperCase()
-                              : 'S',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primary,
-                          ),
-                        )
-                      : null,
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Text(emoji, style: const TextStyle(fontSize: 28)),
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -2641,165 +2841,276 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        salonName,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: context.textColor,
-                        ),
+                        offer['title'] ?? '',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : color,
+                        ),
                       ),
                       const SizedBox(height: 2),
-                      Row(
+                      Text(
+                        salonName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: secondaryColor,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
-                          Icon(
-                            Icons.access_time,
-                            size: 12,
-                            color: context.secondaryTextColor,
-                          ),
-                          const SizedBox(width: 4),
-                          Flexible(
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: color.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                             child: Text(
-                              daysLeft <= 0 ? 'Expired' : '$daysLeft days left',
+                              _getDiscountText(offer),
                               style: TextStyle(
-                                fontSize: 11,
-                                color: daysLeft <= 3
-                                    ? Colors.red
-                                    : context.secondaryTextColor,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: color,
                               ),
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          if ((offer['points_required'] ?? 0) > 0) ...[
-                            const SizedBox(width: 8),
-                            Icon(
-                              Icons.star,
-                              size: 12,
-                              color: Colors.amber.shade600,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '${offer['points_required']} pts',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: Colors.amber.shade700,
+                          if (isClaimed)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.check_circle,
+                                    size: 12,
+                                    color: Colors.green.shade600,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'Applied',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.green.shade600,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
-                          ],
                         ],
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 6),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 90),
-                  child: Container(
+              ],
+            ),
+
+            // ───── DESCRIPTION ─────
+            if (description.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: secondaryColor),
+              ),
+            ],
+            const SizedBox(height: 12),
+
+            // ───── META: points + days left ─────
+            Row(
+              children: [
+                if (points > 0)
+                  Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
+                      horizontal: 6,
+                      vertical: 2,
                     ),
                     decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [Colors.amber.shade400, Colors.orange.shade500],
-                      ),
-                      borderRadius: BorderRadius.circular(20),
+                      color: Colors.amber.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
-                      discountText,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Divider(color: context.dividerColor, height: 1),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  offer['title'],
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: context.textColor,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  offer['description'] ?? '',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: context.secondaryTextColor,
-                    height: 1.4,
-                  ),
-                  maxLines: inGrid ? 2 : 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () => _applyOffer(offer),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: discountColor,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(25),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.star, color: Colors.amber, size: 12),
+                        const SizedBox(width: 2),
+                        Text(
+                          '$points pts',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: context.textColor,
                           ),
                         ),
-                        child: const Text(
-                          'Apply Offer',
-                          style: TextStyle(fontWeight: FontWeight.w600),
+                      ],
+                    ),
+                  ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: daysLeft <= 3
+                        ? Colors.red.withValues(alpha: 0.1)
+                        : (isDark
+                              ? Colors.white10
+                              : Colors.grey.withValues(alpha: 0.1)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.access_time,
+                        size: 10,
+                        color: daysLeft <= 3 ? Colors.red : secondaryColor,
+                      ),
+                      const SizedBox(width: 2),
+                      Text(
+                        isExpired ? 'Expired' : '$daysLeft days left',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: daysLeft <= 3 ? Colors.red : secondaryColor,
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    OutlinedButton(
-                      onPressed: () => _bookAppointment(),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: context.secondaryTextColor,
-                        side: BorderSide(color: context.dividerColor),
-                        padding: const EdgeInsets.symmetric(
-                          vertical: 10,
-                          horizontal: 16,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(25),
-                        ),
-                      ),
-                      child: const Text('Book Now'),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 10),
+
+            // ───── ACTIONS ─────
+            SizedBox(
+              height: 36,
+              child: isClaimed
+                  ? Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _bookAppointmentWithOffer(offer),
+                            icon: const Icon(Icons.calendar_today, size: 14),
+                            label: const Text(
+                              'Book Now',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primary,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => _createVipBookingWithOffer(offer),
+                            icon: const Icon(
+                              Icons.star,
+                              size: 14,
+                              color: Colors.amber,
+                            ),
+                            label: const Text(
+                              'VIP',
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.amber,
+                              ),
+                            ),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(
+                                color: Colors.amber,
+                                width: 1.4,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: isExpired ? null : () => _applyOffer(offer),
+                        icon: const Icon(Icons.local_offer, size: 15),
+                        label: Text(
+                          isExpired ? 'Expired' : 'Apply Offer',
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: color,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          disabledBackgroundColor: isDark
+                              ? Colors.grey[800]
+                              : Colors.grey[300],
+                          disabledForegroundColor: isDark
+                              ? Colors.white38
+                              : Colors.grey[600],
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
+
+    // ✨ Pulse only the offers that are NOT applied yet (new offers)
+    if (!isClaimed && !isExpired) {
+      return ScaleTransition(scale: _pulseAnim, child: card);
+    }
+    return card;
   }
 
   // ============================================================
-  // ✅ MAIN BUILD METHOD - WEB + MOBILE
+  // MAIN BUILD METHOD
   // ============================================================
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -2825,7 +3136,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ),
           ),
           title: null,
-          actions: [_buildProfilePhoto()],
+          actions: _safeActions([_buildProfilePhoto()]),
         ),
         body: const Center(
           child: Column(
@@ -2856,7 +3167,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ),
           ),
           title: null,
-          actions: [_buildProfilePhoto()],
+          actions: _safeActions([_buildProfilePhoto()]),
         ),
         drawer: SideMenu(
           userRole: 'customer',
@@ -2923,11 +3234,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           ),
         ),
         title: null,
-        actions: [
+        actions: _safeActions([
           _buildOffersButton(),
           _buildNotificationIcon(),
           _buildProfilePhoto(),
-        ],
+        ]),
       ),
       drawer: SideMenu(
         userRole: 'customer',
@@ -2940,7 +3251,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ✅ WEB LAYOUT - Search Bar inside content
   Widget _buildWebLayout() {
     return Center(
       child: Container(
@@ -2961,50 +3271,60 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
+                  // ✅ Margin lives on the outer container; the link/key are on
+                  //    the inner decorated box so the overlay matches its size
                   Container(
                     margin: const EdgeInsets.only(bottom: 20),
-                    decoration: BoxDecoration(
-                      color: context.isDarkMode
-                          ? Colors.white.withValues(alpha: 0.08)
-                          : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(30),
-                      border: Border.all(color: context.dividerColor),
-                    ),
-                    child: TextField(
-                      controller: _searchController,
-                      focusNode: _searchFocusNode,
-                      style: TextStyle(color: context.textColor),
-                      decoration: InputDecoration(
-                        hintText: '🔍 Search for salons...',
-                        hintStyle: TextStyle(color: context.secondaryTextColor),
-                        prefixIcon: Icon(
-                          Icons.search,
-                          color: context.secondaryTextColor,
+                    child: CompositedTransformTarget(
+                      link: _searchLayerLink,
+                      child: Container(
+                        key: _searchFieldKey,
+                        decoration: BoxDecoration(
+                          color: context.isDarkMode
+                              ? Colors.white.withValues(alpha: 0.08)
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(color: context.dividerColor),
                         ),
-                        suffixIcon: _searchController.text.isNotEmpty
-                            ? GestureDetector(
-                                onTap: () {
-                                  _searchController.clear();
-                                  _hideSearchResults();
-                                },
-                                child: Icon(
-                                  Icons.close,
-                                  color: context.secondaryTextColor,
-                                ),
-                              )
-                            : null,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(
-                          vertical: 14,
-                          horizontal: 8,
+                        child: TextField(
+                          controller: _searchController,
+                          focusNode: _searchFocusNode,
+                          style: TextStyle(color: context.textColor),
+                          decoration: InputDecoration(
+                            hintText: '🔍 Search for salons...',
+                            hintStyle: TextStyle(
+                              color: context.secondaryTextColor,
+                            ),
+                            prefixIcon: Icon(
+                              Icons.search,
+                              color: context.secondaryTextColor,
+                            ),
+                            suffixIcon: _searchController.text.isNotEmpty
+                                ? GestureDetector(
+                                    onTap: () {
+                                      _searchController.clear();
+                                      _hideSearchResults();
+                                    },
+                                    child: Icon(
+                                      Icons.close,
+                                      color: context.secondaryTextColor,
+                                    ),
+                                  )
+                                : null,
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 14,
+                              horizontal: 8,
+                            ),
+                          ),
+                          onTap: () {
+                            if (_searchController.text.isNotEmpty &&
+                                _searchResults.isNotEmpty) {
+                              _showSearchOverlay();
+                            }
+                          },
                         ),
                       ),
-                      onTap: () {
-                        if (_searchController.text.isNotEmpty &&
-                            _searchResults.isNotEmpty) {
-                          _showSearchOverlay();
-                        }
-                      },
                     ),
                   ),
                   _buildDashboardContent(),
@@ -3017,53 +3337,56 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
-  // ✅ MOBILE LAYOUT - Search Bar below AppBar
   Widget _buildMobileLayout() {
     return Column(
       children: [
         Container(
           color: context.backgroundColor,
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Container(
-            decoration: BoxDecoration(
-              color: context.isDarkMode
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: context.dividerColor),
-            ),
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              style: TextStyle(color: context.textColor),
-              decoration: InputDecoration(
-                hintText: '🔍 Search for salons...',
-                hintStyle: TextStyle(color: context.secondaryTextColor),
-                prefixIcon: Icon(
-                  Icons.search,
-                  color: context.secondaryTextColor,
-                ),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? GestureDetector(
-                        onTap: () {
-                          _searchController.clear();
-                          _hideSearchResults();
-                        },
-                        child: Icon(
-                          Icons.close,
-                          color: context.secondaryTextColor,
-                        ),
-                      )
-                    : null,
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          child: CompositedTransformTarget(
+            link: _searchLayerLink,
+            child: Container(
+              key: _searchFieldKey,
+              decoration: BoxDecoration(
+                color: context.isDarkMode
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: context.dividerColor),
               ),
-              onTap: () {
-                if (_searchController.text.isNotEmpty &&
-                    _searchResults.isNotEmpty) {
-                  _showSearchOverlay();
-                }
-              },
+              child: TextField(
+                controller: _searchController,
+                focusNode: _searchFocusNode,
+                style: TextStyle(color: context.textColor),
+                decoration: InputDecoration(
+                  hintText: '🔍 Search for salons...',
+                  hintStyle: TextStyle(color: context.secondaryTextColor),
+                  prefixIcon: Icon(
+                    Icons.search,
+                    color: context.secondaryTextColor,
+                  ),
+                  suffixIcon: _searchController.text.isNotEmpty
+                      ? GestureDetector(
+                          onTap: () {
+                            _searchController.clear();
+                            _hideSearchResults();
+                          },
+                          child: Icon(
+                            Icons.close,
+                            color: context.secondaryTextColor,
+                          ),
+                        )
+                      : null,
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+                onTap: () {
+                  if (_searchController.text.isNotEmpty &&
+                      _searchResults.isNotEmpty) {
+                    _showSearchOverlay();
+                  }
+                },
+              ),
             ),
           ),
         ),
@@ -3091,10 +3414,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       ],
     );
   }
-
-  // ============================================================
-  // ✅ DASHBOARD CONTENT
-  // ============================================================
 
   Widget _buildDashboardContent() {
     final isDark = context.isDarkMode;
@@ -3217,8 +3536,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ),
           ),
         const SizedBox(height: 20),
-        _buildActivitySummaryCard(),
-        const SizedBox(height: 20),
         if (_offers.isNotEmpty) ...[
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -3259,12 +3576,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _offers.length,
+                    // ✅ Fixed card height (works for both Apply / Applied states)
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           crossAxisSpacing: 16,
                           mainAxisSpacing: 16,
-                          childAspectRatio: 1.6,
+                          mainAxisExtent: 240,
                         ),
                     itemBuilder: (context, index) =>
                         _buildFacebookStyleOfferPost(
@@ -3423,6 +3741,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             ),
           ),
         ],
+        const SizedBox(height: 4),
+        // ✅ Activity Summary — at the very bottom of the screen
+        _buildActivitySummaryCard(),
         const SizedBox(height: 20),
       ],
     );
