@@ -54,6 +54,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   int _totalSpent = 0;
   int _loyaltyPoints = 0;
 
+  // ✅ NEW: Salon-specific loyalty summary
+  int _loyaltySalonCount = 0;
+
   // VIP Bookings
   int _vipBookings = 0;
   int _pendingVipBookings = 0;
@@ -389,8 +392,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       }
 
       // 2. ✅ Load offer's applicable services + variants (variant-aware)
-      //    offer_services rows may have variant_id null (service-level)
-      //    or a specific variant_id (variant-level)
       List<Map<String, dynamic>> offerServiceRows = [];
       try {
         final offerServicesResp = await supabase
@@ -807,7 +808,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // LOAD DASHBOARD DATA
+  // ✅ LOAD DASHBOARD DATA (with salon-specific loyalty)
   // ============================================================
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
@@ -907,6 +908,28 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       final favoriteBarbers = await _getFavoriteBarbers(user.id);
       final offers = await _loadOffersFromDatabase();
 
+      // ✅ NEW: Load salon-specific loyalty summary via RPC
+      int loyaltyPoints = 0;
+      int loyaltySalonCount = 0;
+
+      try {
+        final loyaltySummary = await supabase.rpc(
+          'get_global_loyalty_summary',
+          params: {'p_customer_id': user.id},
+        );
+
+        if (loyaltySummary is Map) {
+          loyaltyPoints =
+              (loyaltySummary['total_current_points'] as num?)?.toInt() ?? 0;
+          loyaltySalonCount =
+              (loyaltySummary['salon_count'] as num?)?.toInt() ?? 0;
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to load loyalty summary: $e');
+        // Fallback — old logic (only if RPC fails)
+        loyaltyPoints = (totalSpent / 10).round();
+      }
+
       await _loadUnreadCount();
 
       if (mounted) {
@@ -918,7 +941,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           _vipBookings = vip;
           _pendingVipBookings = pendingVip;
           _totalSpent = totalSpent.toInt();
-          _loyaltyPoints = (totalSpent / 10).round();
+          _loyaltyPoints = loyaltyPoints;
+          _loyaltySalonCount = loyaltySalonCount;
           _favoriteBarbers = favoriteBarbers;
           _offers = offers;
         });
@@ -947,7 +971,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       debugPrint(
         '✅ Dashboard loaded: $upcoming upcoming, ${offers.length} offers, '
-        '$_unreadNotificationCount unread',
+        '$_loyaltyPoints pts across $_loyaltySalonCount salons',
       );
     } catch (e) {
       debugPrint('❌ Error loading dashboard data: $e');
@@ -1340,7 +1364,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ APPLY OFFER — Atomic via claim_offer RPC
+  // ✅ APPLY OFFER — Atomic via claim_offer RPC (salon-specific)
   // ============================================================
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
@@ -1437,6 +1461,39 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
+      // ✅ NEW: Salon-specific points check
+      final pointsRequired = (offer['points_required'] as num?)?.toInt() ?? 0;
+      final offerSalonId = offer['salon_id'] as int?;
+
+      if (pointsRequired > 0 && offerSalonId != null) {
+        try {
+          final loyaltyResult = await supabase.rpc(
+            'get_customer_loyalty_for_salon',
+            params: {
+              'p_customer_id': user.id,
+              'p_salon_id': offerSalonId,
+            },
+          );
+
+          final userPoints = (loyaltyResult is Map)
+              ? (loyaltyResult['current_points'] as num?)?.toInt() ?? 0
+              : 0;
+
+          if (userPoints < pointsRequired) {
+            if (mounted) {
+              _showSnackBar(
+                'You need $pointsRequired points at this salon to apply',
+                Colors.orange,
+              );
+            }
+            return;
+          }
+        } catch (e) {
+          debugPrint('⚠️ Error checking salon loyalty: $e');
+          // Fall through — server will validate anyway
+        }
+      }
+
       if (!mounted) return;
 
       final confirmed = await showDialog<bool>(
@@ -1498,16 +1555,19 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   textAlign: TextAlign.center,
                 ),
               ],
-              if ((offer['points_required'] ?? 0) > 0) ...[
+              if (pointsRequired > 0) ...[
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Icon(Icons.star, color: Colors.amber, size: 20),
                     const SizedBox(width: 8),
-                    Text(
-                      'Requires ${offer['points_required']} loyalty points',
-                      style: const TextStyle(fontSize: 14),
+                    Flexible(
+                      child: Text(
+                        'Requires $pointsRequired points at this salon',
+                        style: const TextStyle(fontSize: 14),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ],
                 ),
@@ -1544,7 +1604,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       // ✅ Set claiming state
       setState(() => _claimingOfferIds.add(offerId));
 
-      // ✅ Atomic RPC — handles: points, used_count, race safe
+      // ✅ Atomic RPC — salon-specific points
       final response = await supabase.rpc(
         'claim_offer',
         params: {'p_offer_id': offerId},
@@ -1559,7 +1619,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           '✅ "${offer['title']}" applied! Tap "Book Now" or "VIP" to use it.',
           Colors.green,
         );
-        // ✅ Full refresh so badges update
         await _loadDashboardData();
       } else {
         final msg = (result['message'] ?? 'Failed to apply offer').toString();
@@ -2110,6 +2169,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               Icons.card_giftcard,
               Colors.green,
               _viewLoyaltyProgram,
+              subtitle: _loyaltySalonCount > 0
+                  ? '$_loyaltySalonCount salons'
+                  : null,
             ),
             _buildStatCard(
               'Completed',
@@ -2154,6 +2216,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               Icons.card_giftcard,
               Colors.green,
               _viewLoyaltyProgram,
+              subtitle: _loyaltySalonCount > 0
+                  ? '$_loyaltySalonCount salons'
+                  : null,
             ),
           ),
         ],
@@ -2166,8 +2231,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     String value,
     IconData icon,
     Color color,
-    VoidCallback onTap,
-  ) {
+    VoidCallback onTap, {
+    String? subtitle,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -2196,6 +2262,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               style: TextStyle(fontSize: 11, color: Colors.grey[600]),
               textAlign: TextAlign.center,
             ),
+            if (subtitle != null)
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 9,
+                  color: Colors.grey[500],
+                  fontWeight: FontWeight.w500,
+                ),
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+              ),
           ],
         ),
       ),
@@ -3701,7 +3778,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     itemCount: _offers.length,
-                    // ✅ Match SalonProfile card height (~300-320)
                     gridDelegate:
                         const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,

@@ -430,8 +430,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     final offerServices = widget.editingOffer!['offer_services'] as List? ?? [];
 
     if (offerServices.isEmpty) {
-      // No specific services → offer applies to everything historically.
-      // Since we no longer have "All Services" mode, leave selection empty.
       return;
     }
 
@@ -1382,7 +1380,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                 label: 'Points Required',
                 hint: '0 (available for all customers)',
                 icon: Icons.stars,
-                helperText: 'Loyalty points needed to claim',
+                helperText: 'Loyalty points needed to claim (salon-specific)',
                 keyboardType: TextInputType.number,
                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                 validator: (v) {
@@ -1459,7 +1457,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   // ============================================
-  // SERVICE MENU TREE (always visible, no All/Specific toggle)
+  // SERVICE MENU TREE
   // ============================================
   Widget _buildServiceMenuTree() {
     if (_isLoadingServices) {
@@ -1540,7 +1538,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
               ? () {
                   setState(() {
                     if (_selection.isEmpty) {
-                      // Select all services with priced variants
                       for (final cat in _serviceMenuTree) {
                         for (final s in (cat['services'] as List)) {
                           final sid = s['id'] as int;

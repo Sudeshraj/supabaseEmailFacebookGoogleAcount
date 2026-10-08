@@ -490,7 +490,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
-  // ✅ APPLY OFFER - uses claim_offer RPC
+  // ✅ APPLY OFFER - uses claim_offer RPC (salon-specific)
   // ============================================
 
   Future<void> _applyOffer(Map<String, dynamic> offer) async {
@@ -546,24 +546,37 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
-      // Points check
-      final pointsRequired = offer['points_required'] ?? 0;
-      if (pointsRequired > 0) {
-        final loyaltyResult = await supabase
-            .from('customer_loyalty')
-            .select('current_points')
-            .eq('customer_id', user.id)
-            .maybeSingle();
+      // ✅ NEW: Salon-specific points check
+      final pointsRequired =
+          (offer['points_required'] as num?)?.toInt() ?? 0;
+      final offerSalonId = offer['salon_id'] as int?;
 
-        final userPoints = loyaltyResult?['current_points'] ?? 0;
-        if (userPoints < pointsRequired) {
-          if (mounted) {
-            _showSnackBar(
-              'You need $pointsRequired points to apply this offer',
-              Colors.orange,
-            );
+      if (pointsRequired > 0 && offerSalonId != null) {
+        try {
+          final loyaltyResult = await supabase.rpc(
+            'get_customer_loyalty_for_salon',
+            params: {
+              'p_customer_id': user.id,
+              'p_salon_id': offerSalonId,
+            },
+          );
+
+          final userPoints = (loyaltyResult is Map)
+              ? (loyaltyResult['current_points'] as num?)?.toInt() ?? 0
+              : 0;
+
+          if (userPoints < pointsRequired) {
+            if (mounted) {
+              _showSnackBar(
+                'You need $pointsRequired points at this salon to apply',
+                Colors.orange,
+              );
+            }
+            return;
           }
-          return;
+        } catch (e) {
+          debugPrint('⚠️ Error checking salon loyalty: $e');
+          // Fall through — server will validate anyway
         }
       }
 
@@ -652,9 +665,12 @@ class _OffersScreenState extends State<OffersScreen> {
                   children: [
                     const Icon(Icons.star, color: Colors.amber, size: 20),
                     const SizedBox(width: 8),
-                    Text(
-                      'Requires $pointsRequired loyalty points',
-                      style: const TextStyle(fontSize: 14),
+                    Flexible(
+                      child: Text(
+                        'Requires $pointsRequired points at this salon',
+                        style: const TextStyle(fontSize: 14),
+                        textAlign: TextAlign.center,
+                      ),
                     ),
                   ],
                 ),
@@ -689,7 +705,7 @@ class _OffersScreenState extends State<OffersScreen> {
 
       setState(() => _claimingOfferIds.add(offerId));
 
-      // ✅ Atomic RPC
+      // ✅ Atomic RPC (salon-specific)
       final response = await supabase.rpc(
         'claim_offer',
         params: {'p_offer_id': offerId},

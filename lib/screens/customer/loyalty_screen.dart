@@ -19,8 +19,27 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   bool _hasError = false;
   String _errorMessage = '';
 
-  // Data
-  Map<String, dynamic>? _loyalty;
+  // ============================================
+  // ✅ SALON-SPECIFIC DATA (Option B)
+  // ============================================
+
+  /// හැම salon එකකට වෙනම loyalty data
+  List<Map<String, dynamic>> _salonLoyalties = [];
+
+  /// Global summary (හැම salon එකෙන්ම total)
+  Map<String, dynamic> _globalSummary = {
+    'total_current_points': 0,
+    'total_lifetime_points': 0,
+    'salon_count': 0,
+    'best_tier': 'Bronze',
+  };
+
+  /// Selected salon for "My Tier" tab
+  int? _selectedSalonId;
+
+  /// Selected salon filter for "History" tab (null = All)
+  int? _historySalonFilter;
+
   List<Map<String, dynamic>> _transactions = [];
   List<Map<String, dynamic>> _badges = [];
   List<Map<String, dynamic>> _earnedBadges = [];
@@ -28,7 +47,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   // Tab
   late TabController _tabController;
 
-  // ✅ API 36: Responsive variables
+  // Responsive
   bool _isTablet = false;
   bool _isWeb = false;
 
@@ -36,6 +55,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _tabController.addListener(_onTabChanged);
     _loadLoyaltyData();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkScreenSize();
@@ -46,6 +66,10 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _checkScreenSize();
+  }
+
+  void _onTabChanged() {
+    if (mounted) setState(() {});
   }
 
   void _checkScreenSize() {
@@ -63,19 +87,38 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
 
   @override
   void dispose() {
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     super.dispose();
   }
 
   // ============================================
-  // TIER HELPERS
+  // ✅ SELECTED SALON LOYALTY (for "My Tier" tab)
   // ============================================
 
-  int get _currentPoints =>
-      (_loyalty?['current_points'] as num?)?.toInt() ?? 0;
+  Map<String, dynamic>? get _selectedSalonLoyalty {
+    if (_selectedSalonId == null) {
+      return _salonLoyalties.isNotEmpty ? _salonLoyalties.first : null;
+    }
+    try {
+      return _salonLoyalties.firstWhere(
+        (l) => l['salon_id'] == _selectedSalonId,
+      );
+    } catch (e) {
+      return _salonLoyalties.isNotEmpty ? _salonLoyalties.first : null;
+    }
+  }
+
   int get _lifetimePoints =>
-      (_loyalty?['lifetime_points'] as num?)?.toInt() ?? 0;
-  String get _tier => _loyalty?['tier']?.toString() ?? 'Bronze';
+      (_selectedSalonLoyalty?['lifetime_points'] as num?)?.toInt() ?? 0;
+  String get _tier =>
+      _selectedSalonLoyalty?['tier']?.toString() ?? 'Bronze';
+  String get _selectedSalonName =>
+      _selectedSalonLoyalty?['salon_name']?.toString() ?? 'Select a salon';
+
+  // ============================================
+  // TIER HELPERS
+  // ============================================
 
   Color _tierColor(String tier) {
     switch (tier) {
@@ -105,7 +148,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     }
   }
 
-  // ✅ Tier Emoji
   String _tierEmoji(String tier) {
     switch (tier) {
       case 'Platinum':
@@ -120,7 +162,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     }
   }
 
-  // ✅ Tier Description - User ට තේරෙන විදියට
   String _tierDescription(String tier) {
     switch (tier) {
       case 'Platinum':
@@ -131,11 +172,10 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
         return 'Faster service and bonus points';
       case 'Bronze':
       default:
-        return 'Start your loyalty journey - earn points and unlock rewards!';
+        return 'Start your loyalty journey at this salon!';
     }
   }
 
-  // ✅ Tier Benefits - User ට තේරෙන විදියට
   List<Map<String, dynamic>> _tierBenefits(String tier) {
     switch (tier) {
       case 'Platinum':
@@ -169,7 +209,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     }
   }
 
-  // ✅ All Tiers for Progress Tracker
   List<Map<String, dynamic>> get _allTiers => [
     {
       'name': 'Bronze',
@@ -205,23 +244,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     },
   ];
 
-  double get _tierProgress {
-    const tierThresholds = {
-      'Bronze': [0, 200],
-      'Silver': [200, 500],
-      'Gold': [500, 1000],
-      'Platinum': [1000, 1000],
-    };
-
-    final range = tierThresholds[_tier] ?? [0, 1000];
-    final min = range[0];
-    final max = range[1];
-
-    if (_tier == 'Platinum' || max <= min) return 1.0;
-
-    final progress = (_lifetimePoints - min) / (max - min);
-    return progress.clamp(0.0, 1.0);
-  }
 
   int get _nextTierMinPoints {
     switch (_tier) {
@@ -252,7 +274,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   }
 
   // ============================================
-  // LOAD DATA
+  // ✅ LOAD DATA (Salon-Specific via RPC)
   // ============================================
 
   Future<void> _loadLoyaltyData() async {
@@ -276,56 +298,64 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
         return;
       }
 
-      var loyalty = await supabase
-          .from('customer_loyalty')
-          .select()
-          .eq('customer_id', user.id)
-          .maybeSingle();
+      // 1. ✅ Global summary (හැම salon එකෙන්ම total)
+      final globalSummary = await supabase.rpc(
+        'get_global_loyalty_summary',
+        params: {'p_customer_id': user.id},
+      );
 
-      if (loyalty == null) {
-        try {
-          await supabase.from('customer_loyalty').insert({
-            'customer_id': user.id,
-            'total_points': 0,
-            'current_points': 0,
-            'lifetime_points': 0,
-            'tier': 'Bronze',
-            'points_to_next_tier': 500,
-          });
+      // 2. ✅ All salon-specific loyalty rows
+      final salonLoyaltiesResult = await supabase.rpc(
+        'get_all_customer_loyalty',
+        params: {'p_customer_id': user.id},
+      );
 
-          loyalty = await supabase
-              .from('customer_loyalty')
-              .select()
-              .eq('customer_id', user.id)
-              .maybeSingle();
-        } catch (e) {
-          debugPrint('Error creating loyalty row: $e');
-        }
-      }
+      // 3. ✅ All transactions (with salon info)
+      final transactions = await supabase.rpc(
+        'get_all_loyalty_transactions',
+        params: {
+          'p_customer_id': user.id,
+          'p_limit': 100,
+        },
+      );
 
-      final transactions = await supabase
-          .from('loyalty_transactions')
-          .select()
-          .eq('customer_id', user.id)
-          .order('created_at', ascending: false)
-          .limit(50);
-
+      // 4. Badges (platform-wide + salon-specific)
       final allBadges = await supabase
           .from('badges')
           .select()
           .eq('is_active', true)
           .order('points_required', ascending: true);
 
+      // 5. Earned badges
       final earnedBadges = await supabase
           .from('customer_badges')
-          .select('badge_id, earned_at')
+          .select('badge_id, earned_at, salon_id')
           .eq('customer_id', user.id);
 
       if (!mounted) return;
 
+      final salonLoyalties = List<Map<String, dynamic>>.from(
+        salonLoyaltiesResult is List ? salonLoyaltiesResult : [],
+      );
+
+      // Auto-select first salon
+      if (_selectedSalonId == null && salonLoyalties.isNotEmpty) {
+        _selectedSalonId = salonLoyalties.first['salon_id'] as int?;
+      }
+
       setState(() {
-        _loyalty = loyalty;
-        _transactions = List<Map<String, dynamic>>.from(transactions);
+        _globalSummary = globalSummary is Map
+            ? Map<String, dynamic>.from(globalSummary)
+            : {
+                'total_current_points': 0,
+                'total_lifetime_points': 0,
+                'salon_count': 0,
+                'best_tier': 'Bronze',
+              };
+        _salonLoyalties = salonLoyalties;
+        _transactions = List<Map<String, dynamic>>.from(
+          transactions is List ? transactions : [],
+        );
         _badges = List<Map<String, dynamic>>.from(allBadges);
         _earnedBadges = List<Map<String, dynamic>>.from(earnedBadges);
         _isLoading = false;
@@ -428,6 +458,17 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   }
 
   // ============================================
+  // FILTERED TRANSACTIONS (History tab)
+  // ============================================
+
+  List<Map<String, dynamic>> get _filteredTransactions {
+    if (_historySalonFilter == null) return _transactions;
+    return _transactions
+        .where((t) => t['salon_id'] == _historySalonFilter)
+        .toList();
+  }
+
+  // ============================================
   // BUILD
   // ============================================
 
@@ -487,15 +528,17 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                 ? _buildLoadingState()
                 : _hasError
                     ? _buildErrorState()
-                    : TabBarView(
-                        controller: _tabController,
-                        children: [
-                          _buildOverviewTab(),
-                          _buildTierDetailsTab(),
-                          _buildHistoryTab(),
-                          _buildBadgesTab(),
-                        ],
-                      ),
+                    : _salonLoyalties.isEmpty
+                        ? _buildEmptyState()
+                        : TabBarView(
+                            controller: _tabController,
+                            children: [
+                              _buildOverviewTab(),
+                              _buildTierDetailsTab(),
+                              _buildHistoryTab(),
+                              _buildBadgesTab(),
+                            ],
+                          ),
           ),
         ),
       ),
@@ -503,22 +546,21 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   }
 
   // ============================================
-  // LOADING / ERROR
+  // LOADING / ERROR / EMPTY
   // ============================================
 
   Widget _buildLoadingState() {
-    final primaryColor = context.primaryColor;
-    final secondaryTextColor = context.secondaryTextColor;
-
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          CircularProgressIndicator(color: primaryColor),
+          CircularProgressIndicator(color: context.primaryColor),
           const SizedBox(height: 16),
           Text(
             'Loading loyalty data...',
-            style: context.bodyMedium.copyWith(color: secondaryTextColor),
+            style: context.bodyMedium.copyWith(
+              color: context.secondaryTextColor,
+            ),
           ),
         ],
       ),
@@ -527,8 +569,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
 
   Widget _buildErrorState() {
     final isDark = context.isDarkMode;
-    final primaryColor = context.primaryColor;
-    final secondaryTextColor = context.secondaryTextColor;
 
     return Center(
       child: Padding(
@@ -544,14 +584,16 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
             const SizedBox(height: 16),
             Text(
               _errorMessage,
-              style: context.bodyMedium.copyWith(color: secondaryTextColor),
+              style: context.bodyMedium.copyWith(
+                color: context.secondaryTextColor,
+              ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: _loadLoyaltyData,
               style: ElevatedButton.styleFrom(
-                backgroundColor: primaryColor,
+                backgroundColor: context.primaryColor,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -565,8 +607,61 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
+  Widget _buildEmptyState() {
+    final isDark = context.isDarkMode;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.card_giftcard_outlined,
+              size: 64,
+              color: isDark ? Colors.white30 : Colors.grey[400],
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No Loyalty Points Yet',
+              style: context.titleMedium.copyWith(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white70 : Colors.grey[700],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Book a service at any salon to start earning loyalty points!',
+              style: context.bodySmall.copyWith(
+                color: context.secondaryTextColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.store),
+              label: const Text('Browse Salons'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: context.primaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // ============================================
-  // TAB 1: OVERVIEW
+  // TAB 1: OVERVIEW (Global + Per-Salon)
   // ============================================
 
   Widget _buildOverviewTab() {
@@ -576,42 +671,613 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.all(_isWeb ? 24 : 16),
-        child: _isTablet
-            ? Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: Column(
-                      children: [
-                        _buildTierCard(),
-                        const SizedBox(height: 16),
-                        _buildPointsSummary(),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: _buildEarningGuide(),
-                  ),
-                ],
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildTierCard(),
-                  const SizedBox(height: 16),
-                  _buildPointsSummary(),
-                  const SizedBox(height: 16),
-                  _buildEarningGuide(),
-                ],
-              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildGlobalSummaryCard(),
+            const SizedBox(height: 20),
+            _buildSalonLoyaltySection(),
+            const SizedBox(height: 20),
+            _buildEarningGuide(),
+          ],
+        ),
       ),
     );
   }
 
+  // ✅ Global Summary Card (හැම salon එකෙන්ම total)
+  Widget _buildGlobalSummaryCard() {
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final primaryColor = context.primaryColor;
+
+    final totalPoints =
+        (_globalSummary['total_current_points'] as num?)?.toInt() ?? 0;
+    final totalLifetime =
+        (_globalSummary['total_lifetime_points'] as num?)?.toInt() ?? 0;
+    final salonCount = (_globalSummary['salon_count'] as num?)?.toInt() ?? 0;
+    final bestTier =
+        _globalSummary['best_tier']?.toString() ?? 'Bronze';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            primaryColor.withValues(alpha: isDark ? 0.3 : 0.15),
+            primaryColor.withValues(alpha: isDark ? 0.1 : 0.05),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: primaryColor.withValues(alpha: 0.4)),
+        boxShadow: [
+          BoxShadow(
+            color: primaryColor.withValues(alpha: 0.15),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: primaryColor.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Text(
+                  '💎',
+                  style: TextStyle(fontSize: 32),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Global Loyalty',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Across $salonCount ${salonCount == 1 ? 'salon' : 'salons'}',
+                      style: context.bodyMedium.copyWith(
+                        color: secondaryTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+
+          // Total points
+          Row(
+            children: [
+              Expanded(
+                child: _buildGlobalStat(
+                  'Total Points',
+                  '$totalPoints',
+                  Icons.savings,
+                  AppTheme.success,
+                  isDark,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildGlobalStat(
+                  'Lifetime',
+                  '$totalLifetime',
+                  Icons.history,
+                  Colors.purple,
+                  isDark,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildGlobalStat(
+                  'Best Tier',
+                  '${_tierEmoji(bestTier)} $bestTier',
+                  _tierIcon(bestTier),
+                  _tierColor(bestTier),
+                  isDark,
+                  isSmall: true,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGlobalStat(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+    bool isDark, {
+    bool isSmall = false,
+  }) {
+    final secondaryTextColor = context.secondaryTextColor;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.06)
+            : Colors.white.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: isSmall ? 13 : 18,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: context.bodySmall.copyWith(
+              fontSize: 10,
+              color: secondaryTextColor,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ Per-Salon Loyalty Section
+  Widget _buildSalonLoyaltySection() {
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Container(
+              width: 4,
+              height: 20,
+              decoration: BoxDecoration(
+                color: context.primaryColor,
+                borderRadius: BorderRadius.horizontal(
+                  right: Radius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Your Salons',
+              style: context.titleMedium.copyWith(
+                fontWeight: FontWeight.bold,
+                color: textColor,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '${_salonLoyalties.length}',
+              style: context.bodySmall.copyWith(
+                fontWeight: FontWeight.bold,
+                color: context.primaryColor,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Points you\'ve earned at each salon',
+          style: context.bodySmall.copyWith(color: secondaryTextColor),
+        ),
+        const SizedBox(height: 12),
+
+        ..._salonLoyalties.map((loyalty) => _buildSalonLoyaltyCard(loyalty)),
+      ],
+    );
+  }
+
+  Widget _buildSalonLoyaltyCard(Map<String, dynamic> loyalty) {
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
+    final salonId = loyalty['salon_id'] as int?;
+    final salonName = loyalty['salon_name']?.toString() ?? 'Salon';
+    final salonLogo = loyalty['salon_logo']?.toString();
+    final currentPoints =
+        (loyalty['current_points'] as num?)?.toInt() ?? 0;
+    final lifetimePoints =
+        (loyalty['lifetime_points'] as num?)?.toInt() ?? 0;
+    final tier = loyalty['tier']?.toString() ?? 'Bronze';
+    final tierColor = _tierColor(tier);
+
+    // Calculate progress to next tier
+    final nextTierPoints = tier == 'Bronze'
+        ? 200
+        : tier == 'Silver'
+            ? 500
+            : tier == 'Gold'
+                ? 1000
+                : 1000;
+    final tierMin = tier == 'Bronze'
+        ? 0
+        : tier == 'Silver'
+            ? 200
+            : tier == 'Gold'
+                ? 500
+                : 1000;
+    final tierProgress = tier == 'Platinum'
+        ? 1.0
+        : ((lifetimePoints - tierMin) / (nextTierPoints - tierMin))
+            .clamp(0.0, 1.0);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 2,
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: tierColor.withValues(alpha: 0.3),
+          width: 1.5,
+        ),
+      ),
+      child: InkWell(
+        onTap: () {
+          // Switch to My Tier tab with this salon selected
+          setState(() => _selectedSalonId = salonId);
+          _tabController.animateTo(1);
+        },
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Salon header
+              Row(
+                children: [
+                  // Salon logo / initial
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: tierColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                      image: salonLogo != null && salonLogo.isNotEmpty
+                          ? DecorationImage(
+                              image: NetworkImage(salonLogo),
+                              fit: BoxFit.cover,
+                            )
+                          : null,
+                    ),
+                    child: salonLogo == null || salonLogo.isEmpty
+                        ? Center(
+                            child: Text(
+                              salonName.isNotEmpty
+                                  ? salonName[0].toUpperCase()
+                                  : 'S',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                                color: tierColor,
+                              ),
+                            ),
+                          )
+                        : null,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          salonName,
+                          style: context.bodyMedium.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: textColor,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Text(
+                              _tierEmoji(tier),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              tier,
+                              style: context.bodySmall.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: tierColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Points badge
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: tierColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      children: [
+                        Text(
+                          '$currentPoints',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: tierColor,
+                          ),
+                        ),
+                        Text(
+                          'points',
+                          style: context.bodySmall.copyWith(
+                            fontSize: 9,
+                            color: secondaryTextColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 12),
+
+              // Progress bar
+              if (tier != 'Platinum') ...[
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: LinearProgressIndicator(
+                    value: tierProgress,
+                    minHeight: 6,
+                    backgroundColor:
+                        isDark ? Colors.grey[800] : Colors.grey[200],
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(tierColor),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '$lifetimePoints pts',
+                      style: context.bodySmall.copyWith(
+                        fontSize: 10,
+                        color: secondaryTextColor,
+                      ),
+                    ),
+                    Text(
+                      '$nextTierPoints pts',
+                      style: context.bodySmall.copyWith(
+                        fontSize: 10,
+                        color: secondaryTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ] else ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: tierColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.emoji_events,
+                        size: 14,
+                        color: tierColor,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Platinum member — top tier!',
+                          style: context.bodySmall.copyWith(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            color: tierColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              // Arrow to view tier details
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Text(
+                    'View tier details',
+                    style: context.bodySmall.copyWith(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: context.primaryColor,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.arrow_forward_ios,
+                    size: 10,
+                    color: context.primaryColor,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Earning guide
+  Widget _buildEarningGuide() {
+    final isDark = context.isDarkMode;
+    final cardColor = context.cardColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final primaryColor = context.primaryColor;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.tips_and_updates, color: primaryColor, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'How to Earn Points',
+                style: context.titleMedium.copyWith(
+                  fontWeight: FontWeight.bold,
+                  color: textColor,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Points are salon-specific — earn at each salon separately',
+            style: context.bodySmall.copyWith(color: secondaryTextColor),
+          ),
+          const SizedBox(height: 16),
+          _buildEarningRow(
+            Icons.event_available,
+            'Complete a booking',
+            'Earn 1 point per Rs. 10 spent',
+            AppTheme.success,
+          ),
+          const SizedBox(height: 12),
+          _buildEarningRow(
+            Icons.rate_review,
+            'Write a review',
+            '+10 points per review',
+            Colors.blue,
+          ),
+          const SizedBox(height: 12),
+          _buildEarningRow(
+            Icons.people,
+            'Refer a friend',
+            'Earn bonus points on first booking',
+            Colors.purple,
+          ),
+          const SizedBox(height: 12),
+          _buildEarningRow(
+            Icons.cake,
+            'Birthday bonus',
+            'Special points on your birthday',
+            Colors.pink,
+          ),
+          const SizedBox(height: 12),
+          _buildEarningRow(
+            Icons.local_offer,
+            'Claim special offers',
+            'Redeem points for exclusive offers',
+            AppTheme.warning,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEarningRow(
+    IconData icon,
+    String title,
+    String subtitle,
+    Color color,
+  ) {
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 18, color: color),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: context.bodyMedium.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              Text(
+                subtitle,
+                style: context.bodySmall.copyWith(color: secondaryTextColor),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   // ============================================
-  // TAB 2: MY TIER (NEW - Detailed Tier Info)
+  // TAB 2: MY TIER (Salon-Specific)
   // ============================================
 
   Widget _buildTierDetailsTab() {
@@ -624,19 +1290,14 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Current Tier Explanation
+            _buildSalonSelector(),
+            const SizedBox(height: 20),
             _buildCurrentTierExplanation(),
             const SizedBox(height: 20),
-
-            // Your Benefits
             _buildYourBenefits(),
             const SizedBox(height: 20),
-
-            // All Tiers Progress Tracker
             _buildTiersProgressTracker(),
             const SizedBox(height: 20),
-
-            // How to Level Up
             _buildHowToLevelUp(),
           ],
         ),
@@ -644,7 +1305,85 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // Current Tier Explanation
+  // ✅ Salon Selector Dropdown
+  Widget _buildSalonSelector() {
+    final isDark = context.isDarkMode;
+    final cardColor = context.cardColor;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.store,
+            size: 20,
+            color: context.primaryColor,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int>(
+                value: _selectedSalonId,
+                isExpanded: true,
+                dropdownColor:
+                    isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                style: context.bodyMedium.copyWith(
+                  color: context.textColor,
+                  fontWeight: FontWeight.w600,
+                ),
+                hint: Text(
+                  'Select a salon',
+                  style: context.bodyMedium.copyWith(
+                    color: context.secondaryTextColor,
+                  ),
+                ),
+                items: _salonLoyalties.map((loyalty) {
+                  final salonId = loyalty['salon_id'] as int?;
+                  final salonName =
+                      loyalty['salon_name']?.toString() ?? 'Salon';
+                  final points =
+                      (loyalty['current_points'] as num?)?.toInt() ?? 0;
+                  return DropdownMenuItem<int>(
+                    value: salonId,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            salonName,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '$points pts',
+                          style: context.bodySmall.copyWith(
+                            fontSize: 11,
+                            color: context.secondaryTextColor,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  setState(() => _selectedSalonId = value);
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Current Tier Explanation (uses _selectedSalonLoyalty)
   Widget _buildCurrentTierExplanation() {
     final isDark = context.isDarkMode;
     final textColor = context.textColor;
@@ -681,9 +1420,9 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'You are $_tier Member'.replaceAll('\$ ', ''),
+                      'You are $_tier at $_selectedSalonName',
                       style: TextStyle(
-                        fontSize: 22,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: tierColor,
                       ),
@@ -691,7 +1430,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                     const SizedBox(height: 6),
                     Text(
                       _tierDescription(_tier),
-                      style: context.bodyMedium.copyWith(
+                      style: context.bodySmall.copyWith(
                         color: secondaryTextColor,
                       ),
                     ),
@@ -716,8 +1455,8 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                 Expanded(
                   child: Text(
                     _tier == 'Platinum'
-                        ? 'You have reached the highest tier! Enjoy exclusive VIP benefits.'
-                        : 'Earn $_nextTierMinPoints lifetime points to reach $_nextTierName tier and unlock more benefits.',
+                        ? 'You have reached the highest tier at this salon!'
+                        : 'Earn $_nextTierMinPoints lifetime points at this salon to reach $_nextTierName.',
                     style: context.bodySmall.copyWith(
                       color: textColor,
                       fontWeight: FontWeight.w500,
@@ -806,7 +1545,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
               ),
             ),
           ),
-          Icon(
+          const Icon(
             Icons.check_circle,
             size: 18,
             color: AppTheme.success,
@@ -845,7 +1584,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
               ),
               const SizedBox(width: 8),
               Text(
-                'Tier Progress',
+                'Tier Progress at $_selectedSalonName',
                 style: context.titleMedium.copyWith(
                   fontWeight: FontWeight.bold,
                   color: textColor,
@@ -891,7 +1630,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                   ),
                   child: Row(
                     children: [
-                      // Tier Emoji
                       Container(
                         width: 48,
                         height: 48,
@@ -912,8 +1650,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                         ),
                       ),
                       const SizedBox(width: 12),
-
-                      // Tier Info
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -969,8 +1705,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                           ],
                         ),
                       ),
-
-                      // Status Icon
                       Icon(
                         isUnlocked
                             ? Icons.check_circle
@@ -1039,7 +1773,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Congratulations! You\'re a Platinum member with all premium benefits unlocked. Keep earning points to enjoy exclusive rewards!',
+              'Congratulations! You\'re a Platinum member at $_selectedSalonName with all premium benefits unlocked.',
               style: context.bodySmall.copyWith(color: secondaryTextColor),
               textAlign: TextAlign.center,
             ),
@@ -1080,7 +1814,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            'You need ${_nextTierMinPoints - _lifetimePoints} more points to reach $_nextTierName!',
+            'You need ${_nextTierMinPoints - _lifetimePoints} more points at $_selectedSalonName to reach $_nextTierName!',
             style: context.bodyMedium.copyWith(
               color: _tierColor(_nextTierName),
               fontWeight: FontWeight.w600,
@@ -1162,450 +1896,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   }
 
   // ============================================
-  // TIER CARD (Overview Tab)
-  // ============================================
-
-  Widget _buildTierCard() {
-    final tierColor = _tierColor(_tier);
-    final isDark = context.isDarkMode;
-    final textColor = context.textColor;
-    final secondaryTextColor = context.secondaryTextColor;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            tierColor.withValues(alpha: isDark ? 0.3 : 0.15),
-            tierColor.withValues(alpha: isDark ? 0.1 : 0.05),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: tierColor.withValues(alpha: 0.4)),
-        boxShadow: [
-          BoxShadow(
-            color: tierColor.withValues(alpha: 0.15),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: tierColor.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: Text(
-                  _tierEmoji(_tier),
-                  style: const TextStyle(fontSize: 32),
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '$_tier Member',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: tierColor,
-                        letterSpacing: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _tier == 'Platinum'
-                          ? 'You\'ve reached the highest tier! 🎉'
-                          : 'Progress to $_nextTierName',
-                      style: context.bodyMedium.copyWith(color: secondaryTextColor),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-
-          if (_tier != 'Platinum') ...[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  '$_lifetimePoints pts',
-                  style: context.bodyMedium.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                  ),
-                ),
-                Text(
-                  '$_nextTierMinPoints pts',
-                  style: context.bodyMedium.copyWith(color: secondaryTextColor),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: LinearProgressIndicator(
-                value: _tierProgress,
-                minHeight: 10,
-                backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
-                valueColor: AlwaysStoppedAnimation<Color>(tierColor),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Center(
-              child: Text(
-                '${_nextTierMinPoints - _lifetimePoints} more points to $_nextTierName',
-                style: context.bodySmall.copyWith(
-                  fontStyle: FontStyle.italic,
-                  color: secondaryTextColor,
-                ),
-              ),
-            ),
-          ] else ...[
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: tierColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.emoji_events, color: tierColor, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'You are a Platinum member — enjoy all premium benefits!',
-                      style: context.bodySmall.copyWith(
-                        fontWeight: FontWeight.w500,
-                        color: textColor,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // Summary grid
-  Widget _buildPointsSummary() {
-    final isDark = context.isDarkMode;
-    final cardColor = context.cardColor;
-    final textColor = context.textColor;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.account_balance_wallet,
-                color: Colors.blue,
-                size: 22,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Points Summary',
-                style: context.titleMedium.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: textColor,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Your points breakdown',
-            style: context.bodySmall.copyWith(
-              color: context.secondaryTextColor,
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildPointStat(
-                  'Available',
-                  _currentPoints,
-                  Icons.savings,
-                  AppTheme.success,
-                  subtitle: 'Ready to redeem',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildPointStat(
-                  'Lifetime',
-                  _lifetimePoints,
-                  Icons.history,
-                  Colors.purple,
-                  subtitle: 'Total earned',
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildPointStat(
-                  'Current Tier',
-                  null,
-                  _tierIcon(_tier),
-                  _tierColor(_tier),
-                  textValue: '$_tier ${_tierEmoji(_tier)}',
-                  subtitle: 'Your level',
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildPointStat(
-                  'Next Tier',
-                  _tier == 'Platinum' ? 0 : _nextTierMinPoints - _lifetimePoints,
-                  Icons.trending_up,
-                  Colors.orange,
-                  suffix: _tier == 'Platinum' ? 'Max reached' : 'pts to go',
-                  subtitle: _tier == 'Platinum' ? 'Highest tier' : 'to $_nextTierName',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPointStat(
-    String label,
-    int? value,
-    IconData icon,
-    Color color, {
-    String? textValue,
-    String? suffix,
-    String? subtitle,
-  }) {
-    final secondaryTextColor = context.secondaryTextColor;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, size: 16, color: color),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  label,
-                  style: context.bodySmall.copyWith(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                    color: secondaryTextColor,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                textValue ?? (value ?? 0).toString(),
-                style: TextStyle(
-                  fontSize: textValue != null ? 14 : 22,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
-              ),
-              if (suffix != null && textValue == null) ...[
-                const SizedBox(width: 4),
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 3),
-                  child: Text(
-                    suffix,
-                    style: context.bodySmall.copyWith(
-                      fontSize: 10,
-                      color: secondaryTextColor,
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              subtitle,
-              style: context.bodySmall.copyWith(
-                fontSize: 9,
-                color: secondaryTextColor,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // Earning guide
-  Widget _buildEarningGuide() {
-    final isDark = context.isDarkMode;
-    final cardColor = context.cardColor;
-    final textColor = context.textColor;
-    final secondaryTextColor = context.secondaryTextColor;
-    final primaryColor = context.primaryColor;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.tips_and_updates, color: primaryColor, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                'How to Earn Points',
-                style: context.titleMedium.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: textColor,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Complete simple actions to earn points',
-            style: context.bodySmall.copyWith(color: secondaryTextColor),
-          ),
-          const SizedBox(height: 16),
-          _buildEarningRow(
-            Icons.event_available,
-            'Complete a booking',
-            'Earn 1 point per Rs. 10 spent',
-            AppTheme.success,
-          ),
-          const SizedBox(height: 12),
-          _buildEarningRow(
-            Icons.rate_review,
-            'Write a review',
-            '+10 points per review',
-            Colors.blue,
-          ),
-          const SizedBox(height: 12),
-          _buildEarningRow(
-            Icons.people,
-            'Refer a friend',
-            'Earn bonus points on first booking',
-            Colors.purple,
-          ),
-          const SizedBox(height: 12),
-          _buildEarningRow(
-            Icons.cake,
-            'Birthday bonus',
-            'Special points on your birthday',
-            Colors.pink,
-          ),
-          const SizedBox(height: 12),
-          _buildEarningRow(
-            Icons.local_offer,
-            'Claim special offers',
-            'Redeem points for exclusive offers',
-            AppTheme.warning,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEarningRow(
-    IconData icon,
-    String title,
-    String subtitle,
-    Color color,
-  ) {
-    final textColor = context.textColor;
-    final secondaryTextColor = context.secondaryTextColor;
-
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(10),
-          ),
-          child: Icon(icon, size: 18, color: color),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: context.bodyMedium.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: textColor,
-                ),
-              ),
-              Text(
-                subtitle,
-                style: context.bodySmall.copyWith(color: secondaryTextColor),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ============================================
-  // TAB 3: HISTORY
+  // TAB 3: HISTORY (Salon Filter)
   // ============================================
 
   Widget _buildHistoryTab() {
@@ -1643,18 +1934,101 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
       );
     }
 
+    final filtered = _filteredTransactions;
+
     return RefreshIndicator(
       onRefresh: _loadLoyaltyData,
       color: context.primaryColor,
-      child: ListView.separated(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: EdgeInsets.all(_isWeb ? 24 : 16),
-        itemCount: _transactions.length,
-        separatorBuilder: (context, index) => const SizedBox(height: 8),
-        itemBuilder: (context, index) {
-          final tx = _transactions[index];
-          return _buildTransactionCard(tx);
-        },
+      child: Column(
+        children: [
+          _buildHistorySalonFilter(),
+          Expanded(
+            child: filtered.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'No transactions for this salon',
+                        style: context.bodyMedium.copyWith(
+                          color: secondaryTextColor,
+                        ),
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: EdgeInsets.all(_isWeb ? 24 : 16),
+                    itemCount: filtered.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final tx = filtered[index];
+                      return _buildTransactionCard(tx);
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ✅ History Salon Filter
+  Widget _buildHistorySalonFilter() {
+    final isDark = context.isDarkMode;
+    final cardColor = context.cardColor;
+
+    return Container(
+      color: cardColor,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Row(
+        children: [
+          Icon(
+            Icons.filter_list,
+            size: 18,
+            color: context.primaryColor,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<int?>(
+                value: _historySalonFilter,
+                isExpanded: true,
+                dropdownColor:
+                    isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                style: context.bodyMedium.copyWith(
+                  color: context.textColor,
+                  fontWeight: FontWeight.w600,
+                ),
+                items: [
+                  DropdownMenuItem<int?>(
+                    value: null,
+                    child: Text(
+                      'All Salons (${_transactions.length})',
+                    ),
+                  ),
+                  ..._salonLoyalties.map((loyalty) {
+                    final salonId = loyalty['salon_id'] as int?;
+                    final salonName =
+                        loyalty['salon_name']?.toString() ?? 'Salon';
+                    final count = _transactions
+                        .where((t) => t['salon_id'] == salonId)
+                        .length;
+                    return DropdownMenuItem<int?>(
+                      value: salonId,
+                      child: Text(
+                        '$salonName ($count)',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }),
+                ],
+                onChanged: (value) {
+                  setState(() => _historySalonFilter = value);
+                },
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1668,6 +2042,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     final source = tx['source']?.toString() ?? 'booking';
     final points = (tx['points'] as num?)?.toInt() ?? 0;
     final description = tx['description']?.toString() ?? '';
+    final salonName = tx['salon_name']?.toString();
     final createdAt = tx['created_at'] != null
         ? DateTime.tryParse(tx['created_at'].toString())
         : null;
@@ -1733,8 +2108,44 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                     ),
                   ],
                 ),
+                // ✅ Salon name badge
+                if (salonName != null && salonName.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 6,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: context.primaryColor.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.store,
+                          size: 10,
+                          color: context.primaryColor,
+                        ),
+                        const SizedBox(width: 3),
+                        Flexible(
+                          child: Text(
+                            salonName,
+                            style: context.bodySmall.copyWith(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w600,
+                              color: context.primaryColor,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 if (description.isNotEmpty) ...[
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                     description,
                     style: context.bodySmall.copyWith(color: secondaryTextColor),
@@ -1844,7 +2255,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
             ),
             const SizedBox(height: 20),
 
-            // Earned section
             if (earned.isNotEmpty) ...[
               Row(
                 children: [
@@ -1867,7 +2277,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
               const SizedBox(height: 24),
             ],
 
-            // Locked section
             if (locked.isNotEmpty) ...[
               Row(
                 children: [
@@ -1980,7 +2389,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                           color: AppTheme.warning.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Text(
+                        child: const Text(
                           '✓ EARNED',
                           style: TextStyle(
                             fontSize: 9,

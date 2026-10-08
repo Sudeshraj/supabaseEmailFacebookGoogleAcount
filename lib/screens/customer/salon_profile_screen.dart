@@ -622,7 +622,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ============================================================
-  // ✅ OFFER CLAIM (uses claim_offer RPC, atomic)
+  // ✅ OFFER CLAIM (uses claim_offer RPC, atomic — salon-specific)
   // ============================================================
 
   Future<void> _claimOffer(Map<String, dynamic> offer) async {
@@ -669,13 +669,44 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
+      // ✅ NEW: Salon-specific points check (client-side)
+      final pointsRequired =
+          (offer['points_required'] as num?)?.toInt() ?? 0;
+
+      if (pointsRequired > 0) {
+        try {
+          final loyaltyResult = await supabase.rpc(
+            'get_customer_loyalty_for_salon',
+            params: {
+              'p_customer_id': user.id,
+              'p_salon_id': widget.salon['id'],
+            },
+          );
+
+          final userPoints = (loyaltyResult is Map)
+              ? (loyaltyResult['current_points'] as num?)?.toInt() ?? 0
+              : 0;
+
+          if (userPoints < pointsRequired) {
+            _showSnackBar(
+              'You need $pointsRequired points at this salon to claim',
+              Colors.orange,
+            );
+            return;
+          }
+        } catch (e) {
+          debugPrint('⚠️ Error checking salon loyalty: $e');
+          // Fall through — server will validate anyway
+        }
+      }
+
       if (!mounted) return;
       final confirmed = await _showClaimConfirmDialog(offer);
       if (confirmed != true) return;
 
       setState(() => _claimingOfferIds.add(offerId));
 
-      // ✅ Atomic RPC (handles points + used_count + validation)
+      // ✅ Atomic RPC (handles points + used_count + validation, salon-specific)
       final response = await supabase.rpc(
         'claim_offer',
         params: {'p_offer_id': offerId},
@@ -773,10 +804,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         const Icon(Icons.star,
                             color: Colors.amber, size: 16),
                         const SizedBox(width: 4),
-                        Text(
-                          '$pointsRequired points required',
-                          style: context.bodySmall.copyWith(
-                            color: context.secondaryTextColor,
+                        Flexible(
+                          child: Text(
+                            '$pointsRequired points required at this salon',
+                            style: context.bodySmall.copyWith(
+                              color: context.secondaryTextColor,
+                            ),
+                            textAlign: TextAlign.center,
                           ),
                         ),
                       ],
