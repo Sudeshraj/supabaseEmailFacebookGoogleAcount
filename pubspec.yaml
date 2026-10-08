@@ -48,6 +48,24 @@ dependencies:
   go_router: ^17.0.1
   
   # ================================================================
+  # 🔥 NEW: SUBSCRIPTION SYSTEM
+  # ================================================================
+
+  # PayHere Payment Gateway
+  payhere_mobilesdk_flutter: ^3.2.3
+
+  # PDF export සඳහා (Platinum plan එකට)
+  pdf: ^3.13.1
+  printing: ^5.15.1
+  
+  # CSV/Excel export සඳහා (Platinum plan එකට)
+  csv: ^8.0.0
+  
+  # File save කරන්න (export කරපු files)
+  path_provider: ^2.1.6
+  share_plus: ^13.3.1
+  
+  # ================================================================
   # 🔥 ENVIRONMENT
   # ================================================================
   flutter_dotenv: ^6.0.0
@@ -88,8 +106,7 @@ dependencies:
   google_fonts: ^8.1.0
   # Deep linking configuration for Android and iOS can be added here if needed.
   app_links: ^7.2.1
-
-  
+   
    
 
 dev_dependencies:

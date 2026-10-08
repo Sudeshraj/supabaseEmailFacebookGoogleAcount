@@ -126,3 +126,8 @@
 # Missing Play Core classes - app doesn't use Play Store deferred components
 -dontwarn com.google.android.play.core.**
 -keep class com.google.android.play.core.** { *; }
+
+# PayHere SDK - DO NOT REMOVE
+-keep class lk.payhere.** { *; }
+-keep class com.google.gson.** { *; }
+-dontwarn lk.payhere.**

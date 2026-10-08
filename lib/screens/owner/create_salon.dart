@@ -6,6 +6,7 @@ import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/alertBox/time_picker_dialog.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:go_router/go_router.dart';                                    // ✅ NEW
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -63,6 +64,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   bool _isTimezoneLoaded = false;
   bool _isLoading = false;
 
+  // ==================== ✅ PLAN LIMIT CHECK ====================
+  bool isPlanLimitChecked = false;
+  bool canCreateSalon = true;
+
   // ==================== CURRENCY RELATED VARIABLES ====================
   String _salonCurrencyCode = 'LKR';
   String _salonCurrencySymbol = 'Rs.';
@@ -110,6 +115,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkTimezoneChanges();
+      // ✅ NEW: Check plan limit on screen load
+      _checkPlanLimit();
     });
   }
 
@@ -118,6 +125,209 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     super.didChangeDependencies();
     _isWeb = context.isWeb;
     _isDark = context.isDarkMode;
+  }
+
+  // ============================================================
+  // ✅ NEW: PLAN LIMIT CHECK
+  // ============================================================
+
+  /// Check if the owner can create a salon based on their plan.
+  /// If they cannot, a dialog is shown and the screen is popped.
+  Future<void> _checkPlanLimit() async {
+    if (!mounted) return;
+
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) {
+        setState(() => isPlanLimitChecked = true);
+        return;
+      }
+
+      final usage = await supabase.rpc(
+        'get_owner_salon_usage',
+        params: {'p_owner_id': userId},
+      );
+
+      if (!mounted) return;
+
+      final canCreate = usage['can_create_more'] as bool? ?? true;
+      final currentSalons = usage['total_salons'] as int? ?? 0;
+      final maxSalons = usage['max_salons'] as int? ?? 1;
+      final planName = usage['plan_name'] as String? ?? 'bronze';
+
+      setState(() {
+        isPlanLimitChecked = true;
+        canCreateSalon = canCreate;
+      });
+
+      if (!canCreate) {
+        await _showLimitReachedDialog(
+          currentSalons: currentSalons,
+          maxSalons: maxSalons,
+          planName: planName,
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking plan limit: $e');
+      // On error, allow (DB trigger will enforce server-side)
+      if (mounted) {
+        setState(() {
+          isPlanLimitChecked = true;
+          canCreateSalon = true;
+        });
+      }
+    }
+  }
+
+  /// Show "Salon Limit Reached" dialog and pop the screen when dismissed.
+  Future<void> _showLimitReachedDialog({
+    required int currentSalons,
+    required int maxSalons,
+    required String planName,
+  }) async {
+    if (!mounted) return;
+
+    final planDisplay = planName.isNotEmpty
+        ? planName[0].toUpperCase() + planName.substring(1)
+        : 'Bronze';
+    final userId = supabase.auth.currentUser?.id;
+
+    final action = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          icon: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.workspace_premium,
+              size: 40,
+              color: Colors.amber,
+            ),
+          ),
+          title: Text(
+            'Salon Limit Reached',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: _isDark ? Colors.white : Colors.black87,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Your $planDisplay plan allows only $maxSalons '
+                'active salon${maxSalons > 1 ? "s" : ""}. '
+                'You currently have $currentSalons.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  color: _isDark ? Colors.white70 : Colors.grey[700],
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.info_outline,
+                      color: Colors.blue,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Upgrade your plan to create more salons.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: _isDark ? Colors.white70 : Colors.grey[800],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'back'),
+              child: const Text('Go Back'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, 'upgrade'),
+              icon: const Icon(Icons.upgrade, size: 18),
+              label: const Text('View Plans'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.amber[700],
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (action == 'upgrade' && userId != null) {
+      // Find owner's first active salon to pass to plans screen
+      try {
+        final salonResponse = await supabase
+            .from('salons')
+            .select('id')
+            .eq('owner_id', userId)
+            .eq('is_active', true)
+            .order('created_at', ascending: true)
+            .limit(1)
+            .maybeSingle();
+
+        if (!mounted) return;
+
+        if (salonResponse == null) {
+          _showSnackBar('No active salon found', Colors.orange);
+          Navigator.pop(context);
+          return;
+        }
+
+        final salonId = salonResponse['id'] as int;
+        // Pop create salon screen first, then push plans
+        Navigator.pop(context);
+        context.pushNamed(
+          'subscription_plans',
+          extra: {'salonId': salonId, 'ownerId': userId},
+        );
+        return;
+      } catch (e) {
+        debugPrint('❌ Error navigating to plans: $e');
+      }
+    }
+
+    // Default: pop create salon screen
+    if (mounted) Navigator.pop(context);
   }
 
   Future<void> _initializeWithTimezone() async {
@@ -1438,6 +1648,34 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       return;
     }
 
+    // ✅ NEW: Double-check plan limit right before creating (in case
+    // the plan changed while the user was on this screen)
+    try {
+      final usage = await supabase.rpc(
+        'get_owner_salon_usage',
+        params: {'p_owner_id': userId},
+      );
+
+      if (!mounted) return;
+
+      final canCreate = usage['can_create_more'] as bool? ?? true;
+      if (!canCreate) {
+        final currentSalons = usage['total_salons'] as int? ?? 0;
+        final maxSalons = usage['max_salons'] as int? ?? 1;
+        final planName = usage['plan_name'] as String? ?? 'bronze';
+
+        await _showLimitReachedDialog(
+          currentSalons: currentSalons,
+          maxSalons: maxSalons,
+          planName: planName,
+        );
+        return;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Could not re-verify plan limit before create: $e');
+      // Continue — the DB trigger will enforce
+    }
+
     if (_isConfirmDialogOpen) return;
     _isConfirmDialogOpen = true;
 
@@ -1512,30 +1750,53 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'is_active': true,
       };
 
-      final response = await supabase
-          .from('salons')
-          .insert(salonData)
-          .select('id, name')
-          .single();
-      final salonId = response['id'] as int;
-      debugPrint('✅ Salon created with ID: $salonId');
+      try {
+        final response = await supabase
+            .from('salons')
+            .insert(salonData)
+            .select('id, name')
+            .single();
+        final salonId = response['id'] as int;
+        debugPrint('✅ Salon created with ID: $salonId');
 
-      String? logoUrl = (_logoFile != null || _logoWebBytes != null)
-          ? await _uploadLogo(salonId)
-          : null;
-      String? coverUrl = (_coverFile != null || _coverWebBytes != null)
-          ? await _uploadCover(salonId)
-          : null;
+        String? logoUrl = (_logoFile != null || _logoWebBytes != null)
+            ? await _uploadLogo(salonId)
+            : null;
+        String? coverUrl = (_coverFile != null || _coverWebBytes != null)
+            ? await _uploadCover(salonId)
+            : null;
 
-      if (logoUrl != null || coverUrl != null) {
-        final imageUpdate = <String, dynamic>{};
-        if (logoUrl != null) imageUpdate['logo_url'] = logoUrl;
-        if (coverUrl != null) imageUpdate['cover_url'] = coverUrl;
-        await supabase.from('salons').update(imageUpdate).eq('id', salonId);
+        if (logoUrl != null || coverUrl != null) {
+          final imageUpdate = <String, dynamic>{};
+          if (logoUrl != null) imageUpdate['logo_url'] = logoUrl;
+          if (coverUrl != null) imageUpdate['cover_url'] = coverUrl;
+          await supabase.from('salons').update(imageUpdate).eq('id', salonId);
+        }
+
+        if (!mounted) return;
+        Navigator.pop(context, true);
+      } on PostgrestException catch (e) {
+        // ✅ NEW: Handle DB trigger limit error specifically
+        if (e.message.contains('Salon limit reached')) {
+          final userId = supabase.auth.currentUser?.id;
+          if (userId != null) {
+            final usage = await supabase.rpc(
+              'get_owner_salon_usage',
+              params: {'p_owner_id': userId},
+            );
+
+            if (!mounted) return;
+
+            await _showLimitReachedDialog(
+              currentSalons: usage['total_salons'] as int? ?? 0,
+              maxSalons: usage['max_salons'] as int? ?? 1,
+              planName: usage['plan_name'] as String? ?? 'bronze',
+            );
+          }
+          return;
+        }
+        rethrow;
       }
-
-      if (!mounted) return;
-      Navigator.pop(context, true);
     } catch (e) {
       debugPrint('❌ Error creating salon: $e');
       _showSnackBar('Error: $e', Colors.red);
@@ -1816,10 +2077,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   }
 
   // ==================== STEP ACTIONS ====================
-  // ✅ Lives at the bottom of the scroll content (not a fixed
-  // bottomNavigationBar). Both buttons share the row width via
-  // Expanded so they never overlap on mobile/narrow screens, and
-  // the row itself is centered on wider (web) screens.
 
   Widget _buildStepActions() {
     final isDark = _isDark;
@@ -2007,10 +2264,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           tooltip: 'Back',
         ),
       ),
-      // ✅ No fixed bottomNavigationBar anymore — the Continue/Create
-      // Salon action row now lives at the bottom of the scrollable
-      // content (see _buildStepActions), so it never overlaps other
-      // content on narrow/mobile screens and stays responsive.
       body: SafeArea(
         child: Container(
           color: isDark ? const Color(0xFF121212) : Colors.grey[50],

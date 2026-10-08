@@ -2998,4 +2998,16 @@ static Future<void> logoutUser() async {
       return false;
     }
   }
+
+//subscription_provider sadaha
+static Future<void> saveCurrentSalonId(int salonId) async {
+  final prefs = await SharedPreferences.getInstance();
+  await prefs.setInt('current_salon_id', salonId);
+}
+
+static Future<int?> getCurrentSalonId() async {
+  final prefs = await SharedPreferences.getInstance();
+  return prefs.getInt('current_salon_id');
+}
+
 }

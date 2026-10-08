@@ -6,6 +6,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:app_links/app_links.dart';
 import 'package:flutter_application_1/firebase_options.dart';
+import 'package:flutter_application_1/providers/subscription_provider.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
@@ -53,12 +54,16 @@ import 'package:flutter_application_1/screens/owner/service_management.dart';
 import 'package:flutter_application_1/screens/settings/profile_management_screen.dart';
 import 'package:flutter_application_1/screens/settings/profile_screen.dart';
 import 'package:flutter_application_1/screens/settings/settings_screen.dart';
+import 'package:flutter_application_1/screens/subscription/payment_history_screen.dart';
+import 'package:flutter_application_1/screens/subscription/plans_comparison_screen.dart';
+import 'package:flutter_application_1/screens/subscription/subscription_screen.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:workmanager/workmanager.dart';
 
@@ -1588,6 +1593,40 @@ GoRouter _createRouter() {
           return BarberReviewsScreen(salonId: salonId, barberId: null);
         },
       ),
+
+      // ============================================
+      // subscription
+      // ============================================
+      GoRoute(
+        path: '/subscription',
+        name: 'subscription',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return SubscriptionScreen(
+            salonId: extra?['salonId'] as int,
+            ownerId: extra?['ownerId'] as String,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/subscription/plans',
+        name: 'subscription_plans',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return PlansComparisonScreen(
+            salonId: extra?['salonId'] as int,
+            ownerId: extra?['ownerId'] as String,
+          );
+        },
+      ),
+      GoRoute(
+        path: '/subscription/history',
+        name: 'subscription_history',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>?;
+          return PaymentHistoryScreen(ownerId: extra?['ownerId'] as String);
+        },
+      ),
     ],
   );
 }
@@ -1839,50 +1878,46 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ FIX: a call here used to read `Theme.of(context).brightness`,
-    // but `context` at this point is MyApp's OWN context — which sits
-    // ABOVE the `MaterialApp.router` built below, not inside it. There
-    // is no Theme ancestor above MyApp, so Theme.of(context) silently
-    // fell back to Flutter's default fallback ThemeData (always
-    // "light"), regardless of the app's actual active theme. That call
-    // has been removed entirely: the overlay style is already kept in
-    // sync correctly via `_resolveIsDark()` (which reads themeNotifier
-    // + platform brightness directly) from initState's post-frame
-    // callback, `_onThemeChanged`, and `didChangePlatformBrightness`.
-    return MaterialApp.router(
-      routerConfig: router,
-      scaffoldMessengerKey: messengerKey,
-      debugShowCheckedModeBanner: false,
-      title: 'Salon Management',
+    return MultiProvider(
+      providers: [
+        // ✅ Subscription provider — app එකේ හැම තැනකම access කරන්න පුළුවන්
+        ChangeNotifierProvider(create: (_) => SubscriptionProvider()),
+      ],
+      child: MaterialApp.router(
+        routerConfig: router,
+        scaffoldMessengerKey: messengerKey,
+        debugShowCheckedModeBanner: false,
+        title: 'Salon Management',
 
-      theme: AppTheme.lightTheme,
-      darkTheme: AppTheme.darkTheme,
-      themeMode: themeNotifier.currentTheme,
+        theme: AppTheme.lightTheme,
+        darkTheme: AppTheme.darkTheme,
+        themeMode: themeNotifier.currentTheme,
 
-      builder: (context, child) {
-        return Stack(
-          children: [
-            // ✅ EDGE-TO-EDGE: SafeArea for Android 16
-            SafeArea(
-              bottom: false,
-              child: AbsorbPointer(
-                absorbing: _offline,
-                child: child ?? const SizedBox(),
-              ),
-            ),
-            if (_offline)
-              Positioned(
-                bottom: 0,
-                left: 0,
-                right: 0,
-                child: SafeArea(
-                  top: false,
-                  child: NetworkBanner(offline: _offline),
+        builder: (context, child) {
+          return Stack(
+            children: [
+              // ✅ EDGE-TO-EDGE: SafeArea for Android 16
+              SafeArea(
+                bottom: false,
+                child: AbsorbPointer(
+                  absorbing: _offline,
+                  child: child ?? const SizedBox(),
                 ),
               ),
-          ],
-        );
-      },
+              if (_offline)
+                Positioned(
+                  bottom: 0,
+                  left: 0,
+                  right: 0,
+                  child: SafeArea(
+                    top: false,
+                    child: NetworkBanner(offline: _offline),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 }

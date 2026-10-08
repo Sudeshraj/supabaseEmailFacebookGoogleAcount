@@ -13,8 +13,12 @@ import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
+
+import '../../providers/subscription_provider.dart';
+import '../../services/session_manager.dart';
 
 final RouteObserver<ModalRoute<void>> routeObserver =
     RouteObserver<ModalRoute<void>>();
@@ -38,7 +42,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   final CurrencyService _currencyService = CurrencyService.instance;
   String _salonCurrencyCode = 'LKR';
 
-  // ✅ Currency getter
   String get _salonCurrencySymbol =>
       _currencyService.getSymbol(_salonCurrencyCode);
 
@@ -92,25 +95,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   final ScrollController _scrollController = ScrollController();
 
-  // ✅ FCM subscriptions (cancelled in dispose so setState is never called
-  // on a disposed State)
   StreamSubscription<RemoteMessage>? _onMessageSub;
   StreamSubscription<RemoteMessage>? _onOpenedSub;
 
-  // ==================== ✅ SERVICE MENU SECTION ====================
-  // After the first load, later refreshes happen silently (no full-page
-  // spinner) so the Service Menu keeps any unsaved edits.
   bool _initialLoadDone = false;
-
-  // Bumped when returning from another screen so the Service Menu tree
-  // reloads from the database (it may have been changed elsewhere).
   int _serviceMenuVersion = 0;
 
   // ============================================================
   // ✅ CURRENCY HELPERS
   // ============================================================
 
-  /// Format price with salon currency
   String _formatPrice(dynamic price) {
     return _currencyService.format(
       price: price,
@@ -146,7 +140,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     });
   }
 
-  // ✅ Check screen size for responsive layout
   void _checkScreenSize() {
     if (!mounted) return;
     final size = MediaQuery.of(context).size;
@@ -166,9 +159,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   @override
   void didPopNext() {
     debugPrint('🔄 Dashboard: Returning from child screen, refreshing data');
-    // Reload the Service Menu tree from the database
     if (mounted) setState(() => _serviceMenuVersion++);
     _refreshAllData();
+    _refreshSubscription();
   }
 
   @override
@@ -232,6 +225,187 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     } catch (e) {
       debugPrint('❌ Error ensuring owner role: $e');
     }
+  }
+
+  // ============================================================
+  // ✅ SUBSCRIPTION HELPERS
+  // ============================================================
+
+  Future<void> _loadSubscription() async {
+    if (!mounted || _selectedSalonId == null) return;
+    final salonId = int.tryParse(_selectedSalonId!);
+    if (salonId == null) return;
+
+    try {
+      await SessionManager.saveCurrentSalonId(salonId);
+
+      if (mounted) {
+        await context.read<SubscriptionProvider>().loadCapabilities(salonId);
+        debugPrint('✅ Subscription capabilities loaded for salon $salonId');
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading subscription: $e');
+    }
+  }
+
+  Future<void> _refreshSubscription() async {
+    if (!mounted || _selectedSalonId == null) return;
+    try {
+      await context.read<SubscriptionProvider>().refresh();
+      debugPrint('✅ Subscription refreshed');
+    } catch (e) {
+      debugPrint('❌ Error refreshing subscription: $e');
+    }
+  }
+
+  // ============================================================
+  // ✅ SALON LIMIT CHECK (NEW)
+  // ============================================================
+
+  /// Check if the owner is allowed to create another salon based on their
+  /// current subscription plan. Returns true if they can, false otherwise.
+  /// If they cannot, a dialog is shown automatically.
+  Future<bool> _checkCanCreateSalon() async {
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId == null) return false;
+
+      final usage = await supabase.rpc(
+        'get_owner_salon_usage',
+        params: {'p_owner_id': userId},
+      );
+
+      if (!mounted) return false;
+
+      final canCreate = usage['can_create_more'] as bool? ?? true;
+
+      if (!canCreate) {
+        final currentSalons = usage['total_salons'] as int? ?? 0;
+        final maxSalons = usage['max_salons'] as int? ?? 1;
+        final planName = usage['plan_name'] as String? ?? 'bronze';
+
+        _showSalonLimitDialog(
+          currentSalons: currentSalons,
+          maxSalons: maxSalons,
+          planName: planName,
+        );
+      }
+
+      return canCreate;
+    } catch (e) {
+      debugPrint('❌ Error checking salon limit: $e');
+      // On error, allow the attempt - the DB trigger will enforce the limit
+      return true;
+    }
+  }
+
+  /// Show "Salon Limit Reached" dialog with an upgrade CTA.
+  void _showSalonLimitDialog({
+    required int currentSalons,
+    required int maxSalons,
+    required String planName,
+  }) {
+    final isDark = context.isDarkMode;
+    final planDisplay = planName.isNotEmpty
+        ? planName[0].toUpperCase() + planName.substring(1)
+        : 'Bronze';
+    final userId = supabase.auth.currentUser?.id;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        icon: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.amber.withValues(alpha: 0.15),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.workspace_premium,
+            size: 40,
+            color: Colors.amber,
+          ),
+        ),
+        title: Text(
+          'Salon Limit Reached',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Your $planDisplay plan allows only $maxSalons '
+              'active salon${maxSalons > 1 ? "s" : ""}. '
+              'You currently have $currentSalons.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white70 : Colors.grey[700],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Upgrade your plan to create more salons.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white70 : Colors.grey[800],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              if (_selectedSalonId == null || userId == null) return;
+              context.pushNamed(
+                'subscription_plans',
+                extra: {
+                  'salonId': int.parse(_selectedSalonId!),
+                  'ownerId': userId,
+                },
+              );
+            },
+            icon: const Icon(Icons.upgrade, size: 18),
+            label: const Text('View Plans'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.amber[700],
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ============================================================
@@ -343,6 +517,72 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ),
           ),
       ],
+    );
+  }
+
+  // ============================================================
+  // ✅ PLAN BADGE
+  // ============================================================
+
+  Widget _buildPlanBadge() {
+    return Consumer<SubscriptionProvider>(
+      builder: (context, sub, _) {
+        final planName = sub.currentPlanDisplay;
+        final rank = sub.currentPlanRank;
+
+        final Color badgeColor = rank == 4
+            ? Colors.amber
+            : rank == 3
+                ? Colors.orange
+                : rank == 2
+                    ? Colors.blueGrey
+                    : Colors.brown;
+
+        return GestureDetector(
+          onTap: () {
+            if (_selectedSalonId == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('No active salon found')),
+              );
+              return;
+            }
+            final userId = supabase.auth.currentUser?.id;
+            if (userId == null) return;
+
+            context.pushNamed(
+              'subscription',
+              extra: {
+                'salonId': int.parse(_selectedSalonId!),
+                'ownerId': userId,
+              },
+            );
+          },
+          child: Container(
+            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: badgeColor.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: badgeColor, width: 1),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.workspace_premium, size: 14, color: badgeColor),
+                const SizedBox(width: 4),
+                Text(
+                  planName,
+                  style: TextStyle(
+                    color: badgeColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1010,6 +1250,111 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
+  void _showUpgradeDialog({
+    required String featureName,
+    required String requiredPlan,
+  }) {
+    final isDark = context.isDarkMode;
+    final userId = supabase.auth.currentUser?.id;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        icon: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.amber.withValues(alpha: 0.15),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.workspace_premium,
+            size: 36,
+            color: Colors.amber,
+          ),
+        ),
+        title: Text(
+          'Upgrade Required',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '$featureName is available in the $requiredPlan plan or higher.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white70 : Colors.grey[700],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.workspace_premium,
+                    color: Colors.amber,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Upgrade your plan to unlock this feature.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isDark ? Colors.white70 : Colors.grey[800],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Not Now'),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              Navigator.pop(dialogContext);
+              if (_selectedSalonId == null || userId == null) return;
+              context.pushNamed(
+                'subscription_plans',
+                extra: {
+                  'salonId': int.parse(_selectedSalonId!),
+                  'ownerId': userId,
+                },
+              );
+            },
+            icon: const Icon(Icons.upgrade, size: 18),
+            label: const Text('View Plans'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.amber[700],
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _viewBookings() {
     if (!_hasPermission) {
       _showPermissionCardContext(action: 'booking');
@@ -1035,6 +1380,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showNoSalonSelectedDialog();
       return;
     }
+
+    final sub = context.read<SubscriptionProvider>();
+    if (!sub.canManageOffers) {
+      _showUpgradeDialog(featureName: 'Offers', requiredPlan: 'Silver');
+      return;
+    }
+
     context.push('/owner/offers/$_selectedSalonId');
   }
 
@@ -1152,6 +1504,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showNoSalonSelectedDialog();
       return;
     }
+
+    final sub = context.read<SubscriptionProvider>();
+    if (!sub.canViewCustomers) {
+      _showUpgradeDialog(featureName: 'Customers', requiredPlan: 'Silver');
+      return;
+    }
+
     context.push('/owner/customers?salonId=$_selectedSalonId');
   }
 
@@ -1164,6 +1523,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showNoSalonSelectedDialog();
       return;
     }
+
+    final sub = context.read<SubscriptionProvider>();
+    if (!sub.canViewRevenue) {
+      _showUpgradeDialog(featureName: 'Revenue', requiredPlan: 'Silver');
+      return;
+    }
+
     context.push('/owner/revenue?salonId=$_selectedSalonId');
   }
 
@@ -1192,6 +1558,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showNoSalonSelectedDialog();
       return;
     }
+
+    final sub = context.read<SubscriptionProvider>();
+    if (!sub.canViewReports) {
+      _showUpgradeDialog(featureName: 'Reports', requiredPlan: 'Platinum');
+      return;
+    }
+
     context.push('/owner/reports?salonId=$_selectedSalonId');
   }
 
@@ -1204,7 +1577,31 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _showNoSalonSelectedDialog();
       return;
     }
+
+    final sub = context.read<SubscriptionProvider>();
+    if (!sub.canViewAnalytics) {
+      _showUpgradeDialog(featureName: 'Analytics', requiredPlan: 'Platinum');
+      return;
+    }
+
     context.push('/owner/analytics?salonId=$_selectedSalonId');
+  }
+
+  void _viewSubscription() {
+    if (_selectedSalonId == null || _ownerSalons.isEmpty) {
+      _showNoSalonSelectedDialog();
+      return;
+    }
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null) return;
+
+    context.pushNamed(
+      'subscription',
+      extra: {
+        'salonId': int.parse(_selectedSalonId!),
+        'ownerId': userId,
+      },
+    );
   }
 
   void _viewNotifications() {
@@ -1221,8 +1618,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Future<void> _loadAllData() async {
     if (!mounted) return;
-    // Full-page spinner only on the very first load. Later refreshes are
-    // silent so the Service Menu section keeps its state.
     if (!_initialLoadDone) setState(() => _isLoading = true);
     try {
       debugPrint('🔄 _loadAllData() started');
@@ -1261,6 +1656,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       await _loadNotificationCount();
       debugPrint('✅ Notification count loaded');
+
+      await _loadSubscription();
+      debugPrint('✅ Subscription capabilities loaded');
 
       _hasPermission = await _notificationService.hasPermission();
       debugPrint('✅ Has permission: $_hasPermission');
@@ -1377,10 +1775,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
-  // ============================================================
-  // ✅ LOAD OWNER SALONS
-  // ============================================================
-
   Future<void> _loadOwnerSalons() async {
     try {
       final userId = supabase.auth.currentUser?.id;
@@ -1473,10 +1867,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       }
     }
   }
-
-  // ============================================================
-  // ✅ LOAD DASHBOARD STATS
-  // ============================================================
 
   Future<void> _loadDashboardStats() async {
     debugPrint('📊 _loadDashboardStats() called');
@@ -1582,10 +1972,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
-  // ============================================================
-  // ✅ CHECK ONBOARDING STATUS
-  // ============================================================
-
   Future<void> _checkOnboardingStatus() async {
     if (_ownerSalons.isEmpty || _selectedSalonId == null) {
       if (mounted) {
@@ -1670,7 +2056,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Future<void> _refreshAllData() async => _loadAllData();
 
-  // Called by the Service Menu section after services were saved.
   Future<void> _onServicesSaved() async {
     await _checkOnboardingStatus();
   }
@@ -1696,6 +2081,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     try {
       await Future.wait([_loadDashboardStats(), _checkOnboardingStatus()]);
       await _loadNotificationCount();
+      await _loadSubscription();
+      debugPrint('✅ Subscription reloaded after salon switch');
     } catch (e) {
       debugPrint('Error switching salon: $e');
     } finally {
@@ -1832,10 +2219,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  // ============================================================
-  // ✅ RESPONSIVE STAT CARDS - WITH SALON CURRENCY
-  // Mobile එකේ icon text hide, web/tablet එකේ පෙන්නනවා
-  // ============================================================
   Widget _buildResponsiveStatCards() {
     if (_isTablet) {
       return Padding(
@@ -1871,8 +2254,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               color: Colors.green,
               onTap: _navigateToBarberList,
             ),
-            // ✅ Revenue - uses salon currency TEXT (Rs., $, £)
-            // Tablet එකේ icon text පෙන්නනවා (hideIconTextOnMobile: false)
             DashboardStatCard(
               title: 'Revenue',
               value: _formatPrice(_totalRevenue),
@@ -1934,8 +2315,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ),
               ),
               const SizedBox(width: 12),
-              // ✅ Revenue - Mobile එකේ icon text hide කරනවා
-              // (value text එකේම "Rs. 15000.00" තියෙන නිසා duplicate නෑ)
               Expanded(
                 child: DashboardStatCard(
                   title: 'Revenue',
@@ -1944,7 +2323,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   color: Colors.orange,
                   fullWidth: true,
                   onTap: _viewRevenue,
-                  hideIconTextOnMobile: true, // ✅ Mobile එකේ icon text hide
+                  hideIconTextOnMobile: true,
                 ),
               ),
             ],
@@ -1963,10 +2342,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final screenWidth = MediaQuery.of(context).size.width;
     final isWeb = screenWidth > 800;
     final isDark = context.isDarkMode;
-
-    // ✅ Removed `_checkScreenSize()` from build(): calling setState while
-    // building is illegal. It is already invoked (post-frame) from
-    // didChangeDependencies, which runs whenever MediaQuery changes.
 
     if (_isCheckingStatus) {
       return Scaffold(
@@ -2090,9 +2465,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             iconSize: 28,
           ),
         ),
-        // Title is only shown on mobile (on web the salon chip lives in
-        // `actions`). Wrapped in Flexible so it can never force the
-        // trailing actions to overflow.
         title: isWeb
             ? null
             : Row(
@@ -2114,14 +2486,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   ),
                 ],
               ),
-        // Actions row built with LayoutBuilder so the salon chip's max
-        // width is computed from the actual available space.
         actions: [
           Flexible(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                // Reserve space for notification icon + profile avatar first.
-                const reservedForIconsAndAvatar = 96.0;
+                const reservedForIconsAndAvatar = 180.0;
                 final availableForChip =
                     constraints.maxWidth - reservedForIconsAndAvatar;
 
@@ -2131,85 +2500,81 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     _selectedSalonName!.isNotEmpty &&
                     availableForChip > 60;
 
-                // ✅ FIX (61px overflow): when the AppBar's trailing slot is
-                // squeezed (very narrow window / layout transition) the
-                // icon + avatar Row can't fit. FittedBox scales it down
-                // instead of overflowing.
                 return FittedBox(
                   fit: BoxFit.scaleDown,
                   alignment: Alignment.centerRight,
                   child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (showChip)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: availableForChip.clamp(60, 200),
-                          ),
-                          child: GestureDetector(
-                            onTap: _ownerSalons.length > 1
-                                ? _showSalonSelectorDialog
-                                : null,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 12,
-                                vertical: 6,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.2),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.store,
-                                    size: 14,
-                                    color: Colors.white,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Flexible(
-                                    child: Text(
-                                      _selectedSalonName!,
-                                      style: const TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  if (_ownerSalons.length > 1)
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showChip)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: availableForChip.clamp(60, 200),
+                            ),
+                            child: GestureDetector(
+                              onTap: _ownerSalons.length > 1
+                                  ? _showSalonSelectorDialog
+                                  : null,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.2),
+                                  borderRadius: BorderRadius.circular(20),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
                                     const Icon(
-                                      Icons.arrow_drop_down,
-                                      size: 16,
+                                      Icons.store,
+                                      size: 14,
                                       color: Colors.white,
                                     ),
-                                ],
+                                    const SizedBox(width: 6),
+                                    Flexible(
+                                      child: Text(
+                                        _selectedSalonName!,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    if (_ownerSalons.length > 1)
+                                      const Icon(
+                                        Icons.arrow_drop_down,
+                                        size: 16,
+                                        color: Colors.white,
+                                      ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    // Mobile: compact salon chip on the right of the AppBar.
-                    if (!isWeb && _ownerSalons.length > 1 && !showChip)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 4),
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: (constraints.maxWidth - 88).clamp(
-                              40,
-                              140,
+                      if (!isWeb && _ownerSalons.length > 1 && !showChip)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: (constraints.maxWidth - 180).clamp(
+                                40,
+                                140,
+                              ),
                             ),
+                            child: _buildSalonSelectorChip(),
                           ),
-                          child: _buildSalonSelectorChip(),
                         ),
-                      ),
-                    _buildNotificationIcon(),
-                    _buildProfileImage(),
-                  ],
+                      _buildPlanBadge(),
+                      _buildNotificationIcon(),
+                      _buildProfileImage(),
+                    ],
                   ),
                 );
               },
@@ -2294,7 +2659,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
         if (_completedSteps < _totalSteps) _buildStepFlow(),
 
-        // ✅ Service Menu — right below the Salon Setup section
         _buildServiceMenuSection(isDark: isDark),
 
         if (_ownerSalons.isEmpty)
@@ -2362,7 +2726,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ SERVICE MENU — styled like a menu book
+  // ✅ SERVICE MENU
   // ============================================================
 
   Widget _buildServiceMenuSection({required bool isDark}) {
@@ -2371,11 +2735,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       return const SizedBox.shrink();
     }
 
-    const accent = Colors.green; // same colour as the Service Management tiles
+    const accent = Colors.green;
     final paper = isDark ? const Color(0xFF17201A) : const Color(0xFFF6FBF6);
 
-    // Mobile gets the full screen width and tight padding so the tree has
-    // maximum room — no side border/spine eating into it.
     final horizontalMargin = _isWeb ? 16.0 : 0.0;
     final horizontalPadding = _isWeb ? 20.0 : 10.0;
     final cornerRadius = _isWeb ? 20.0 : 0.0;
@@ -2624,6 +2986,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             onTap: _viewAnalytics,
           ),
           _ManagementAction(
+            icon: Icons.workspace_premium,
+            label: 'Subscription',
+            color: Colors.amber,
+            onTap: _viewSubscription,
+          ),
+          _ManagementAction(
             icon: Icons.settings,
             label: 'Settings',
             color: Colors.grey,
@@ -2656,8 +3024,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ✅ FIX (RenderFlex overflowed by 3.4px): the title Text is now
-          // Flexible + ellipsis so the Row can shrink on narrow widths.
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2792,7 +3158,17 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ✅ NAVIGATION HELPERS
   // ============================================================
 
+  /// ✅ UPDATED: Check plan limit before navigating to create salon
   void _navigateToCreateSalon() async {
+    // ✅ NEW: Check plan limit BEFORE opening the create screen
+    final canCreate = await _checkCanCreateSalon();
+    if (!mounted) return;
+
+    if (!canCreate) {
+      // Dialog is already shown by _checkCanCreateSalon
+      return;
+    }
+
     final result = await context.push('/owner/salon/create');
     if (result == true && mounted) await _refreshAllData();
   }
@@ -2920,8 +3296,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ✅ mainAxisSize.min removed: this Row contains an Expanded, so
-          // it should fill the available width (min + Expanded can overflow).
           Row(
             children: [
               Container(
@@ -3164,18 +3538,18 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final Color circleBg = isCompleted
         ? green
         : isActive
-        ? pink
-        : const Color(0xFFE5E7EB);
+            ? pink
+            : const Color(0xFFE5E7EB);
     final Color labelColor = isCompleted
         ? const Color(0xFF15803D)
         : isActive
-        ? const Color(0xFF1A1A1A)
-        : const Color(0xFFB0B5BF);
+            ? const Color(0xFF1A1A1A)
+            : const Color(0xFFB0B5BF);
     final Color subtitleColor = isCompleted
         ? green.withValues(alpha: 0.8)
         : isActive
-        ? const Color(0xFF6B7280)
-        : const Color(0xFFD1D5DB);
+            ? const Color(0xFF6B7280)
+            : const Color(0xFFD1D5DB);
 
     Widget card = AnimatedContainer(
       duration: const Duration(milliseconds: 250),
@@ -3185,24 +3559,24 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         color: isCompleted
             ? green.withValues(alpha: 0.06)
             : isNext
-            ? pink.withValues(alpha: 0.07)
-            : isActive
-            ? pink.withValues(alpha: 0.04)
-            : const Color(0xFFFAFAFA),
+                ? pink.withValues(alpha: 0.07)
+                : isActive
+                    ? pink.withValues(alpha: 0.04)
+                    : const Color(0xFFFAFAFA),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isCompleted
               ? green.withValues(alpha: 0.4)
               : isNext
-              ? pink.withValues(alpha: 0.65)
-              : isActive
-              ? pink.withValues(alpha: 0.3)
-              : const Color(0xFFEEEEEE),
+                  ? pink.withValues(alpha: 0.65)
+                  : isActive
+                      ? pink.withValues(alpha: 0.3)
+                      : const Color(0xFFEEEEEE),
           width: isNext
               ? 1.8
               : isActive
-              ? 1.5
-              : 1.0,
+                  ? 1.5
+                  : 1.0,
         ),
       ),
       child: Column(
@@ -3220,12 +3594,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       size: 22,
                     )
                   : isLocked
-                  ? const Icon(
-                      Icons.lock_outline_rounded,
-                      color: Color(0xFFADB5BD),
-                      size: 18,
-                    )
-                  : Icon(icon, color: Colors.white, size: 20),
+                      ? const Icon(
+                          Icons.lock_outline_rounded,
+                          color: Color(0xFFADB5BD),
+                          size: 18,
+                        )
+                      : Icon(icon, color: Colors.white, size: 20),
             ),
           ),
           const SizedBox(height: 9),
