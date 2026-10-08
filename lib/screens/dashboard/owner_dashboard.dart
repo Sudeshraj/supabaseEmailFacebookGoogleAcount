@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
@@ -90,6 +92,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   final ScrollController _scrollController = ScrollController();
 
+  // ✅ FCM subscriptions (cancelled in dispose so setState is never called
+  // on a disposed State)
+  StreamSubscription<RemoteMessage>? _onMessageSub;
+  StreamSubscription<RemoteMessage>? _onOpenedSub;
+
   // ==================== ✅ SERVICE MENU SECTION ====================
   // After the first load, later refreshes happen silently (no full-page
   // spinner) so the Service Menu keeps any unsaved edits.
@@ -141,6 +148,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   // ✅ Check screen size for responsive layout
   void _checkScreenSize() {
+    if (!mounted) return;
     final size = MediaQuery.of(context).size;
     final isLarge = size.width > 800 || size.height > 800;
     final isTablet = size.shortestSide >= 600;
@@ -166,6 +174,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   @override
   void dispose() {
     routeObserver.unsubscribe(this);
+    _onMessageSub?.cancel();
+    _onOpenedSub?.cancel();
     _pulseCtrl.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -173,6 +183,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Future<void> _initializeAndLoad() async {
     await _ensureOwnerRole();
+    if (!mounted) return;
     await _loadAllData();
   }
 
@@ -1059,7 +1070,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final result = await context.push(
       '/owner/services/add?salonId=$_selectedSalonId',
     );
-    if (result == true) await _refreshAllData();
+    if (result == true && mounted) await _refreshAllData();
   }
 
   void _navigateToBarberLeaves() {
@@ -1209,6 +1220,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ============================================================
 
   Future<void> _loadAllData() async {
+    if (!mounted) return;
     // Full-page spinner only on the very first load. Later refreshes are
     // silent so the Service Menu section keeps its state.
     if (!_initialLoadDone) setState(() => _isLoading = true);
@@ -1217,23 +1229,27 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       await _loadUserProfile();
       debugPrint('✅ User profile loaded');
+      if (!mounted) return;
 
       await _loadOwnerSalons();
       debugPrint('✅ Owner salons loaded: ${_ownerSalons.length}');
+      if (!mounted) return;
 
       try {
         await _loadDashboardStats();
         debugPrint('✅ Dashboard stats loaded');
       } catch (e) {
         debugPrint('⚠️ Dashboard stats error (non-critical): $e');
-        setState(() {
-          _todayAppointments = 0;
-          _pendingBookings = 0;
-          _activeBarbers = 0;
-          _totalCustomers = 0;
-          _totalRevenue = 0;
-          _completedToday = 0;
-        });
+        if (mounted) {
+          setState(() {
+            _todayAppointments = 0;
+            _pendingBookings = 0;
+            _activeBarbers = 0;
+            _totalCustomers = 0;
+            _totalRevenue = 0;
+            _completedToday = 0;
+          });
+        }
       }
 
       try {
@@ -1467,14 +1483,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
     if (_selectedSalonId == null || _ownerSalons.isEmpty) {
       debugPrint('⚠️ No salon selected or no salons found');
-      setState(() {
-        _todayAppointments = 0;
-        _pendingBookings = 0;
-        _activeBarbers = 0;
-        _totalCustomers = 0;
-        _totalRevenue = 0;
-        _completedToday = 0;
-      });
+      if (mounted) {
+        setState(() {
+          _todayAppointments = 0;
+          _pendingBookings = 0;
+          _activeBarbers = 0;
+          _totalCustomers = 0;
+          _totalRevenue = 0;
+          _completedToday = 0;
+        });
+      }
       return;
     }
 
@@ -1570,14 +1588,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Future<void> _checkOnboardingStatus() async {
     if (_ownerSalons.isEmpty || _selectedSalonId == null) {
-      setState(() {
-        _hasSalon = false;
-        _hasServices = false;
-        _hasBarbers = false;
-        _hasBarberSchedule = false;
-        _hasHolidays = false;
-        _completedSteps = 0;
-      });
+      if (mounted) {
+        setState(() {
+          _hasSalon = false;
+          _hasServices = false;
+          _hasBarbers = false;
+          _hasBarberSchedule = false;
+          _hasHolidays = false;
+          _completedSteps = 0;
+        });
+      }
       return;
     }
 
@@ -1689,7 +1709,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   void _setupNotificationListeners() {
     try {
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      _onMessageSub = FirebaseMessaging.onMessage.listen((
+        RemoteMessage message,
+      ) {
+        if (!mounted) return;
         debugPrint('📨 New notification received: ${message.data}');
 
         if (message.data['type'] == 'new_booking') {
@@ -1704,11 +1727,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         }
       });
 
-      FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      _onOpenedSub = FirebaseMessaging.onMessageOpenedApp.listen((
+        RemoteMessage message,
+      ) {
+        if (!mounted) return;
         if (message.data['type'] == 'new_booking') _viewBookings();
       });
 
       FirebaseMessaging.instance.getInitialMessage().then((message) {
+        if (!mounted) return;
         if (message != null) {
           debugPrint('📱 App launched from terminated state with notification');
           _loadNotificationCount();
@@ -1937,7 +1964,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final isWeb = screenWidth > 800;
     final isDark = context.isDarkMode;
 
-    _checkScreenSize();
+    // ✅ Removed `_checkScreenSize()` from build(): calling setState while
+    // building is illegal. It is already invoked (post-frame) from
+    // didChangeDependencies, which runs whenever MediaQuery changes.
 
     if (_isCheckingStatus) {
       return Scaffold(
@@ -2061,9 +2090,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             iconSize: 28,
           ),
         ),
-        // ✅ Fixed: title no longer duplicates the salon chip on web
-        // (it's shown once in `actions` for web, and once here for mobile),
-        // and it is wrapped so it can never force the trailing actions to overflow.
+        // Title is only shown on mobile (on web the salon chip lives in
+        // `actions`). Wrapped in Flexible so it can never force the
+        // trailing actions to overflow.
         title: isWeb
             ? null
             : Row(
@@ -2085,10 +2114,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   ),
                 ],
               ),
-        // ✅ Fixed: actions row is now built with LayoutBuilder so the salon
-        // chip's max width is computed from the *actual* available space
-        // instead of a fixed 200px, which is what caused the 61px overflow
-        // on medium-width web windows.
+        // Actions row built with LayoutBuilder so the salon chip's max
+        // width is computed from the actual available space.
         actions: [
           Flexible(
             child: LayoutBuilder(
@@ -2104,7 +2131,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     _selectedSalonName!.isNotEmpty &&
                     availableForChip > 60;
 
-                return Row(
+                // ✅ FIX (61px overflow): when the AppBar's trailing slot is
+                // squeezed (very narrow window / layout transition) the
+                // icon + avatar Row can't fit. FittedBox scales it down
+                // instead of overflowing.
+                return FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (showChip)
@@ -2159,9 +2193,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                           ),
                         ),
                       ),
-                    // ✅ Mobile: show a compact salon chip on the right of the
-                    // AppBar (was previously stuffed into `title`, which is
-                    // what caused overflow on narrow phones with long names).
+                    // Mobile: compact salon chip on the right of the AppBar.
                     if (!isWeb && _ownerSalons.length > 1 && !showChip)
                       Padding(
                         padding: const EdgeInsets.only(right: 4),
@@ -2178,6 +2210,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     _buildNotificationIcon(),
                     _buildProfileImage(),
                   ],
+                  ),
                 );
               },
             ),
@@ -2407,6 +2440,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 Flexible(
                   child: Text(
                     'Service Menu',
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 19,
@@ -2622,6 +2656,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ✅ FIX (RenderFlex overflowed by 3.4px): the title Text is now
+          // Flexible + ellipsis so the Row can shrink on narrow widths.
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -2639,12 +2675,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 ),
               ),
               const SizedBox(width: 10),
-              Text(
-                'Management',
-                style: TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black87,
+              Flexible(
+                child: Text(
+                  'Management',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 19,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
               ),
             ],
@@ -2701,6 +2741,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               Expanded(
                 child: Text(
                   category.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w700,
@@ -2752,7 +2794,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   void _navigateToCreateSalon() async {
     final result = await context.push('/owner/salon/create');
-    if (result == true) await _refreshAllData();
+    if (result == true && mounted) await _refreshAllData();
   }
 
   void _navigateToEditSalon() async {
@@ -2763,7 +2805,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final result = await context.push(
       '/owner/salon/edit?salonId=$_selectedSalonId',
     );
-    if (result == true) await _refreshAllData();
+    if (result == true && mounted) await _refreshAllData();
   }
 
   void _viewSettings() => context.push('/settings');
@@ -2878,8 +2920,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ✅ mainAxisSize.min removed: this Row contains an Expanded, so
+          // it should fill the available width (min + Expanded can overflow).
           Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
               Container(
                 width: 42,
@@ -2901,6 +2944,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   children: [
                     Text(
                       'Salon Setup',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -2909,6 +2954,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     ),
                     Text(
                       '$_completedSteps of $_totalSteps steps complete',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12,
                         color:
@@ -2918,6 +2965,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   ],
                 ),
               ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
