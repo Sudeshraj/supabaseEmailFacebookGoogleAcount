@@ -172,6 +172,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
   // DATA LOADING
   // ============================================
   Future<void> _loadData({bool silent = false}) async {
+    if (!mounted) return; // ✅ guard
     if (!silent) setState(() => _isLoadingData = true);
 
     try {
@@ -191,6 +192,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
           .eq('is_active', true)
           .order('display_order');
 
+      if (!mounted) return; // ✅ guard
       setState(() {
         _ageCategories = List<Map<String, dynamic>>.from(ageResponse);
       });
@@ -230,6 +232,8 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
       } catch (e) {
         debugPrint('Could not load salon genders: $e');
       }
+
+      if (!mounted) return; // ✅ guard
 
       final ageIdToName = <int, String>{};
       for (var a in _ageCategories) {
@@ -295,6 +299,9 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         });
       }
 
+      // ✅ FIX: this was the setState() at service_menu_editor.dart:305
+      // that ran after the widget had been disposed.
+      if (!mounted) return;
       setState(() {
         _categories
           ..clear()
@@ -302,10 +309,9 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         _isLoadingData = false;
       });
     } catch (e) {
+      if (!mounted) return; // ✅ guard
       setState(() => _isLoadingData = false);
-      if (mounted) {
-        _showSnackBar(_friendlyError(e), Colors.red);
-      }
+      _showSnackBar(_friendlyError(e), Colors.red);
     }
   }
 
@@ -727,6 +733,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     );
 
     if (result == null) return;
+    if (!mounted) return; // ✅ guard (widget may be disposed while dialog open)
 
     setState(() {
       if (editIndex != null) {
@@ -1021,6 +1028,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     );
 
     if (result == null) return;
+    if (!mounted) return; // ✅ guard
 
     setState(() {
       final services = _categories[categoryIndex]['services'] as List;
@@ -1406,6 +1414,12 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                                           .select()
                                           .single();
 
+                                      // ✅ guard: the editor or the dialog
+                                      // may be gone by the time the insert
+                                      // returns.
+                                      if (!mounted) return;
+                                      if (!dialogContext.mounted) return;
+
                                       setState(() {
                                         _ageCategories.add(
                                             Map<String, dynamic>.from(
@@ -1704,6 +1718,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     );
 
     if (result == null) return;
+    if (!mounted) return; // ✅ guard
 
     setState(() {
       final variants = (service['variants'] as List);
@@ -1741,8 +1756,8 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
       context: context,
       builder: (context) => AlertDialog(
         scrollable: true,
-              insetPadding:
-                  const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        insetPadding:
+            const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape:
             RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -1844,6 +1859,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     );
 
     if (!confirmed) return;
+    if (!mounted) return; // ✅ guard
 
     setState(() => _isLoading = true);
 
@@ -2164,56 +2180,57 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (widget.showHeader) ...[
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(7),
-                decoration: BoxDecoration(
-                  color: accent.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Icon(Icons.account_tree_outlined, size: 18, color: accent),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Your Services',
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-              ),
-              if (_categories.isNotEmpty)
+            Row(
+              children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.all(7),
                   decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(6),
+                    color: accent.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
                   ),
+                  child: Icon(Icons.account_tree_outlined,
+                      size: 18, color: accent),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
                   child: Text(
-                    '${_categories.length} CATEGOR${_categories.length == 1 ? 'Y' : 'IES'}',
+                    'Your Services',
                     style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w800,
-                      color: accent,
-                      letterSpacing: 0.5,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
                     ),
                   ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Categories contain services. Services contain variants.',
-            style: TextStyle(
-              fontSize: 11,
-              color: isDark ? Colors.white60 : Colors.grey[600],
+                if (_categories.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '${_categories.length} CATEGOR${_categories.length == 1 ? 'Y' : 'IES'}',
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w800,
+                        color: accent,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          ),
-          const SizedBox(height: 12),
+            const SizedBox(height: 4),
+            Text(
+              'Categories contain services. Services contain variants.',
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 12),
           ],
 
           if (_categories.isEmpty) ...[
@@ -2267,7 +2284,8 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                       message:
                           'Remove "${cat['display_name']}" and all its services?',
                     );
-                    if (ok) {
+                    if (ok && mounted) {
+                      // ✅ guard
                       setState(() => _categories.removeAt(catIndex));
                     }
                   },
@@ -2294,7 +2312,8 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                       title: 'Delete Service?',
                       message: 'Remove "${svc['name']}" and its variants?',
                     );
-                    if (ok) {
+                    if (ok && mounted) {
+                      // ✅ guard
                       setState(() {
                         (_categories[catIndex]['services'] as List)
                             .removeAt(si);
@@ -2326,7 +2345,8 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                         message:
                             'Remove this variant (${v['gender_name']} • ${v['age_category_name']})?',
                       );
-                      if (ok) {
+                      if (ok && mounted) {
+                        // ✅ guard
                         setState(() {
                           ((_categories[catIndex]['services']
                                       as List)[si]['variants']
