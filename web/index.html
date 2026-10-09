@@ -3,9 +3,7 @@
 <head>
   <base href="/" />
   <meta charset="UTF-8">
-  
- 
-  
+
   <!-- ==================== SEO META TAGS ==================== -->
   <title>SBooking</title>
   <meta name="description" content="Book salon appointments online in Sri Lanka. Haircuts, facials, spa, manicure, and beauty services. Instant booking, reviews, and prices.">
@@ -15,7 +13,7 @@
   <meta name="language" content="English">
   <meta name="geo.region" content="LK">
   <meta name="geo.placename" content="Colombo">
-  
+
   <!-- Open Graph for Social Media Sharing -->
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://mysalon.lk/">
@@ -24,14 +22,14 @@
   <meta property="og:image" content="https://mysalon.lk/images/og-image.jpg">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  
+
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:site" content="@MySalonLK">
   <meta name="twitter:title" content="MySalon - Salon Booking App Sri Lanka">
   <meta name="twitter:description" content="Book salon appointments instantly. View reviews, prices, and stylist availability.">
   <meta name="twitter:image" content="https://mysalon.lk/images/twitter-image.jpg">
-  
+
   <!-- ==================== STRUCTURED DATA FOR SEO ==================== -->
   <script type="application/ld+json">
   {
@@ -72,7 +70,7 @@
     ]
   }
   </script>
-  
+
   <!-- ==================== PWA CONFIG ==================== -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
@@ -81,16 +79,18 @@
   <link rel="icon" type="image/png" href="favicon.png">
   <link rel="manifest" href="manifest.json">
 
-    <!-- ✅ PayHere JavaScript SDK -->
-  <script src="https://www.payhere.lk/lib/payhere.js"></script>
-   
-  
+  <!--
+    NOTE: PayHere JS SDK (payhere.js) is intentionally NOT loaded here.
+    Web payments use PayHere's hosted checkout (same-tab form POST from
+    PayHereWebService), which needs no script.
+  -->
+
   <!-- ==================== 🔥 FIREBASE SCRIPTS ==================== -->
   <!-- Firebase Core SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
   <!-- Firebase Messaging SDK -->
   <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging-compat.js"></script>
-  
+
   <!-- ==================== HIDDEN SEO CONTENT STYLE ==================== -->
   <style>
     /* SEO content that's visible to search engines but hidden from users */
@@ -105,7 +105,7 @@
       white-space: nowrap;
       border: 0;
     }
-    
+
     /* Loading indicator */
     .loading-indicator {
       position: fixed;
@@ -120,7 +120,7 @@
       z-index: 9999;
       transition: opacity 0.3s ease;
     }
-    
+
     .spinner {
       width: 40px;
       height: 40px;
@@ -129,7 +129,7 @@
       border-radius: 50%;
       animation: spin 1s linear infinite;
     }
-    
+
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
@@ -141,21 +141,21 @@
   <!-- ==================== HIDDEN SEO CONTENT ==================== -->
   <div class="seo-content">
     <h1>MySalon - #1 Salon Booking App in Sri Lanka</h1>
-    
+
     <h2>Book Salon Services Online</h2>
     <p>Book appointments at top salons in Colombo, Kandy, Galle, Negombo, and across Sri Lanka.</p>
-    
+
     <h3>Available Services:</h3>
     <ul>
-      <li>Haircut & Styling</li>
+      <li>Haircut &amp; Styling</li>
       <li>Facial Treatments</li>
-      <li>Spa & Massage</li>
-      <li>Manicure & Pedicure</li>
-      <li>Waxing & Hair Removal</li>
+      <li>Spa &amp; Massage</li>
+      <li>Manicure &amp; Pedicure</li>
+      <li>Waxing &amp; Hair Removal</li>
       <li>Bridal Makeup</li>
       <li>Men's Grooming</li>
     </ul>
-    
+
     <h3>How It Works:</h3>
     <ol>
       <li>Search salons by location or name</li>
@@ -164,7 +164,7 @@
       <li>Confirm booking (online payment or pay at salon)</li>
       <li>Receive SMS/email reminders</li>
     </ol>
-    
+
     <h3>Benefits:</h3>
     <ul>
       <li>24/7 booking availability</li>
@@ -173,24 +173,24 @@
       <li>Booking history and repeat appointments</li>
       <li>Service comparison across salons</li>
     </ul>
-    
+
     <h3>Contact Us:</h3>
     <p>Support: <a href="tel:+94112345678">+94 11 234 5678</a> (24/7)</p>
     <p>WhatsApp: <a href="https://wa.me/94771234567">+94 77 123 4567</a></p>
     <p>Email: <a href="mailto:support@mysalon.lk">support@mysalon.lk</a></p>
-    
-    <p><strong>Partner Salons:</strong> Style & Smile Salon, Glamour Beauty, Urban Cuts, Herbal Spa, Royal Nail Studio, Men's Grooming Lounge, and 100+ salons across Sri Lanka.</p>
-    
+
+    <p><strong>Partner Salons:</strong> Style &amp; Smile Salon, Glamour Beauty, Urban Cuts, Herbal Spa, Royal Nail Studio, Men's Grooming Lounge, and 100+ salons across Sri Lanka.</p>
+
     <h3>Popular Salon Locations:</h3>
     <p>Colombo Salon Booking | Kandy Beauty Services | Galle Spa Appointments | Negombo Hair Salons | Kurunegala Beauty Parlors | Jaffna Salon Services</p>
   </div>
-  
+
   <!-- ==================== LOADING INDICATOR ==================== -->
   <div class="loading-indicator" id="app-loading">
     <div class="spinner"></div>
   </div>
-  
-  <!-- ==================== 🔥 FIREBASE INITIALIZATION (FIXED) ==================== -->
+
+  <!-- ==================== 🔥 FIREBASE INITIALIZATION ==================== -->
   <script>
     // Your Firebase Configuration
     const firebaseConfig = {
@@ -202,14 +202,27 @@
       appId: "1:624521405165:web:09323a1025f02b668262e4",
       measurementId: "G-925VW9Z44F"
     };
-    
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-    const messaging = firebase.messaging();
-    
+
+    // Initialize Firebase safely.
+    // If the Firebase scripts failed to load (ad blocker, offline,
+    // unsupported browser) the rest of this file must still run, so
+    // `messaging` stays null and every function below handles that.
+    let messaging = null;
+    try {
+      if (typeof firebase !== 'undefined') {
+        firebase.initializeApp(firebaseConfig);
+        messaging = firebase.messaging();
+      } else {
+        console.warn('⚠️ Firebase SDK not loaded - notifications disabled');
+      }
+    } catch (e) {
+      console.error('❌ Firebase init failed:', e);
+      messaging = null;
+    }
+
     // Variable to store current token
     let currentFcmToken = null;
-    
+
     // Function to save token and notify Flutter
     function saveTokenAndNotify(token) {
       if (token && token !== currentFcmToken) {
@@ -219,18 +232,19 @@
         window.dispatchEvent(new CustomEvent('fcm-token-refresh', { detail: { token: token } }));
       }
     }
-    
+
     // ================================================================
     // ✅ EXPOSE FUNCTIONS TO FLUTTER (User action එකෙන් පස්සේ call කරන්න)
     // ================================================================
-    
+
     // ✅ Flutter එකෙන් call කරන්න - Permission Request
     window.requestNotificationPermission = async function() {
       console.log('🌐 Web: Requesting notification permission from user action');
+      if (!messaging || !('Notification' in window)) return false;
       try {
         const permission = await Notification.requestPermission();
         console.log('🔔 Notification permission:', permission);
-        
+
         if (permission === 'granted') {
           const token = await messaging.getToken({
             vapidKey: 'BFj7Eoc2BRmQQrXHBFvWXjcmeb3seAyHmOpVZEOLpKTpwbelZoo5tqci-o7KR-sr0hgO9yIYDRV1KP88vhV0l6k'
@@ -244,14 +258,15 @@
         return false;
       }
     };
-    
+
     // ✅ Flutter එකෙන් call කරන්න - Get Permission Status
     window.getNotificationPermissionStatus = function() {
-      return Notification.permission;
+      return ('Notification' in window) ? Notification.permission : 'denied';
     };
-    
+
     // ✅ Flutter එකෙන් call කරන්න - Get Token
     window.getFcmToken = async function() {
+      if (!messaging || !('Notification' in window)) return null;
       try {
         if (Notification.permission === 'granted') {
           const token = await messaging.getToken();
@@ -266,25 +281,61 @@
         return null;
       }
     };
-    
-    // ================================================================
-    // ✅ Handle foreground messages (app is open)
-    // ================================================================
-    messaging.onMessage((payload) => {
-      console.log('📩 Foreground message received:', payload);
-      
-      if (Notification.permission === 'granted' && payload.notification) {
-        new Notification(payload.notification.title || 'New Notification', {
-          body: payload.notification.body || 'You have a new notification',
-          icon: '/favicon.png',
-          badge: '/icons/Icon-192.png',
-          data: payload.data,
-        });
+
+    if (messaging) {
+      // ================================================================
+      // ✅ Handle foreground messages (app is open)
+      // ================================================================
+      messaging.onMessage((payload) => {
+        console.log('📩 Foreground message received:', payload);
+
+        if (Notification.permission === 'granted' && payload.notification) {
+          new Notification(payload.notification.title || 'New Notification', {
+            body: payload.notification.body || 'You have a new notification',
+            icon: '/favicon.png',
+            badge: '/icons/Icon-192.png',
+            data: payload.data,
+          });
+        }
+
+        window.dispatchEvent(new CustomEvent('fcm-message-received', { detail: payload }));
+      });
+
+      // ================================================================
+      // ✅ Periodic token check (every 24 hours)
+      // ================================================================
+      setInterval(async () => {
+        if (Notification.permission === 'granted') {
+          try {
+            const newToken = await messaging.getToken();
+            if (newToken && newToken !== currentFcmToken) {
+              console.log('🔄 Token changed during periodic check');
+              saveTokenAndNotify(newToken);
+            }
+          } catch (e) {
+            console.error('Periodic token check failed:', e);
+          }
+        }
+      }, 24 * 60 * 60 * 1000);
+
+      // ================================================================
+      // 🔥 DO NOT AUTO-REQUEST PERMISSION ON PAGE LOAD
+      // Only get token if permission already granted
+      // ================================================================
+      if (Notification.permission === 'granted') {
+        console.log('🔔 Notification permission already granted, getting token...');
+        messaging.getToken()
+          .then(token => {
+            if (token) saveTokenAndNotify(token);
+          })
+          .catch(err => console.error('Error getting token:', err));
+      } else {
+        console.log('🔔 Notification permission NOT granted.');
+        console.log('📌 Will ask when user clicks "Enable" in the app.');
+        console.log('📌 Current status:', Notification.permission);
       }
-      
-      window.dispatchEvent(new CustomEvent('fcm-message-received', { detail: payload }));
-    });
-    
+    }
+
     // ================================================================
     // ✅ Listen for token refresh from service worker
     // ================================================================
@@ -296,43 +347,7 @@
         }
       });
     }
-    
-    // ================================================================
-    // ✅ Periodic token check (every 24 hours)
-    // ================================================================
-    setInterval(async () => {
-      if (Notification.permission === 'granted') {
-        try {
-          const newToken = await messaging.getToken();
-          if (newToken && newToken !== currentFcmToken) {
-            console.log('🔄 Token changed during periodic check');
-            saveTokenAndNotify(newToken);
-          }
-        } catch(e) {
-          console.error('Periodic token check failed:', e);
-        }
-      }
-    }, 24 * 60 * 60 * 1000);
-    
-    // ================================================================
-    // 🔥 FIXED: DO NOT AUTO-REQUEST PERMISSION ON PAGE LOAD
-    // ================================================================
-    
-    // ✅ Only get token if permission already granted
-    // ✅ This replaces the old auto-request code
-    if (Notification.permission === 'granted') {
-      console.log('🔔 Notification permission already granted, getting token...');
-      messaging.getToken()
-        .then(token => {
-          if (token) saveTokenAndNotify(token);
-        })
-        .catch(err => console.error('Error getting token:', err));
-    } else {
-      console.log('🔔 Notification permission NOT granted.');
-      console.log('📌 Will ask when user clicks "Enable" in the app.');
-      console.log('📌 Current status:', Notification.permission);
-    }
-    
+
     // ================================================================
     // ✅ Handle notification click when app is opened via notification
     // ================================================================
@@ -343,23 +358,22 @@
         try {
           const data = JSON.parse(pendingNotification);
           window.dispatchEvent(new CustomEvent('fcm-notification-clicked', { detail: data }));
-        } catch(e) {
+        } catch (e) {
           console.error('Error parsing pending notification:', e);
         }
       }
     });
-    
+
     console.log('🌐 Web: Notification service initialized WITHOUT auto-permission request');
   </script>
-  
+
   <!-- ==================== SERVICE WORKER REGISTRATION ==================== -->
   <!--
-    ⚠️ FIX: Flutter 3.34+ (flutter_bootstrap.js) auto-registers its own
+    Flutter 3.34+ (flutter_bootstrap.js) auto-registers its own
     service worker internally. Manually registering
     'flutter_service_worker.js' here a second time at the same scope ('/')
     conflicts with that auto-registration and can cause the browser to be
-    unsure which SW should own push/notification events - which is why
-    web notifications were silently failing.
+    unsure which SW should own push/notification events.
 
     Only the Firebase messaging service worker is registered manually here.
     Do NOT add a manual flutter_service_worker.js registration back in.
@@ -377,18 +391,18 @@
       });
     }
   </script>
-  
+
   <!-- ==================== URL STRATEGY ==================== -->
   <script>
     (function() {
       var url = window.location.href;
       var isAuthCallback = url.includes('/auth/callback');
       var hasFragment = window.location.hash && window.location.hash.length > 1;
-      
+
       if (isAuthCallback && hasFragment) {
         console.log('🔐 Auth callback detected');
         var fragment = window.location.hash.substring(1);
-        
+
         if (fragment.includes('=')) {
           var baseUrl = url.split('#')[0];
           var separator = baseUrl.includes('?') ? '&' : '?';
@@ -401,10 +415,10 @@
       }
     })();
   </script>
-  
+
   <!-- ==================== MAIN FLUTTER BOOTSTRAP ==================== -->
   <script src="flutter_bootstrap.js" async></script>
-  
+
   <!-- ==================== HIDE LOADING INDICATOR ==================== -->
   <script>
     window.addEventListener('load', function() {
@@ -419,7 +433,7 @@
       }, 1000);
     });
   </script>
-  
+
   <!-- ==================== APPLE SIGN-IN SCRIPT ==================== -->
   <script type="text/javascript" src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script>
 </body>

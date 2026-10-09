@@ -4,36 +4,30 @@ import 'payhere_service.dart';
 import 'payhere_web_service.dart';
 
 /// ============================================================
-/// Unified Payment Service — Platform-aware wrapper
-// ------------------------------------------------------------
-/// Automatically picks the correct PayHere implementation:
-///   • Web    → PayHereWebService (uses payhere.js JS SDK)
-///   • Mobile → PayHereService    (uses native mobile SDK)
+/// Unified Payment Service — platform-aware wrapper
+/// ------------------------------------------------------------
+///   • Web    → PayHereWebService (iframe popup, redirect fallback)
+///   • Mobile → PayHereService    (native PayHere SDK)
 ///
-/// Usage:
-///   final payment = PaymentService();
-///   final paymentId = await payment.startSubscriptionPayment(...);
+/// Mobile: returns the payment id on success, null on cancel/failure.
+/// Web:    returns the order id when the iframe popup payment completes,
+///         [redirectSentinel] if it had to fall back to a same-tab
+///         redirect (result then comes back via returnUrl / cancelUrl),
+///         or null on cancel / failure.
 ///
-/// The returned paymentId is non-null on success, null on
-/// cancel/fail. The actual subscription activation happens
-/// asynchronously via the PayHere webhook (Edge Function), so
-/// callers should refresh the subscription provider after a
-/// short delay.
+/// Subscription activation always happens on the server via the
+/// PayHere webhook (Edge Function).
 /// ============================================================
 class PaymentService {
   final PayHereService _mobile = PayHereService();
   final PayHereWebService _web = PayHereWebService();
 
-  /// True if payments are supported on this platform.
-  /// Currently: Web, Android, iOS.
-  bool get isSupported {
-    if (kIsWeb) return true;
-    // On non-web platforms, PayHere mobile SDK supports Android + iOS.
-    // We can't check Platform directly here without importing
-    // dart:io, which breaks web compilation, so we let the
-    // mobile service handle its own platform check.
-    return true;
-  }
+  bool get isSupported => true;
+
+  /// Returned on web when the tab is being redirected to PayHere's hosted
+  /// checkout (popup unavailable). The caller should just stop; the result
+  /// is handled when PayHere sends the user back to returnUrl.
+  static const String redirectSentinel = PayHereWebService.redirectSentinel;
 
   /// Whether we're currently running on web.
   bool get isWeb => kIsWeb;
@@ -41,11 +35,7 @@ class PaymentService {
   /// Whether we're currently running on mobile (Android/iOS).
   bool get isMobile => !kIsWeb;
 
-  /// Start a subscription payment.
-  ///
-  /// Returns the payment ID (a non-empty string) on success, or
-  /// null on cancel/failure. Never throws — errors are surfaced
-  /// via the debug log and returned as null.
+  /// [returnUrl] / [cancelUrl] are used on web only.
   Future<String?> startSubscriptionPayment({
     required int salonId,
     required String planName,
@@ -53,6 +43,8 @@ class PaymentService {
     required String customerEmail,
     required String customerName,
     required String customerPhone,
+    String? returnUrl,
+    String? cancelUrl,
   }) async {
     debugPrint(
       '💳 PaymentService.startSubscriptionPayment — '
@@ -69,15 +61,9 @@ class PaymentService {
           customerEmail: customerEmail,
           customerName: customerName,
           customerPhone: customerPhone,
-          onCompleted: (paymentId) {
-            debugPrint('✅ [Web] Payment completed: $paymentId');
-          },
-          onError: (error) {
-            debugPrint('❌ [Web] Payment error: $error');
-          },
-          onDismissed: () {
-            debugPrint('⏹️ [Web] Payment dismissed');
-          },
+          returnUrl: returnUrl ?? Uri.base.origin,
+          cancelUrl: cancelUrl ?? Uri.base.origin,
+          onError: (error) => debugPrint('❌ [Web] Payment error: $error'),
         );
       } else {
         return await _mobile.startSubscriptionPayment(
@@ -93,19 +79,5 @@ class PaymentService {
       debugPrint('❌ PaymentService error: $e\n$stack');
       return null;
     }
-  }
-
-  /// Check if PayHere is available right now (e.g. SDK loaded).
-  /// Useful to show a friendly error BEFORE opening the payment
-  /// sheet (e.g. on web when the payhere.js script failed to load).
-  Future<bool> isAvailable() async {
-    if (kIsWeb) {
-      // On web we can't easily check without a JS call; assume true
-      // — the web service itself returns a clear error if the SDK
-      // is missing.
-      return true;
-    }
-    // On mobile, the SDK is bundled — assume true.
-    return true;
   }
 }

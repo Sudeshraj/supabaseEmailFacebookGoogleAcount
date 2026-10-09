@@ -12,15 +12,16 @@ import 'reduce_salons_screen.dart';
 // ============================================================
 // PLANS COMPARISON SCREEN
 // ------------------------------------------------------------
-// Shows all 4 subscription plans (Bronze / Silver / Gold /
-// Platinum) with their features and lets the owner:
-//   • Upgrade (triggers PayHere payment via PaymentService)
+// Shows all subscription plans and lets the owner:
+//   • Upgrade (PayHere payment via PaymentService)
+//       - Mobile: native PayHere SDK
+//       - Web:    iframe popup over the app (JS SDK). If the popup can't
+//                 start, falls back to hosted checkout (same-tab redirect);
+//                 PayHere then sends the user back with
+//                 ?payment=return&plan=xxx and this screen polls until
+//                 the webhook has activated the plan.
 //   • Downgrade (with salon-count validation if needed)
-//   • Read a "reason" banner when redirected from a locked
-//     route (e.g. user tried to open Reports on Bronze)
-//
-// Platform-aware: PaymentService internally switches between
-// the mobile PayHere SDK and the web PayHere JS SDK.
+//   • Read a "reason" banner when redirected from a locked route
 // ============================================================
 class PlansComparisonScreen extends StatefulWidget {
   final int salonId;
@@ -45,10 +46,13 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   bool _processing = false;
   String? _error;
 
-  // ✅ Set from the route's query params when redirected here
+  // Set from the route's query params when redirected here
   // from a locked route (see main.dart's redirect callback).
   String? _reason;
   String? _requiredPlan;
+
+  // Set when PayHere (web) sends the user back to this screen.
+  bool _returnHandled = false;
 
   @override
   void initState() {
@@ -59,13 +63,22 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // Read the redirect reason (if any) once dependencies are ready.
     try {
       final uri = GoRouterState.of(context).uri;
       _reason = uri.queryParameters['reason'];
       _requiredPlan = uri.queryParameters['required'];
+
+      // PayHere web return: ?payment=return|cancel&plan=<planName>
+      final paymentStatus = uri.queryParameters['payment'];
+      if (paymentStatus != null && !_returnHandled) {
+        _returnHandled = true;
+        final planName = uri.queryParameters['plan'];
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _handlePaymentReturn(paymentStatus, planName);
+        });
+      }
     } catch (_) {
-      // Not routed through GoRouter (e.g. preview) — no reason.
+      // Not routed through GoRouter (e.g. preview) — nothing to read.
     }
   }
 
@@ -95,10 +108,19 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
 
   SubscriptionPlan? get _currentPlan {
     final provider = context.read<SubscriptionProvider>();
+    if (_plans.isEmpty) return null;
     return _plans.firstWhere(
       (p) => p.name == provider.currentPlanName,
       orElse: () => _plans.first,
     );
+  }
+
+  String _displayNameFor(String? planName) {
+    if (planName == null || planName.isEmpty) return 'Your';
+    for (final p in _plans) {
+      if (p.name == planName) return p.displayName;
+    }
+    return planName[0].toUpperCase() + planName.substring(1);
   }
 
   // ============================================================
@@ -116,14 +138,12 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       return;
     }
 
-    // Confirm dialog
     final confirmed = await _showConfirmDialog(plan, currentPlan);
     if (confirmed != true) return;
 
     setState(() => _processing = true);
 
     try {
-      // Call request_plan_change RPC
       final result = await provider.requestPlanChange(
         newPlanName: plan.name,
         ownerId: widget.ownerId,
@@ -171,8 +191,26 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   }
 
   // ============================================================
-  // PAYMENT FLOW (platform-aware via PaymentService)
+  // PAYMENT FLOW
   // ============================================================
+
+  /// URL PayHere sends the user back to (web only). It points to THIS
+  /// screen's current route, keeping its existing query params.
+  String _buildReturnUrl(String status, String planName) {
+    try {
+      final current = GoRouterState.of(context).uri;
+      final params = Map<String, String>.from(current.queryParameters)
+        ..remove('reason')
+        ..remove('required')
+        ..['payment'] = status
+        ..['plan'] = planName;
+      return Uri.parse(
+        Uri.base.origin,
+      ).replace(path: current.path, queryParameters: params).toString();
+    } catch (_) {
+      return '${Uri.base.origin}/?payment=$status&plan=$planName';
+    }
+  }
 
   Future<void> _handlePaymentFlow(
     SubscriptionPlan plan,
@@ -180,23 +218,12 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   ) async {
     final amount = (result['amount'] as num).toDouble();
 
-    // Get customer info from Supabase auth
+    // Customer info from Supabase auth
     final user = Supabase.instance.client.auth.currentUser;
     final email = user?.email ?? '';
     final name =
         user?.userMetadata?['full_name'] as String? ?? email.split('@').first;
     final phone = user?.userMetadata?['phone'] as String? ?? '0770000000';
-
-    // ✅ On web, warn the user about popups BEFORE opening the sheet.
-    if (_payment.isWeb) {
-      _showSnack(
-        'Please allow popups for this site to complete payment',
-        isError: false,
-      );
-      // Brief delay so the user can read it before the popup appears.
-      await Future.delayed(const Duration(milliseconds: 800));
-      if (!mounted) return;
-    }
 
     debugPrint(
       '💳 Starting payment — platform=${_payment.isWeb ? "web" : "mobile"}, '
@@ -210,6 +237,8 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       customerEmail: email,
       customerName: name,
       customerPhone: phone,
+      returnUrl: _payment.isWeb ? _buildReturnUrl('return', plan.name) : null,
+      cancelUrl: _payment.isWeb ? _buildReturnUrl('cancel', plan.name) : null,
     );
 
     if (!mounted) return;
@@ -219,23 +248,69 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       return;
     }
 
-    // ✅ Payment submitted — the PayHere webhook (Edge Function)
-    // will activate the subscription shortly. Give it a moment,
-    // then refresh local capabilities.
+    // WEB fallback: this tab is navigating to PayHere's hosted checkout.
+    // The result is handled in _handlePaymentReturn when PayHere
+    // redirects back here.
+    if (paymentId == PaymentService.redirectSentinel) return;
+
+    // Mobile SDK / web iframe popup: payment submitted — the webhook
+    // activates the plan.
     _showSnack('Payment received. Activating plan...');
-    await Future.delayed(const Duration(seconds: 3));
+    final activated = await _waitForPlan(plan.name);
 
     if (!mounted) return;
 
-    // Refresh capabilities
-    await context.read<SubscriptionProvider>().refresh();
+    if (activated) {
+      _showSuccessDialog(
+        plan.displayName,
+        'Payment successful. Your ${plan.displayName} plan is now active!',
+      );
+    } else {
+      _showSnack(
+        'Payment received. Your plan will be activated shortly.',
+      );
+    }
+  }
 
+  /// Polls the subscription until [planName] is active (webhook done).
+  Future<bool> _waitForPlan(String? planName) async {
+    final provider = context.read<SubscriptionProvider>();
+    for (var i = 0; i < 15; i++) {
+      await provider.refresh();
+      if (!mounted) return false;
+      if (planName == null || provider.currentPlanName == planName) {
+        return true;
+      }
+      await Future.delayed(const Duration(seconds: 2));
+      if (!mounted) return false;
+    }
+    return false;
+  }
+
+  /// Web only: PayHere sent the user back here.
+  Future<void> _handlePaymentReturn(String status, String? planName) async {
+    if (status == 'cancel') {
+      _showSnack('Payment cancelled', isError: true);
+      return;
+    }
+
+    setState(() => _processing = true);
+    final activated = await _waitForPlan(planName);
     if (!mounted) return;
+    setState(() => _processing = false);
 
-    _showSuccessDialog(
-      plan.displayName,
-      'Payment successful. Your ${plan.displayName} plan is now active!',
-    );
+    final display = _displayNameFor(planName);
+    if (activated) {
+      _showSuccessDialog(
+        display,
+        'Payment successful. Your $display plan is now active!',
+      );
+    } else {
+      _showSnack(
+        'Payment received. Your plan will be activated shortly — '
+        'please refresh in a moment.',
+      );
+    }
   }
 
   // ============================================================
@@ -262,7 +337,6 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     );
 
     if (reduced == true && mounted) {
-      // Retry the plan change now that salon count is reduced
       await _handlePlanSelection(plan);
     } else if (mounted) {
       _showSnack(
@@ -347,7 +421,12 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
-              Navigator.pop(context); // Back to subscription screen
+              // After a web payment return this screen may be the only
+              // page in the stack, so only pop when there is something
+              // to go back to.
+              if (Navigator.canPop(context)) {
+                Navigator.pop(context); // Back to subscription screen
+              }
             },
             child: const Text('OK'),
           ),
@@ -373,9 +452,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Choose a Plan'),
-      ),
+      appBar: AppBar(title: const Text('Choose a Plan')),
       body: Stack(
         children: [
           _buildBody(),
@@ -423,7 +500,6 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // ✅ Reason banner (shown when redirected from a locked route)
         if (_reason != null && _requiredPlan != null) ...[
           _buildReasonBanner(),
           const SizedBox(height: 16),
@@ -464,11 +540,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.lock_outline,
-            color: Colors.amber,
-            size: 22,
-          ),
+          const Icon(Icons.lock_outline, color: Colors.amber, size: 22),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -484,10 +556,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
                 const SizedBox(height: 4),
                 Text(
                   'Upgrade to $required or higher to unlock this feature.',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[700],
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[700]),
                 ),
               ],
             ),
@@ -528,17 +597,14 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     final borderColor = isCurrent
         ? Colors.green
         : plan.planRank == 4
-            ? Colors.amber
-            : Colors.grey[300]!;
+        ? Colors.amber
+        : Colors.grey[300]!;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(
-          color: borderColor,
-          width: isCurrent ? 2 : 1,
-        ),
+        side: BorderSide(color: borderColor, width: isCurrent ? 2 : 1),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -608,10 +674,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Text(
                       '/month',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 14,
-                      ),
+                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
                     ),
                   ),
                 ],

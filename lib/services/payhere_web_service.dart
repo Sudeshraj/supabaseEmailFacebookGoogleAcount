@@ -1,24 +1,46 @@
 import 'dart:async';
 import 'dart:js_interop';
 import 'dart:js_interop_unsafe';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:web/web.dart' as web;
 
-/// PayHere Web Checkout Service — Flutter Web only.
+/// PayHere Web service — Flutter Web only.
 ///
-/// Requires this script in web/index.html (head):
-///   <script src="https://www.payhere.lk/lib/payhere.js"></script>
-///   (same script for sandbox & live; mode is set via the 'sandbox' flag)
+/// Two ways to take a payment on web:
 ///
-/// Uses dart:js_interop + dart:js_interop_unsafe (Flutter 3.10+)
+///  1. POPUP (preferred, user-friendly): PayHere JS SDK opens the payment
+///     form in an iframe overlay on top of the app. The user never leaves
+///     the app. Result arrives via callbacks.
+///
+///  2. REDIRECT (fallback): hosted checkout, a normal form POST in the same
+///     tab. Used automatically when the popup cannot start (SDK blocked,
+///     or PayHere rejects the SDK request, e.g. some localhost setups).
+///     The user returns to [returnUrl] / [cancelUrl] afterwards.
+///
+/// In both cases the subscription is activated by the `payhere-webhook`
+/// Edge Function (server-to-server).
+///
+/// The PayHere JS SDK is loaded on demand, so web/index.html does not
+/// need a <script> tag for it.
 class PayHereWebService {
   final SupabaseClient _supabase = Supabase.instance.client;
 
-  // ⚠️ CHANGE THESE for production
-  static const bool isSandbox = true;
+  /// Try the iframe popup first. Set to false to always use the redirect.
+  static const bool preferPopup = true;
 
+  /// Returned when the tab is being redirected to PayHere (hosted
+  /// checkout). The caller should stop and wait for the return URL.
+  static const String redirectSentinel = 'REDIRECT';
+
+  static const String _sdkUrl = 'https://www.payhere.lk/lib/payhere.js';
+
+  /// Returns:
+  ///  • order id        → popup payment completed
+  ///  • [redirectSentinel] → redirecting to PayHere (page is unloading)
+  ///  • null            → cancelled / failed
   Future<String?> startSubscriptionPayment({
     required int salonId,
     required String planName,
@@ -26,24 +48,16 @@ class PayHereWebService {
     required String customerEmail,
     required String customerName,
     required String customerPhone,
-    required void Function(String orderId) onCompleted,
+    required String returnUrl,
+    required String cancelUrl,
     required void Function(String error) onError,
-    required void Function() onDismissed,
   }) async {
-    // 1. Check the PayHere JS SDK first (before any network call)
-    final payhere = _getWindowPayHere();
-    if (payhere == null) {
-      debugPrint(
-        '❌ PayHere JS SDK not loaded. Add <script src="https://www.payhere.lk/lib/payhere.js"> to index.html',
-      );
-      onError('PayHere SDK not loaded. Please refresh.');
-      return null;
-    }
+    final env = EnvironmentManager();
 
-    // 2. Order ID
+    // 1. Order ID
     final orderId = 'SUB-$salonId-${DateTime.now().millisecondsSinceEpoch}';
 
-    // 3. Fetch hash from Edge Function
+    // 2. Fetch hash (web uses the PayHere *Domain* merchant secret)
     final String hash;
     try {
       final hashResponse = await _supabase.functions.invoke(
@@ -57,7 +71,6 @@ class PayHereWebService {
       );
       hash = hashResponse.data['hash'] as String;
     } on FunctionException catch (e) {
-      // invoke() throws on non-2xx responses
       debugPrint(
         '❌ generate-payhere-hash failed: status=${e.status}, details=${e.details}',
       );
@@ -69,14 +82,12 @@ class PayHereWebService {
       return null;
     }
 
-    // 4. Payment object
-    final env = EnvironmentManager();
+    // 3. Payment fields (same for popup and redirect)
     final nameParts = customerName.trim().split(' ');
-    final paymentObject = <String, dynamic>{
-      'sandbox': env.payhereSandbox,
+    final fields = <String, String>{
       'merchant_id': env.payhereMerchantId,
-      'return_url': Uri.base.origin,
-      'cancel_url': Uri.base.origin,
+      'return_url': returnUrl,
+      'cancel_url': cancelUrl,
       'notify_url': '${env.supabaseUrl}/functions/v1/payhere-webhook',
       'order_id': orderId,
       'items': '$planName Subscription',
@@ -94,64 +105,113 @@ class PayHereWebService {
       'custom_2': planName,
     };
 
-    final completer = Completer<String?>();
+    // 4. Popup first, redirect as fallback
+    if (preferPopup) {
+      final popup = await _tryPopup(fields, env.payhereSandbox, orderId);
+      switch (popup.outcome) {
+        case _PopupOutcome.completed:
+          return popup.orderId ?? orderId;
+        case _PopupOutcome.dismissed:
+          return null; // user closed the popup
+        case _PopupOutcome.failed:
+          debugPrint('⚠️ PayHere popup unavailable, using redirect fallback');
+          break; // fall through to redirect
+      }
+    }
 
-    // 5. Register callbacks
+    return _redirectToCheckout(fields, env.payhereSandbox, orderId, onError);
+  }
+
+  // ------------------------------------------------------------
+  // POPUP (JS SDK, iframe overlay)
+  // ------------------------------------------------------------
+
+  Future<_PopupResult> _tryPopup(
+    Map<String, String> fields,
+    bool sandbox,
+    String orderId,
+  ) async {
+    if (!await _ensureSdk()) {
+      return const _PopupResult(_PopupOutcome.failed);
+    }
+    final payhere = _getWindowPayHere();
+    if (payhere == null) return const _PopupResult(_PopupOutcome.failed);
+
+    final completer = Completer<_PopupResult>();
+
     payhere.setProperty(
       'onCompleted'.toJS,
-      ((JSString completedOrderId) {
-        debugPrint('✅ PayHere completed: ${completedOrderId.toDart}');
-        if (!completer.isCompleted) completer.complete(completedOrderId.toDart);
-        onCompleted(completedOrderId.toDart);
+      ((JSAny? completedOrderId) {
+        final id = (completedOrderId as JSString?)?.toDart;
+        debugPrint('✅ PayHere popup completed: $id');
+        if (!completer.isCompleted) {
+          completer.complete(_PopupResult(_PopupOutcome.completed, id));
+        }
       }).toJS,
     );
 
     payhere.setProperty(
       'onDismissed'.toJS,
       (() {
-        debugPrint('⏹️ PayHere dismissed');
-        if (!completer.isCompleted) completer.complete(null);
-        onDismissed();
+        debugPrint('⏹️ PayHere popup dismissed');
+        if (!completer.isCompleted) {
+          completer.complete(const _PopupResult(_PopupOutcome.dismissed));
+        }
       }).toJS,
     );
 
     payhere.setProperty(
       'onError'.toJS,
-      ((JSString error) {
-        debugPrint('❌ PayHere error: ${error.toDart}');
-        if (!completer.isCompleted) completer.complete(null);
-        onError(error.toDart);
+      ((JSAny? error) {
+        debugPrint('❌ PayHere popup error: $error');
+        if (!completer.isCompleted) {
+          completer.complete(const _PopupResult(_PopupOutcome.failed));
+        }
       }).toJS,
     );
-    // 6. Start payment
+
     try {
-      debugPrint('🚀 Starting PayHere for order $orderId');
-      final jsPaymentObject = paymentObject.jsify() as JSObject;
+      debugPrint('🚀 Starting PayHere popup for order $orderId');
+      final paymentObject = <String, dynamic>{'sandbox': sandbox, ...fields};
       final startPaymentFn = payhere.getProperty<JSFunction?>(
         'startPayment'.toJS,
       );
       if (startPaymentFn == null) {
-        throw Exception('payhere.startPayment not found');
+        return const _PopupResult(_PopupOutcome.failed);
       }
-      startPaymentFn.callAsFunction(payhere, jsPaymentObject);
+      startPaymentFn.callAsFunction(payhere, paymentObject.jsify());
 
-      // Timeout so the UI spinner never hangs forever if no callback fires
       return await completer.future.timeout(
-        const Duration(minutes: 5),
-        onTimeout: () {
-          debugPrint('⏱️ PayHere timed out waiting for callback');
-          return null;
-        },
+        const Duration(minutes: 10),
+        onTimeout: () => const _PopupResult(_PopupOutcome.dismissed),
       );
     } catch (e) {
-      debugPrint('❌ startPayment failed: $e');
-      if (!completer.isCompleted) completer.complete(null);
-      onError(e.toString());
-      return null;
+      debugPrint('❌ PayHere popup start failed: $e');
+      return const _PopupResult(_PopupOutcome.failed);
     }
   }
 
-  /// Fetch `window.payhere` object.
+  /// Loads payhere.js on demand if it isn't on the page already.
+  Future<bool> _ensureSdk() async {
+    if (_getWindowPayHere() != null) return true;
+
+    final loaded = Completer<bool>();
+    final script = web.HTMLScriptElement()
+      ..src = _sdkUrl
+      ..onload = ((web.Event _) {
+        if (!loaded.isCompleted) loaded.complete(true);
+      }).toJS
+      ..onerror = ((web.Event _) {
+        if (!loaded.isCompleted) loaded.complete(false);
+      }).toJS;
+    web.document.head!.append(script);
+
+    return loaded.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () => false,
+    );
+  }
+
   JSObject? _getWindowPayHere() {
     try {
       final window = web.window as JSObject;
@@ -163,4 +223,49 @@ class PayHereWebService {
       return null;
     }
   }
+
+  // ------------------------------------------------------------
+  // REDIRECT (hosted checkout, same tab)
+  // ------------------------------------------------------------
+
+  String? _redirectToCheckout(
+    Map<String, String> fields,
+    bool sandbox,
+    String orderId,
+    void Function(String error) onError,
+  ) {
+    try {
+      debugPrint('🚀 Redirecting to PayHere checkout, order $orderId');
+      final form = web.HTMLFormElement()
+        ..method = 'post'
+        ..action = sandbox
+            ? 'https://sandbox.payhere.lk/pay/checkout'
+            : 'https://www.payhere.lk/pay/checkout'
+        ..target = '_self';
+
+      fields.forEach((key, value) {
+        final input = web.HTMLInputElement()
+          ..type = 'hidden'
+          ..name = key
+          ..value = value;
+        form.append(input);
+      });
+
+      web.document.body!.append(form);
+      form.submit();
+      return redirectSentinel;
+    } catch (e) {
+      debugPrint('❌ PayHere redirect failed: $e');
+      onError(e.toString());
+      return null;
+    }
+  }
+}
+
+enum _PopupOutcome { completed, dismissed, failed }
+
+class _PopupResult {
+  final _PopupOutcome outcome;
+  final String? orderId;
+  const _PopupResult(this.outcome, [this.orderId]);
 }
