@@ -26,10 +26,10 @@ class EnvironmentManager {
         envFile = '.env.development';
     }
 
-// 'flutter run'	= 'development' -->	.env
-// 'flutter run --dart-define=flavor=test' =	'test' --> 	.env.test
-// 'flutter run --profile' =	'staging'	--> .env.staging
-// 'flutter run --release' =	'production' -->	.env.production
+    // 'flutter run'	= 'development' -->	.env
+    // 'flutter run --dart-define=flavor=test' =	'test' --> 	.env.test
+    // 'flutter run --profile' =	'staging'	--> .env.staging
+    // 'flutter run --release' =	'production' -->	.env.production
 
     try {
       await dotenv.load(
@@ -111,19 +111,31 @@ class EnvironmentManager {
 
   // ========== APPLE OAUTH CONFIGURATION ==========
 
-  /// 🔥 NEW: Apple Service ID (from Apple Developer Console)
+  /// NEW: Apple Service ID (from Apple Developer Console)
   String get appleServiceId {
     return dotenv.env['APPLE_SERVICE_ID'] ?? '';
   }
 
-  /// 🔥 NEW: Apple redirect URL
+  /// NEW: Apple redirect URL
   String get appleRedirectUrl {
     return dotenv.env['APPLE_REDIRECT_URL'] ?? 'myapp://auth/callback';
   }
 
-  /// 🔥 NEW: Enable/disable Apple OAuth
+  /// NEW: Enable/disable Apple OAuth
   bool get enableAppleOAuth {
     return dotenv.env['ENABLE_APPLE_OAUTH'] != 'false';
+  }
+
+  // ========== PAYHERE CONFIGURATION ==========
+
+  String get payhereMerchantId {
+    return dotenv.env['PAYHERE_MERCHANT_ID'] ?? '';
+  }
+
+  /// true = sandbox, false = live.
+  /// PAYHERE_SANDBOX=false කියලා ස්ථිරව දාලා නැත්නම් හැමවිටම sandbox.
+  bool get payhereSandbox {
+    return dotenv.env['PAYHERE_SANDBOX'] != 'false';
   }
 
   // ========== REDIRECT URL CONFIGURATION ==========
@@ -161,7 +173,7 @@ class EnvironmentManager {
     }
   }
 
-    // String _getRedirectUrl() {
+  // String _getRedirectUrl() {
   //   if (kReleaseMode) {
   //     return 'com.yourcompany.mysalon://auth-callback';
   //   } else if (kDebugMode) {
@@ -243,18 +255,18 @@ class EnvironmentManager {
 
   // ========== OAUTH PROVIDER MANAGEMENT ==========
 
-  /// 🔥 UPDATED: List of enabled OAuth providers
+  /// UPDATED: List of enabled OAuth providers
   List<String> get enabledOAuthProviders {
     final providers = <String>[];
 
     if (enableGoogleOAuth) providers.add('google');
     if (enableFacebookOAuth) providers.add('facebook');
-    if (enableAppleOAuth) providers.add('apple'); // 👈 Apple එක add කරන්න
+    if (enableAppleOAuth) providers.add('apple'); // 👈Apple එක add කරන්න
 
     return providers;
   }
 
-  /// 🔥 UPDATED: Check if specific OAuth provider is enabled
+  /// UPDATED: Check if specific OAuth provider is enabled
   bool isOAuthProviderEnabled(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
@@ -268,7 +280,7 @@ class EnvironmentManager {
     }
   }
 
-  /// 🔥 UPDATED: Validate OAuth configuration
+  /// UPDATED: Validate OAuth configuration
   bool hasValidOAuthConfiguration(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':
@@ -312,7 +324,7 @@ class EnvironmentManager {
 
   // ========== VALIDATION ==========
 
-  /// 🔥 UPDATED: Validate with Apple support
+  /// UPDATED: Validate with Apple support
   void validate() {
     final errors = <String>[];
 
@@ -406,7 +418,7 @@ class EnvironmentManager {
 
   // ========== DEBUG INFO ==========
 
-  /// 🔥 UPDATED: Print info with Apple support
+  /// UPDATED: Print info with Apple support
   void printInfo() {
     if (!debugMode) return;
 
@@ -455,7 +467,7 @@ class EnvironmentManager {
       debugPrint('   • Facebook OAuth: ❌ Disabled');
     }
 
-    // 🔥 Apple status
+    // Apple status
     if (enableAppleOAuth) {
       debugPrint('   • Apple OAuth: ✅ Enabled');
       if (appleServiceId.isNotEmpty) {
@@ -512,7 +524,7 @@ class EnvironmentManager {
 
   // ========== OAUTH VALIDATION METHODS ==========
 
-  /// 🔥 UPDATED: Validate OAuth configurations with Apple
+  /// UPDATED: Validate OAuth configurations with Apple
   Map<String, dynamic> validateOAuthConfigurations() {
     final results = <String, dynamic>{};
 
@@ -533,7 +545,7 @@ class EnvironmentManager {
       'redirectUrls': getRequiredRedirectUrls(),
     };
 
-    // 🔥 Apple OAuth
+    // Apple OAuth
     results['apple'] = {
       'enabled': enableAppleOAuth,
       'serviceId': appleServiceId.isNotEmpty,
@@ -544,7 +556,7 @@ class EnvironmentManager {
   }
 
   // Get OAuth provider configuration
-  /// 🔥 UPDATED: Get provider config with Apple
+  /// UPDATED: Get provider config with Apple
   Map<String, dynamic>? getOAuthProviderConfig(String provider) {
     switch (provider.toLowerCase()) {
       case 'google':

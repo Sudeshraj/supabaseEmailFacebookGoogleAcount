@@ -1,13 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../models/subscription_plan.dart';
 import '../../providers/subscription_provider.dart';
+import '../../services/payment_service.dart';
 import '../../services/subscription_service.dart';
-import '../../services/payhere_service.dart';
 import 'reduce_salons_screen.dart';
 
+// ============================================================
+// PLANS COMPARISON SCREEN
+// ------------------------------------------------------------
+// Shows all 4 subscription plans (Bronze / Silver / Gold /
+// Platinum) with their features and lets the owner:
+//   • Upgrade (triggers PayHere payment via PaymentService)
+//   • Downgrade (with salon-count validation if needed)
+//   • Read a "reason" banner when redirected from a locked
+//     route (e.g. user tried to open Reports on Bronze)
+//
+// Platform-aware: PaymentService internally switches between
+// the mobile PayHere SDK and the web PayHere JS SDK.
+// ============================================================
 class PlansComparisonScreen extends StatefulWidget {
   final int salonId;
   final String ownerId;
@@ -24,17 +38,35 @@ class PlansComparisonScreen extends StatefulWidget {
 
 class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   final SubscriptionService _service = SubscriptionService();
-  final PayHereService _payHere = PayHereService();
+  final PaymentService _payment = PaymentService();
 
   List<SubscriptionPlan> _plans = [];
   bool _loading = true;
   bool _processing = false;
   String? _error;
 
+  // ✅ Set from the route's query params when redirected here
+  // from a locked route (see main.dart's redirect callback).
+  String? _reason;
+  String? _requiredPlan;
+
   @override
   void initState() {
     super.initState();
     _loadPlans();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Read the redirect reason (if any) once dependencies are ready.
+    try {
+      final uri = GoRouterState.of(context).uri;
+      _reason = uri.queryParameters['reason'];
+      _requiredPlan = uri.queryParameters['required'];
+    } catch (_) {
+      // Not routed through GoRouter (e.g. preview) — no reason.
+    }
   }
 
   Future<void> _loadPlans() async {
@@ -68,6 +100,10 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       orElse: () => _plans.first,
     );
   }
+
+  // ============================================================
+  // PLAN SELECTION
+  // ============================================================
 
   Future<void> _handlePlanSelection(SubscriptionPlan plan) async {
     final provider = context.read<SubscriptionProvider>();
@@ -134,7 +170,10 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     }
   }
 
-  /// Upgrade flow: trigger PayHere payment
+  // ============================================================
+  // PAYMENT FLOW (platform-aware via PaymentService)
+  // ============================================================
+
   Future<void> _handlePaymentFlow(
     SubscriptionPlan plan,
     Map<String, dynamic> result,
@@ -148,7 +187,23 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         user?.userMetadata?['full_name'] as String? ?? email.split('@').first;
     final phone = user?.userMetadata?['phone'] as String? ?? '0770000000';
 
-    final paymentId = await _payHere.startSubscriptionPayment(
+    // ✅ On web, warn the user about popups BEFORE opening the sheet.
+    if (_payment.isWeb) {
+      _showSnack(
+        'Please allow popups for this site to complete payment',
+        isError: false,
+      );
+      // Brief delay so the user can read it before the popup appears.
+      await Future.delayed(const Duration(milliseconds: 800));
+      if (!mounted) return;
+    }
+
+    debugPrint(
+      '💳 Starting payment — platform=${_payment.isWeb ? "web" : "mobile"}, '
+      'plan=${plan.name}, amount=$amount',
+    );
+
+    final paymentId = await _payment.startSubscriptionPayment(
       salonId: widget.salonId,
       planName: plan.name,
       amount: amount,
@@ -164,10 +219,14 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       return;
     }
 
-    // Payment success — wait for webhook to process (2 sec)
+    // ✅ Payment submitted — the PayHere webhook (Edge Function)
+    // will activate the subscription shortly. Give it a moment,
+    // then refresh local capabilities.
     _showSnack('Payment received. Activating plan...');
     await Future.delayed(const Duration(seconds: 3));
+
     if (!mounted) return;
+
     // Refresh capabilities
     await context.read<SubscriptionProvider>().refresh();
 
@@ -179,7 +238,10 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     );
   }
 
-  /// Downgrade flow: ask user to reduce salons first
+  // ============================================================
+  // DOWNGRADE FLOW (reduce salons first)
+  // ============================================================
+
   Future<void> _handleReduceSalons(
     SubscriptionPlan plan,
     Map<String, dynamic> result,
@@ -200,7 +262,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     );
 
     if (reduced == true && mounted) {
-      // Try again
+      // Retry the plan change now that salon count is reduced
       await _handlePlanSelection(plan);
     } else if (mounted) {
       _showSnack(
@@ -209,6 +271,10 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       );
     }
   }
+
+  // ============================================================
+  // DIALOGS
+  // ============================================================
 
   Future<bool?> _showConfirmDialog(
     SubscriptionPlan newPlan,
@@ -291,6 +357,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   }
 
   void _showSnack(String message, {bool isError = false}) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -299,10 +366,16 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     );
   }
 
+  // ============================================================
+  // BUILD
+  // ============================================================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Choose a Plan')),
+      appBar: AppBar(
+        title: const Text('Choose a Plan'),
+      ),
       body: Stack(
         children: [
           _buildBody(),
@@ -332,7 +405,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
             children: [
               const Icon(Icons.error_outline, size: 64, color: Colors.red),
               const SizedBox(height: 16),
-              Text('Failed to load plans'),
+              const Text('Failed to load plans'),
               const SizedBox(height: 8),
               Text(_error!, textAlign: TextAlign.center),
               const SizedBox(height: 24),
@@ -350,6 +423,12 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        // ✅ Reason banner (shown when redirected from a locked route)
+        if (_reason != null && _requiredPlan != null) ...[
+          _buildReasonBanner(),
+          const SizedBox(height: 16),
+        ],
+
         const Text(
           'Select your plan',
           style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
@@ -365,6 +444,82 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     );
   }
 
+  // ============================================================
+  // REASON BANNER
+  // ============================================================
+
+  Widget _buildReasonBanner() {
+    final reason = _reason ?? '';
+    final required = _requiredPlan ?? '';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.amber.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.amber.withValues(alpha: 0.35),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.lock_outline,
+            color: Colors.amber,
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${_featureDisplayName(reason)} requires $required',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Upgrade to $required or higher to unlock this feature.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[700],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _featureDisplayName(String reason) {
+    switch (reason) {
+      case 'reports':
+        return 'Reports';
+      case 'analytics':
+        return 'Analytics';
+      case 'revenue':
+        return 'Revenue';
+      case 'customers_screen':
+        return 'Customers';
+      case 'manage_offers':
+        return 'Offers';
+      case 'salons':
+        return 'Creating more salons';
+      default:
+        return 'This feature';
+    }
+  }
+
+  // ============================================================
+  // PLAN CARD
+  // ============================================================
+
   Widget _buildPlanCard(SubscriptionPlan plan) {
     final provider = context.watch<SubscriptionProvider>();
     final isCurrent = plan.name == provider.currentPlanName;
@@ -373,21 +528,24 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     final borderColor = isCurrent
         ? Colors.green
         : plan.planRank == 4
-        ? Colors.amber
-        : Colors.grey[300]!;
+            ? Colors.amber
+            : Colors.grey[300]!;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: borderColor, width: isCurrent ? 2 : 1),
+        side: BorderSide(
+          color: borderColor,
+          width: isCurrent ? 2 : 1,
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
+            // Header row: badge + current chip
             Row(
               children: [
                 Container(
@@ -431,7 +589,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
             ),
             const SizedBox(height: 12),
 
-            // Price
+            // Price row
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -450,7 +608,10 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
                     padding: const EdgeInsets.only(bottom: 6),
                     child: Text(
                       '/month',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                 ],
