@@ -55,6 +55,7 @@ import 'package:flutter_application_1/screens/settings/profile_management_screen
 import 'package:flutter_application_1/screens/settings/profile_screen.dart';
 import 'package:flutter_application_1/screens/settings/settings_screen.dart';
 import 'package:flutter_application_1/screens/subscription/payment_history_screen.dart';
+import 'package:flutter_application_1/screens/subscription/payment_return_screen.dart';
 import 'package:flutter_application_1/screens/subscription/plans_comparison_screen.dart';
 import 'package:flutter_application_1/screens/subscription/subscription_screen.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
@@ -772,6 +773,14 @@ GoRouter _createRouter() {
       if (path == '/clear-data') {
         debugPrint('✅ Clear data screen - allowing access');
         return null;
+      }
+
+      // ============================================
+      // 3B. PAYMENT RETURN (PayHere redirect fallback)
+      // Must keep its query params; only needs a logged-in user.
+      // ============================================
+      if (path == '/payment-return') {
+        return appState.loggedIn ? null : '/login';
       }
 
       // ============================================
@@ -1625,6 +1634,20 @@ GoRouter _createRouter() {
         builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>?;
           return PaymentHistoryScreen(ownerId: extra?['ownerId'] as String);
+        },
+      ),
+      GoRoute(
+        path: '/payment-return',
+        name: 'payment_return',
+        builder: (context, state) {
+          final q = state.uri.queryParameters;
+          return PaymentReturnScreen(
+            salonId: int.tryParse(q['salon'] ?? ''),
+            planName: q['plan'],
+            status: q['payment'] ?? 'return',
+            previousExpiryMs: int.tryParse(q['prev'] ?? ''),
+            homePath: '/owner', // ඔයාගේ owner dashboard route එක
+          );
         },
       ),
     ],

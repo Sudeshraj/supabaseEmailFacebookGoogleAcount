@@ -1,7 +1,10 @@
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 
 import 'payhere_service.dart';
-import 'payhere_web_service.dart';
+// The web implementation needs dart:js_interop / package:web, which only
+// compile for the browser. Every other platform gets the stub instead.
+import 'payhere_web_service_stub.dart'
+    if (dart.library.js_interop) 'payhere_web_service.dart';
 
 /// ============================================================
 /// Unified Payment Service — platform-aware wrapper
@@ -9,37 +12,33 @@ import 'payhere_web_service.dart';
 ///   • Web    → PayHereWebService (iframe popup, redirect fallback)
 ///   • Mobile → PayHereService    (native PayHere SDK)
 ///
-/// Mobile: returns the payment id on success, null on cancel/failure.
+/// The app never sends a price. The server decides it from the plan.
+///
+/// Mobile: returns the order id on success, null on cancel / failure.
 /// Web:    returns the order id when the iframe popup payment completes,
-///         [redirectSentinel] if it had to fall back to a same-tab
-///         redirect (result then comes back via returnUrl / cancelUrl),
+///         [redirectSentinel] if it had to fall back to a same-tab redirect
+///         (the result then comes back via returnUrl / cancelUrl),
 ///         or null on cancel / failure.
 ///
-/// Subscription activation always happens on the server via the
-/// PayHere webhook (Edge Function).
+/// Subscription activation always happens on the server via the PayHere
+/// webhook, so callers must poll / refresh afterwards.
 /// ============================================================
 class PaymentService {
   final PayHereService _mobile = PayHereService();
   final PayHereWebService _web = PayHereWebService();
 
-  bool get isSupported => true;
-
   /// Returned on web when the tab is being redirected to PayHere's hosted
-  /// checkout (popup unavailable). The caller should just stop; the result
-  /// is handled when PayHere sends the user back to returnUrl.
+  /// checkout. The caller should just stop; see PaymentReturnScreen.
   static const String redirectSentinel = PayHereWebService.redirectSentinel;
 
-  /// Whether we're currently running on web.
+  bool get isSupported => true;
   bool get isWeb => kIsWeb;
-
-  /// Whether we're currently running on mobile (Android/iOS).
   bool get isMobile => !kIsWeb;
 
   /// [returnUrl] / [cancelUrl] are used on web only.
   Future<String?> startSubscriptionPayment({
     required int salonId,
     required String planName,
-    required double amount,
     required String customerEmail,
     required String customerName,
     required String customerPhone,
@@ -48,8 +47,7 @@ class PaymentService {
   }) async {
     debugPrint(
       '💳 PaymentService.startSubscriptionPayment — '
-      'platform=${kIsWeb ? "web" : "mobile"}, '
-      'plan=$planName, amount=$amount, salonId=$salonId',
+      'platform=${kIsWeb ? "web" : "mobile"}, plan=$planName, salonId=$salonId',
     );
 
     try {
@@ -57,7 +55,6 @@ class PaymentService {
         return await _web.startSubscriptionPayment(
           salonId: salonId,
           planName: planName,
-          amount: amount,
           customerEmail: customerEmail,
           customerName: customerName,
           customerPhone: customerPhone,
@@ -69,7 +66,6 @@ class PaymentService {
         return await _mobile.startSubscriptionPayment(
           salonId: salonId,
           planName: planName,
-          amount: amount,
           customerEmail: customerEmail,
           customerName: customerName,
           customerPhone: customerPhone,

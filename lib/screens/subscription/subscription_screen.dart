@@ -3,9 +3,6 @@ import 'package:flutter_application_1/screens/subscription/payment_history_scree
 import 'package:flutter_application_1/screens/subscription/plans_comparison_screen.dart';
 import 'package:provider/provider.dart';
 import '../../providers/subscription_provider.dart';
-// import '../../providers/subscription_provider.dart';
-// import 'plans_comparison_screen.dart';
-// import 'payment_history_screen.dart';
 
 class SubscriptionScreen extends StatefulWidget {
   final int salonId;
@@ -51,8 +48,33 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
       ),
       body: Consumer<SubscriptionProvider>(
         builder: (context, provider, _) {
-          if (provider.loading && provider.capabilities == null) {
-            return const Center(child: CircularProgressIndicator());
+          if (!provider.isReady) {
+            if (provider.loading) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.cloud_off, size: 56, color: Colors.grey),
+                    const SizedBox(height: 12),
+                    Text(
+                      provider.error ?? 'Could not load subscription details',
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 16),
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          provider.loadCapabilities(widget.salonId),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            );
           }
 
           return RefreshIndicator(
@@ -74,8 +96,9 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
   }
 
   Widget _buildCurrentPlanCard(SubscriptionProvider provider) {
-    final expiresAt = provider.capabilities?['plan']?['expires_at'];
-    final isPaid = provider.currentPlanName != 'bronze';
+    final expiresAt = provider.expiresAt;
+    final isPaid = provider.isPaidPlan;
+    final days = provider.daysRemaining;
 
     return Card(
       elevation: 4,
@@ -92,11 +115,13 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   size: 32,
                 ),
                 const SizedBox(width: 12),
-                Text(
-                  '${provider.currentPlanDisplay} Plan',
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
+                Expanded(
+                  child: Text(
+                    '${provider.currentPlanDisplay} Plan',
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ],
@@ -104,11 +129,43 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             const SizedBox(height: 12),
             if (isPaid && expiresAt != null) ...[
               Text(
-                'Expires: ${_formatDate(expiresAt)}',
+                provider.cancelAtPeriodEnd
+                    ? 'Ends on: ${_formatDate(expiresAt)}'
+                    : 'Renews / expires: ${_formatDate(expiresAt)}',
                 style: TextStyle(color: Colors.grey[700]),
               ),
+              if (days != null)
+                Text(
+                  '$days day${days == 1 ? "" : "s"} left',
+                  style: TextStyle(
+                    color: days <= 3 ? Colors.red : Colors.grey[700],
+                    fontWeight: days <= 3 ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
               const SizedBox(height: 4),
             ],
+            if (provider.cancelAtPeriodEnd)
+              Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 4),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.orange, size: 18),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Cancelled. You keep your features until the date above, '
+                        'then the salon moves to Bronze (Free).',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Text(
               'Salons: ${provider.currentSalons} / ${provider.maxSalons == -1 ? "∞" : provider.maxSalons}',
               style: TextStyle(color: Colors.grey[700]),
@@ -138,20 +195,22 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
           style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
         ),
         const SizedBox(height: 12),
-        ...features.map((f) => ListTile(
-          leading: Icon(
-            f.enabled ? Icons.check_circle : Icons.cancel,
-            color: f.enabled ? Colors.green : Colors.red,
+        ...features.map(
+          (f) => ListTile(
+            leading: Icon(
+              f.enabled ? Icons.check_circle : Icons.cancel,
+              color: f.enabled ? Colors.green : Colors.red,
+            ),
+            title: Text(f.name),
+            dense: true,
           ),
-          title: Text(f.name),
-          dense: true,
-        )),
+        ),
       ],
     );
   }
 
   Widget _buildActionButtons(SubscriptionProvider provider) {
-    final isPaid = provider.currentPlanName != 'bronze';
+    final isPaid = provider.isPaidPlan;
 
     return Column(
       children: [
@@ -170,13 +229,18 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               ).then((_) => provider.refresh());
             },
             icon: const Icon(Icons.upgrade),
-            label: Text(isPaid ? 'Change Plan' : 'Upgrade Plan'),
+            label: Text(
+              provider.canRenew
+                  ? 'Renew / Change Plan'
+                  : (isPaid ? 'Change Plan' : 'Upgrade Plan'),
+            ),
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 14),
             ),
           ),
         ),
-        if (isPaid) ...[
+        // Already cancelled -> nothing left to cancel
+        if (isPaid && !provider.cancelAtPeriodEnd) ...[
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
@@ -220,23 +284,23 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
               );
               if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(result['message'] ?? 'Done')),
+                  SnackBar(
+                    content: Text(result['message'] ?? 'Done'),
+                    backgroundColor: result['success'] == true
+                        ? null
+                        : Colors.red,
+                  ),
                 );
-                provider.refresh();
               }
             },
-            child: const Text(
-              'Cancel',
-              style: TextStyle(color: Colors.red),
-            ),
+            child: const Text('Cancel', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
   }
 
-  String _formatDate(String isoDate) {
-    final date = DateTime.parse(isoDate);
+  String _formatDate(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 }

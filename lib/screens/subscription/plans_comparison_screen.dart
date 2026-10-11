@@ -12,16 +12,13 @@ import 'reduce_salons_screen.dart';
 // ============================================================
 // PLANS COMPARISON SCREEN
 // ------------------------------------------------------------
-// Shows all subscription plans and lets the owner:
-//   • Upgrade (PayHere payment via PaymentService)
+//   • Upgrade / Renew  → PayHere payment (price decided by the SERVER)
 //       - Mobile: native PayHere SDK
-//       - Web:    iframe popup over the app (JS SDK). If the popup can't
-//                 start, falls back to hosted checkout (same-tab redirect);
-//                 PayHere then sends the user back with
-//                 ?payment=return&plan=xxx and this screen polls until
-//                 the webhook has activated the plan.
-//   • Downgrade (with salon-count validation if needed)
-//   • Read a "reason" banner when redirected from a locked route
+//       - Web:    iframe popup; if it can't start, a same-tab redirect and
+//                 PayHere returns the user to /payment-return
+//                 (PaymentReturnScreen)
+//   • Downgrade (with salon-count validation)
+//   • "Reason" banner when redirected from a locked route
 // ============================================================
 class PlansComparisonScreen extends StatefulWidget {
   final int salonId;
@@ -46,18 +43,22 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   bool _processing = false;
   String? _error;
 
-  // Set from the route's query params when redirected here
-  // from a locked route (see main.dart's redirect callback).
+  // Set from the route's query params when redirected here from a locked route
   String? _reason;
   String? _requiredPlan;
-
-  // Set when PayHere (web) sends the user back to this screen.
-  bool _returnHandled = false;
 
   @override
   void initState() {
     super.initState();
     _loadPlans();
+    // make sure the provider is looking at THIS salon
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final provider = context.read<SubscriptionProvider>();
+      if (provider.currentSalonId != widget.salonId || !provider.isReady) {
+        provider.loadCapabilities(widget.salonId);
+      }
+    });
   }
 
   @override
@@ -67,18 +68,8 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       final uri = GoRouterState.of(context).uri;
       _reason = uri.queryParameters['reason'];
       _requiredPlan = uri.queryParameters['required'];
-
-      // PayHere web return: ?payment=return|cancel&plan=<planName>
-      final paymentStatus = uri.queryParameters['payment'];
-      if (paymentStatus != null && !_returnHandled) {
-        _returnHandled = true;
-        final planName = uri.queryParameters['plan'];
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _handlePaymentReturn(paymentStatus, planName);
-        });
-      }
     } catch (_) {
-      // Not routed through GoRouter (e.g. preview) — nothing to read.
+      // Not routed through GoRouter — no reason banner.
     }
   }
 
@@ -107,20 +98,12 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   }
 
   SubscriptionPlan? get _currentPlan {
-    final provider = context.read<SubscriptionProvider>();
     if (_plans.isEmpty) return null;
+    final provider = context.read<SubscriptionProvider>();
     return _plans.firstWhere(
       (p) => p.name == provider.currentPlanName,
       orElse: () => _plans.first,
     );
-  }
-
-  String _displayNameFor(String? planName) {
-    if (planName == null || planName.isEmpty) return 'Your';
-    for (final p in _plans) {
-      if (p.name == planName) return p.displayName;
-    }
-    return planName[0].toUpperCase() + planName.substring(1);
   }
 
   // ============================================================
@@ -133,13 +116,21 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
 
     if (currentPlan == null) return;
 
-    if (plan.id == currentPlan.id) {
+    final isRenewal = plan.id == currentPlan.id;
+
+    if (isRenewal && !provider.canRenew) {
       _showSnack('You are already on the ${plan.displayName} plan');
       return;
     }
 
-    final confirmed = await _showConfirmDialog(plan, currentPlan);
+    final confirmed = await _showConfirmDialog(
+      plan,
+      currentPlan,
+      isRenewal: isRenewal,
+    );
     if (confirmed != true) return;
+
+    final previousExpiry = isRenewal ? provider.expiresAt : null;
 
     setState(() => _processing = true);
 
@@ -147,6 +138,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       final result = await provider.requestPlanChange(
         newPlanName: plan.name,
         ownerId: widget.ownerId,
+        salonId: widget.salonId,
       );
 
       if (!mounted) return;
@@ -155,7 +147,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
 
       switch (actionRequired) {
         case 'PAYMENT_REQUIRED':
-          await _handlePaymentFlow(plan, result);
+          await _handlePaymentFlow(plan, previousExpiry: previousExpiry);
           break;
 
         case 'REDUCE_SALONS':
@@ -194,30 +186,29 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   // PAYMENT FLOW
   // ============================================================
 
-  /// URL PayHere sends the user back to (web only). It points to THIS
-  /// screen's current route, keeping its existing query params.
-  String _buildReturnUrl(String status, String planName) {
-    try {
-      final current = GoRouterState.of(context).uri;
-      final params = Map<String, String>.from(current.queryParameters)
-        ..remove('reason')
-        ..remove('required')
-        ..['payment'] = status
-        ..['plan'] = planName;
-      return Uri.parse(
-        Uri.base.origin,
-      ).replace(path: current.path, queryParameters: params).toString();
-    } catch (_) {
-      return '${Uri.base.origin}/?payment=$status&plan=$planName';
-    }
+  /// PayHere sends the user here after a web redirect payment.
+  /// It carries everything PaymentReturnScreen needs (no router `extra`).
+  String _buildReturnUrl(
+    String status,
+    String planName,
+    DateTime? previousExpiry,
+  ) {
+    final params = <String, String>{
+      'payment': status,
+      'plan': planName,
+      'salon': '${widget.salonId}',
+      if (previousExpiry != null)
+        'prev': '${previousExpiry.millisecondsSinceEpoch}',
+    };
+    return Uri.parse(
+      Uri.base.origin,
+    ).replace(path: '/payment-return', queryParameters: params).toString();
   }
 
   Future<void> _handlePaymentFlow(
-    SubscriptionPlan plan,
-    Map<String, dynamic> result,
-  ) async {
-    final amount = (result['amount'] as num).toDouble();
-
+    SubscriptionPlan plan, {
+    DateTime? previousExpiry,
+  }) async {
     // Customer info from Supabase auth
     final user = Supabase.instance.client.auth.currentUser;
     final email = user?.email ?? '';
@@ -227,18 +218,21 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
 
     debugPrint(
       '💳 Starting payment — platform=${_payment.isWeb ? "web" : "mobile"}, '
-      'plan=${plan.name}, amount=$amount',
+      'plan=${plan.name}',
     );
 
     final paymentId = await _payment.startSubscriptionPayment(
       salonId: widget.salonId,
       planName: plan.name,
-      amount: amount,
       customerEmail: email,
       customerName: name,
       customerPhone: phone,
-      returnUrl: _payment.isWeb ? _buildReturnUrl('return', plan.name) : null,
-      cancelUrl: _payment.isWeb ? _buildReturnUrl('cancel', plan.name) : null,
+      returnUrl: _payment.isWeb
+          ? _buildReturnUrl('return', plan.name, previousExpiry)
+          : null,
+      cancelUrl: _payment.isWeb
+          ? _buildReturnUrl('cancel', plan.name, previousExpiry)
+          : null,
     );
 
     if (!mounted) return;
@@ -248,15 +242,17 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       return;
     }
 
-    // WEB fallback: this tab is navigating to PayHere's hosted checkout.
-    // The result is handled in _handlePaymentReturn when PayHere
-    // redirects back here.
+    // WEB fallback: this tab is navigating to PayHere. The result is shown by
+    // PaymentReturnScreen when PayHere redirects back.
     if (paymentId == PaymentService.redirectSentinel) return;
 
     // Mobile SDK / web iframe popup: payment submitted — the webhook
-    // activates the plan.
+    // activates the plan, so wait for it.
     _showSnack('Payment received. Activating plan...');
-    final activated = await _waitForPlan(plan.name);
+    final activated = await _waitForPlan(
+      plan.name,
+      previousExpiry: previousExpiry,
+    );
 
     if (!mounted) return;
 
@@ -266,51 +262,29 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         'Payment successful. Your ${plan.displayName} plan is now active!',
       );
     } else {
-      _showSnack(
-        'Payment received. Your plan will be activated shortly.',
-      );
+      _showSnack('Payment received. Your plan will be activated shortly.');
     }
   }
 
-  /// Polls the subscription until [planName] is active (webhook done).
-  Future<bool> _waitForPlan(String? planName) async {
+  /// Polls until the webhook has activated [planName]
+  /// (for a renewal: until expires_at moved past [previousExpiry]).
+  Future<bool> _waitForPlan(String planName, {DateTime? previousExpiry}) async {
     final provider = context.read<SubscriptionProvider>();
     for (var i = 0; i < 15; i++) {
-      await provider.refresh();
+      await provider.loadCapabilities(widget.salonId);
       if (!mounted) return false;
-      if (planName == null || provider.currentPlanName == planName) {
-        return true;
-      }
+
+      final planOk = provider.currentPlanName == planName;
+      final expiryOk =
+          previousExpiry == null ||
+          (provider.expiresAt != null &&
+              provider.expiresAt!.isAfter(previousExpiry));
+      if (planOk && expiryOk) return true;
+
       await Future.delayed(const Duration(seconds: 2));
       if (!mounted) return false;
     }
     return false;
-  }
-
-  /// Web only: PayHere sent the user back here.
-  Future<void> _handlePaymentReturn(String status, String? planName) async {
-    if (status == 'cancel') {
-      _showSnack('Payment cancelled', isError: true);
-      return;
-    }
-
-    setState(() => _processing = true);
-    final activated = await _waitForPlan(planName);
-    if (!mounted) return;
-    setState(() => _processing = false);
-
-    final display = _displayNameFor(planName);
-    if (activated) {
-      _showSuccessDialog(
-        display,
-        'Payment successful. Your $display plan is now active!',
-      );
-    } else {
-      _showSnack(
-        'Payment received. Your plan will be activated shortly — '
-        'please refresh in a moment.',
-      );
-    }
   }
 
   // ============================================================
@@ -352,23 +326,30 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
 
   Future<bool?> _showConfirmDialog(
     SubscriptionPlan newPlan,
-    SubscriptionPlan currentPlan,
-  ) {
+    SubscriptionPlan currentPlan, {
+    required bool isRenewal,
+  }) {
     final isUpgrade = newPlan.planRank > currentPlan.planRank;
+    final title = isRenewal
+        ? 'Renew Plan?'
+        : (isUpgrade ? 'Upgrade Plan?' : 'Downgrade Plan?');
 
     return showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(isUpgrade ? 'Upgrade Plan?' : 'Downgrade Plan?'),
+        title: Text(title),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Change from ${currentPlan.displayName} to ${newPlan.displayName}?',
+              isRenewal
+                  ? 'Renew ${newPlan.displayName} for another month? '
+                        'The new month is added after your current period ends.'
+                  : 'Change from ${currentPlan.displayName} to ${newPlan.displayName}?',
             ),
             const SizedBox(height: 12),
-            if (isUpgrade && newPlan.price > 0) ...[
+            if ((isUpgrade || isRenewal) && newPlan.price > 0) ...[
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -387,7 +368,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
                 ),
               ),
             ],
-            if (!isUpgrade) ...[
+            if (!isUpgrade && !isRenewal) ...[
               const SizedBox(height: 8),
               const Text(
                 'You will lose access to features not included in the lower plan.',
@@ -403,7 +384,9 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text(isUpgrade ? 'Continue' : 'Confirm'),
+            child: Text(
+              isRenewal ? 'Renew' : (isUpgrade ? 'Continue' : 'Confirm'),
+            ),
           ),
         ],
       ),
@@ -421,9 +404,6 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(ctx);
-              // After a web payment return this screen may be the only
-              // page in the stack, so only pop when there is something
-              // to go back to.
               if (Navigator.canPop(context)) {
                 Navigator.pop(context); // Back to subscription screen
               }
@@ -504,7 +484,6 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
           _buildReasonBanner(),
           const SizedBox(height: 16),
         ],
-
         const Text(
           'Select your plan',
           style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
@@ -578,6 +557,8 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         return 'Customers';
       case 'manage_offers':
         return 'Offers';
+      case 'export':
+        return 'Data export';
       case 'salons':
         return 'Creating more salons';
       default:
@@ -593,6 +574,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     final provider = context.watch<SubscriptionProvider>();
     final isCurrent = plan.name == provider.currentPlanName;
     final isUpgrade = plan.planRank > provider.currentPlanRank;
+    final canRenewThis = isCurrent && provider.canRenew;
 
     final borderColor = isCurrent
         ? Colors.green
@@ -611,7 +593,6 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header row: badge + current chip
             Row(
               children: [
                 Container(
@@ -654,8 +635,6 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
               ],
             ),
             const SizedBox(height: 12),
-
-            // Price row
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -691,6 +670,20 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
                 fontWeight: FontWeight.w500,
               ),
             ),
+            if (isCurrent &&
+                provider.isPaidPlan &&
+                provider.daysRemaining != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '${provider.daysRemaining} day(s) left',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: canRenewThis ? Colors.orange[800] : Colors.grey[600],
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
             if (plan.description != null) ...[
               const SizedBox(height: 8),
               Text(
@@ -701,8 +694,6 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
             const SizedBox(height: 16),
             const Divider(height: 1),
             const SizedBox(height: 12),
-
-            // Features
             _featureRow('Appointment History', plan.canViewAppointmentHistory),
             _featureRow('Offers Management', plan.canManageOffers),
             _featureRow('Revenue Screen', plan.canViewRevenue),
@@ -710,13 +701,10 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
             _featureRow('Reports', plan.canViewReports),
             _featureRow('Analytics', plan.canViewAnalytics),
             _featureRow('Data Export (Excel/PDF)', plan.canExportData),
-
             const SizedBox(height: 16),
-
-            // Action button
             SizedBox(
               width: double.infinity,
-              child: isCurrent
+              child: (isCurrent && !canRenewThis)
                   ? OutlinedButton(
                       onPressed: null,
                       child: const Text('Current Plan'),
@@ -726,15 +714,17 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
                           ? null
                           : () => _handlePlanSelection(plan),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: isUpgrade
+                        backgroundColor: (isUpgrade || canRenewThis)
                             ? Colors.amber[700]
                             : Colors.grey[700],
                         padding: const EdgeInsets.symmetric(vertical: 14),
                       ),
                       child: Text(
-                        isUpgrade
-                            ? 'Upgrade to ${plan.displayName}'
-                            : 'Downgrade to ${plan.displayName}',
+                        canRenewThis
+                            ? 'Renew ${plan.displayName}'
+                            : (isUpgrade
+                                  ? 'Upgrade to ${plan.displayName}'
+                                  : 'Downgrade to ${plan.displayName}'),
                         style: const TextStyle(
                           fontWeight: FontWeight.bold,
                           color: Colors.white,

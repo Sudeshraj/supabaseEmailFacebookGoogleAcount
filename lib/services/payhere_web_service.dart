@@ -9,42 +9,35 @@ import 'package:web/web.dart' as web;
 
 /// PayHere Web service — Flutter Web only.
 ///
-/// Two ways to take a payment on web:
+/// The price is NEVER sent from the app. The app only says which plan it
+/// wants for which salon; the `generate-payhere-hash` Edge Function checks
+/// that the user owns the salon, reads the price from the database, creates
+/// a pending payment and returns order_id + amount + hash + merchant_id.
 ///
-///  1. POPUP (preferred, user-friendly): PayHere JS SDK opens the payment
-///     form in an iframe overlay on top of the app. The user never leaves
-///     the app. Result arrives via callbacks.
+/// Two ways to take the payment:
+///  1. POPUP (preferred): PayHere JS SDK opens an iframe over the app.
+///  2. REDIRECT (fallback): hosted checkout, same tab. Used automatically
+///     when the popup cannot start. The user comes back to [returnUrl].
 ///
-///  2. REDIRECT (fallback): hosted checkout, a normal form POST in the same
-///     tab. Used automatically when the popup cannot start (SDK blocked,
-///     or PayHere rejects the SDK request, e.g. some localhost setups).
-///     The user returns to [returnUrl] / [cancelUrl] afterwards.
-///
-/// In both cases the subscription is activated by the `payhere-webhook`
-/// Edge Function (server-to-server).
-///
-/// The PayHere JS SDK is loaded on demand, so web/index.html does not
-/// need a <script> tag for it.
+/// The subscription itself is activated by the `payhere-webhook` function.
 class PayHereWebService {
   final SupabaseClient _supabase = Supabase.instance.client;
 
   /// Try the iframe popup first. Set to false to always use the redirect.
   static const bool preferPopup = true;
 
-  /// Returned when the tab is being redirected to PayHere (hosted
-  /// checkout). The caller should stop and wait for the return URL.
+  /// Returned when the tab is being redirected to PayHere (hosted checkout).
   static const String redirectSentinel = 'REDIRECT';
 
   static const String _sdkUrl = 'https://www.payhere.lk/lib/payhere.js';
 
   /// Returns:
-  ///  • order id        → popup payment completed
+  ///  • order id           → popup payment completed
   ///  • [redirectSentinel] → redirecting to PayHere (page is unloading)
-  ///  • null            → cancelled / failed
+  ///  • null               → cancelled / failed
   Future<String?> startSubscriptionPayment({
     required int salonId,
     required String planName,
-    required double amount,
     required String customerEmail,
     required String customerName,
     required String customerPhone,
@@ -54,46 +47,40 @@ class PayHereWebService {
   }) async {
     final env = EnvironmentManager();
 
-    // 1. Order ID
-    final orderId = 'SUB-$salonId-${DateTime.now().millisecondsSinceEpoch}';
-
-    // 2. Fetch hash (web uses the PayHere *Domain* merchant secret)
-    final String hash;
+    // 1. Ask the server for a signed quote
+    final Map<String, dynamic> quote;
     try {
-      final hashResponse = await _supabase.functions.invoke(
+      final response = await _supabase.functions.invoke(
         'generate-payhere-hash',
-        body: {
-          'order_id': orderId,
-          'amount': amount,
-          'currency': 'LKR',
-          'platform': 'web',
-        },
+        body: {'salon_id': salonId, 'plan_name': planName, 'platform': 'web'},
       );
-      hash = hashResponse.data['hash'] as String;
+      quote = Map<String, dynamic>.from(response.data as Map);
     } on FunctionException catch (e) {
       debugPrint(
         '❌ generate-payhere-hash failed: status=${e.status}, details=${e.details}',
       );
-      onError('Failed to generate payment hash (${e.status})');
+      onError('Could not start the payment (${e.status})');
       return null;
     } catch (e) {
       debugPrint('❌ generate-payhere-hash error: $e');
-      onError('Failed to generate payment hash');
+      onError('Could not start the payment');
       return null;
     }
 
-    // 3. Payment fields (same for popup and redirect)
+    final orderId = quote['order_id'] as String;
+
+    // 2. Payment fields (same for popup and redirect)
     final nameParts = customerName.trim().split(' ');
     final fields = <String, String>{
-      'merchant_id': env.payhereMerchantId,
+      'merchant_id': quote['merchant_id'].toString(),
       'return_url': returnUrl,
       'cancel_url': cancelUrl,
       'notify_url': '${env.supabaseUrl}/functions/v1/payhere-webhook',
       'order_id': orderId,
       'items': '$planName Subscription',
-      'amount': amount.toStringAsFixed(2),
-      'currency': 'LKR',
-      'hash': hash,
+      'amount': quote['amount'].toString(),
+      'currency': quote['currency'].toString(),
+      'hash': quote['hash'].toString(),
       'first_name': nameParts.first,
       'last_name': nameParts.length > 1 ? nameParts.last : '',
       'email': customerEmail,
@@ -105,17 +92,17 @@ class PayHereWebService {
       'custom_2': planName,
     };
 
-    // 4. Popup first, redirect as fallback
+    // 3. Popup first, redirect as fallback
     if (preferPopup) {
       final popup = await _tryPopup(fields, env.payhereSandbox, orderId);
       switch (popup.outcome) {
         case _PopupOutcome.completed:
           return popup.orderId ?? orderId;
         case _PopupOutcome.dismissed:
-          return null; // user closed the popup
+          return null;
         case _PopupOutcome.failed:
           debugPrint('⚠️ PayHere popup unavailable, using redirect fallback');
-          break; // fall through to redirect
+          break;
       }
     }
 

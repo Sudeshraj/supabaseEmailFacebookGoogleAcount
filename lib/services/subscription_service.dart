@@ -2,28 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/subscription_plan.dart';
 
+/// NOTE: there is intentionally NO activateSubscription() here any more.
+/// Only the PayHere webhook (service_role) may activate a paid plan.
 class SubscriptionService {
   final SupabaseClient _supabase = Supabase.instance.client;
 
-  /// Get all available plans
+  /// Get all available plans. Throws on failure so the UI can show the error.
   Future<List<SubscriptionPlan>> getAllPlans() async {
-    try {
-      final response = await _supabase
-          .from('subscription_plans')
-          .select()
-          .eq('is_active', true)
-          .order('plan_rank', ascending: true);
+    final response = await _supabase
+        .from('subscription_plans')
+        .select()
+        .eq('is_active', true)
+        .order('plan_rank', ascending: true);
 
-      return (response as List)
-          .map((e) => SubscriptionPlan.fromJson(e))
-          .toList();
-    } catch (e) {
-      debugPrint('Error loading plans: $e');
-      return [];
-    }
+    return (response as List)
+        .map((e) => SubscriptionPlan.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
-  /// Get salon capabilities (cached per salon)
+  /// Get salon capabilities. Returns null if the call fails.
   Future<Map<String, dynamic>?> getSalonCapabilities(int salonId) async {
     try {
       final response = await _supabase.rpc(
@@ -66,7 +63,7 @@ class SubscriptionService {
     }
   }
 
-  /// Request plan change (returns action_required if payment/action needed)
+  /// Request a plan change (returns action_required if payment/action needed)
   Future<Map<String, dynamic>> requestPlanChange({
     required int salonId,
     required String newPlanName,
@@ -81,40 +78,13 @@ class SubscriptionService {
           'p_owner_id': ownerId,
         },
       );
-      return response as Map<String, dynamic>;
+      return Map<String, dynamic>.from(response as Map);
     } catch (e) {
       return {'success': false, 'message': e.toString()};
     }
   }
 
-  /// Activate subscription after payment success
-  Future<Map<String, dynamic>> activateSubscription({
-    required int salonId,
-    required String planName,
-    required String ownerId,
-    String? paymentReference,
-    double? paymentAmount,
-    String? paymentMethod,
-  }) async {
-    try {
-      final response = await _supabase.rpc(
-        'activate_salon_subscription',
-        params: {
-          'p_salon_id': salonId,
-          'p_plan_name': planName,
-          'p_owner_id': ownerId,
-          'p_payment_reference': paymentReference,
-          'p_payment_amount': paymentAmount,
-          'p_payment_method': paymentMethod,
-        },
-      );
-      return response as Map<String, dynamic>;
-    } catch (e) {
-      return {'success': false, 'message': e.toString()};
-    }
-  }
-
-  /// Cancel subscription
+  /// Cancel subscription (access continues until the period end)
   Future<Map<String, dynamic>> cancelSubscription({
     required int salonId,
     required String ownerId,
@@ -129,7 +99,7 @@ class SubscriptionService {
           'p_reason': reason,
         },
       );
-      return response as Map<String, dynamic>;
+      return Map<String, dynamic>.from(response as Map);
     } catch (e) {
       return {'success': false, 'message': e.toString()};
     }
