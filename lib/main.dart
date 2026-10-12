@@ -1602,6 +1602,16 @@ GoRouter _createRouter() {
           return BarberReviewsScreen(salonId: salonId, barberId: null);
         },
       ),
+      GoRoute(
+  path: '/barber/customers',
+  builder: (context, state) {
+    final salonId = state.uri.queryParameters['salonId'];
+    return CustomerListScreen(
+      salonId: salonId,
+      role: 'barber',
+    );
+  },
+),
 
       // ============================================
       // subscription

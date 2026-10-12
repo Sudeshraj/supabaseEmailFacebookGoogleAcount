@@ -32,7 +32,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
   String get _salonCurrencySymbol =>
       _currencyService.getSymbol(_salonCurrencyCode);
 
-
   // Revenue data
   int _todayRevenue = 0;
   int _weekRevenue = 0;
@@ -182,7 +181,12 @@ class _RevenueScreenState extends State<RevenueScreen> {
       final allTimeStart = DateTime(2000, 1, 1);
       final allTimeStartStr = DateFormat('yyyy-MM-dd').format(allTimeStart);
 
+      // ✅ FIX 3: 7 days ago (for "Today" tab chart — last 7 days)
+      final sevenDaysAgo = today.subtract(const Duration(days: 6));
+      final sevenDaysAgoStr = DateFormat('yyyy-MM-dd').format(sevenDaysAgo);
+
       final results = await Future.wait([
+        // 0: Today
         supabase
             .from('appointments')
             .select('price, status')
@@ -190,6 +194,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
             .eq('appointment_date', todayStr)
             .eq('status', 'completed'),
 
+        // 1: Week
         supabase
             .from('appointments')
             .select('price, status')
@@ -197,6 +202,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
             .gte('appointment_date', weekStartStr)
             .eq('status', 'completed'),
 
+        // 2: Month
         supabase
             .from('appointments')
             .select('price, status')
@@ -204,6 +210,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
             .gte('appointment_date', monthStartStr)
             .eq('status', 'completed'),
 
+        // 3: All time
         supabase
             .from('appointments')
             .select('price, status')
@@ -211,13 +218,15 @@ class _RevenueScreenState extends State<RevenueScreen> {
             .gte('appointment_date', allTimeStartStr)
             .eq('status', 'completed'),
 
+        // ✅ 4: Daily chart data — Last 7 days (FIX 3)
         supabase
             .from('appointments')
             .select('appointment_date, price, status')
             .eq('salon_id', salonId)
-            .gte('appointment_date', weekStartStr)
+            .gte('appointment_date', sevenDaysAgoStr)
             .eq('status', 'completed'),
 
+        // 5: All data (for monthly chart)
         supabase
             .from('appointments')
             .select('appointment_date, price, status')
@@ -248,6 +257,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
           0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _totalAppointments = allTimeData.length;
 
+      // ✅ Daily revenue (last 7 days)
       final Map<String, int> dailyMap = {};
       for (var item in dailyData) {
         final date = item['appointment_date'] as String;
@@ -262,6 +272,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
           .toList()
         ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
+      // ✅ Monthly revenue (all time)
       final Map<String, int> monthlyMap = {};
       for (var item in allData) {
         final date = item['appointment_date'] as String;
@@ -277,6 +288,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
           .toList()
         ..sort((a, b) => (a['month'] as String).compareTo(b['month'] as String));
 
+      // ✅ Weekly revenue
       final Map<String, int> weeklyMap = {};
       for (var item in weekData) {
         final date = item['appointment_date'] as String;
@@ -321,6 +333,10 @@ class _RevenueScreenState extends State<RevenueScreen> {
       final allTimeStart = DateTime(2000, 1, 1);
       final allTimeStartStr = DateFormat('yyyy-MM-dd').format(allTimeStart);
 
+      // ✅ FIX 3: 7 days ago (for "Today" tab chart — last 7 days)
+      final sevenDaysAgo = today.subtract(const Duration(days: 6));
+      final sevenDaysAgoStr = DateFormat('yyyy-MM-dd').format(sevenDaysAgo);
+
       final salonId =
           widget.salonId != null ? int.parse(widget.salonId!) : null;
 
@@ -338,11 +354,22 @@ class _RevenueScreenState extends State<RevenueScreen> {
       }
 
       final results = await Future.wait([
+        // 0: Today
         buildBaseQuery().eq('appointment_date', todayStr),
+
+        // 1: Week
         buildBaseQuery().gte('appointment_date', weekStartStr),
+
+        // 2: Month
         buildBaseQuery().gte('appointment_date', monthStartStr),
+
+        // 3: All time
         buildBaseQuery().gte('appointment_date', allTimeStartStr),
-        buildBaseQuery().gte('appointment_date', weekStartStr),
+
+        // ✅ 4: Daily chart data — Last 7 days (FIX 3)
+        buildBaseQuery().gte('appointment_date', sevenDaysAgoStr),
+
+        // 5: All data (for monthly chart)
         buildBaseQuery(),
       ]);
 
@@ -369,6 +396,7 @@ class _RevenueScreenState extends State<RevenueScreen> {
           0, (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0));
       _totalAppointments = allTimeData.length;
 
+      // ✅ Daily revenue (last 7 days)
       final Map<String, int> dailyMap = {};
       for (var item in dailyData) {
         final date = item['appointment_date'] as String;
@@ -383,6 +411,24 @@ class _RevenueScreenState extends State<RevenueScreen> {
           .toList()
         ..sort((a, b) => (a['date'] as String).compareTo(b['date'] as String));
 
+      // ✅ FIX 1: Weekly revenue (barber එකට calculate කරන්නේ නෑ — fix)
+      final Map<String, int> weeklyMap = {};
+      for (var item in weekData) {
+        final date = item['appointment_date'] as String;
+        final dateObj = DateTime.parse(date);
+        final weekKey = DateFormat('yyyy-ww').format(dateObj);
+        final price = (item['price'] as num?)?.toInt() ?? 0;
+        weeklyMap[weekKey] = (weeklyMap[weekKey] ?? 0) + price;
+      }
+      _weeklyRevenue = weeklyMap.entries
+          .map((e) => <String, dynamic>{
+                'week': e.key,
+                'revenue': e.value,
+              })
+          .toList()
+        ..sort((a, b) => (a['week'] as String).compareTo(b['week'] as String));
+
+      // ✅ Monthly revenue (all time)
       final Map<String, int> monthlyMap = {};
       for (var item in allData) {
         final date = item['appointment_date'] as String;
@@ -742,8 +788,6 @@ class _RevenueScreenState extends State<RevenueScreen> {
             // ✅ Revenue with salon currency
             Row(
               children: [
-                // ✅ Mobile එකේ icon text hide කරන්නේ නෑ (මේක main display)
-                //     Text එකේම currency symbol එක තියෙන නිසා duplicate නෑ
                 Expanded(
                   child: FittedBox(
                     fit: BoxFit.scaleDown,
@@ -787,7 +831,8 @@ class _RevenueScreenState extends State<RevenueScreen> {
     switch (_selectedPeriod) {
       case 'Today':
         data = _dailyRevenue;
-        title = 'Daily Revenue';
+        // ✅ FIX 2: "Daily Revenue" → "Today's Revenue"
+        title = 'Today\'s Revenue';
         valueKey = 'revenue';
         labelKey = 'date';
         break;

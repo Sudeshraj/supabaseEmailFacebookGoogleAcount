@@ -1,4 +1,4 @@
-// Dashboard screen for owners to view customers and followers of their salon
+// Dashboard screen for owners and barbers to view customers
 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -38,6 +38,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
 
   // ✅ Scroll Controller for web
   final ScrollController _scrollController = ScrollController();
+
+  /// ✅ Owner ට followers තියෙනවා, barber ට නෑ
+  bool get _showFollowers => widget.role == 'owner';
 
   @override
   void initState() {
@@ -169,14 +172,20 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   }
 
   // ============================================================
-  // LOAD BARBER CUSTOMERS
+  // ✅ LOAD BARBER CUSTOMERS (barber ගේ appointments වල customers)
+  //    - Barber ගේ salon_id = widget.salonId (dashboard එකෙන් pass)
+  //    - Followers load කරන්නේ නෑ (barber ට followers නෑ)
   // ============================================================
   Future<void> _loadBarberCustomers(String barberId) async {
     try {
-      final response = await supabase
+      final salonId = widget.salonId;
+
+      var query = supabase
           .from('appointments')
           .select('''
             customer_id,
+            salon_id,
+            appointment_date,
             profiles!appointments_customer_id_fkey (
               id,
               full_name,
@@ -187,8 +196,17 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             )
           ''')
           .eq('barber_id', barberId)
-          .eq('status', 'completed')
-          .order('appointment_date', ascending: false);
+          .eq('status', 'completed');
+
+      // ✅ Salon filter — dashboard එකෙන් pass කරන salon එකට විතරයි
+      if (salonId != null && salonId.isNotEmpty) {
+        query = query.eq('salon_id', int.parse(salonId));
+      }
+
+      final response = await query.order(
+        'appointment_date',
+        ascending: false,
+      );
 
       final Map<String, Map<String, dynamic>> customerMap = {};
 
@@ -207,7 +225,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             'avatar_url': profile['avatar_url'],
             'created_at': profile['created_at'],
             'booking_count': 0,
-            'is_follower': false,
+            'is_follower': false, // ✅ Barber ට followers නෑ
             'followed_at': null,
           };
         }
@@ -224,12 +242,18 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       setState(() {
         _customers = customers;
         _totalCustomers = customers.length;
+        _totalFollowers = 0; // ✅ Barber ට followers නෑ
         _totalBookings = customers.fold(
           0,
           (sum, c) => sum + (c['booking_count'] as int),
         );
         _isLoading = false;
       });
+
+      debugPrint('✅ Loaded ${customers.length} customers for barber');
+      if (salonId != null && salonId.isNotEmpty) {
+        debugPrint('   - Filtered by salon: $salonId');
+      }
     } catch (e) {
       setState(() {
         _errorMessage = 'Error loading customers: ${e.toString()}';
@@ -426,7 +450,10 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => CustomerDetailsSheet(customer: customer),
+      builder: (context) => CustomerDetailsSheet(
+        customer: customer,
+        showFollowers: _showFollowers, // ✅ Barber ට followers section hide
+      ),
     );
   }
 
@@ -457,17 +484,20 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             value: '$_totalCustomers',
             color: Colors.blue,
           ),
-          Container(
-            width: 1,
-            height: 30,
-            color: isDark ? Colors.grey[800] : Colors.grey[300],
-          ),
-          _buildStatItem(
-            icon: Icons.star,
-            label: 'Followers',
-            value: '$_totalFollowers',
-            color: Colors.orange,
-          ),
+          // ✅ Owner ට විතරයි Followers පෙන්නන්නේ
+          if (_showFollowers) ...[
+            Container(
+              width: 1,
+              height: 30,
+              color: isDark ? Colors.grey[800] : Colors.grey[300],
+            ),
+            _buildStatItem(
+              icon: Icons.star,
+              label: 'Followers',
+              value: '$_totalFollowers',
+              color: Colors.orange,
+            ),
+          ],
           Container(
             width: 1,
             height: 30,
@@ -538,7 +568,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           children: [
             Text(
               widget.role == 'customer' ? 'My Profile' : 'Customers',
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
                 color: Colors.white,
@@ -598,43 +628,43 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
               ),
             )
           : _errorMessage != null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 64,
-                    color: isDark ? Colors.white30 : Colors.grey[400],
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 64,
+                        color: isDark ? Colors.white30 : Colors.grey[400],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        _errorMessage!,
+                        style: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: _loadData,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Retry'),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  Text(
-                    _errorMessage!,
-                    style: TextStyle(
-                      color: isDark ? Colors.white60 : Colors.grey[600],
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _loadData,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            )
-          : isWeb
-          ? _buildWebLayout()
-          : _buildMobileLayout(),
+                )
+              : isWeb
+                  ? _buildWebLayout()
+                  : _buildMobileLayout(),
     );
   }
 
   // ============================================================
-  // ✅ WEB LAYOUT - Dashboard Style with Search Bar inside
+  // ✅ WEB LAYOUT
   // ============================================================
   Widget _buildWebLayout() {
     final filteredCustomers = _filteredCustomers;
@@ -660,7 +690,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ✅ Search Bar inside content (Web)
+                  // ✅ Search Bar
                   Container(
                     margin: const EdgeInsets.only(bottom: 20),
                     decoration: BoxDecoration(
@@ -724,10 +754,11 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                     ),
                   ),
 
-                  // Stats Header
-                  if (widget.role == 'owner') _buildStatsHeader(),
+                  // ✅ Stats Header
+                  if (widget.role == 'owner' || widget.role == 'barber')
+                    _buildStatsHeader(),
 
-                  // Filter options
+                  // ✅ Filter options
                   if (_showFilterOptions && widget.role != 'customer')
                     Container(
                       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -737,8 +768,11 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                           children: [
                             _buildFilterChip('All'),
                             const SizedBox(width: 8),
-                            _buildFilterChip('Followers'),
-                            const SizedBox(width: 8),
+                            // ✅ Owner ට විතරයි Followers filter
+                            if (_showFollowers) ...[
+                              _buildFilterChip('Followers'),
+                              const SizedBox(width: 8),
+                            ],
                             _buildFilterChip('Bookings'),
                             const SizedBox(width: 8),
                             _buildFilterChip('Newest'),
@@ -747,7 +781,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                       ),
                     ),
 
-                  // Customer count
+                  // ✅ Customer count
                   if (filteredCustomers.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 16, top: 8),
@@ -767,9 +801,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                               'Showing results for "$_searchQuery"',
                               style: TextStyle(
                                 fontSize: 13,
-                                color: isDark
-                                    ? Colors.white70
-                                    : Colors.grey[500],
+                                color:
+                                    isDark ? Colors.white70 : Colors.grey[500],
                                 fontStyle: FontStyle.italic,
                               ),
                             ),
@@ -777,7 +810,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                       ),
                     ),
 
-                  // Customer Grid
+                  // ✅ Customer Grid
                   filteredCustomers.isEmpty
                       ? _buildEmptyState(isDark)
                       : GridView.builder(
@@ -785,11 +818,11 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                           physics: const NeverScrollableScrollPhysics(),
                           gridDelegate:
                               const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 2,
-                                crossAxisSpacing: 16,
-                                mainAxisSpacing: 16,
-                                childAspectRatio: 1.2,
-                              ),
+                            crossAxisCount: 2,
+                            crossAxisSpacing: 16,
+                            mainAxisSpacing: 16,
+                            childAspectRatio: 1.2,
+                          ),
                           itemCount: filteredCustomers.length,
                           itemBuilder: (context, index) {
                             final customer = filteredCustomers[index];
@@ -819,7 +852,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       color: AppTheme.primary,
       child: Column(
         children: [
-          // ✅ Search Bar below AppBar (Mobile)
+          // ✅ Search Bar
           Container(
             padding: const EdgeInsets.all(12),
             color: isDark ? const Color(0xFF121212) : Colors.white,
@@ -883,10 +916,11 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             ),
           ),
 
-          // Stats Header
-          if (widget.role == 'owner') _buildStatsHeader(),
+          // ✅ Stats Header
+          if (widget.role == 'owner' || widget.role == 'barber')
+            _buildStatsHeader(),
 
-          // Filter options
+          // ✅ Filter options
           if (_showFilterOptions && widget.role != 'customer')
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -896,8 +930,11 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                   children: [
                     _buildFilterChip('All'),
                     const SizedBox(width: 8),
-                    _buildFilterChip('Followers'),
-                    const SizedBox(width: 8),
+                    // ✅ Owner ට විතරයි Followers filter
+                    if (_showFollowers) ...[
+                      _buildFilterChip('Followers'),
+                      const SizedBox(width: 8),
+                    ],
                     _buildFilterChip('Bookings'),
                     const SizedBox(width: 8),
                     _buildFilterChip('Newest'),
@@ -906,7 +943,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
               ),
             ),
 
-          // Customer count
+          // ✅ Customer count
           if (filteredCustomers.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -921,19 +958,23 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                   ),
                   const Spacer(),
                   if (_searchQuery.isNotEmpty)
-                    Text(
-                      'Showing results for "$_searchQuery"',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.white70 : Colors.grey[500],
-                        fontStyle: FontStyle.italic,
+                    Flexible(
+                      child: Text(
+                        'Showing results for "$_searchQuery"',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isDark ? Colors.white70 : Colors.grey[500],
+                          fontStyle: FontStyle.italic,
+                        ),
                       ),
                     ),
                 ],
               ),
             ),
 
-          // Customer List
+          // ✅ Customer List
           Expanded(
             child: filteredCustomers.isEmpty
                 ? _buildEmptyState(isDark)
@@ -1228,7 +1269,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                             ],
                           ),
                         ),
-                        if (isFollower)
+                        // ✅ Owner ට විතරයි Follower badge
+                        if (isFollower && _showFollowers)
                           Container(
                             padding: const EdgeInsets.symmetric(
                               horizontal: 8,
@@ -1282,8 +1324,13 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
 // ============================================================
 class CustomerDetailsSheet extends StatelessWidget {
   final Map<String, dynamic> customer;
+  final bool showFollowers; // ✅ Owner = true, barber = false
 
-  const CustomerDetailsSheet({super.key, required this.customer});
+  const CustomerDetailsSheet({
+    super.key,
+    required this.customer,
+    this.showFollowers = true,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1442,7 +1489,8 @@ class CustomerDetailsSheet extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            if (isFollower)
+                            // ✅ Owner ට විතරයි Follower badge
+                            if (isFollower && showFollowers)
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 12,
@@ -1474,7 +1522,7 @@ class CustomerDetailsSheet extends StatelessWidget {
                               ),
                           ],
                         ),
-                        if (followedAt.isNotEmpty)
+                        if (followedAt.isNotEmpty && showFollowers)
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
                             child: Text(
@@ -1590,7 +1638,6 @@ class CustomerDetailsSheet extends StatelessWidget {
                         ),
                         onTap: () {
                           Navigator.pop(context);
-                          // Navigate to booking history
                         },
                       ),
                     ),
@@ -1619,7 +1666,6 @@ class CustomerDetailsSheet extends StatelessWidget {
                         ),
                         onTap: () {
                           Navigator.pop(context);
-                          // Navigate to reviews
                         },
                       ),
                     ),

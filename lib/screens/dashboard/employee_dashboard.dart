@@ -131,9 +131,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     _checkTimezoneChange();
   }
 
+  // ✅ FIX: only called from didChangeDependencies (NOT from build()),
+  // so it can never call setState() during build.
   void _checkScreenSize() {
     final size = MediaQuery.of(context).size;
-    final isLarge = size.width > 800 || size.height > 800;
+    final isLarge = size.width > 800;
     final isTablet = size.shortestSide >= 600;
     final isWeb = size.width > 800;
 
@@ -178,6 +180,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     await TimezoneService.setTimezone(_userTimezone);
     _lastTimezone = _userTimezone;
 
+    if (!mounted) return;
     setState(() {
       _isTimezoneLoaded = true;
     });
@@ -298,54 +301,65 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        // ✅ FIX: title Row overflow -> Expanded
         title: const Row(
           children: [
             Text('🌐'),
             SizedBox(width: 8),
-            Text('Browser Notification Settings'),
+            Expanded(
+              child: Text(
+                'Browser Notification Settings',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'To enable notifications, please follow these steps:',
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            _buildWebStep('1', 'Click the 🔒 lock icon in the address bar'),
-            const SizedBox(height: 8),
-            _buildWebStep('2', 'Click "Site settings" or "Permissions"'),
-            const SizedBox(height: 8),
-            _buildWebStep('3', 'Find "Notifications" and select "Allow"'),
-            const SizedBox(height: 8),
-            _buildWebStep('4', 'Refresh the page'),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber.shade200),
+        // ✅ FIX: scrollable content so it never overflows vertically
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'To enable notifications, please follow these steps:',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.amber.shade700),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Once enabled, you\'ll receive notifications even when the tab is not active',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.amber.shade800,
+              const SizedBox(height: 16),
+              _buildWebStep('1', 'Click the 🔒 lock icon in the address bar'),
+              const SizedBox(height: 8),
+              _buildWebStep('2', 'Click "Site settings" or "Permissions"'),
+              const SizedBox(height: 8),
+              _buildWebStep('3', 'Find "Notifications" and select "Allow"'),
+              const SizedBox(height: 8),
+              _buildWebStep('4', 'Refresh the page'),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade200),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.amber.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Once enabled, you\'ll receive notifications even when the tab is not active',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.amber.shade800,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -417,6 +431,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         userId: _employeeId,
         role: 'barber',
       );
+      if (!mounted) return;
       setState(() {
         _unreadNotificationCount = count;
       });
@@ -470,7 +485,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) {
-        setState(() => _isActive = false);
+        if (mounted) setState(() => _isActive = false);
         return;
       }
 
@@ -519,10 +534,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           default:
             message += 'not active.';
         }
-        setState(() {
-          _isActive = false;
-          _inactiveReason = '$message Please contact support.';
-        });
+        if (mounted) {
+          setState(() {
+            _isActive = false;
+            _inactiveReason = '$message Please contact support.';
+          });
+        }
         return;
       }
 
@@ -540,11 +557,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
         if (!isActiveBarber) {
           debugPrint('❌ User does not have barber role');
-          setState(() {
-            _isActive = false;
-            _inactiveReason =
-                'You do not have a barber role. Please contact support.';
-          });
+          if (mounted) {
+            setState(() {
+              _isActive = false;
+              _inactiveReason =
+                  'You do not have a barber role. Please contact support.';
+            });
+          }
           return;
         }
       }
@@ -558,37 +577,43 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       if (profileResponse != null) {
         if (profileResponse['is_blocked'] == true) {
-          setState(() {
-            _isActive = false;
-            _inactiveReason =
-                'Your account has been blocked. Please contact support.';
-          });
+          if (mounted) {
+            setState(() {
+              _isActive = false;
+              _inactiveReason =
+                  'Your account has been blocked. Please contact support.';
+            });
+          }
           return;
         }
 
         if (profileResponse['is_active'] == false) {
-          setState(() {
-            _isActive = false;
-            _inactiveReason =
-                'Your profile is inactive. Please contact support.';
-          });
+          if (mounted) {
+            setState(() {
+              _isActive = false;
+              _inactiveReason =
+                  'Your profile is inactive. Please contact support.';
+            });
+          }
           return;
         }
 
-        setState(() {
-          _employeeName =
-              profileResponse['full_name'] ??
-              currentUser.email?.split('@').first ??
-              'Barber';
-          if (profileResponse['email'] != null &&
-              profileResponse['email'].toString().isNotEmpty) {
-            _employeeEmail = profileResponse['email'].toString();
-          }
-          _employeeAvatar = profileResponse['avatar_url'] ?? '';
-        });
+        if (mounted) {
+          setState(() {
+            _employeeName =
+                profileResponse['full_name'] ??
+                currentUser.email?.split('@').first ??
+                'Barber';
+            if (profileResponse['email'] != null &&
+                profileResponse['email'].toString().isNotEmpty) {
+              _employeeEmail = profileResponse['email'].toString();
+            }
+            _employeeAvatar = profileResponse['avatar_url'] ?? '';
+          });
+        }
       } else {
         final profile = await SessionManager.getProfileByEmail(_employeeEmail);
-        if (profile != null) {
+        if (profile != null && mounted) {
           setState(() {
             _employeeName = profile['name'] ?? _employeeEmail.split('@').first;
             _employeeAvatar = profile['avatar'] ?? '';
@@ -596,7 +621,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         }
       }
 
-      setState(() => _isActive = true);
+      if (mounted) setState(() => _isActive = true);
     } catch (e) {
       debugPrint('❌ Error checking employee status: $e');
 
@@ -605,19 +630,21 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         if (email != null) {
           final profile = await SessionManager.getProfileByEmail(email);
           if (profile != null) {
-            setState(() {
-              _employeeEmail = email;
-              _employeeName = profile['name'] ?? email.split('@').first;
-              _employeeAvatar = profile['avatar'] ?? '';
-              _isActive = true;
-            });
+            if (mounted) {
+              setState(() {
+                _employeeEmail = email;
+                _employeeName = profile['name'] ?? email.split('@').first;
+                _employeeAvatar = profile['avatar'] ?? '';
+                _isActive = true;
+              });
+            }
             return;
           }
         }
       } catch (fallbackError) {
         debugPrint('❌ Fallback also failed: $fallbackError');
       }
-      setState(() => _isActive = true);
+      if (mounted) setState(() => _isActive = true);
     } finally {
       if (mounted && _isCheckingStatus) {
         setState(() => _isCheckingStatus = false);
@@ -690,13 +717,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         await SessionManager.saveSalonName(_selectedSalonName);
       }
 
+      if (!mounted) return;
       setState(() {
         _assignedSalons = salons;
         if (_selectedSalonId == null && salons.isNotEmpty) {
           _selectedSalonId = salons[0]['id'] as String;
           _selectedSalonName = salons[0]['name'] ?? '';
-          _salonCurrencyCode =
-              salons[0]['currency_code'] as String? ?? 'LKR';
+          _salonCurrencyCode = salons[0]['currency_code'] as String? ?? 'LKR';
         } else if (salons.isNotEmpty) {
           final selected = salons.firstWhere(
             (s) => s['id'] == _selectedSalonId,
@@ -704,8 +731,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           );
           _selectedSalonName = selected['name'] ?? '';
           if (selected.isNotEmpty) {
-            _salonCurrencyCode =
-                selected['currency_code'] as String? ?? 'LKR';
+            _salonCurrencyCode = selected['currency_code'] as String? ?? 'LKR';
           }
         }
       });
@@ -733,8 +759,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       _selectedSalonName = selected['name'] ?? '';
 
       if (selected.isNotEmpty) {
-        _salonCurrencyCode =
-            selected['currency_code'] as String? ?? 'LKR';
+        _salonCurrencyCode = selected['currency_code'] as String? ?? 'LKR';
         debugPrint('✅ Salon switched → Currency: $_salonCurrencyCode');
       }
     });
@@ -772,6 +797,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   // ==================== LOAD DASHBOARD DATA ====================
 
   Future<void> _loadData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
@@ -827,7 +853,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // =====================================================
   // LOAD APPOINTMENTS WITH PERFORMANCE STATS
-  // ✅ FIX: appointments no longer has service_id / variant_id.
+  // ✅ appointments no longer has service_id / variant_id.
   //    All per-service data lives in appointment_services.
   //    Read appointments.price directly (server-synced total).
   // =====================================================
@@ -837,6 +863,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       if (salonId == null) {
         debugPrint('⚠️ No salon selected');
+        if (!mounted) return;
         setState(() {
           _todaysAppointmentsList = [];
           _todaysAppointments = 0;
@@ -932,8 +959,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         if (price <= 0 && servicesList.isNotEmpty) {
           price = servicesList.fold<double>(
             0.0,
-            (acc, s) =>
-                acc + ((s['final_price'] as num?)?.toDouble() ?? 0.0),
+            (acc, s) => acc + ((s['final_price'] as num?)?.toDouble() ?? 0.0),
           );
         }
 
@@ -992,10 +1018,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       // ✅ Calculate On Time Percentage
       int onTimePercentage = 0;
       if (totalAppointmentsToday > 0) {
-        onTimePercentage =
-            ((todayCompleted / totalAppointmentsToday) * 100).round();
+        onTimePercentage = ((todayCompleted / totalAppointmentsToday) * 100)
+            .round();
       }
 
+      if (!mounted) return;
       setState(() {
         _todaysAppointmentsList = allAppointments;
         _todaysAppointments = todayTotal;
@@ -1012,6 +1039,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       debugPrint('✅ Total appointments in list: ${allAppointments.length}');
     } catch (e) {
       debugPrint('❌ Error loading appointments: $e');
+      if (!mounted) return;
       setState(() {
         _todaysAppointmentsList = [];
         _todaysAppointments = 0;
@@ -1025,7 +1053,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // =====================================================
   // LOAD STATISTICS
-  // ✅ FIX: uses appointments.price directly (server-synced total).
+  // ✅ uses appointments.price directly (server-synced total).
   // =====================================================
   Future<void> _loadStatistics() async {
     try {
@@ -1033,6 +1061,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       if (salonId == null) {
         debugPrint('⚠️ No salon selected for statistics');
+        if (!mounted) return;
         setState(() {
           _totalCustomers = 0;
           _monthlyEarnings = 0;
@@ -1074,7 +1103,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       );
       final lastDayStr = lastDayOfMonth.toIso8601String().split('T').first;
 
-      // ✅ Read price directly - server-synced total (services + extra - discount)
       final monthlyResponse = await supabase
           .from('appointments')
           .select('price')
@@ -1105,6 +1133,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         avgRating = totalRating / reviewsResponse.length;
       }
 
+      if (!mounted) return;
       setState(() {
         _totalCustomers = uniqueCustomers;
         _monthlyEarnings = monthlyTotal;
@@ -1116,6 +1145,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       );
     } catch (e) {
       debugPrint('❌ Error loading statistics: $e');
+      if (!mounted) return;
       setState(() {
         _totalCustomers = 0;
         _monthlyEarnings = 0;
@@ -1152,6 +1182,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       builder: (context) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        // ✅ FIX: title Row overflow -> Expanded
         title: Row(
           children: [
             Container(
@@ -1163,9 +1194,15 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               child: const Icon(Icons.assignment_add, color: Colors.blue),
             ),
             const SizedBox(width: 12),
-            Text(
-              'New Booking Assigned!',
-              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            Expanded(
+              child: Text(
+                'New Booking Assigned!',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
             ),
           ],
         ),
@@ -1270,22 +1307,21 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         ),
         onGranted: () async {
           await _permissionManager.markPermissionGranted();
+          if (!mounted) return;
           setState(() {
             _hasPermission = true;
             _showPermissionCard = false;
           });
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  isWeb
-                      ? '✅ Notifications enabled in browser!'
-                      : '✅ Notifications enabled!',
-                ),
-                backgroundColor: Colors.green,
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                isWeb
+                    ? '✅ Notifications enabled in browser!'
+                    : '✅ Notifications enabled!',
               ),
-            );
-          }
+              backgroundColor: Colors.green,
+            ),
+          );
         },
         onDenied: () async {
           await _permissionManager.markPermissionDenied(permanent: false);
@@ -1309,6 +1345,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   void _showSettingsDialog() {
+    if (!mounted) return;
     final isDark = context.isDarkMode;
 
     showDialog(
@@ -1429,79 +1466,89 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
     await showModalBottomSheet(
       context: context,
+      isScrollControlled: true, // ✅ FIX: allow tall sheets
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Select Salon',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black87,
+      builder: (context) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.7,
+        ),
+        // ✅ FIX: scrollable so many salons never overflow vertically
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Select Salon',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Choose a salon to view its data',
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white60 : Colors.grey,
+              const SizedBox(height: 8),
+              Text(
+                'Choose a salon to view its data',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white60 : Colors.grey,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            ..._assignedSalons.map((salon) {
-              final isSelected = salon['id'] == _selectedSalonId;
-              return ListTile(
-                leading: CircleAvatar(
-                  radius: 20,
-                  backgroundColor: isSelected
-                      ? AppTheme.primary
-                      : Colors.grey[200],
-                  backgroundImage: salon['logo_url'] != null
-                      ? NetworkImage(salon['logo_url'])
-                      : null,
-                  child: salon['logo_url'] == null
-                      ? Icon(
-                          Icons.store,
-                          color: isSelected ? Colors.white : Colors.grey[600],
-                          size: 20,
-                        )
-                      : null,
-                ),
-                title: Text(
-                  salon['name'] ?? 'Unknown Salon',
-                  style: TextStyle(
-                    fontWeight: isSelected
-                        ? FontWeight.bold
-                        : FontWeight.normal,
-                    color: isDark ? Colors.white : Colors.black87,
+              const SizedBox(height: 16),
+              ..._assignedSalons.map((salon) {
+                final isSelected = salon['id'] == _selectedSalonId;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: CircleAvatar(
+                    radius: 20,
+                    backgroundColor: isSelected
+                        ? AppTheme.primary
+                        : Colors.grey[200],
+                    backgroundImage: salon['logo_url'] != null
+                        ? NetworkImage(salon['logo_url'])
+                        : null,
+                    child: salon['logo_url'] == null
+                        ? Icon(
+                            Icons.store,
+                            color: isSelected ? Colors.white : Colors.grey[600],
+                            size: 20,
+                          )
+                        : null,
                   ),
-                ),
-                subtitle: Text(
-                  salon['address'] ?? '',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  title: Text(
+                    salon['name'] ?? 'Unknown Salon',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.normal,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
                   ),
-                ),
-                trailing: isSelected
-                    ? const Icon(Icons.check_circle, color: AppTheme.primary)
-                    : null,
-                onTap: () {
-                  Navigator.pop(context);
-                  _selectSalon(salon['id'] as String);
-                },
-              );
-            }),
-          ],
+                  subtitle: Text(
+                    salon['address'] ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                  ),
+                  trailing: isSelected
+                      ? const Icon(Icons.check_circle, color: AppTheme.primary)
+                      : null,
+                  onTap: () {
+                    Navigator.pop(context);
+                    _selectSalon(salon['id'] as String);
+                  },
+                );
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -1516,11 +1563,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     required VoidCallback onTap,
   }) {
     final isDark = context.isDarkMode;
+    final subtitle = _getQuickActionSubtitle(label);
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(12),
@@ -1532,19 +1581,26 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             const SizedBox(height: 4),
             Text(
               label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 12,
                 color: isDark ? Colors.white : color,
                 fontWeight: FontWeight.w500,
               ),
             ),
-            Text(
-              _getQuickActionSubtitle(label),
-              style: TextStyle(
-                fontSize: 9,
-                color: isDark ? Colors.white60 : Colors.grey[600],
+            if (subtitle.isNotEmpty)
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 9,
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                ),
               ),
-            ),
           ],
         ),
       ),
@@ -1572,22 +1628,225 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(height: 4),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: isDark ? Colors.white : color,
+        // ✅ FIX: FittedBox so value/label never overflow in narrow columns
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : color,
+            ),
           ),
         ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            color: isDark ? Colors.white60 : Colors.grey[600],
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
           ),
         ),
       ],
+    );
+  }
+
+  // ✅ FIX: Rating card — the main source of the Row overflow error.
+  Widget _buildRatingCard() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Colors.amber.withValues(alpha: 0.1),
+            Colors.orange.withValues(alpha: 0.1),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Hide the "12%" chip when there is not enough room
+          final showTrend = constraints.maxWidth >= 280;
+
+          return Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.amber.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.star, color: Colors.amber, size: 28),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Your Rating',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 14, color: Colors.grey),
+                    ),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.baseline,
+                        textBaseline: TextBaseline.alphabetic,
+                        children: [
+                          Text(
+                            _rating > 0 ? _rating.toStringAsFixed(1) : '0.0',
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.amber,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          const Text(
+                            '/ 5.0',
+                            style: TextStyle(fontSize: 16, color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (showTrend) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.arrow_upward, color: Colors.green, size: 16),
+                      SizedBox(width: 4),
+                      Text(
+                        '12%',
+                        style: TextStyle(
+                          color: Colors.green,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ✅ FIX: Stats cards — responsive, never overflow horizontally
+  Widget _buildStatsSection() {
+    final todaysCard = DashboardStatCard(
+      title: "Today's",
+      value: '$_todaysAppointments',
+      icon: Icons.calendar_today,
+      color: Colors.blue,
+      subtitle: '$_completedToday completed',
+      onTap: _viewMySchedule,
+    );
+
+    final earningsCard = DashboardStatCard(
+      title: 'Earnings',
+      value: _formatPrice(_todayEarnings),
+      iconText: _salonCurrencySymbol,
+      color: Colors.green,
+      subtitle: '${_getMonthName()}: ${_formatPrice(_monthlyEarnings)}',
+      onTap: _viewTodayEarnings,
+      hideIconTextOnMobile: !_isTablet,
+    );
+
+    // Tablet / large: 3 cards in one row
+    if (_isTablet) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: todaysCard),
+            const SizedBox(width: 12),
+            Expanded(child: earningsCard),
+            const SizedBox(width: 12),
+            Expanded(
+              child: DashboardStatCard(
+                title: 'Total Customers',
+                value: '$_totalCustomers',
+                icon: Icons.people,
+                color: Colors.teal,
+                subtitle: 'All time',
+                onTap: _viewMyCustomers,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Phone
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isVeryNarrow = constraints.maxWidth < 340;
+
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: isVeryNarrow
+                  ? Column(
+                      children: [
+                        todaysCard,
+                        const SizedBox(height: 12),
+                        earningsCard,
+                      ],
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(child: todaysCard),
+                        const SizedBox(width: 12),
+                        Expanded(child: earningsCard),
+                      ],
+                    ),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: DashboardStatCard(
+                title: 'Total Customers Served',
+                value: '$_totalCustomers',
+                icon: Icons.people,
+                color: Colors.teal,
+                fullWidth: true,
+                subtitle: 'All time',
+                onTap: _viewMyCustomers,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1600,7 +1859,16 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     final isWeb = screenWidth > 800;
     final isDark = context.isDarkMode;
 
-    _checkScreenSize();
+    // ✅ FIX: when the browser window is collapsed to a tiny size (resize /
+    // DevTools), the AppBar actions slot gets ~1px width and overflows.
+    // Nothing meaningful can be drawn there, so render an empty box instead.
+    if (screenWidth < 240) {
+      return const SizedBox.shrink();
+    }
+
+    // ❌ REMOVED: _checkScreenSize();
+    // Calling setState() inside build() throws "setState() called during build".
+    // It is already handled in didChangeDependencies().
 
     // ✅ STATE 1: Loading
     if (!_isTimezoneLoaded || _isCheckingStatus) {
@@ -1667,8 +1935,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           onMenuItemSelected: () {},
         ),
         body: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
+          // ✅ FIX: scrollable so it never overflows vertically on short screens
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -1718,43 +1987,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       );
     }
 
-    if (!_isTimezoneLoaded) {
-      return Scaffold(
-        key: _scaffoldKey,
-        appBar: AppBar(
-          title: const Text('Employee Dashboard'),
-          backgroundColor: AppTheme.primary,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          leading: Builder(
-            builder: (context) => IconButton(
-              icon: const Icon(Icons.menu, color: Colors.white),
-              onPressed: () => Scaffold.of(context).openDrawer(),
-              tooltip: 'Menu',
-              iconSize: 28,
-            ),
-          ),
-        ),
-        body: const Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              CircularProgressIndicator(color: AppTheme.primary),
-              SizedBox(height: 16),
-              Text('Loading timezone...'),
-            ],
-          ),
-        ),
-      );
-    }
-
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
-        centerTitle: isWeb,
+        centerTitle: false,
         leading: Builder(
           builder: (context) => IconButton(
             icon: const Icon(Icons.menu, color: Colors.white),
@@ -1763,25 +2002,19 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             iconSize: 28,
           ),
         ),
-        title: Row(
-          children: [
-            if (!isWeb)
-              Flexible(
-                child: Text(
-                  _selectedSalonName.isNotEmpty
-                      ? _selectedSalonName
-                      : 'Dashboard',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+        // ✅ FIX: simple Text title (removed Row + Spacer which could overflow)
+        title: isWeb
+            ? null
+            : Text(
+                _selectedSalonName.isNotEmpty ? _selectedSalonName : 'Dashboard',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
                 ),
               ),
-            const Spacer(),
-          ],
-        ),
         actions: [
           // Salon Selector (Web)
           if (isWeb && _selectedSalonName.isNotEmpty)
@@ -1810,6 +2043,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                         Flexible(
                           child: Text(
                             _selectedSalonName,
+                            maxLines: 1,
                             style: const TextStyle(
                               fontSize: 12,
                               color: Colors.white,
@@ -1831,7 +2065,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               ),
             ),
           // Salon Selector Chip (Mobile)
-          if (_assignedSalons.length > 1 && !isWeb)
+          if (_assignedSalons.length > 1 && !isWeb && screenWidth >= 340)
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: GestureDetector(
@@ -1852,12 +2086,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                       const SizedBox(width: 4),
                       ConstrainedBox(
                         constraints: BoxConstraints(
-                          maxWidth: MediaQuery.of(context).size.width * 0.35,
+                          maxWidth: screenWidth * 0.25,
                         ),
                         child: Text(
                           _selectedSalonName.isNotEmpty
                               ? _selectedSalonName
                               : 'Salon',
+                          maxLines: 1,
                           style: const TextStyle(
                             fontSize: 10,
                             color: Colors.white,
@@ -1887,7 +2122,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                   color: Colors.white,
                 ),
                 onPressed: _viewNotifications,
-                padding: EdgeInsets.zero,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
                 constraints: const BoxConstraints(),
               ),
               if (_unreadNotificationCount > 0)
@@ -1948,9 +2183,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   Widget _buildBody(bool isWeb) {
     return _isLoading
-        ? const Center(
-            child: CircularProgressIndicator(color: AppTheme.primary),
-          )
+        ? const Center(child: CircularProgressIndicator(color: AppTheme.primary))
         : Center(
             child: Container(
               constraints: BoxConstraints(
@@ -1985,6 +2218,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   // =====================================================
   Widget _buildDashboardContent() {
     final isDark = context.isDarkMode;
+    final todayList = _todaysAppointmentsList
+        .where((a) => a['is_today'] == true)
+        .toList();
 
     return Column(
       children: [
@@ -2000,176 +2236,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         const SizedBox(height: 8),
 
         // Rating Card
-        Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [
-                Colors.amber.withValues(alpha: 0.1),
-                Colors.orange.withValues(alpha: 0.1),
-              ],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.amber.withValues(alpha: 0.2),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.star, color: Colors.amber, size: 28),
-              ),
-              const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Your Rating',
-                    style: TextStyle(fontSize: 14, color: Colors.grey),
-                  ),
-                  Row(
-                    children: [
-                      Text(
-                        _rating > 0 ? _rating.toStringAsFixed(1) : '0.0',
-                        style: const TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.amber,
-                        ),
-                      ),
-                      const SizedBox(width: 4),
-                      const Text(
-                        '/ 5.0',
-                        style: TextStyle(fontSize: 16, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.arrow_upward, color: Colors.green, size: 16),
-                    SizedBox(width: 4),
-                    Text(
-                      '12%',
-                      style: TextStyle(
-                        color: Colors.green,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+        _buildRatingCard(),
         const SizedBox(height: 16),
 
         // STATS CARDS - RESPONSIVE WITH SALON CURRENCY
-        if (_isTablet)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: _isLargeScreen ? 3 : 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.2,
-              children: [
-                DashboardStatCard(
-                  title: "Today's",
-                  value: '$_todaysAppointments',
-                  icon: Icons.calendar_today,
-                  color: Colors.blue,
-                  subtitle: '$_completedToday completed',
-                  onTap: _viewMySchedule,
-                ),
-                DashboardStatCard(
-                  title: 'Earnings',
-                  value: _formatPrice(_todayEarnings),
-                  iconText: _salonCurrencySymbol,
-                  color: Colors.green,
-                  subtitle:
-                      '${_getMonthName()}: ${_formatPrice(_monthlyEarnings)}',
-                  onTap: _viewTodayEarnings,
-                ),
-                DashboardStatCard(
-                  title: 'Total Customers',
-                  value: '$_totalCustomers',
-                  icon: Icons.people,
-                  color: Colors.teal,
-                  subtitle: 'All time',
-                  onTap: _viewMyCustomers,
-                ),
-              ],
-            ),
-          )
-        else
-          Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: DashboardStatCard(
-                        title: "Today's",
-                        value: '$_todaysAppointments',
-                        icon: Icons.calendar_today,
-                        color: Colors.blue,
-                        subtitle: '$_completedToday completed',
-                        onTap: _viewMySchedule,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: DashboardStatCard(
-                        title: 'Earnings',
-                        value: _formatPrice(_todayEarnings),
-                        iconText: _salonCurrencySymbol,
-                        color: Colors.green,
-                        subtitle:
-                            '${_getMonthName()}: ${_formatPrice(_monthlyEarnings)}',
-                        onTap: _viewTodayEarnings,
-                        hideIconTextOnMobile: true,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: DashboardStatCard(
-                  title: 'Total Customers Served',
-                  value: '$_totalCustomers',
-                  icon: Icons.people,
-                  color: Colors.teal,
-                  fullWidth: true,
-                  subtitle: 'All time',
-                  onTap: _viewMyCustomers,
-                ),
-              ),
-            ],
-          ),
+        _buildStatsSection(),
         const SizedBox(height: 16),
 
         // Quick Actions
@@ -2192,40 +2263,41 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         ),
         const SizedBox(height: 16),
 
-        // Today's Schedule
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                "Today's Schedule",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        // Today's Schedule header
+        // ✅ FIX: title is Expanded so the Row can never overflow
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  "Today's Schedule",
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GestureDetector(
+              const SizedBox(width: 8),
+              GestureDetector(
                 onTap: _viewUpcomingAppointments,
                 child: Text(
                   'View All',
+                  maxLines: 1,
                   style: TextStyle(
                     color: AppTheme.primary,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child:
-              _todaysAppointmentsList
-                  .where((a) => a['is_today'] == true)
-                  .isEmpty
+          child: todayList.isEmpty
               ? Container(
+                  width: double.infinity,
                   padding: const EdgeInsets.all(32),
                   decoration: BoxDecoration(
                     color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
@@ -2237,6 +2309,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                   child: Center(
                     child: Text(
                       'No appointments today',
+                      textAlign: TextAlign.center,
                       style: TextStyle(
                         color: isDark ? Colors.white60 : Colors.grey,
                       ),
@@ -2244,50 +2317,47 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                   ),
                 )
               : Column(
-                  children: _todaysAppointmentsList
-                      .where((a) => a['is_today'] == true)
-                      .map((apt) {
-                        Color statusColor;
-                        switch (apt['status']) {
-                          case 'completed':
-                            statusColor = Colors.green;
-                            break;
-                          case 'confirmed':
-                            statusColor = Colors.blue;
-                            break;
-                          case 'cancelled':
-                            statusColor = Colors.red;
-                            break;
-                          case 'no_show':
-                            statusColor = Colors.red;
-                            break;
-                          default:
-                            statusColor = Colors.orange;
-                        }
-                        return BookingTile(
-                          customerName: apt['customer_name'],
-                          serviceName: apt['service_name'],
-                          time: apt['start_time'],
-                          status: apt['status'],
-                          statusColor: statusColor,
-                          barberName: 'You',
-                          formattedPrice: _formatPrice(apt['price']),
-                          salonName: apt['salon_name'],
-                          isVip: apt['is_vip'] ?? false,
-                          queueNumber: apt['queue_number'],
-                          queueToken: apt['queue_token'],
-                          showActions: apt['status'] != 'completed',
-                          onTap: () =>
-                              _viewBookingDetails(apt['customer_name']),
-                        );
-                      })
-                      .toList(),
+                  children: todayList.map((apt) {
+                    Color statusColor;
+                    switch (apt['status']) {
+                      case 'completed':
+                        statusColor = Colors.green;
+                        break;
+                      case 'confirmed':
+                        statusColor = Colors.blue;
+                        break;
+                      case 'cancelled':
+                        statusColor = Colors.red;
+                        break;
+                      case 'no_show':
+                        statusColor = Colors.red;
+                        break;
+                      default:
+                        statusColor = Colors.orange;
+                    }
+                    return BookingTile(
+                      customerName: apt['customer_name'],
+                      serviceName: apt['service_name'],
+                      time: apt['start_time'],
+                      status: apt['status'],
+                      statusColor: statusColor,
+                      barberName: 'You',
+                      formattedPrice: _formatPrice(apt['price']),
+                      salonName: apt['salon_name'],
+                      isVip: apt['is_vip'] ?? false,
+                      queueNumber: apt['queue_number'],
+                      queueToken: apt['queue_token'],
+                      showActions: apt['status'] != 'completed',
+                      onTap: () => _viewBookingDetails(apt['customer_name']),
+                    );
+                  }).toList(),
                 ),
         ),
         const SizedBox(height: 16),
 
         // Performance Card
         Container(
+          width: double.infinity,
           margin: const EdgeInsets.all(16),
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -2302,6 +2372,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             children: [
               Text(
                 "Today's Performance",
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
@@ -2310,6 +2382,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               ),
               const SizedBox(height: 16),
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: _buildPerformanceItem(
