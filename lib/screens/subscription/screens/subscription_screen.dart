@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/screens/subscription/payment_history_screen.dart';
-import 'package:flutter_application_1/screens/subscription/plans_comparison_screen.dart';
+import 'package:flutter_application_1/screens/subscription/screens/payment_history_screen.dart';
+import 'package:flutter_application_1/screens/subscription/screens/plans_comparison_screen.dart';
 import 'package:provider/provider.dart';
-import '../../providers/subscription_provider.dart';
+import '../providers/subscription_provider.dart';
 
 class SubscriptionScreen extends StatefulWidget {
   final int salonId;

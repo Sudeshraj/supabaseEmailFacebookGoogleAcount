@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
-import '../../../providers/subscription_provider.dart';
+import '../providers/subscription_provider.dart';
 
 /// Where PayHere sends the user after the web *redirect* (hosted checkout)
 /// payment. Everything it needs is in the URL, so a full page reload is fine:

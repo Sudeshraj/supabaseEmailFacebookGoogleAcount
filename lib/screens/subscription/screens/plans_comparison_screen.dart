@@ -3,10 +3,10 @@ import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../models/subscription_plan.dart';
-import '../../providers/subscription_provider.dart';
-import '../../services/payment_service.dart';
-import '../../services/subscription_service.dart';
+import '../models/subscription_plan.dart';
+import '../providers/subscription_provider.dart';
+import '../services/payment_service.dart';
+import '../services/subscription_service.dart';
 import 'reduce_salons_screen.dart';
 
 // ============================================================

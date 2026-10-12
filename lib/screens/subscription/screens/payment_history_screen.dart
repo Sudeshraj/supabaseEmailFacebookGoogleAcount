@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../services/subscription_service.dart';
+import '../services/subscription_service.dart';
 
 class PaymentHistoryScreen extends StatefulWidget {
   final String ownerId;

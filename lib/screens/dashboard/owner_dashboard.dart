@@ -17,7 +17,7 @@ import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
 
-import '../../providers/subscription_provider.dart';
+import '../subscription/providers/subscription_provider.dart';
 import '../../services/session_manager.dart';
 
 final RouteObserver<ModalRoute<void>> routeObserver =

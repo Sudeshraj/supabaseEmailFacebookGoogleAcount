@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../../providers/subscription_provider.dart';
+import '../providers/subscription_provider.dart';
 
 /// Wrap any screen that requires a specific feature
 class FeatureLock extends StatelessWidget {
