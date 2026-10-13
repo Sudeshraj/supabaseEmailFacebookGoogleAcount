@@ -696,6 +696,11 @@ class _SideMenuState extends State<SideMenu> {
     final messenger = ScaffoldMessenger.of(context);
     final String newRole = profile['role'] as String;
 
+    // ✅ Tell the router to ignore role/route mismatches until we've
+    // finished navigating (see AppState.beginRoleSwitch / main.dart).
+    appState.beginRoleSwitch();
+    bool navigated = false;
+
     setState(() => _isLoading = true);
 
     try {
@@ -709,16 +714,16 @@ class _SideMenuState extends State<SideMenu> {
       await SessionManager.updateUserRole(newRole);
 
       // 2️⃣ ✅ Update AppState (memory + SharedPreferences) FIRST
-      await appState.setCurrentRole(newRole);
+      // Set the role WITHOUT notifying, navigate, then notify (see
+      // _createProfileDirectly for why).
+      await appState.setCurrentRoleSilently(newRole);
 
-      // Safety net: setCurrentRole() silently ignores roles that are
-      // not in appState.roles yet (stale list). Fall back to saving
-      // the role and reloading the state before we navigate.
+      // Safety net: ignored if the role isn't in appState.roles yet.
       if (appState.currentRole != newRole) {
         debugPrint('⚠️ AppState roles stale – forcing refresh');
         await SessionManager.saveCurrentRole(newRole);
         await appState.refreshState(silent: true);
-        await appState.setCurrentRole(newRole);
+        await appState.setCurrentRoleSilently(newRole);
       }
       debugPrint('✅ AppState currentRole = ${appState.currentRole}');
 
@@ -742,6 +747,8 @@ class _SideMenuState extends State<SideMenu> {
 
       // 4️⃣ Navigate. No Navigator.pop – go() replaces the stack.
       _goToRoleDashboard(router, newRole);
+      navigated = true;
+      appState.endRoleSwitchLater();
     } catch (e) {
       debugPrint('❌ Error switching profile: $e');
       messenger.showSnackBar(
@@ -751,6 +758,7 @@ class _SideMenuState extends State<SideMenu> {
         ),
       );
     } finally {
+      if (!navigated) appState.endRoleSwitch();
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -862,6 +870,9 @@ class _SideMenuState extends State<SideMenu> {
 
     // ✅ Capture router BEFORE any await
     final router = GoRouter.of(context);
+
+    appState.beginRoleSwitch();
+    bool navigated = false;
 
     setState(() => _isLoading = true);
 
@@ -1040,19 +1051,17 @@ class _SideMenuState extends State<SideMenu> {
         );
       }
 
-      // 3️⃣ Switch role (memory + prefs) and navigate right after –
-      // same flow as _switchProfile, so the router never sees a
-      // role/route mismatch.
-      await appState.setCurrentRole(role);
-      if (appState.currentRole != role) {
-        debugPrint('⚠️ AppState roles stale – forcing refresh');
-        await SessionManager.saveCurrentRole(role);
-        await appState.refreshState(silent: true);
-      }
+      // 3️⃣ Set the role WITHOUT notifying listeners, navigate, and
+      // only then notify. Notifying first makes GoRouter re-run its
+      // redirect on the OLD route (/barber) with the NEW role (owner)
+      // → /role-selector flash (visible on mobile).
+      await appState.setCurrentRoleSilently(role);
       debugPrint('✅ AppState currentRole = ${appState.currentRole}');
 
       debugPrint('🎯 Navigating directly to dashboard: $role');
       _goToRoleDashboard(router, role);
+      navigated = true;
+      appState.endRoleSwitchLater();
 
       // 4️⃣ Auth metadata in the background (non-blocking, no race).
       unawaited(() async {
@@ -1083,6 +1092,7 @@ class _SideMenuState extends State<SideMenu> {
         );
       }
     } finally {
+      if (!navigated) appState.endRoleSwitch();
       if (mounted) {
         setState(() => _isLoading = false);
       }

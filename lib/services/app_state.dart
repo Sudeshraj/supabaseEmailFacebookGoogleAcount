@@ -333,6 +333,8 @@ class AppState extends ChangeNotifier {
       _deletionRestoreDueDate = null;
       _deletionRestoreDaysRemaining = null;
       _pendingReactivation = false;
+      _switchingRole = false;
+      _profileCheckFailed = false;
       notifyListeners();
 
       developer.log('User logged out', name: 'AppState');
@@ -379,6 +381,8 @@ class AppState extends ChangeNotifier {
       _deletionRestoreDueDate = null;
       _deletionRestoreDaysRemaining = null;
       _pendingReactivation = false;
+      _switchingRole = false;
+      _profileCheckFailed = false;
       notifyListeners();
 
       developer.log('Quick-switch logout complete', name: 'AppState');
@@ -408,6 +412,67 @@ class AppState extends ChangeNotifier {
         name: 'AppState',
       );
     }
+  }
+
+  // ============================================================
+  // ✅ NEW: ROLE-SWITCH GUARD (used by SideMenu profile switch /
+  // create-profile flows)
+  // ------------------------------------------------------------
+  // GoRouter listens to this AppState (refreshListenable) and its
+  // redirect re-runs on EVERY notifyListeners(). While the user is
+  // still on the OLD dashboard (e.g. /barber) and currentRole has
+  // already changed to the NEW role (e.g. owner), the redirect sees
+  // "route role != current role but user has that role" and sends
+  // the user to /role-selector - the flash seen on mobile.
+  // While [switchingRole] is true, main.dart's redirect returns null.
+  // ============================================================
+  bool _switchingRole = false;
+  bool get switchingRole => _switchingRole;
+
+  // ============================================================
+  // ✅ NEW: PROFILE-CHECK-FAILED (offline / network error) flag
+  // ------------------------------------------------------------
+  // Previously ANY exception in _updateUserProfile() (e.g. no
+  // internet) wiped roles/currentRole and set profileCompleted =
+  // false, so the router sent a perfectly valid user to /reg.
+  // Now a failed check keeps the last known state and just raises
+  // this flag; it clears on the next successful check.
+  // ============================================================
+  bool _profileCheckFailed = false;
+  bool get profileCheckFailed => _profileCheckFailed;
+
+  /// Silent (no notify): router starts ignoring role/route mismatches.
+  void beginRoleSwitch() {
+    _switchingRole = true;
+  }
+
+  /// Ends the switch and notifies so the router re-validates the
+  /// (now correct) route.
+  void endRoleSwitch() {
+    if (!_switchingRole) return;
+    _switchingRole = false;
+    notifyListeners();
+  }
+
+  /// Ends the switch after navigation has had time to settle.
+  void endRoleSwitchLater() {
+    Future.delayed(const Duration(milliseconds: 800), endRoleSwitch);
+  }
+
+  /// Sets the current role in memory + SharedPreferences WITHOUT
+  /// notifying listeners. Call right before router.go(); the later
+  /// endRoleSwitch() notifies.
+  Future<void> setCurrentRoleSilently(String role) async {
+    if (!_roles.contains(role)) {
+      developer.log(
+        'Cannot set role: $role not in user roles',
+        name: 'AppState',
+      );
+      return;
+    }
+    _currentRole = role;
+    await SessionManager.saveCurrentRole(role);
+    developer.log('Current role set silently to: $role', name: 'AppState');
   }
 
   // ============================================================
@@ -764,6 +829,12 @@ Future<void> _checkAuthenticationState() async {
           .eq('user_id', user.id)
           .eq('status', 'active');
 
+      // ✅ Roles query succeeded → network is fine, clear the flag
+      if (_profileCheckFailed) {
+        _profileCheckFailed = false;
+        notifyListeners();
+      }
+
       // Extract role names from active roles only
       final List<String> roleNames = [];
       for (var roleEntry in userRolesResponse) {
@@ -919,11 +990,16 @@ Future<void> _checkAuthenticationState() async {
         name: 'AppState',
       );
     } catch (e) {
-      developer.log('Profile update error: $e', name: 'AppState');
-      _setProfileCompleted(false);
-      _setRoles([]);
-      _setCurrentRole(null);
-      _setLoginProvider(null);
+      // ✅ FIX: do NOT wipe roles / currentRole / profileCompleted on an
+      // error. The usual cause is a temporary network failure, and
+      // wiping made the router redirect to /reg ("profile not
+      // completed") even though the profile is fine. Keep the last
+      // known state and flag the failure instead.
+      developer.log('Profile update error (state kept): $e', name: 'AppState');
+      if (!_profileCheckFailed) {
+        _profileCheckFailed = true;
+        notifyListeners();
+      }
     }
   }
 
@@ -1057,6 +1133,8 @@ Future<void> _checkAuthenticationState() async {
     _deletionRestoreDueDate = null;
     _deletionRestoreDaysRemaining = null;
     _pendingReactivation = false;
+    _switchingRole = false;
+    _profileCheckFailed = false;
     notifyListeners();
   }
 

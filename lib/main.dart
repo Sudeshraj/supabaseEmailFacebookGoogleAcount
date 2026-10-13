@@ -746,11 +746,31 @@ GoRouter _createRouter() {
         return null;
       }
 
+      // 2A. ROLE SWITCH IN PROGRESS - don't flag role/route mismatch
+      if (appState.switchingRole) {
+        debugPrint('🔄 Role switch in progress - no redirect');
+        return null;
+      }
+
       // ============================================
       // 2. APPSTATE LOADING - Wait
       // ============================================
       if (appState.loading) {
         debugPrint('⏳ AppState loading - no redirect');
+        return null;
+      }
+
+      // ============================================
+      // 2A-2. PROFILE CHECK FAILED (offline / network error)
+      // The profile could not be verified, NOT "incomplete". Stay on the
+      // current screen instead of sending a valid user to /reg. Once the
+      // network is back, refreshState() clears the flag and the router
+      // re-validates automatically.
+      // ============================================
+      if (appState.loggedIn &&
+          appState.profileCheckFailed &&
+          !appState.profileCompleted) {
+        debugPrint('📴 Profile check failed (offline?) - staying put');
         return null;
       }
 
@@ -1719,7 +1739,15 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void _initNetworkMonitoring() {
     _networkService = NetworkService();
     _networkSub = _networkService.onStatusChange.listen((online) {
+      debugPrint('🌐 MyApp network listener: online=$online');
+      final wasOffline = _offline;
       if (mounted) setState(() => _offline = !online);
+      // ✅ Only on an OFFLINE → ONLINE transition: re-verify the profile so
+      // a failed check (and the frozen router) recovers without
+      // restarting the app. (Never on every status tick.)
+      if (online && wasOffline) {
+        appState.refreshState(silent: true);
+      }
     });
   }
 
