@@ -194,10 +194,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   bool get _currencyUsesDecimals =>
       _currencyService.getInfo(_salonCurrencyCode).decimals > 0;
 
-  // ✅ NEW: Price hint for input field
   String get _salonPriceHint => _currencyService.getHint(_salonCurrencyCode);
 
-  // ✅ NEW: Example prices for hierarchy guide card
   String get _examplePrice {
     if (_currencyUsesDecimals) {
       return '$_salonCurrencySymbol${15.00}';
@@ -246,9 +244,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   void _onVariantFieldChanged() {
+    if (!mounted) return;
     _validatePrice();
     _validateDuration();
-    if (mounted) setState(() {});
   }
 
   @override
@@ -273,7 +271,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
-  // CURRENCY LOADING
+  // ✅ CURRENCY LOADING
   // ============================================
   Future<void> _loadSalonCurrency() async {
     try {
@@ -281,12 +279,16 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .from('salons')
           .select('currency_code')
           .eq('id', widget.salonId)
-          .single();
+          .maybeSingle();
 
       if (!mounted) return;
-      setState(() {
-        _salonCurrencyCode = response['currency_code'] as String? ?? 'LKR';
-      });
+
+      if (response != null) {
+        final currency = response['currency_code'] as String?;
+        if (currency != null && currency.isNotEmpty) {
+          setState(() => _salonCurrencyCode = currency);
+        }
+      }
 
       debugPrint('✅ Salon currency loaded: $_salonCurrencyCode');
     } catch (e) {
@@ -300,11 +302,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   void _validateServiceName() {
     final String name = _serviceNameController.text.trim();
     if (name.isEmpty) {
-      setState(() => _serviceNameError = null);
+      if (mounted) setState(() => _serviceNameError = null);
       return;
     }
     if (widget.isEditing && widget.serviceId != null) {
-      setState(() => _serviceNameError = null);
+      if (mounted) setState(() => _serviceNameError = null);
       return;
     }
     final bool exists = _addedServices.asMap().entries.any(
@@ -312,17 +314,19 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           e.value['name'].toString().toLowerCase() == name.toLowerCase() &&
           e.key != _editingServiceIndex,
     );
-    setState(() {
-      _serviceNameError = exists
-          ? 'A service with this name already exists'
-          : null;
-    });
+    if (mounted) {
+      setState(() {
+        _serviceNameError = exists
+            ? 'A service with this name already exists'
+            : null;
+      });
+    }
   }
 
   void _validateCategoryName() {
     final String name = _newCategoryNameController.text.trim();
     if (name.isEmpty) {
-      setState(() => _categoryNameError = null);
+      if (mounted) setState(() => _categoryNameError = null);
       return;
     }
     final bool exists = _categories.any(
@@ -330,14 +334,17 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           c['display_name'].toString().toLowerCase() == name.toLowerCase() &&
           c['id'] != _editingCategoryId,
     );
-    setState(() {
-      _categoryNameError = exists
-          ? 'A category with this name already exists'
-          : null;
-    });
+    if (mounted) {
+      setState(() {
+        _categoryNameError = exists
+            ? 'A category with this name already exists'
+            : null;
+      });
+    }
   }
 
   void _validateAgeFields() {
+    if (!mounted) return;
     setState(() {
       final name = _ageDisplayNameController.text.trim();
       if (name.isEmpty) {
@@ -382,48 +389,51 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   void _validatePrice() {
     final String priceText = _variantPriceController.text.trim();
     if (priceText.isEmpty) {
-      setState(() => _priceError = null);
+      if (mounted) setState(() => _priceError = null);
       return;
     }
 
     final double? price = double.tryParse(priceText);
     if (price == null) {
-      setState(() => _priceError = 'Please enter a valid number');
+      if (mounted) setState(() => _priceError = 'Please enter a valid number');
       return;
     }
     if (price < 0) {
-      setState(() => _priceError = 'Price cannot be negative');
+      if (mounted) setState(() => _priceError = 'Price cannot be negative');
       return;
     }
 
-    // ✅ Currency-aware decimal validation
     if (!_currencyUsesDecimals && priceText.contains('.')) {
       final decimalPart = priceText.split('.').last;
       if (decimalPart.isNotEmpty && int.tryParse(decimalPart) != 0) {
-        setState(() {
-          _priceError = '$_salonCurrencyCode does not use decimals';
-        });
+        if (mounted) {
+          setState(() {
+            _priceError = '$_salonCurrencyCode does not use decimals';
+          });
+        }
         return;
       }
     }
 
-    setState(() => _priceError = null);
+    if (mounted) setState(() => _priceError = null);
   }
 
   void _validateDuration() {
     final String durationText = _variantDurationController.text.trim();
     if (durationText.isEmpty) {
-      setState(() => _durationError = null);
+      if (mounted) setState(() => _durationError = null);
       return;
     }
 
     final int? duration = int.tryParse(durationText);
-    if (duration == null) {
-      setState(() => _durationError = 'Please enter a valid number');
-    } else if (duration <= 0) {
-      setState(() => _durationError = 'Duration must be greater than 0');
-    } else {
-      setState(() => _durationError = null);
+    if (mounted) {
+      if (duration == null) {
+        setState(() => _durationError = 'Please enter a valid number');
+      } else if (duration <= 0) {
+        setState(() => _durationError = 'Duration must be greater than 0');
+      } else {
+        setState(() => _durationError = null);
+      }
     }
   }
 
@@ -431,7 +441,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   // DATA LOADING
   // ============================================
   Future<void> _loadData() async {
-    setState(() => _isLoadingData = true);
+    if (mounted) setState(() => _isLoadingData = true);
 
     try {
       final categoriesResponse = await supabase
@@ -476,6 +486,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         debugPrint('Could not load global categories: $e');
       }
 
+      if (!mounted) return;
       setState(() {
         _categories = List<Map<String, dynamic>>.from(categoriesResponse);
         _ageCategories = List<Map<String, dynamic>>.from(ageResponse);
@@ -499,13 +510,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       if (widget.isEditing && widget.serviceId != null) {
         await _loadServiceForEdit();
       }
-
-      setState(() => _isLoadingData = false);
     } catch (e) {
-      setState(() => _isLoadingData = false);
+      debugPrint('Error loading data: $e');
       if (mounted) {
         _showSnackBar('Error loading data: $e', Colors.red);
       }
+    } finally {
+      if (mounted) setState(() => _isLoadingData = false);
     }
   }
 
@@ -608,6 +619,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         });
       }
 
+      if (!mounted) return;
       setState(() {
         for (var s in uniqueServices) {
           final sid = s['id'] as int;
@@ -696,6 +708,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         });
       }
 
+      if (!mounted) return;
       setState(() {
         _addedServices.removeWhere((s) => s['id'] == widget.serviceId);
         _addedServices.insert(0, {
@@ -723,11 +736,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   Future<void> _loadVariantsForService(int serviceIndex) async {
+    if (serviceIndex >= _addedServices.length) return;
+
     final service = _addedServices[serviceIndex];
     final serviceId = service['id'];
     if (serviceId == null) return;
 
-    setState(() => _isLoadingVariants = true);
+    if (mounted) setState(() => _isLoadingVariants = true);
     try {
       final variantsResponse = await supabase
           .from('service_variants')
@@ -782,6 +797,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         });
       }
 
+      if (!mounted) return;
       setState(() {
         service['variants'] = loaded;
       });
@@ -820,7 +836,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     }
   }
 
+  /// ✅ FIX: Use index loop instead of `variants.indexOf(v)`
   bool _isVariantDuplicate(int serviceIndex) {
+    if (serviceIndex >= _addedServices.length) return false;
+
     final service = _addedServices[serviceIndex];
     final variants = service['variants'] as List;
 
@@ -829,22 +848,21 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     final newDuration =
         int.tryParse(_variantDurationController.text.trim()) ?? 0;
 
-    return variants.any((v) {
-      if (_editingVariantIndex >= 0 &&
-          variants.indexOf(v) == _editingVariantIndex) {
-        return false;
-      }
+    for (int i = 0; i < variants.length; i++) {
+      // Skip the variant being edited
+      if (_editingVariantIndex >= 0 && i == _editingVariantIndex) continue;
 
+      final v = variants[i];
       final sameGender = (v['gender_id'] as int?) == newGenderId;
       final sameAge = (v['age_category_id'] as int?) == newAgeId;
       final sameDuration =
           ((v['duration'] as num?)?.toInt() ?? 0) == newDuration;
 
-      return sameGender && sameAge && sameDuration;
-    });
+      if (sameGender && sameAge && sameDuration) return true;
+    }
+    return false;
   }
 
-  // ✅ Format price for display (currency-aware)
   String _formatPriceDisplay(Map<String, dynamic> v) {
     final priceSet = v['price_set'] == true;
     final price = (v['price'] as num?)?.toDouble() ?? 0.0;
@@ -879,7 +897,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return;
     }
 
-    setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
     try {
       final data = {
         'salon_id': widget.salonId,
@@ -898,6 +916,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             .update(data)
             .eq('id', _editingCategoryId!);
 
+        if (!mounted) return;
         setState(() {
           final idx = _categories.indexWhere(
             (c) => c['id'] == _editingCategoryId,
@@ -921,6 +940,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             .select()
             .single();
 
+        if (!mounted) return;
         setState(() {
           _categories.add(Map<String, dynamic>.from(inserted));
           _selectedCategoryId = inserted['id'] as int;
@@ -932,7 +952,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         });
       }
     } catch (e) {
-      _showSnackBar('Error saving category: $e', Colors.red);
+      if (mounted) _showSnackBar('Error saving category: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -963,6 +983,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   Future<void> _deleteCategory(int index) async {
+    if (index >= _categories.length) return;
+
     final cat = _categories[index];
     final catId = cat['id'] as int?;
     final catName = cat['display_name'] ?? '';
@@ -974,37 +996,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
 
     if (confirmed != true) return;
+    if (!mounted) return;
 
     setState(() => _isLoading = true);
     try {
       if (catId != null) {
-        final servicesToDelete = _addedServices
-            .where((s) => s['category_id'] == catId)
-            .toList();
-
-        for (final svc in servicesToDelete) {
-          final svcId = svc['id'] as int?;
-          if (svcId != null) {
-            try {
-              await supabase
-                  .from('service_variants')
-                  .delete()
-                  .eq('service_id', svcId);
-            } catch (_) {}
-            try {
-              await supabase
-                  .from('barber_services')
-                  .delete()
-                  .eq('service_id', svcId);
-            } catch (_) {}
-            try {
-              await supabase.from('services').delete().eq('id', svcId);
-            } catch (_) {}
-          }
-        }
-
         await supabase.from('salon_categories').delete().eq('id', catId);
 
+        if (!mounted) return;
         setState(() {
           _categories.removeAt(index);
           _addedServices.removeWhere((s) => s['category_id'] == catId);
@@ -1021,7 +1020,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         });
       }
     } catch (e) {
-      _showSnackBar('Error deleting category: $e', Colors.red);
+      if (mounted) _showSnackBar('Error deleting category: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -1036,8 +1035,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           selected['display_name']?.toString() ?? '';
       _ageMinController.text = (selected['min_age'] ?? 0).toString();
       _ageMaxController.text = (selected['max_age'] ?? 100).toString();
-      _validateAgeFields();
     });
+    _validateAgeFields();
   }
 
   Future<void> _addAgeCategoryDirect() async {
@@ -1068,7 +1067,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return;
     }
 
-    setState(() => _isAddingAgeCategory = true);
+    if (mounted) setState(() => _isAddingAgeCategory = true);
 
     try {
       final insertData = {
@@ -1086,6 +1085,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           .select()
           .single();
 
+      if (!mounted) return;
       setState(() {
         _ageCategories.add(Map<String, dynamic>.from(inserted));
         _selectedAgeCategoryId = inserted['id'] as int;
@@ -1098,7 +1098,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         _ageMaxError = null;
       });
     } catch (e) {
-      _showSnackBar('Error adding age category: $e', Colors.red);
+      if (mounted) _showSnackBar('Error adding age category: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isAddingAgeCategory = false);
     }
@@ -1162,6 +1162,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   void _editAddedService(int index) {
+    if (index >= _addedServices.length) return;
+
     final service = _addedServices[index];
     setState(() {
       _editingServiceIndex = index;
@@ -1184,6 +1186,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   void _removeAddedService(int index) {
+    if (index >= _addedServices.length) return;
+
     final wasFromDb = _addedServices[index]['from_db'] == true;
     final serviceId = _addedServices[index]['id'];
     final serviceName = _addedServices[index]['name'];
@@ -1220,23 +1224,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
 
     if (confirmed != true) return;
+    if (!mounted) return;
 
     setState(() => _isLoading = true);
     try {
-      await supabase
-          .from('service_variants')
-          .delete()
-          .eq('service_id', serviceId);
-
-      try {
-        await supabase
-            .from('barber_services')
-            .delete()
-            .eq('service_id', serviceId);
-      } catch (_) {}
-
       await supabase.from('services').delete().eq('id', serviceId);
 
+      if (!mounted) return;
       setState(() {
         _addedServices.removeAt(localIndex);
         _dbServiceIds.remove(serviceId);
@@ -1248,7 +1242,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
       _showSnackBar('Service removed from salon', Colors.orange);
     } catch (e) {
-      _showSnackBar('Error removing service: $e', Colors.red);
+      if (mounted) _showSnackBar('Error removing service: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -1317,7 +1311,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     final genderName = _genderNameFromId(_selectedGenderId);
     final ageName = _selectedAgeCategoryId != null
         ? _getAgeCategoryDisplayName(
-            _ageCategories.firstWhere((a) => a['id'] == _selectedAgeCategoryId),
+            _ageCategories.firstWhere(
+              (a) => a['id'] == _selectedAgeCategoryId,
+              orElse: () => {'display_name': 'Any', 'min_age': 0, 'max_age': 0},
+            ),
           )
         : 'Any';
 
@@ -1366,8 +1363,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   void _editVariant(int serviceIndex, int variantIndex) {
+    if (serviceIndex >= _addedServices.length) return;
+
     final service = _addedServices[serviceIndex];
-    final v = (service['variants'] as List)[variantIndex];
+    final variants = service['variants'] as List;
+    if (variantIndex >= variants.length) return;
+
+    final v = variants[variantIndex];
 
     setState(() {
       _variantTargetServiceIndex = serviceIndex;
@@ -1414,8 +1416,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   void _removeVariant(int serviceIndex, int variantIndex) {
+    if (serviceIndex >= _addedServices.length) return;
+
     final service = _addedServices[serviceIndex];
-    final variant = (service['variants'] as List)[variantIndex];
+    final variants = service['variants'] as List;
+    if (variantIndex >= variants.length) return;
+
+    final variant = variants[variantIndex];
 
     if (variant['from_db'] == true && variant['variant_id'] != null) {
       _confirmRemoveDbVariant(
@@ -1425,7 +1432,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       );
     } else {
       setState(() {
-        (service['variants'] as List).removeAt(variantIndex);
+        variants.removeAt(variantIndex);
       });
     }
   }
@@ -1440,18 +1447,24 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       message: 'This will permanently remove this variant from the salon.',
     );
 
-    if (confirmed == true) {
+    if (confirmed == true && mounted) {
       setState(() => _isLoading = true);
       try {
         await supabase.from('service_variants').delete().eq('id', variantId);
 
+        if (!mounted) return;
         setState(() {
-          final service = _addedServices[serviceIndex];
-          (service['variants'] as List).removeAt(variantIndex);
+          if (serviceIndex < _addedServices.length) {
+            final service = _addedServices[serviceIndex];
+            final variants = service['variants'] as List;
+            if (variantIndex < variants.length) {
+              variants.removeAt(variantIndex);
+            }
+          }
         });
         _showSnackBar('Variant removed', Colors.orange);
       } catch (e) {
-        _showSnackBar('Error removing variant: $e', Colors.red);
+        if (mounted) _showSnackBar('Error removing variant: $e', Colors.red);
       } finally {
         if (mounted) setState(() => _isLoading = false);
       }
@@ -1464,7 +1477,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }) {
     return showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
@@ -1480,11 +1493,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
@@ -1529,7 +1542,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }) {
     return showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
@@ -1545,11 +1558,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
@@ -1561,6 +1574,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
+  /// ✅ FIX: Removed unused `toInsertKeys` variable
   Future<Map<String, int>> _ensureSalonGenders() async {
     final Map<String, int> byNameLower = {};
 
@@ -1575,26 +1589,34 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     }
 
     int nextOrder = existing.length;
+    final List<Map<String, dynamic>> toInsert = [];
+
     for (final hg in _hardcodedGenders) {
       final name = (hg['display_name'] as String).trim();
       final key = name.toLowerCase();
       if (byNameLower.containsKey(key)) continue;
 
+      toInsert.add({
+        'salon_id': widget.salonId,
+        'display_name': name,
+        'display_order': nextOrder++,
+        'is_active': true,
+      });
+    }
+
+    if (toInsert.isNotEmpty) {
       try {
         final inserted = await supabase
             .from('salon_genders')
-            .insert({
-              'salon_id': widget.salonId,
-              'display_name': name,
-              'display_order': nextOrder,
-              'is_active': true,
-            })
-            .select('id')
-            .single();
-        byNameLower[key] = inserted['id'] as int;
-        nextOrder++;
+            .insert(toInsert)
+            .select('id, display_name');
+
+        for (var row in inserted) {
+          final name = (row['display_name'] ?? '').toString();
+          byNameLower[name.trim().toLowerCase()] = row['id'] as int;
+        }
       } catch (e) {
-        debugPrint('Could not insert salon gender "$name": $e');
+        debugPrint('Could not bulk insert salon genders: $e');
       }
     }
 
@@ -1602,7 +1624,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   Future<void> _performSaveAllServices() async {
-    setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
 
     try {
       if (widget.salonBarberId != null) {
@@ -1619,7 +1641,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             'This barber account is not active. Please reactivate the barber first.',
             Colors.orange,
           );
-          setState(() => _isLoading = false);
+          if (mounted) setState(() => _isLoading = false);
           return;
         }
       }
@@ -1735,53 +1757,53 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           }
         }
 
+        // Bulk insert variants
         final variants = service['variants'] as List;
-        for (final v in variants) {
-          final genderName = (v['gender_name'] as String? ?? 'Any').trim();
-          final genderKey = genderName.toLowerCase();
-          final resolvedGenderId = genderName == 'Any'
-              ? null
-              : genderIdByNameLower[genderKey];
-
-          final variantData = {
-            'service_id': serviceId,
-            'salon_gender_id': resolvedGenderId,
-            'salon_age_category_id': v['age_category_id'],
-            'price': v['price_set'] == true ? v['price'] : null,
-            'duration': ((v['duration'] as num?)?.toInt() ?? 0) == 0
+        if (variants.isNotEmpty) {
+          final List<Map<String, dynamic>> variantDataList = [];
+          for (final v in variants) {
+            final genderName = (v['gender_name'] as String? ?? 'Any').trim();
+            final genderKey = genderName.toLowerCase();
+            final resolvedGenderId = genderName == 'Any'
                 ? null
-                : v['duration'],
-            'is_active': true,
-          };
+                : genderIdByNameLower[genderKey];
 
-          final variantResponse = await supabase
+            variantDataList.add({
+              'service_id': serviceId,
+              'salon_gender_id': resolvedGenderId,
+              'salon_age_category_id': v['age_category_id'],
+              'price': v['price_set'] == true ? v['price'] : null,
+              'duration': ((v['duration'] as num?)?.toInt() ?? 0) == 0
+                  ? null
+                  : v['duration'],
+              'is_active': true,
+            });
+          }
+
+          final insertedVariants = await supabase
               .from('service_variants')
-              .insert(variantData)
-              .select()
-              .single();
-          final variantId = variantResponse['id'];
+              .insert(variantDataList)
+              .select('id');
 
           if (widget.salonBarberId != null) {
-            final existing = await supabase
-                .from('barber_services')
-                .select()
-                .eq('salon_barber_id', widget.salonBarberId!)
-                .eq('service_id', serviceId)
-                .eq('variant_id', variantId)
-                .maybeSingle();
-
-            if (existing == null) {
-              await supabase.from('barber_services').insert({
+            final List<Map<String, dynamic>> barberServiceData = [];
+            for (
+              int i = 0;
+              i < insertedVariants.length && i < variants.length;
+              i++
+            ) {
+              barberServiceData.add({
                 'salon_barber_id': widget.salonBarberId!,
                 'service_id': serviceId,
-                'variant_id': variantId,
-                'custom_price': v['price'],
+                'variant_id': insertedVariants[i]['id'],
+                'custom_price': variants[i]['price'],
               });
             }
+            if (barberServiceData.isNotEmpty) {
+              await supabase.from('barber_services').insert(barberServiceData);
+            }
           }
-        }
-
-        if (variants.isEmpty && widget.salonBarberId != null) {
+        } else if (widget.salonBarberId != null) {
           final existing = await supabase
               .from('barber_services')
               .select()
@@ -1964,7 +1986,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
-  // ✅ HIERARCHY GUIDE (FIXED - NO HARDCODED "Rs.")
+  // HIERARCHY GUIDE
   // ============================================
   Widget _buildHierarchyGuideCard() {
     final isDark = _isDark;
@@ -2119,7 +2141,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          // ✅ DYNAMIC CURRENCY
                           'Male • Adult   $_examplePrice • 30 min',
                           style: TextStyle(
                             fontSize: 11,
@@ -2130,7 +2151,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                       ),
                     ],
                   ),
-
                   Padding(
                     padding: const EdgeInsets.only(left: 20, top: 2),
                     child: Row(
@@ -2147,7 +2167,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            // ✅ DYNAMIC CURRENCY
                             'Female • Child  $_examplePriceFemale • 45 min',
                             style: TextStyle(
                               fontSize: 11,
@@ -2232,7 +2251,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            // ✅ DYNAMIC CURRENCY
                             'Male • Child  $_examplePriceChild • 10 min',
                             style: TextStyle(
                               fontSize: 11,
@@ -2276,7 +2294,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   // ============================================
-  // CATEGORY NAME — Autocomplete suggestions
+  // CATEGORY NAME — Autocomplete
+  // ✅ FIX: Removed addListener inside fieldViewBuilder (memory leak)
   // ============================================
   Widget _buildCategoryNameSuggestionField() {
     final isDark = _isDark;
@@ -2318,14 +2337,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         },
         fieldViewBuilder:
             (context, textController, focusNode, onFieldSubmitted) {
+              // ✅ Sync one-time (no listener accumulation)
               if (textController.text != _newCategoryNameController.text) {
                 textController.text = _newCategoryNameController.text;
               }
-              _newCategoryNameController.addListener(() {
-                if (textController.text != _newCategoryNameController.text) {
-                  textController.text = _newCategoryNameController.text;
-                }
-              });
 
               return TextFormField(
                 controller: textController,
@@ -2848,12 +2863,13 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           children: _categoryColorOptions.map((opt) {
             final isSelected = _selectedCategoryColor == opt['hex'];
             return GestureDetector(
-              onTap: () => setState(() => _selectedCategoryColor = opt['hex']),
+              onTap: () =>
+                  setState(() => _selectedCategoryColor = opt['hex'] as String),
               child: Container(
                 width: 26,
                 height: 26,
                 decoration: BoxDecoration(
-                  color: opt['color'],
+                  color: opt['color'] as Color,
                   shape: BoxShape.circle,
                   border: isSelected
                       ? Border.all(color: Colors.white, width: 2)
@@ -2882,7 +2898,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   Color _hexToColor(String hex) {
     if (hex.startsWith('#')) {
-      return Color(int.parse('0xFF${hex.substring(1)}'));
+      try {
+        return Color(int.parse('0xFF${hex.substring(1)}'));
+      } catch (_) {
+        return AppTheme.primary;
+      }
     }
     return AppTheme.primary;
   }
@@ -3517,7 +3537,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       );
     }
 
-    final selectedService = _variantTargetServiceIndex != null
+    final selectedService =
+        _variantTargetServiceIndex != null &&
+            _variantTargetServiceIndex! < _addedServices.length
         ? _addedServices[_variantTargetServiceIndex!]
         : null;
     final variants = selectedService != null
@@ -3656,7 +3678,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 _priceExpanded = false;
               });
 
-              if (v != null) {
+              if (v != null && v < _addedServices.length) {
                 final svc = _addedServices[v];
                 if (svc['from_db'] == true && svc['id'] != null) {
                   await _loadVariantsForService(v);
@@ -3747,7 +3769,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             ),
             const SizedBox(height: 8),
 
-            // ✅ PRICE HEADER - Dynamic currency
             _buildExpandableHeader(
               title: 'Price',
               icon: Icons.attach_money,
@@ -4804,6 +4825,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
   // ============================================
   // AGE TYPING FORM
+  // ✅ FIX: Removed addListener inside fieldViewBuilder (memory leak)
   // ============================================
   Widget _buildAgeTypingForm() {
     final isDark = _isDark;
@@ -5077,6 +5099,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
+  /// ✅ FIX: Removed addListener inside fieldViewBuilder (memory leak)
   Widget _buildAgeNameSuggestionField() {
     final isDark = _isDark;
 
@@ -5106,14 +5129,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         }
       },
       fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
+        // ✅ Sync one-time (no listener accumulation)
         if (textController.text != _ageDisplayNameController.text) {
           textController.text = _ageDisplayNameController.text;
         }
-        _ageDisplayNameController.addListener(() {
-          if (textController.text != _ageDisplayNameController.text) {
-            textController.text = _ageDisplayNameController.text;
-          }
-        });
 
         return TextFormField(
           controller: textController,
@@ -5200,7 +5219,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
-  // ✅ PRICE FIELD - Dynamic currency + hint
   Widget _buildPriceField() {
     final isDark = _isDark;
     return TextFormField(

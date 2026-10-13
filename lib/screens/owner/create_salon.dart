@@ -6,7 +6,7 @@ import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/alertBox/time_picker_dialog.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
-import 'package:go_router/go_router.dart';                                    // ✅ NEW
+import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -29,13 +29,22 @@ class CreateSalonScreen extends StatefulWidget {
   State<CreateSalonScreen> createState() => _CreateSalonScreenState();
 }
 
-class _CreateSalonScreenState extends State<CreateSalonScreen> {
+class _CreateSalonScreenState extends State<CreateSalonScreen>
+    with WidgetsBindingObserver {
+  // ==================== ✅ CONSTANTS ====================
+  // DB default timezone (salons table default 'Asia/Colombo')
+  // Used as fallback when:
+  //   1. User timezone is empty
+  //   2. Timezone initialization fails
+  //   3. Salon timezone is empty (display)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
   // ==================== STEP MANAGEMENT ====================
   int _currentStep = 0;
   int _furthestStep = 0;
   static const int _totalSteps = 3;
 
-  // Basic info controllers
+  // ==================== CONTROLLERS ====================
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
@@ -54,7 +63,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   bool _isUploadingLogo = false;
   bool _isUploadingCover = false;
 
-  // ==================== TIMEZONE RELATED VARIABLES ====================
+  // ==================== TIMEZONE VARIABLES ====================
   String _openTimeUtc = '';
   String _closeTimeUtc = '';
   TimeOfDay _openTimeLocal = const TimeOfDay(hour: 9, minute: 0);
@@ -64,11 +73,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   bool _isTimezoneLoaded = false;
   bool _isLoading = false;
 
-  // ==================== ✅ PLAN LIMIT CHECK ====================
+  // ==================== PLAN LIMIT ====================
   bool isPlanLimitChecked = false;
   bool canCreateSalon = true;
 
-  // ==================== CURRENCY RELATED VARIABLES ====================
+  // ==================== CURRENCY VARIABLES ====================
   String _salonCurrencyCode = 'LKR';
   String _salonCurrencySymbol = 'Rs.';
 
@@ -101,21 +110,65 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
+  // ============================================================
+  // ✅ TIMEZONE HELPERS
+  // ============================================================
+
+  /// Salon timezone display (NOT user timezone)
+  /// Uses _kDefaultSalonTimezone as fallback
   String _getTimezoneDisplay() {
-    if (_salonTimezone.isEmpty) {
-      return 'Loading timezone...';
-    }
-    return TimezoneService.getFullTimezoneDisplay();
+    final tz = _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
+    return TimezoneService.getFullTimezoneDisplayFor(tz);
   }
 
+  /// User timezone display (for reference)
+  String _getUserTimezoneDisplay() {
+    if (_userTimezone.isEmpty) return '';
+    return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
+  }
+
+  /// Check if salon and user timezones differ
+  bool get _isSameTimezone {
+    if (_salonTimezone.isEmpty || _userTimezone.isEmpty) return true;
+    return _salonTimezone == _userTimezone;
+  }
+
+  /// Convert a TimeOfDay from salon timezone to user timezone
+  TimeOfDay _convertSalonTimeToUserTime(TimeOfDay salonTime) {
+    if (_isSameTimezone) return salonTime;
+    try {
+      return TimezoneService.convertTimeOfDayBetweenTimezones(
+        salonTime,
+        fromTimezone: _salonTimezone,
+        toTimezone: _userTimezone,
+      );
+    } catch (e) {
+      debugPrint('❌ Error in _convertSalonTimeToUserTime: $e');
+      return salonTime;
+    }
+  }
+
+  /// Format TimeOfDay for display (e.g., "9:30 AM")
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour =
+        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
+  // ============================================================
+  // LIFECYCLE
+  // ============================================================
   @override
   void initState() {
     super.initState();
+    // ✅ FIX: Add observer to detect app resume (timezone changes)
+    WidgetsBinding.instance.addObserver(this);
+
     _initializeWithTimezone();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkTimezoneChanges();
-      // ✅ NEW: Check plan limit on screen load
       _checkPlanLimit();
     });
   }
@@ -127,12 +180,30 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     _isDark = context.isDarkMode;
   }
 
-  // ============================================================
-  // ✅ NEW: PLAN LIMIT CHECK
-  // ============================================================
+  // ✅ FIX: Check timezone changes on app resume
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _checkTimezoneChanges();
+    }
+  }
 
-  /// Check if the owner can create a salon based on their plan.
-  /// If they cannot, a dialog is shown and the screen is popped.
+  @override
+  void dispose() {
+    // ✅ FIX: Remove observer
+    WidgetsBinding.instance.removeObserver(this);
+
+    _nameController.dispose();
+    _addressController.dispose();
+    _phoneController.dispose();
+    _emailController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  // ============================================================
+  // ✅ PLAN LIMIT CHECK
+  // ============================================================
   Future<void> _checkPlanLimit() async {
     if (!mounted) return;
 
@@ -169,7 +240,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       }
     } catch (e) {
       debugPrint('❌ Error checking plan limit: $e');
-      // On error, allow (DB trigger will enforce server-side)
       if (mounted) {
         setState(() {
           isPlanLimitChecked = true;
@@ -179,7 +249,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  /// Show "Salon Limit Reached" dialog and pop the screen when dismissed.
   Future<void> _showLimitReachedDialog({
     required int currentSalons,
     required int maxSalons,
@@ -294,7 +363,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     if (!mounted) return;
 
     if (action == 'upgrade' && userId != null) {
-      // Find owner's first active salon to pass to plans screen
       try {
         final salonResponse = await supabase
             .from('salons')
@@ -314,7 +382,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         }
 
         final salonId = salonResponse['id'] as int;
-        // Pop create salon screen first, then push plans
         Navigator.pop(context);
         context.pushNamed(
           'subscription_plans',
@@ -326,72 +393,109 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       }
     }
 
-    // Default: pop create salon screen
     if (mounted) Navigator.pop(context);
   }
 
+  // ============================================================
+  // ✅ TIMEZONE INITIALIZATION
+  // ============================================================
   Future<void> _initializeWithTimezone() async {
-    await TimezoneService.initialize();
+    try {
+      await TimezoneService.initialize();
 
-    final prefs = await SharedPreferences.getInstance();
+      final prefs = await SharedPreferences.getInstance();
 
-    String cachedUserTimezone =
-        prefs.getString(TimezoneService.kUserTimezone) ?? '';
+      // ✅ User timezone load (priority: user setting → service)
+      final cachedUserTimezone =
+          prefs.getString(TimezoneService.kUserTimezone) ?? '';
 
-    if (cachedUserTimezone.isNotEmpty) {
-      _userTimezone = cachedUserTimezone;
-      await TimezoneService.setTimezone(_userTimezone);
-      debugPrint('✅ Timezone from USER SETTING: $_userTimezone');
-    } else {
-      _userTimezone = TimezoneService.getCurrentTimezone();
-      await prefs.setString(TimezoneService.kUserTimezone, _userTimezone);
-      debugPrint('✅ Timezone from SERVICE (first time): $_userTimezone');
+      if (cachedUserTimezone.isNotEmpty) {
+        _userTimezone = cachedUserTimezone;
+        await TimezoneService.setTimezone(_userTimezone);
+        debugPrint('✅ User timezone from SETTING: $_userTimezone');
+      } else {
+        _userTimezone = TimezoneService.getCurrentTimezone();
+        await prefs.setString(TimezoneService.kUserTimezone, _userTimezone);
+        debugPrint('✅ User timezone from DEVICE: $_userTimezone');
+      }
+
+      // ✅ Fallback if empty (uses _kDefaultSalonTimezone)
+      if (_userTimezone.isEmpty) {
+        _userTimezone = _kDefaultSalonTimezone;
+        debugPrint('⚠️ User TZ empty → using default: $_kDefaultSalonTimezone');
+      }
+
+      // ✅ New salon → user timezone becomes salon timezone
+      _salonTimezone = _userTimezone;
+
+      // ✅ Currency auto-detect from salon timezone
+      _detectCurrencyFromTimezone();
+      debugPrint('✅ Currency AUTO-DETECTED: $_salonCurrencyCode');
+
+      // ✅ Business hours initialize
+      _initializeBusinessHours();
+
+      if (mounted) {
+        setState(() => _isTimezoneLoaded = true);
+      }
+    } catch (e) {
+      debugPrint('❌ Error initializing timezone: $e');
+      // ✅ Fallback: uses _kDefaultSalonTimezone
+      if (mounted) {
+        setState(() {
+          _userTimezone = _kDefaultSalonTimezone;
+          _salonTimezone = _kDefaultSalonTimezone;
+          _detectCurrencyFromTimezone();
+          _initializeBusinessHours();
+          _isTimezoneLoaded = true;
+        });
+      }
     }
-
-    _salonTimezone = _userTimezone;
-
-    _detectCurrencyFromTimezone();
-    debugPrint('✅ Currency AUTO-DETECTED: $_salonCurrencyCode');
-
-    _initializeBusinessHours();
-
-    setState(() {
-      _isTimezoneLoaded = true;
-    });
   }
 
+  // ============================================================
+  // ✅ CHECK TIMEZONE CHANGES (re-sync local times)
+  // ============================================================
   Future<void> _checkTimezoneChanges() async {
-    final prefs = await SharedPreferences.getInstance();
-    final currentTimezone =
-        prefs.getString(TimezoneService.kUserTimezone) ?? '';
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final currentTimezone =
+          prefs.getString(TimezoneService.kUserTimezone) ?? '';
 
-    if (_userTimezone.isNotEmpty && _userTimezone != currentTimezone) {
-      debugPrint('🔄 Timezone changed: $_userTimezone → $currentTimezone');
+      if (_userTimezone.isNotEmpty &&
+          currentTimezone.isNotEmpty &&
+          _userTimezone != currentTimezone) {
+        debugPrint(
+            '🔄 User timezone changed: $_userTimezone → $currentTimezone');
 
-      setState(() {
-        _userTimezone = currentTimezone;
-        _salonTimezone = currentTimezone;
-        _detectCurrencyFromTimezone();
-        debugPrint('✅ Currency AUTO-SYNCED: $_salonCurrencyCode');
-        _refreshDisplayTimes();
-      });
+        if (!mounted) return;
+        setState(() {
+          _userTimezone = currentTimezone;
+          // ✅ Salon timezone NOT changed — new salon keeps its TZ
+
+          // ✅ FIX: Re-sync local TimeOfDay to new user TZ (for display)
+          if (_openTimeUtc.isNotEmpty) {
+            _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
+              _openTimeUtc,
+              _userTimezone,
+            );
+          }
+          if (_closeTimeUtc.isNotEmpty) {
+            _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
+              _closeTimeUtc,
+              _userTimezone,
+            );
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error in _checkTimezoneChanges: $e');
     }
   }
 
-  void _refreshDisplayTimes() {
-    if (_openTimeUtc.isNotEmpty) {
-      _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-        _openTimeUtc,
-        _salonTimezone,
-      );
-      _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-        _closeTimeUtc,
-        _salonTimezone,
-      );
-    }
-    setState(() {});
-  }
-
+  // ============================================================
+  // ✅ BUSINESS HOURS INITIALIZATION
+  // ============================================================
   void _initializeBusinessHours() {
     const defaultOpenLocal = TimeOfDay(hour: 9, minute: 0);
     const defaultCloseLocal = TimeOfDay(hour: 18, minute: 0);
@@ -399,6 +503,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     _openTimeLocal = defaultOpenLocal;
     _closeTimeLocal = defaultCloseLocal;
 
+    // ✅ Convert to UTC using SALON timezone
     _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
       defaultOpenLocal,
       _salonTimezone,
@@ -408,11 +513,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       _salonTimezone,
     );
 
-    debugPrint('✅ Business hours initialized');
+    debugPrint('✅ Business hours initialized (salon TZ: $_salonTimezone)');
   }
 
+  // ============================================================
+  // ✅ CURRENCY AUTO-DETECT
+  // ============================================================
   void _detectCurrencyFromTimezone() {
-    _salonCurrencyCode = TimezoneService.getCurrencyForTimezone(_salonTimezone);
+    final tz = _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
+    _salonCurrencyCode = TimezoneService.getCurrencyForTimezone(tz);
     _salonCurrencySymbol = _getSymbolForCode(_salonCurrencyCode);
   }
 
@@ -420,17 +529,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     return TimezoneService.getSymbolForCurrency(code);
   }
 
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _addressController.dispose();
-    _phoneController.dispose();
-    _emailController.dispose();
-    _descriptionController.dispose();
-    super.dispose();
-  }
-
-  // ==================== VALIDATION ====================
+  // ============================================================
+  // VALIDATION
+  // ============================================================
   void _validatePhone(String value) {
     setState(() {
       if (value.isEmpty) {
@@ -461,8 +562,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     });
   }
 
-  // ==================== STEP VALIDATION ====================
-
   bool _canProceedFromStep(int step) {
     switch (step) {
       case 0:
@@ -492,8 +591,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     });
   }
 
-  // ==================== WIDGETS: SHARED HELPERS ====================
-
+  // ============================================================
+  // SHARED WIDGETS
+  // ============================================================
   Widget _buildStepHeader(String title, String subtitle) {
     final isDark = _isDark;
     return Padding(
@@ -631,7 +731,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== CURRENCY CARD ====================
+  // ============================================================
+  // ✅ CURRENCY CARD
+  // ============================================================
   Widget _buildCurrencyCard() {
     final isDark = _isDark;
 
@@ -699,7 +801,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Auto-detected from your timezone: $_salonTimezone',
+              'Auto-detected from salon timezone ($_salonTimezone)',
               style: TextStyle(
                 fontSize: 12,
                 color: isDark ? Colors.white60 : Colors.grey,
@@ -823,7 +925,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== IMAGE SECTION ====================
+  // ============================================================
+  // IMAGE SECTIONS
+  // ============================================================
   Widget _buildCoverSection() {
     final isDesktop = _isWeb;
     final isDark = _isDark;
@@ -835,7 +939,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       child: Stack(
         children: [
           GestureDetector(
-            onTap: () => _showCoverSourceDialog(),
+            onTap: _showCoverSourceDialog,
             child: Container(
               width: double.infinity,
               height: double.infinity,
@@ -879,7 +983,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               bottom: 12,
               right: 12,
               child: GestureDetector(
-                onTap: () => _showCoverSourceDialog(),
+                onTap: _showCoverSourceDialog,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 10,
@@ -889,9 +993,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                     color: Colors.black.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(20),
                   ),
-                  child: Row(
+                  child: const Row(
                     mainAxisSize: MainAxisSize.min,
-                    children: const [
+                    children: [
                       Icon(Icons.edit, size: 14, color: Colors.white),
                       SizedBox(width: 4),
                       Text(
@@ -915,7 +1019,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     return Container(
       margin: const EdgeInsets.only(left: 16, top: 0, bottom: 16),
       child: GestureDetector(
-        onTap: () => _showLogoSourceDialog(),
+        onTap: _showLogoSourceDialog,
         child: Container(
           width: isDesktop ? 100 : 80,
           height: isDesktop ? 100 : 80,
@@ -1002,7 +1106,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1025,7 +1129,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _pickLogo();
               },
             ),
@@ -1036,7 +1140,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _takeLogoPhoto();
               },
             ),
@@ -1050,7 +1154,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   ),
                 ),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   _removeLogo();
                 },
               ),
@@ -1070,7 +1174,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1093,7 +1197,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _pickCover();
               },
             ),
@@ -1104,7 +1208,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _takeCoverPhoto();
               },
             ),
@@ -1118,7 +1222,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                   ),
                 ),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   _removeCover();
                 },
               ),
@@ -1129,6 +1233,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
+  // ============================================================
+  // IMAGE PICKING
+  // ============================================================
   Future<void> _pickLogo() async {
     try {
       final XFile? pickedFile = await picker.pickImage(
@@ -1137,41 +1244,44 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         maxHeight: 1600,
         imageQuality: 90,
       );
-      if (pickedFile != null) {
-        if (kIsWeb) {
-          final rawBytes = await pickedFile.readAsBytes();
+      if (pickedFile == null) return;
+
+      if (kIsWeb) {
+        final rawBytes = await pickedFile.readAsBytes();
+        final compressed = await compressAvatarBytes(rawBytes);
+        if (!mounted) return;
+        setState(() {
+          _logoWebBytes = compressed;
+          _logoFile = null;
+        });
+      } else {
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Crop Logo',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              initAspectRatio: CropAspectRatioPreset.square,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
+          ],
+        );
+        if (croppedFile != null) {
+          final rawBytes = await File(croppedFile.path).readAsBytes();
           final compressed = await compressAvatarBytes(rawBytes);
+          if (!mounted) return;
           setState(() {
             _logoWebBytes = compressed;
             _logoFile = null;
           });
-        } else {
-          final croppedFile = await ImageCropper().cropImage(
-            sourcePath: pickedFile.path,
-            aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-            uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Logo',
-                toolbarColor: AppTheme.primary,
-                toolbarWidgetColor: Colors.white,
-                initAspectRatio: CropAspectRatioPreset.square,
-                lockAspectRatio: true,
-              ),
-              IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
-            ],
-          );
-          if (croppedFile != null) {
-            final rawBytes = await File(croppedFile.path).readAsBytes();
-            final compressed = await compressAvatarBytes(rawBytes);
-            setState(() {
-              _logoWebBytes = compressed;
-              _logoFile = null;
-            });
-          }
         }
       }
     } catch (e) {
-      _showSnackBar('Error picking logo', Colors.red);
+      debugPrint('❌ Error picking logo: $e');
+      if (mounted) _showSnackBar('Error picking logo', Colors.red);
     }
   }
 
@@ -1183,40 +1293,43 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         maxHeight: 1600,
         imageQuality: 90,
       );
-      if (pickedFile != null) {
-        if (kIsWeb) {
-          final rawBytes = await pickedFile.readAsBytes();
+      if (pickedFile == null) return;
+
+      if (kIsWeb) {
+        final rawBytes = await pickedFile.readAsBytes();
+        final compressed = await compressAvatarBytes(rawBytes);
+        if (!mounted) return;
+        setState(() {
+          _logoWebBytes = compressed;
+          _logoFile = null;
+        });
+      } else {
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Crop Logo',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
+          ],
+        );
+        if (croppedFile != null) {
+          final rawBytes = await File(croppedFile.path).readAsBytes();
           final compressed = await compressAvatarBytes(rawBytes);
+          if (!mounted) return;
           setState(() {
             _logoWebBytes = compressed;
             _logoFile = null;
           });
-        } else {
-          final croppedFile = await ImageCropper().cropImage(
-            sourcePath: pickedFile.path,
-            aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-            uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Logo',
-                toolbarColor: AppTheme.primary,
-                toolbarWidgetColor: Colors.white,
-                lockAspectRatio: true,
-              ),
-              IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
-            ],
-          );
-          if (croppedFile != null) {
-            final rawBytes = await File(croppedFile.path).readAsBytes();
-            final compressed = await compressAvatarBytes(rawBytes);
-            setState(() {
-              _logoWebBytes = compressed;
-              _logoFile = null;
-            });
-          }
         }
       }
     } catch (e) {
-      _showSnackBar('Error taking photo', Colors.red);
+      debugPrint('❌ Error taking logo photo: $e');
+      if (mounted) _showSnackBar('Error taking photo', Colors.red);
     }
   }
 
@@ -1235,41 +1348,44 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         maxHeight: 1350,
         imageQuality: 90,
       );
-      if (pickedFile != null) {
-        if (kIsWeb) {
-          final rawBytes = await pickedFile.readAsBytes();
+      if (pickedFile == null) return;
+
+      if (kIsWeb) {
+        final rawBytes = await pickedFile.readAsBytes();
+        final compressed = await compressCoverBytes(rawBytes);
+        if (!mounted) return;
+        setState(() {
+          _coverWebBytes = compressed;
+          _coverFile = null;
+        });
+      } else {
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Crop Cover',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              initAspectRatio: CropAspectRatioPreset.ratio16x9,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
+          ],
+        );
+        if (croppedFile != null) {
+          final rawBytes = await File(croppedFile.path).readAsBytes();
           final compressed = await compressCoverBytes(rawBytes);
+          if (!mounted) return;
           setState(() {
             _coverWebBytes = compressed;
             _coverFile = null;
           });
-        } else {
-          final croppedFile = await ImageCropper().cropImage(
-            sourcePath: pickedFile.path,
-            aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
-            uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Cover',
-                toolbarColor: AppTheme.primary,
-                toolbarWidgetColor: Colors.white,
-                initAspectRatio: CropAspectRatioPreset.ratio16x9,
-                lockAspectRatio: true,
-              ),
-              IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
-            ],
-          );
-          if (croppedFile != null) {
-            final rawBytes = await File(croppedFile.path).readAsBytes();
-            final compressed = await compressCoverBytes(rawBytes);
-            setState(() {
-              _coverWebBytes = compressed;
-              _coverFile = null;
-            });
-          }
         }
       }
     } catch (e) {
-      _showSnackBar('Error picking cover', Colors.red);
+      debugPrint('❌ Error picking cover: $e');
+      if (mounted) _showSnackBar('Error picking cover', Colors.red);
     }
   }
 
@@ -1281,40 +1397,43 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         maxHeight: 1350,
         imageQuality: 90,
       );
-      if (pickedFile != null) {
-        if (kIsWeb) {
-          final rawBytes = await pickedFile.readAsBytes();
+      if (pickedFile == null) return;
+
+      if (kIsWeb) {
+        final rawBytes = await pickedFile.readAsBytes();
+        final compressed = await compressCoverBytes(rawBytes);
+        if (!mounted) return;
+        setState(() {
+          _coverWebBytes = compressed;
+          _coverFile = null;
+        });
+      } else {
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Crop Cover',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
+          ],
+        );
+        if (croppedFile != null) {
+          final rawBytes = await File(croppedFile.path).readAsBytes();
           final compressed = await compressCoverBytes(rawBytes);
+          if (!mounted) return;
           setState(() {
             _coverWebBytes = compressed;
             _coverFile = null;
           });
-        } else {
-          final croppedFile = await ImageCropper().cropImage(
-            sourcePath: pickedFile.path,
-            aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
-            uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Cover',
-                toolbarColor: AppTheme.primary,
-                toolbarWidgetColor: Colors.white,
-                lockAspectRatio: true,
-              ),
-              IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
-            ],
-          );
-          if (croppedFile != null) {
-            final rawBytes = await File(croppedFile.path).readAsBytes();
-            final compressed = await compressCoverBytes(rawBytes);
-            setState(() {
-              _coverWebBytes = compressed;
-              _coverFile = null;
-            });
-          }
         }
       }
     } catch (e) {
-      _showSnackBar('Error taking photo', Colors.red);
+      debugPrint('❌ Error taking cover photo: $e');
+      if (mounted) _showSnackBar('Error taking photo', Colors.red);
     }
   }
 
@@ -1325,9 +1444,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     });
   }
 
+  // ============================================================
+  // ✅ IMAGE UPLOAD — throws on error (no silent failure)
+  // ============================================================
   Future<String?> _uploadLogo(int salonId) async {
     if (_logoFile == null && _logoWebBytes == null) return null;
-    setState(() => _isUploadingLogo = true);
+
+    if (mounted) setState(() => _isUploadingLogo = true);
+
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Not logged in');
@@ -1335,9 +1459,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       final filePath = 'salons/$userId/$salonId/logo.jpg';
 
       if (_logoWebBytes != null) {
-        await supabase.storage
-            .from('salon-images')
-            .uploadBinary(
+        await supabase.storage.from('salon-images').uploadBinary(
               filePath,
               _logoWebBytes!,
               fileOptions: const FileOptions(
@@ -1346,9 +1468,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ),
             );
       } else if (_logoFile != null) {
-        await supabase.storage
-            .from('salon-images')
-            .upload(
+        await supabase.storage.from('salon-images').upload(
               filePath,
               _logoFile!,
               fileOptions: const FileOptions(
@@ -1360,13 +1480,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         return null;
       }
 
-      final baseUrl = supabase.storage
-          .from('salon-images')
-          .getPublicUrl(filePath);
+      final baseUrl =
+          supabase.storage.from('salon-images').getPublicUrl(filePath);
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading logo: $e');
-      return null;
+      // ✅ FIX: rethrow — caller handles the error
+      rethrow;
     } finally {
       if (mounted) setState(() => _isUploadingLogo = false);
     }
@@ -1374,7 +1494,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
 
   Future<String?> _uploadCover(int salonId) async {
     if (_coverFile == null && _coverWebBytes == null) return null;
-    setState(() => _isUploadingCover = true);
+
+    if (mounted) setState(() => _isUploadingCover = true);
+
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Not logged in');
@@ -1382,9 +1504,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       final filePath = 'salons/$userId/$salonId/cover.jpg';
 
       if (_coverWebBytes != null) {
-        await supabase.storage
-            .from('salon-images')
-            .uploadBinary(
+        await supabase.storage.from('salon-images').uploadBinary(
               filePath,
               _coverWebBytes!,
               fileOptions: const FileOptions(
@@ -1393,9 +1513,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ),
             );
       } else if (_coverFile != null) {
-        await supabase.storage
-            .from('salon-images')
-            .upload(
+        await supabase.storage.from('salon-images').upload(
               filePath,
               _coverFile!,
               fileOptions: const FileOptions(
@@ -1407,21 +1525,33 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         return null;
       }
 
-      final baseUrl = supabase.storage
-          .from('salon-images')
-          .getPublicUrl(filePath);
+      final baseUrl =
+          supabase.storage.from('salon-images').getPublicUrl(filePath);
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading cover: $e');
-      return null;
+      // ✅ FIX: rethrow — caller handles the error
+      rethrow;
     } finally {
       if (mounted) setState(() => _isUploadingCover = false);
     }
   }
 
-  // ==================== BUSINESS HOURS CARD ====================
+  // ============================================================
+  // ✅ BUSINESS HOURS CARD (with device time reference)
+  // ============================================================
   Widget _buildBusinessHoursCard() {
     final isDark = _isDark;
+    final showUserTime = !_isSameTimezone &&
+        _salonTimezone.isNotEmpty &&
+        _userTimezone.isNotEmpty;
+
+    final userOpenTime = showUserTime
+        ? _convertSalonTimeToUserTime(_openTimeLocal)
+        : null;
+    final userCloseTime = showUserTime
+        ? _convertSalonTimeToUserTime(_closeTimeLocal)
+        : null;
 
     return Card(
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
@@ -1440,6 +1570,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               ),
             ),
             const SizedBox(height: 8),
+
+            // ✅ Salon timezone display
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
@@ -1449,23 +1581,82 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    _getTimezoneDisplay(),
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
                   const Icon(
-                    Icons.access_time,
+                    Icons.store,
                     size: 14,
                     color: AppTheme.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      _getTimezoneDisplay(),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
+
+            // ✅ User timezone info (only if different)
+            if (showUserTime) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Colors.orange.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.phone_android,
+                      size: 14,
+                      color: Colors.orange[700],
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'You are in: ${_getUserTimezoneDisplay()}',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.orange[700],
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Times are shown for salon location',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontStyle: FontStyle.italic,
+                              color: isDark
+                                  ? Colors.white60
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
             const SizedBox(height: 16),
             Row(
               children: [
@@ -1506,28 +1697,78 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                 ),
               ],
             ),
+
             const SizedBox(height: 12),
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.info_outline,
-                    size: 14,
-                    color: isDark ? Colors.white70 : Colors.grey,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Times are stored in UTC. Your local time: ${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)}',
-                      style: TextStyle(
-                        fontSize: 10,
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 14,
                         color: isDark ? Colors.white70 : Colors.grey,
                       ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Salon hours: '
+                          '${_formatTimeOfDay(_openTimeLocal)} - '
+                          '${_formatTimeOfDay(_closeTimeLocal)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white70 : Colors.grey[800],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  // ✅ Device time reference
+                  if (showUserTime &&
+                      userOpenTime != null &&
+                      userCloseTime != null) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.phone_android,
+                          size: 12,
+                          color: isDark
+                              ? Colors.blue[300]
+                              : Colors.blue[700],
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Your time: '
+                            '${_formatTimeOfDay(userOpenTime)} - '
+                            '${_formatTimeOfDay(userCloseTime)}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontStyle: FontStyle.italic,
+                              color: isDark
+                                  ? Colors.blue[300]
+                                  : Colors.blue[700],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                  Text(
+                    'Stored in UTC · Times shown for salon location',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontStyle: FontStyle.italic,
+                      color: isDark ? Colors.white38 : Colors.grey[500],
                     ),
                   ),
                 ],
@@ -1539,8 +1780,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== STEP: REVIEW ====================
-
+  // ============================================================
+  // REVIEW STEP
+  // ============================================================
   Widget _buildReviewTile({
     required IconData icon,
     required String title,
@@ -1619,7 +1861,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
           icon: Icons.access_time,
           title: 'Business Hours & Currency',
           value:
-              '${_openTimeLocal.format(context)} - ${_closeTimeLocal.format(context)} · $_salonCurrencyCode ($_salonCurrencySymbol)',
+              '${_formatTimeOfDay(_openTimeLocal)} - ${_formatTimeOfDay(_closeTimeLocal)} · $_salonCurrencyCode ($_salonCurrencySymbol)',
+          onEdit: () => _goToStep(1),
+        ),
+        _buildReviewTile(
+          icon: Icons.public,
+          title: 'Timezone',
+          value: _salonTimezone.isEmpty
+              ? _kDefaultSalonTimezone
+              : _salonTimezone,
           onEdit: () => _goToStep(1),
         ),
         const SizedBox(height: 8),
@@ -1632,7 +1882,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== CREATE SALON ====================
+  // ============================================================
+  // CREATE SALON
+  // ============================================================
   Future<void> _onCreateSalonPressed() async {
     for (int step = 0; step <= 2; step++) {
       if (!_canProceedFromStep(step)) {
@@ -1648,8 +1900,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       return;
     }
 
-    // ✅ NEW: Double-check plan limit right before creating (in case
-    // the plan changed while the user was on this screen)
     try {
       final usage = await supabase.rpc(
         'get_owner_salon_usage',
@@ -1673,7 +1923,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       }
     } catch (e) {
       debugPrint('⚠️ Could not re-verify plan limit before create: $e');
-      // Continue — the DB trigger will enforce
     }
 
     if (_isConfirmDialogOpen) return;
@@ -1682,8 +1931,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     final confirmed = await showCustomAlert(
       context: context,
       title: "Create Salon?",
-      message:
-          'Do you want to create "${_nameController.text.trim()}"?\n\n'
+      message: 'Do you want to create "${_nameController.text.trim()}"?\n\n'
           'Currency: $_salonCurrencyCode ($_salonCurrencySymbol)\n'
           'Timezone: $_salonTimezone\n\n'
           'This will save the salon with everything you\'ve set up.',
@@ -1716,13 +1964,17 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       final prefs = await SharedPreferences.getInstance();
       final userTimezone =
           prefs.getString(TimezoneService.kUserTimezone) ??
-          TimezoneService.getCurrentTimezone();
+              TimezoneService.getCurrentTimezone();
 
       final extraData = {
         'created_from': _isWeb ? 'web' : 'mobile',
         'platform': _getPlatformName(),
         'user_timezone': userTimezone,
       };
+
+      // ✅ Fallback for salon timezone before insert
+      final salonTz =
+          _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
 
       final salonData = {
         'name': _nameController.text.trim(),
@@ -1743,7 +1995,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         'cover_url': null,
         'open_time': _openTimeUtc,
         'close_time': _closeTimeUtc,
-        'timezone': _salonTimezone,
+        'timezone': salonTz,
         'currency_code': _salonCurrencyCode,
         'currency_symbol': _salonCurrencySymbol,
         'extra_data': extraData,
@@ -1759,12 +2011,28 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         final salonId = response['id'] as int;
         debugPrint('✅ Salon created with ID: $salonId');
 
-        String? logoUrl = (_logoFile != null || _logoWebBytes != null)
-            ? await _uploadLogo(salonId)
-            : null;
-        String? coverUrl = (_coverFile != null || _coverWebBytes != null)
-            ? await _uploadCover(salonId)
-            : null;
+        // ✅ FIX: Handle image upload failures gracefully
+        bool imageUploadFailed = false;
+        String? logoUrl;
+        String? coverUrl;
+
+        if (_logoFile != null || _logoWebBytes != null) {
+          try {
+            logoUrl = await _uploadLogo(salonId);
+          } catch (e) {
+            debugPrint('❌ Logo upload failed: $e');
+            imageUploadFailed = true;
+          }
+        }
+
+        if (_coverFile != null || _coverWebBytes != null) {
+          try {
+            coverUrl = await _uploadCover(salonId);
+          } catch (e) {
+            debugPrint('❌ Cover upload failed: $e');
+            imageUploadFailed = true;
+          }
+        }
 
         if (logoUrl != null || coverUrl != null) {
           final imageUpdate = <String, dynamic>{};
@@ -1774,9 +2042,17 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
         }
 
         if (!mounted) return;
+
+        // ✅ FIX: Show warning if images failed
+        if (imageUploadFailed) {
+          _showSnackBar(
+            'Salon created, but some images failed to upload. Edit to retry.',
+            Colors.orange,
+          );
+        }
+
         Navigator.pop(context, true);
       } on PostgrestException catch (e) {
-        // ✅ NEW: Handle DB trigger limit error specifically
         if (e.message.contains('Salon limit reached')) {
           final userId = supabase.auth.currentUser?.id;
           if (userId != null) {
@@ -1799,7 +2075,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
       }
     } catch (e) {
       debugPrint('❌ Error creating salon: $e');
-      _showSnackBar('Error: $e', Colors.red);
+      if (mounted) _showSnackBar('Error: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -1808,12 +2084,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
   String _getPlatformName() => kIsWeb
       ? 'web'
       : Platform.isIOS
-      ? 'ios'
-      : Platform.isAndroid
-      ? 'android'
-      : 'mobile';
+          ? 'ios'
+          : Platform.isAndroid
+              ? 'android'
+              : 'mobile';
 
   void _showSnackBar(String msg, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
@@ -1824,8 +2101,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== STEP CONTENT SWITCH ====================
-
+  // ============================================================
+  // STEP CONTENT
+  // ============================================================
   Widget _buildStep0() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1969,8 +2247,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     }
   }
 
-  // ==================== STEP INDICATOR ====================
-
+  // ============================================================
+  // STEP INDICATOR
+  // ============================================================
   static const List<Map<String, dynamic>> _stepMeta = [
     {'label': 'Basic', 'icon': Icons.store},
     {'label': 'Hours', 'icon': Icons.access_time},
@@ -2039,8 +2318,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
               color: isCompleted
                   ? AppTheme.primary
                   : (isActive
-                        ? AppTheme.primary.withValues(alpha: 0.1)
-                        : (isDark ? Colors.grey[800] : Colors.grey[200])),
+                      ? AppTheme.primary.withValues(alpha: 0.1)
+                      : (isDark ? Colors.grey[800] : Colors.grey[200])),
               border: Border.all(
                 color: isActive
                     ? AppTheme.primary
@@ -2076,8 +2355,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== STEP ACTIONS ====================
-
+  // ============================================================
+  // STEP ACTIONS
+  // ============================================================
   Widget _buildStepActions() {
     final isDark = _isDark;
     final isLastStep = _currentStep == 2;
@@ -2103,11 +2383,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: FittedBox(
+                  child: const FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: const [
+                      children: [
                         Icon(Icons.arrow_back, size: 18),
                         SizedBox(width: 6),
                         Text('Back'),
@@ -2205,8 +2485,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen> {
     );
   }
 
-  // ==================== BUILD ====================
-
+  // ============================================================
+  // BUILD
+  // ============================================================
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;

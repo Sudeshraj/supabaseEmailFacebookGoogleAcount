@@ -3,9 +3,11 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/services/currency_service.dart';
+import 'package:flutter_application_1/services/timezone_service.dart';
 
 class ReportsScreen extends StatefulWidget {
   final String? salonId;
@@ -18,15 +20,60 @@ class ReportsScreen extends StatefulWidget {
 }
 
 class _ReportsScreenState extends State<ReportsScreen> {
+  // ✅ Default salon timezone (DB default — NOT user timezone)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
   final supabase = Supabase.instance.client;
 
   // ==================== ✅ CURRENCY SERVICE ====================
   final CurrencyService _currencyService = CurrencyService.instance;
-  String _salonCurrencyCode = 'LKR';
+
+  // ✅ Empty initial - DB එකෙන් load වෙනකම් fallback getter use කරනවා
+  String _salonCurrencyCode = '';
+
+  // ==================== ✅ TIMEZONE ====================
+  String _salonTimezone = '';
+  String _userTimezone = '';
+
+  // ✅ Effective currency code getter - DB load fail නම් fallback
+  String get _effectiveCurrencyCode {
+    // Priority 1: DB value (loaded)
+    if (_salonCurrencyCode.isNotEmpty) {
+      return _salonCurrencyCode;
+    }
+
+    // Priority 2: Derive from salon timezone
+    if (_salonTimezone.isNotEmpty) {
+      return TimezoneService.getCurrencyForTimezone(_salonTimezone);
+    }
+
+    // Priority 3: Absolute last resort
+    return 'LKR';
+  }
 
   // ✅ Currency getter
   String get _salonCurrencySymbol =>
-      _currencyService.getSymbol(_salonCurrencyCode);
+      _currencyService.getSymbol(_effectiveCurrencyCode);
+
+  // ✅ Salon timezone "now" getter - fallback to salon default (NOT device)
+  DateTime get _salonNow {
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
+    try {
+      return TimezoneService.getNowInTimezone(tz);
+    } catch (e) {
+      debugPrint('❌ Error getting salon now: $e');
+      return DateTime.now();
+    }
+  }
+
+  // ✅ Check if user timezone differs from salon timezone
+  bool get _isDifferentTimezone {
+    return _salonTimezone.isNotEmpty &&
+        _userTimezone.isNotEmpty &&
+        _salonTimezone != _userTimezone;
+  }
 
   // Report data
   bool _isLoading = true;
@@ -58,8 +105,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeDateRange();
-    _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadData();
+    });
   }
 
   @override
@@ -79,39 +127,73 @@ class _ReportsScreenState extends State<ReportsScreen> {
   // ✅ CURRENCY HELPERS
   // ============================================================
 
-  /// Format price with salon currency
   String _formatPrice(dynamic price) {
     return _currencyService.format(
       price: price,
-      currencyCode: _salonCurrencyCode,
+      currencyCode: _effectiveCurrencyCode,
     );
   }
 
+  // ============================================================
+  // ✅ TIMEZONE HELPERS
+  // ============================================================
+
+  String _getSalonTimezoneDisplay() {
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
+    return TimezoneService.getFullTimezoneDisplayFor(tz);
+  }
+
+  String _getUserTimezoneDisplay() {
+    return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
+  }
+
+  // ============================================================
+  // ✅ DATE RANGE INITIALIZATION
+  // ============================================================
   void _initializeDateRange() {
-    final now = DateTime.now();
+    final now = _salonNow;
     switch (_dateRange) {
       case 'Today':
         _startDate = DateTime(now.year, now.month, now.day);
         _endDate = DateTime(now.year, now.month, now.day);
         break;
       case 'This Week':
-        _startDate = now.subtract(Duration(days: now.weekday - 1));
-        _endDate = now;
+        final weekStart = now.subtract(Duration(days: now.weekday - 1));
+        _startDate = DateTime(weekStart.year, weekStart.month, weekStart.day);
+        _endDate = DateTime(now.year, now.month, now.day);
         break;
       case 'This Month':
         _startDate = DateTime(now.year, now.month, 1);
-        _endDate = now;
+        _endDate = DateTime(now.year, now.month, now.day);
         break;
       case 'Custom':
         if (_startDate == null) {
-          _startDate = now.subtract(const Duration(days: 30));
-          _endDate = now;
+          final thirtyDaysAgo = now.subtract(const Duration(days: 30));
+          _startDate = DateTime(
+            thirtyDaysAgo.year,
+            thirtyDaysAgo.month,
+            thirtyDaysAgo.day,
+          );
+          _endDate = DateTime(now.year, now.month, now.day);
         }
         break;
     }
   }
 
+  // ============================================================
+  // ✅ CONVERT FILTER LABEL → DB STATUS VALUE
+  // ============================================================
+  /// "No Show" → "no_show", "Completed" → "completed", "All" → null
+  String? _filterLabelToDbStatus(String label) {
+    if (label == 'All') return null;
+    return label.toLowerCase().replaceAll(' ', '_');
+  }
+
   Future<void> _loadData() async {
+    if (!mounted) return;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -120,6 +202,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) {
+        if (!mounted) return;
         setState(() {
           _errorMessage = 'Please login to view reports';
           _isLoading = false;
@@ -127,29 +210,69 @@ class _ReportsScreenState extends State<ReportsScreen> {
         return;
       }
 
-      // ✅ Load salon name AND currency
+      // ✅ STEP 1: Load salon data
       if (widget.salonId != null) {
+        final salonIdInt = int.tryParse(widget.salonId!);
+        if (salonIdInt == null) {
+          if (!mounted) return;
+          setState(() {
+            _errorMessage = 'Invalid salon ID';
+            _isLoading = false;
+          });
+          return;
+        }
+
         final salonResponse = await supabase
             .from('salons')
-            .select('name, currency_code')
-            .eq('id', int.parse(widget.salonId!))
+            .select('name, currency_code, timezone')
+            .eq('id', salonIdInt)
             .maybeSingle();
 
         if (salonResponse != null) {
-          _salonName = salonResponse['name'];
-          _salonCurrencyCode =
-              salonResponse['currency_code'] as String? ?? 'LKR';
+          final name = salonResponse['name'] as String?;
+          if (name != null && name.isNotEmpty) {
+            _salonName = name;
+          }
 
+          final currencyCode = salonResponse['currency_code'] as String?;
+          if (currencyCode != null && currencyCode.isNotEmpty) {
+            _salonCurrencyCode = currencyCode;
+          }
+
+          final timezone = salonResponse['timezone'] as String?;
+          if (timezone != null && timezone.isNotEmpty) {
+            _salonTimezone = timezone;
+          }
+
+          debugPrint('✅ Salon name: $_salonName');
           debugPrint('✅ Salon currency: $_salonCurrencyCode');
+          debugPrint('✅ Salon timezone: $_salonTimezone');
         }
       }
 
+      // ✅ STEP 2: Load user timezone
+      final prefs = await SharedPreferences.getInstance();
+      _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
+          TimezoneService.getCurrentTimezone();
+
+      if (_userTimezone.isEmpty) {
+        _userTimezone = _kDefaultSalonTimezone;
+      }
+
+      debugPrint('✅ User timezone: $_userTimezone');
+      debugPrint('✅ Effective currency: $_effectiveCurrencyCode');
+
+      // ✅ STEP 3: Initialize date range (with correct salon timezone)
+      _initializeDateRange();
+
+      // ✅ STEP 4: Load reports
       if (widget.role == 'owner') {
         await _loadOwnerReports(currentUser.id);
       } else if (widget.role == 'barber') {
         await _loadBarberReports(currentUser.id);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading reports: ${e.toString()}';
         _isLoading = false;
@@ -158,19 +281,88 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
+  // ✅ HELPER: Extract service names from appointment_services
+  // ============================================================
+  String _extractServiceName(Map<String, dynamic> appointment) {
+    try {
+      final apptServices = appointment['appointment_services'] as List?;
+      if (apptServices == null || apptServices.isEmpty) {
+        return 'Unknown';
+      }
+
+      final names = <String>[];
+      for (var aps in apptServices) {
+        final apMap = aps as Map?;
+        if (apMap == null) continue;
+
+        final snapshotName = apMap['service_name'] as String?;
+        if (snapshotName != null && snapshotName.isNotEmpty) {
+          names.add(snapshotName);
+          continue;
+        }
+
+        final svc = apMap['services'] as Map?;
+        final svcName = svc?['name'] as String?;
+        if (svcName != null && svcName.isNotEmpty) {
+          names.add(svcName);
+        }
+      }
+
+      return names.isEmpty ? 'Unknown' : names.join(', ');
+    } catch (e) {
+      debugPrint('Error extracting service name: $e');
+      return 'Unknown';
+    }
+  }
+
+  List<String> _extractServiceNamesList(Map<String, dynamic> appointment) {
+    final result = <String>[];
+    try {
+      final apptServices = appointment['appointment_services'] as List?;
+      if (apptServices == null || apptServices.isEmpty) return result;
+
+      for (var aps in apptServices) {
+        final apMap = aps as Map?;
+        if (apMap == null) continue;
+
+        final snapshotName = apMap['service_name'] as String?;
+        if (snapshotName != null && snapshotName.isNotEmpty) {
+          result.add(snapshotName);
+          continue;
+        }
+
+        final svc = apMap['services'] as Map?;
+        final svcName = svc?['name'] as String?;
+        if (svcName != null && svcName.isNotEmpty) {
+          result.add(svcName);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error extracting service names list: $e');
+    }
+    return result;
+  }
+
+  // ============================================================
   // LOAD OWNER REPORTS
   // ============================================================
   Future<void> _loadOwnerReports(String ownerId) async {
     try {
       final salonId =
-          widget.salonId != null ? int.parse(widget.salonId!) : null;
+          widget.salonId != null ? int.tryParse(widget.salonId!) : null;
 
       if (salonId == null) {
+        if (!mounted) return;
         setState(() {
           _errorMessage = 'No salon selected';
           _isLoading = false;
         });
         return;
+      }
+
+      // ✅ Defensive null check
+      if (_startDate == null || _endDate == null) {
+        _initializeDateRange();
       }
 
       final startStr = DateFormat('yyyy-MM-dd').format(_startDate!);
@@ -188,7 +380,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
             end_time,
             status,
             price,
-            service_id,
             salon_id,
             created_at,
             profiles!appointments_customer_id_fkey (
@@ -196,22 +387,28 @@ class _ReportsScreenState extends State<ReportsScreen> {
               email,
               phone
             ),
-            services!inner (
-              name
+            appointment_services (
+              service_name,
+              services (
+                name
+              )
             )
           ''')
           .eq('salon_id', salonId)
           .gte('appointment_date', startStr)
           .lte('appointment_date', endStr);
 
-      if (_selectedFilter != 'All') {
-        query = query.eq('status', _selectedFilter.toLowerCase());
+      // ✅ FIX: Convert "No Show" → "no_show"
+      final dbStatus = _filterLabelToDbStatus(_selectedFilter);
+      if (dbStatus != null) {
+        query = query.eq('status', dbStatus);
       }
 
       final response = await query.order('appointment_date', ascending: false);
 
       final List<Map<String, dynamic>> processedData = [];
-      int totalRevenue = 0;
+      // ✅ FIX: Revenue as double
+      double totalRevenue = 0.0;
       int totalAppointments = 0;
       int completedCount = 0;
       int pendingCount = 0;
@@ -224,10 +421,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
       for (var item in response) {
         final customer = item['profiles'] as Map?;
-        final service = item['services'] as Map?;
-        final price = (item['price'] as num?)?.toInt() ?? 0;
+        // ✅ FIX: Use double, not int
+        final price = (item['price'] as num?)?.toDouble() ?? 0.0;
         final status = item['status'] as String? ?? 'pending';
         final date = item['appointment_date'] as String;
+
+        final serviceName = _extractServiceName(item);
+        final serviceNamesList = _extractServiceNamesList(item);
 
         totalAppointments++;
         totalRevenue += price;
@@ -250,11 +450,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
         dailyData[date] = (dailyData[date] ?? 0) + 1;
 
-        final serviceName = service?['name']?.toString() ?? 'Unknown';
-        serviceData[serviceName] = (serviceData[serviceName] ?? 0) + 1;
+        for (final name in serviceNamesList) {
+          serviceData[name] = (serviceData[name] ?? 0) + 1;
+        }
 
-        final barberId = item['barber_id'] as String;
-        barberData[barberId] = (barberData[barberId] ?? 0) + 1;
+        final barberId = item['barber_id'] as String?;
+        if (barberId != null) {
+          barberData[barberId] = (barberData[barberId] ?? 0) + 1;
+        }
 
         processedData.add({
           'id': item['id'],
@@ -262,7 +465,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           'customer_name': customer?['full_name'] ?? 'Unknown',
           'customer_email': customer?['email'] ?? '',
           'customer_phone': customer?['phone'] ?? '',
-          'service_name': service?['name'] ?? 'Unknown',
+          'service_name': serviceName,
           'barber_id': item['barber_id'],
           'appointment_date': date,
           'start_time': item['start_time'],
@@ -282,7 +485,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
             .inFilter('id', barberIds);
 
         for (var barber in barberResponse) {
-          barberNames[barber['id']] = barber['full_name'] ?? 'Unknown Barber';
+          final id = barber['id'] as String?;
+          if (id == null) continue;
+          barberNames[id] = barber['full_name'] as String? ?? 'Unknown Barber';
         }
       }
 
@@ -310,6 +515,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           .toList()
         ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
 
+      if (!mounted) return;
       setState(() {
         _reportData = processedData;
         _chartData = chartData;
@@ -327,6 +533,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading reports: ${e.toString()}';
         _isLoading = false;
@@ -340,7 +547,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Future<void> _loadBarberReports(String barberId) async {
     try {
       final salonId =
-          widget.salonId != null ? int.parse(widget.salonId!) : null;
+          widget.salonId != null ? int.tryParse(widget.salonId!) : null;
+
+      // ✅ Defensive null check
+      if (_startDate == null || _endDate == null) {
+        _initializeDateRange();
+      }
 
       final startStr = DateFormat('yyyy-MM-dd').format(_startDate!);
       final endStr = DateFormat('yyyy-MM-dd').format(_endDate!);
@@ -357,7 +569,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
             end_time,
             status,
             price,
-            service_id,
             salon_id,
             created_at,
             profiles!appointments_customer_id_fkey (
@@ -365,8 +576,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
               email,
               phone
             ),
-            services!inner (
-              name
+            appointment_services (
+              service_name,
+              services (
+                name
+              )
             )
           ''')
           .eq('barber_id', barberId)
@@ -377,14 +591,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
         query = query.eq('salon_id', salonId);
       }
 
-      if (_selectedFilter != 'All') {
-        query = query.eq('status', _selectedFilter.toLowerCase());
+      // ✅ FIX: Convert "No Show" → "no_show"
+      final dbStatus = _filterLabelToDbStatus(_selectedFilter);
+      if (dbStatus != null) {
+        query = query.eq('status', dbStatus);
       }
 
       final response = await query.order('appointment_date', ascending: false);
 
       final List<Map<String, dynamic>> processedData = [];
-      int totalRevenue = 0;
+      // ✅ FIX: Revenue as double
+      double totalRevenue = 0.0;
       int totalAppointments = 0;
       int completedCount = 0;
       int pendingCount = 0;
@@ -396,10 +613,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
       for (var item in response) {
         final customer = item['profiles'] as Map?;
-        final service = item['services'] as Map?;
-        final price = (item['price'] as num?)?.toInt() ?? 0;
+        // ✅ FIX: Use double, not int
+        final price = (item['price'] as num?)?.toDouble() ?? 0.0;
         final status = item['status'] as String? ?? 'pending';
         final date = item['appointment_date'] as String;
+
+        final serviceName = _extractServiceName(item);
+        final serviceNamesList = _extractServiceNamesList(item);
 
         totalAppointments++;
         totalRevenue += price;
@@ -422,8 +642,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
         dailyData[date] = (dailyData[date] ?? 0) + 1;
 
-        final serviceName = service?['name']?.toString() ?? 'Unknown';
-        serviceData[serviceName] = (serviceData[serviceName] ?? 0) + 1;
+        for (final name in serviceNamesList) {
+          serviceData[name] = (serviceData[name] ?? 0) + 1;
+        }
 
         processedData.add({
           'id': item['id'],
@@ -431,7 +652,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           'customer_name': customer?['full_name'] ?? 'Unknown',
           'customer_email': customer?['email'] ?? '',
           'customer_phone': customer?['phone'] ?? '',
-          'service_name': service?['name'] ?? 'Unknown',
+          'service_name': serviceName,
           'appointment_date': date,
           'start_time': item['start_time'],
           'end_time': item['end_time'],
@@ -453,6 +674,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           .toList()
         ..sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
 
+      if (!mounted) return;
       setState(() {
         _reportData = processedData;
         _chartData = chartData;
@@ -469,6 +691,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading reports: ${e.toString()}';
         _isLoading = false;
@@ -483,11 +706,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final picked = await showDateRangePicker(
       context: context,
       firstDate: DateTime(2020, 1, 1),
-      lastDate: DateTime.now(),
+      lastDate: _salonNow,
       initialDateRange: DateTimeRange(start: _startDate!, end: _endDate!),
     );
 
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _startDate = picked.start;
         _endDate = picked.end;
@@ -498,9 +721,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
-  // BUILD METHODS
+  // BUILD
   // ============================================================
-
   @override
   Widget build(BuildContext context) {
     _isWeb = context.isWeb;
@@ -541,10 +763,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
           tooltip: 'Back',
         ),
         actions: [
-          // ✅ Currency badge
           if (!_isLoading && _errorMessage == null)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(
@@ -556,7 +777,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    _salonCurrencyCode,
+                    _effectiveCurrencyCode,
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
@@ -566,10 +787,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 ),
               ),
             ),
-          IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _loadData,
-          ),
         ],
       ),
       body: _isLoading
@@ -599,12 +816,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         color: _isDark ? Colors.white30 : Colors.grey[400],
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        _errorMessage!,
-                        style: TextStyle(
-                          color: _isDark ? Colors.white60 : Colors.grey[600],
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(
+                            color: _isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                          textAlign: TextAlign.center,
                         ),
-                        textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 24),
                       ElevatedButton(
@@ -680,6 +900,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   Widget _buildContent() {
     return Column(
       children: [
+        if (_isDifferentTimezone) _buildTimezoneInfoBanner(),
+        if (_isDifferentTimezone) const SizedBox(height: 12),
         _buildSummaryCards(),
         const SizedBox(height: 16),
         _buildChart(),
@@ -695,16 +917,65 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
-  // BUILD FILTERS
+  // TIMEZONE INFO BANNER
+  // ============================================================
+  Widget _buildTimezoneInfoBanner() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: _isDark ? 0.12 : 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.blue.withValues(alpha: _isDark ? 0.3 : 0.2),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline,
+            size: 18,
+            color: _isDark ? Colors.blue[300] : Colors.blue[700],
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Salon timezone: ${_getSalonTimezoneDisplay()}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _isDark ? Colors.blue[300] : Colors.blue[700],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'All reports shown in salon\'s timezone. Your timezone: ${_getUserTimezoneDisplay()}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _isDark ? Colors.white70 : Colors.grey[700],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // FILTERS
   // ============================================================
   Widget _buildFilters() {
-    final isDark = _isDark;
     final dateRanges = ['Today', 'This Week', 'This Month', 'Custom'];
     final statuses = ['All', 'Completed', 'Pending', 'Cancelled', 'No Show'];
 
     return Container(
       padding: const EdgeInsets.all(12),
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       child: Column(
         children: [
           Row(
@@ -713,7 +984,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 'Date:',
                 style: TextStyle(
                   fontWeight: FontWeight.w500,
-                  color: isDark ? Colors.white : Colors.black87,
+                  color: _isDark ? Colors.white : Colors.black87,
                 ),
               ),
               const SizedBox(width: 8),
@@ -732,7 +1003,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               fontSize: 11,
                               color: isSelected
                                   ? Colors.white
-                                  : (isDark
+                                  : (_isDark
                                       ? Colors.white70
                                       : Colors.grey[700]),
                             ),
@@ -749,7 +1020,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               }
                             });
                           },
-                          backgroundColor: isDark
+                          backgroundColor: _isDark
                               ? const Color(0xFF2A2A2A)
                               : Colors.grey[100],
                           selectedColor: AppTheme.primary,
@@ -771,7 +1042,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 'Status:',
                 style: TextStyle(
                   fontWeight: FontWeight.w500,
-                  color: isDark ? Colors.white : Colors.black87,
+                  color: _isDark ? Colors.white : Colors.black87,
                 ),
               ),
               const SizedBox(width: 8),
@@ -790,7 +1061,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               fontSize: 11,
                               color: isSelected
                                   ? Colors.white
-                                  : (isDark
+                                  : (_isDark
                                       ? Colors.white70
                                       : Colors.grey[700]),
                             ),
@@ -802,7 +1073,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             });
                             _loadData();
                           },
-                          backgroundColor: isDark
+                          backgroundColor: _isDark
                               ? const Color(0xFF2A2A2A)
                               : Colors.grey[100],
                           selectedColor: AppTheme.primary,
@@ -817,7 +1088,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ],
           ),
 
-          if (_dateRange == 'Custom')
+          if (_dateRange == 'Custom' &&
+              _startDate != null &&
+              _endDate != null)
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Row(
@@ -840,18 +1113,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
-  // ✅ BUILD SUMMARY CARDS (with salon currency)
-  // Mobile එකේ Revenue card එකේ icon text hide කරනවා
+  // SUMMARY CARDS
   // ============================================================
   Widget _buildSummaryCards() {
     final total = _summaryData['total_appointments'] ?? 0;
-    final revenue = _summaryData['total_revenue'] ?? 0;
+    final revenue = _summaryData['total_revenue'] ?? 0.0;
     final completed = _summaryData['completed'] ?? 0;
     final pending = _summaryData['pending'] ?? 0;
     final cancelled = _summaryData['cancelled'] ?? 0;
     final noShow = _summaryData['no_show'] ?? 0;
 
-    // ✅ Mobile එකේද?
     final isMobile = MediaQuery.of(context).size.width < 600;
 
     final cards = [
@@ -861,16 +1132,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
         icon: Icons.calendar_today,
         color: Colors.blue,
       ),
-      // ✅ Revenue - uses salon currency
-      // Mobile එකේ: icon text hide (duplicate නෑ)
-      // Web/Tablet: icon text පෙන්නනවා
       _buildSummaryCard(
         title: 'Revenue',
         value: _formatPrice(revenue),
         icon: Icons.attach_money,
-        iconText: _salonCurrencySymbol,        // ✅ NEW
+        iconText: _salonCurrencySymbol,
         color: Colors.green,
-        hideIconTextOnMobile: isMobile,        // ✅ Mobile එකේ hide
+        hideIconTextOnMobile: isMobile,
       ),
       _buildSummaryCard(
         title: 'Completed',
@@ -918,28 +1186,24 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  // ✅ UPDATED: Supports iconText (text icon like "Rs.") + hideIconTextOnMobile
   Widget _buildSummaryCard({
     required String title,
     required String value,
-    IconData? icon,                          // ← Optional
-    String? iconText,                        // ← NEW: Text icon
+    IconData? icon,
+    String? iconText,
     required Color color,
-    bool hideIconTextOnMobile = false,       // ← NEW
+    bool hideIconTextOnMobile = false,
   }) {
-    final isDark = _isDark;
-
-    // ✅ Icon or Text icon?
     final hasIconText = iconText != null;
     final shouldShowIcon = !(hasIconText && hideIconTextOnMobile);
 
     return Card(
       elevation: 2,
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
           width: 1,
         ),
       ),
@@ -948,7 +1212,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // ✅ Icon or Text icon
             if (shouldShowIcon)
               hasIconText
                   ? Text(
@@ -961,7 +1224,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     )
                   : Icon(icon, color: color, size: 24),
             if (shouldShowIcon) const SizedBox(height: 4),
-            // Value
             Text(
               value,
               style: TextStyle(
@@ -974,12 +1236,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 2),
-            // Title
             Text(
               title,
               style: TextStyle(
                 fontSize: 10,
-                color: isDark ? Colors.white60 : Colors.grey[600],
+                color: _isDark ? Colors.white60 : Colors.grey[600],
               ),
               textAlign: TextAlign.center,
             ),
@@ -990,19 +1251,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
-  // BUILD CHART
+  // CHART
   // ============================================================
   Widget _buildChart() {
-    final isDark = _isDark;
-
     if (_chartData.isEmpty) {
       return Card(
         elevation: 2,
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(
-            color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+            color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
             width: 1,
           ),
         ),
@@ -1019,7 +1278,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : Colors.black87,
+                      color: _isDark ? Colors.white : Colors.black87,
                     ),
                   ),
                 ],
@@ -1034,13 +1293,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     Icon(
                       Icons.insert_chart_outlined,
                       size: 48,
-                      color: isDark ? Colors.white70 : Colors.grey[300],
+                      color: _isDark ? Colors.white70 : Colors.grey[300],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       'No data available for chart',
                       style: TextStyle(
-                        color: isDark ? Colors.white70 : Colors.grey[500],
+                        color: _isDark ? Colors.white70 : Colors.grey[500],
                       ),
                     ),
                   ],
@@ -1060,11 +1319,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     return Card(
       elevation: 2,
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
           width: 1,
         ),
       ),
@@ -1082,7 +1341,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1090,7 +1349,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   '${_chartData.length} days',
                   style: TextStyle(
                     fontSize: 11,
-                    color: isDark ? Colors.white70 : Colors.grey[500],
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1113,7 +1372,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           '$count',
                           style: TextStyle(
                             fontSize: 9,
-                            color: isDark ? Colors.white60 : Colors.grey,
+                            color: _isDark ? Colors.white60 : Colors.grey,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -1122,7 +1381,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           width: 16,
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [AppTheme.primary, AppTheme.primaryLight],
+                              colors: [
+                                AppTheme.primary,
+                                AppTheme.primaryLight,
+                              ],
                             ),
                             borderRadius: BorderRadius.circular(4),
                           ),
@@ -1132,7 +1394,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                           _formatDateLabel(date),
                           style: TextStyle(
                             fontSize: 8,
-                            color: isDark ? Colors.white70 : Colors.grey,
+                            color: _isDark ? Colors.white70 : Colors.grey,
                           ),
                         ),
                       ],
@@ -1160,23 +1422,27 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
-  // BUILD SERVICE STATS
+  // SERVICE STATS
   // ============================================================
   Widget _buildServiceStats() {
-    final isDark = _isDark;
     final serviceStats = _summaryData['service_stats'] as List? ?? [];
 
     if (serviceStats.isEmpty) {
       return const SizedBox.shrink();
     }
 
+    final totalServiceCount = serviceStats.fold<int>(
+      0,
+      (sum, item) => sum + ((item['count'] as int?) ?? 0),
+    );
+
     return Card(
       elevation: 2,
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
           width: 1,
         ),
       ),
@@ -1194,7 +1460,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1202,7 +1468,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   '${serviceStats.length} services',
                   style: TextStyle(
                     fontSize: 11,
-                    color: isDark ? Colors.white70 : Colors.grey[500],
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1211,9 +1477,10 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ...serviceStats.take(5).map((item) {
               final service = item['service'] as String? ?? 'Unknown';
               final count = item['count'] as int? ?? 0;
-              final percentage = _reportData.isNotEmpty
-                  ? (count / _reportData.length * 100).toStringAsFixed(1)
-                  : '0';
+
+              final percentage = totalServiceCount > 0
+                  ? (count / totalServiceCount * 100).toStringAsFixed(1)
+                  : '0.0';
 
               return Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1226,7 +1493,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
-                          color: isDark ? Colors.white : Colors.black87,
+                          color: _isDark ? Colors.white : Colors.black87,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -1235,14 +1502,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       child: Container(
                         height: 8,
                         decoration: BoxDecoration(
-                          color: isDark ? Colors.grey[800] : Colors.grey[200],
+                          color: _isDark ? Colors.grey[800] : Colors.grey[200],
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: FractionallySizedBox(
-                          widthFactor: count /
-                              (_reportData.isNotEmpty
-                                  ? _reportData.length
-                                  : 1),
+                          widthFactor: totalServiceCount > 0
+                              ? count / totalServiceCount
+                              : 0,
                           child: Container(
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
@@ -1262,7 +1528,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       '$count ($percentage%)',
                       style: TextStyle(
                         fontSize: 11,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
+                        color: _isDark ? Colors.white60 : Colors.grey[600],
                       ),
                     ),
                   ],
@@ -1277,7 +1543,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     '+ ${serviceStats.length - 5} more services',
                     style: TextStyle(
                       fontSize: 11,
-                      color: isDark ? Colors.white70 : Colors.grey[500],
+                      color: _isDark ? Colors.white70 : Colors.grey[500],
                       fontStyle: FontStyle.italic,
                     ),
                   ),
@@ -1290,10 +1556,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
-  // BUILD BARBER STATS (Owner only)
+  // BARBER STATS (Owner only)
   // ============================================================
   Widget _buildBarberStats() {
-    final isDark = _isDark;
     final barberStats = _summaryData['barber_stats'] as List? ?? [];
 
     if (barberStats.isEmpty) {
@@ -1302,11 +1567,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     return Card(
       elevation: 2,
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
           width: 1,
         ),
       ),
@@ -1324,7 +1589,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1332,7 +1597,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   '${barberStats.length} barbers',
                   style: TextStyle(
                     fontSize: 11,
-                    color: isDark ? Colors.white70 : Colors.grey[500],
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1364,14 +1629,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
-                              color: isDark ? Colors.white : Colors.black87,
+                              color: _isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                           Text(
                             '$count appointments',
                             style: TextStyle(
                               fontSize: 11,
-                              color: isDark ? Colors.white70 : Colors.grey[500],
+                              color:
+                                  _isDark ? Colors.white70 : Colors.grey[500],
                             ),
                           ),
                         ],
@@ -1406,19 +1672,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
   }
 
   // ============================================================
-  // ✅ BUILD REPORT TABLE (with salon currency)
+  // REPORT TABLE
   // ============================================================
   Widget _buildReportTable() {
-    final isDark = _isDark;
-
     if (_reportData.isEmpty) {
       return Card(
         elevation: 2,
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
           side: BorderSide(
-            color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+            color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
             width: 1,
           ),
         ),
@@ -1429,13 +1693,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
               Icon(
                 Icons.assignment_outlined,
                 size: 48,
-                color: isDark ? Colors.white70 : Colors.grey[300],
+                color: _isDark ? Colors.white70 : Colors.grey[300],
               ),
               const SizedBox(height: 8),
               Text(
                 'No appointments found',
                 style: TextStyle(
-                  color: isDark ? Colors.white70 : Colors.grey[500],
+                  color: _isDark ? Colors.white70 : Colors.grey[500],
                 ),
               ),
             ],
@@ -1446,11 +1710,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
 
     return Card(
       elevation: 2,
-      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          color: _isDark ? Colors.grey[800]! : Colors.grey[200]!,
           width: 1,
         ),
       ),
@@ -1468,7 +1732,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: _isDark ? Colors.white : Colors.black87,
                   ),
                 ),
                 const Spacer(),
@@ -1476,7 +1740,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   '${_reportData.length} records',
                   style: TextStyle(
                     fontSize: 11,
-                    color: isDark ? Colors.white70 : Colors.grey[500],
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
                   ),
                 ),
               ],
@@ -1524,7 +1788,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                               item['appointment_date']?.toString() ?? '',
                               style: TextStyle(
                                 fontSize: 11,
-                                color: isDark
+                                color: _isDark
                                     ? Colors.white60
                                     : Colors.grey[600],
                               ),
@@ -1542,16 +1806,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w500,
-                                    color: isDark
+                                    color: _isDark
                                         ? Colors.white
                                         : Colors.black87,
                                   ),
                                 ),
                                 Text(
                                   item['service_name']?.toString() ?? '',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     fontSize: 10,
-                                    color: isDark
+                                    color: _isDark
                                         ? Colors.white70
                                         : Colors.grey[500],
                                   ),
@@ -1560,7 +1826,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          // ✅ Price - uses salon currency
                           SizedBox(
                             width: 100,
                             child: Text(

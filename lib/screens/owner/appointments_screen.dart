@@ -5,6 +5,7 @@
 // ✅ Card border color changes by VIP / Regular / Pending Payment
 // ✅ Booking number + label (VIP badge or Queue badge)
 // ✅ "For: child" shows for BOTH VIP and Regular
+// ✅ Salon timezone display + "Your time" reference (if different)
 
 import 'dart:async';
 import 'package:flutter/material.dart';
@@ -12,9 +13,11 @@ import 'package:flutter_application_1/widgets/edit_appointment_services_sheet.da
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
 import '../../services/timezone_service.dart';
+import '../../services/currency_service.dart';
 
 class AppointmentsScreen extends StatefulWidget {
   final String? salonId;
@@ -28,13 +31,17 @@ class AppointmentsScreen extends StatefulWidget {
 
 class _AppointmentsScreenState extends State<AppointmentsScreen>
     with SingleTickerProviderStateMixin {
-  final supabase = Supabase.instance.client;
+  // ✅ Default salon timezone (DB default — NOT user timezone!)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
 
-  // ✅ VIP color = Amber (same everywhere)
+  final supabase = Supabase.instance.client;
+  final CurrencyService _currencyService = CurrencyService.instance;
+
+  // ✅ VIP color = Amber
   Color get _vipColor => Colors.amber.shade700;
   Color get _vipBorderColor => Colors.amber.shade400;
 
-  // ✅ Regular queue color = Blue (distinct)
+  // ✅ Regular queue color = Blue
   Color get _regularQueueColor => Colors.blue.shade600;
   Color get _regularQueueBorderColor => Colors.blue.shade400;
 
@@ -43,11 +50,18 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
   bool _isLoading = true;
   String? _errorMessage;
   String _selectedSalonName = '';
-  String _currencyCode = 'LKR';
+
+  // Empty initial - DB එකෙන් load වෙනකම් fallback getter use කරනවා
+  String _currencyCode = '';
+
+  // Timezone variables (salon + user)
+  String _salonTimezone = _kDefaultSalonTimezone;
+  String _userTimezone = '';
+  bool _isTimezoneLoaded = false;
 
   bool _isProcessing = false;
 
-  // ✅ Filter period state
+  // Filter period state
   String _selectedPeriod = 'date';
   DateTime _selectedDate = DateTime.now();
   int _selectedMonth = DateTime.now().month;
@@ -76,12 +90,53 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
 
   static const _editableStatuses = {'pending', 'confirmed', 'in_progress'};
 
+  // ============================================================
+  // ✅ CURRENCY + TIMEZONE GETTERS
+  // ============================================================
+
+  /// Effective currency code - DB → timezone-derived → LKR
+  String get _effectiveCurrencyCode {
+    if (_currencyCode.isNotEmpty) return _currencyCode;
+    if (_salonTimezone.isNotEmpty) {
+      return TimezoneService.getCurrencyForTimezone(_salonTimezone);
+    }
+    return 'LKR';
+  }
+
+  /// Salon "now" - device fallback if not loaded
+  DateTime get _salonNow {
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
+    try {
+      return TimezoneService.getNowInTimezone(tz);
+    } catch (e) {
+      debugPrint('❌ Error getting salon now: $e');
+      return DateTime.now();
+    }
+  }
+
+  /// Salon today at midnight
+  DateTime get _salonToday {
+    final now = _salonNow;
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  /// Check if user timezone differs from salon timezone
+  bool get _isDifferentTimezone {
+    if (_salonTimezone.isEmpty || _userTimezone.isEmpty) return false;
+    return _salonTimezone != _userTimezone;
+  }
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
     _tabController.addListener(_onTabChanged);
-    _loadData();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _initializeAndLoad();
+    });
   }
 
   @override
@@ -103,38 +158,87 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
   }
 
   // ============================================================
-  // ✅ CURRENCY SYMBOL
+  // ✅ INITIALIZE - timezone + data
   // ============================================================
-  String _currencySymbol(String? code) {
-    switch (code) {
-      case 'USD':
-        return '\$';
-      case 'INR':
-        return '₹';
-      case 'GBP':
-        return '£';
-      case 'EUR':
-        return '€';
-      case 'AUD':
-        return 'A\$';
-      case 'AED':
-        return 'د.إ';
-      case 'CAD':
-        return 'C\$';
-      case 'JPY':
-        return '¥';
-      case 'SGD':
-        return 'S\$';
-      case 'MYR':
-        return 'RM';
-      case 'LKR':
-      default:
-        return 'Rs.';
+  Future<void> _initializeAndLoad() async {
+    await _loadSalonTimezone();
+    await _loadUserTimezone();
+
+    await _loadData();
+  }
+
+  /// Load salon timezone (from DB)
+  /// Use _kDefaultSalonTimezone as fallback (NOT user timezone)
+  Future<void> _loadSalonTimezone() async {
+    _salonTimezone = _kDefaultSalonTimezone;
+
+    if (widget.salonId == null) return;
+
+    final salonIdInt = int.tryParse(widget.salonId!);
+    if (salonIdInt == null) return;
+
+    try {
+      final response = await supabase
+          .from('salons')
+          .select('timezone')
+          .eq('id', salonIdInt)
+          .maybeSingle();
+
+      if (response != null) {
+        final tz = response['timezone'] as String?;
+        if (tz != null && tz.isNotEmpty) {
+          _salonTimezone = tz;
+        } else {
+          debugPrint('⚠️ Salon TZ empty → default: $_kDefaultSalonTimezone');
+        }
+      }
+      debugPrint('✅ Salon timezone loaded: $_salonTimezone');
+    } catch (e) {
+      debugPrint('❌ Error loading salon timezone: $e');
+      _salonTimezone = _kDefaultSalonTimezone;
+    }
+  }
+
+  /// Load user timezone (for comparison)
+  /// Use _kDefaultSalonTimezone as fallback
+  Future<void> _loadUserTimezone() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
+          TimezoneService.getCurrentTimezone();
+
+      // Fallback if empty
+      if (_userTimezone.isEmpty) {
+        _userTimezone = _kDefaultSalonTimezone;
+        debugPrint('⚠️ User TZ empty → default: $_kDefaultSalonTimezone');
+      }
+
+      debugPrint('✅ User timezone loaded: $_userTimezone');
+    } catch (e) {
+      debugPrint('❌ Error loading user timezone: $e');
+      _userTimezone = TimezoneService.getCurrentTimezone();
+      if (_userTimezone.isEmpty) {
+        _userTimezone = _kDefaultSalonTimezone;
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isTimezoneLoaded = true);
     }
   }
 
   // ============================================================
-  // ✅ DATE RANGE HELPERS
+  // ✅ CURRENCY SYMBOL (via CurrencyService)
+  // ============================================================
+  String _currencySymbol(String? code) {
+    final effective = (code != null && code.isNotEmpty)
+        ? code
+        : _effectiveCurrencyCode;
+    return _currencyService.getSymbol(effective);
+  }
+
+  // ============================================================
+  // ✅ DATE RANGE HELPERS (use SALON timezone)
   // ============================================================
   String get _dateRangeStart {
     if (_selectedPeriod == 'date') {
@@ -159,25 +263,26 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
 
   String get _periodDisplayText {
     if (_selectedPeriod == 'date') {
-      final today = DateTime.now();
+      final today = _salonToday;
       if (DateFormat('yyyy-MM-dd').format(_selectedDate) ==
           DateFormat('yyyy-MM-dd').format(today)) {
         return 'Today';
       }
       return DateFormat('MMM dd, yyyy').format(_selectedDate);
     } else if (_selectedPeriod == 'month') {
-      return DateFormat(
-        'MMMM yyyy',
-      ).format(DateTime(_selectedYear, _selectedMonth));
+      return DateFormat('MMMM yyyy')
+          .format(DateTime(_selectedYear, _selectedMonth));
     } else {
       return 'Year $_selectedYear';
     }
   }
 
   // ============================================================
-  // ✅ LOAD DATA
+  // ✅ LOAD DATA — with finally block (never stuck on error)
   // ============================================================
   Future<void> _loadData() async {
+    if (!mounted) return;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -186,23 +291,39 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) {
+        if (!mounted) return;
         setState(() {
           _errorMessage = 'Please login to view appointments';
-          _isLoading = false;
         });
         return;
       }
 
       if (widget.salonId != null) {
+        final salonIdInt = int.tryParse(widget.salonId!);
+        if (salonIdInt == null) {
+          if (!mounted) return;
+          setState(() {
+            _errorMessage = 'Invalid salon ID';
+          });
+          return;
+        }
+
         final salonResponse = await supabase
             .from('salons')
             .select('name, currency_code')
-            .eq('id', int.parse(widget.salonId!))
+            .eq('id', salonIdInt)
             .maybeSingle();
 
         if (salonResponse != null) {
-          _selectedSalonName = salonResponse['name'] ?? 'Salon';
-          _currencyCode = salonResponse['currency_code'] ?? 'LKR';
+          final name = salonResponse['name'] as String?;
+          if (name != null && name.isNotEmpty) {
+            _selectedSalonName = name;
+          }
+
+          final currencyCode = salonResponse['currency_code'] as String?;
+          if (currencyCode != null && currencyCode.isNotEmpty) {
+            _currencyCode = currencyCode;
+          }
         }
 
         await _loadSalonBarbers();
@@ -210,10 +331,15 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
 
       await _loadAppointments();
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading appointments: ${e.toString()}';
-        _isLoading = false;
       });
+    } finally {
+      // ✅ ALWAYS stop loading — even on early return or exception
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -223,9 +349,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
   Future<void> _loadSalonBarbers() async {
     if (widget.salonId == null) return;
 
-    try {
-      final salonIdInt = int.parse(widget.salonId!);
+    final salonIdInt = int.tryParse(widget.salonId!);
+    if (salonIdInt == null) return;
 
+    try {
       final salonBarbersResponse = await supabase
           .from('salon_barbers')
           .select('barber_id')
@@ -336,9 +463,11 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
   // ✅ LOAD APPOINTMENTS
   // ============================================================
   Future<void> _loadAppointments() async {
+    if (!mounted) return;
+
     try {
       final salonIdInt = widget.salonId != null
-          ? int.parse(widget.salonId!)
+          ? int.tryParse(widget.salonId!)
           : null;
 
       var query = supabase.from('appointments').select('''
@@ -431,6 +560,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
           .order('appointment_date', ascending: false)
           .order('start_time', ascending: false);
 
+      if (!mounted) return;
+
       final List<Map<String, dynamic>> appointments = [];
       int total = 0;
       int completed = 0;
@@ -490,7 +621,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
         final extraNote = apt['extra_charge_note'] as String?;
         final totalPrice = servicesTotal - totalDiscount + extraCharge;
         final currencyCode =
-            (salon?['currency_code'] as String?) ?? _currencyCode;
+            (salon?['currency_code'] as String?) ?? _effectiveCurrencyCode;
 
         String serviceSummary;
         if (services.isEmpty) {
@@ -567,23 +698,21 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
         });
       }
 
-      if (mounted) {
-        setState(() {
-          _appointments = appointments;
-          _totalCount = total;
-          _completedCount = completed;
-          _pendingCount = pending;
-          _cancelledCount = cancelled;
-          _pendingPaymentCount = pendingPayment;
-          _applyStatusFilter();
-          _isLoading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _appointments = appointments;
+        _totalCount = total;
+        _completedCount = completed;
+        _pendingCount = pending;
+        _cancelledCount = cancelled;
+        _pendingPaymentCount = pendingPayment;
+        _applyStatusFilter();
+      });
     } catch (e) {
       debugPrint('❌ Error loading appointments: $e');
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading appointments: ${e.toString()}';
-        _isLoading = false;
       });
     }
   }
@@ -630,35 +759,71 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     }
   }
 
+  /// Format date with SALON timezone "today"
   String _formatDate(String dateStr) {
     try {
-      final date = DateTime.parse(dateStr);
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
+      final salonNow = _salonNow;
+      final today = DateTime(salonNow.year, salonNow.month, salonNow.day);
       final tomorrow = today.add(const Duration(days: 1));
 
-      if (date.isAtSameMomentAs(today)) {
+      final date = DateTime.parse(dateStr);
+      final dateOnly = DateTime(date.year, date.month, date.day);
+
+      if (dateOnly.isAtSameMomentAs(today)) {
         return 'Today';
-      } else if (date.isAtSameMomentAs(tomorrow)) {
+      } else if (dateOnly.isAtSameMomentAs(tomorrow)) {
         return 'Tomorrow';
       } else {
-        return DateFormat('MMM dd, yyyy').format(date);
+        return DateFormat('MMM dd, yyyy').format(dateOnly);
       }
     } catch (e) {
       return dateStr;
     }
   }
 
+  /// Format UTC time → salon-local display time
   String _formatTime(String timeStr) {
+    if (timeStr.isEmpty) return '';
+
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
+
     try {
-      final parts = timeStr.split(':');
-      final hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
-      final period = hour >= 12 ? 'PM' : 'AM';
-      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
-      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
+        timeStr,
+        tz,
+      );
     } catch (e) {
-      return timeStr;
+      // Fallback: manual 12-hour format
+      try {
+        final parts = timeStr.split(':');
+        final hour = int.parse(parts[0]);
+        final minute = int.parse(parts[1]);
+        final period = hour >= 12 ? 'PM' : 'AM';
+        final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+        return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+      } catch (e2) {
+        return timeStr;
+      }
+    }
+  }
+
+  /// Format UTC time → USER timezone (reference only)
+  /// Returns empty string if user & salon timezone are the same
+  String _formatUtcToUserTime(String? utcTimeStr) {
+    if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
+    if (!_isDifferentTimezone) return '';
+    if (_userTimezone.isEmpty) return '';
+
+    try {
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
+        utcTimeStr,
+        _userTimezone,
+      );
+    } catch (e) {
+      debugPrint('❌ Error in _formatUtcToUserTime: $e');
+      return '';
     }
   }
 
@@ -790,47 +955,49 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     );
 
     if (confirmed != true) return;
+    if (!mounted) return;
 
     setState(() => _isProcessing = true);
 
     try {
       final nowUtc = DateTime.now().toUtc();
-      final userTimezone = TimezoneService.getCurrentTimezone();
+      final tz = _salonTimezone.isNotEmpty
+          ? _salonTimezone
+          : _kDefaultSalonTimezone;
 
       final result = await supabase.rpc(
         'adjust_on_appointment_start',
         params: {
           'p_appointment_id': apt['id'],
           'p_actual_start_time': nowUtc.toIso8601String(),
-          'p_country_timezone': userTimezone,
+          'p_country_timezone': tz,
         },
       );
 
       if (result['success'] == true) {
-        if (mounted) {
-          String message = '✅ Appointment started!';
-          if (result['start_delay_minutes'] != null &&
-              result['start_delay_minutes'] > 0) {
-            message =
-                '⚠️ Started ${result['start_delay_minutes']} min late. Next appointments adjusted.';
-          } else if (result['start_delay_minutes'] != null &&
-              result['start_delay_minutes'] < 0) {
-            message =
-                '✅ Started ${result['start_delay_minutes'].abs()} min early.';
-          }
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(message),
-              backgroundColor: (result['start_delay_minutes'] ?? 0) > 0
-                  ? Colors.orange
-                  : Colors.green,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-          await _loadAppointments();
+        if (!mounted) return;
+        String message = '✅ Appointment started!';
+        if (result['start_delay_minutes'] != null &&
+            result['start_delay_minutes'] > 0) {
+          message =
+              '⚠️ Started ${result['start_delay_minutes']} min late. Next appointments adjusted.';
+        } else if (result['start_delay_minutes'] != null &&
+            result['start_delay_minutes'] < 0) {
+          message =
+              '✅ Started ${result['start_delay_minutes'].abs()} min early.';
         }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: (result['start_delay_minutes'] ?? 0) > 0
+                ? Colors.orange
+                : Colors.green,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        await _loadAppointments();
       } else {
         throw Exception(result['message'] ?? 'Failed to start appointment');
       }
@@ -989,6 +1156,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     );
 
     if (confirmed != true) return;
+    if (!mounted) return;
 
     setState(() => _isProcessing = true);
 
@@ -1005,22 +1173,21 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
       );
 
       if (result['success'] == true) {
-        if (mounted) {
-          final newPrice = (result['new_price'] as num?)?.toDouble();
-          String message = newPrice != null
-              ? '✅ Completed. Total: $symbol${newPrice.toStringAsFixed(2)} — Pending payment'
-              : '✅ Appointment completed — Pending payment';
+        if (!mounted) return;
+        final newPrice = (result['new_price'] as num?)?.toDouble();
+        String message = newPrice != null
+            ? '✅ Completed. Total: $symbol${newPrice.toStringAsFixed(2)} — Pending payment'
+            : '✅ Appointment completed — Pending payment';
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(message),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 3),
-            ),
-          );
-          await _loadAppointments();
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        await _loadAppointments();
       } else {
         throw Exception(result['message'] ?? 'Failed to complete appointment');
       }
@@ -1035,6 +1202,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     }
   }
 
+  // ============================================================
+  // ✅ CANCEL APPOINTMENT — with proper dispose order
+  // ============================================================
   Future<void> _cancelAppointment(Map<String, dynamic> apt) async {
     if (_isProcessing) return;
 
@@ -1054,347 +1224,363 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
       {'value': 'Schedule conflict', 'label': '📅 Schedule Conflict'},
       {'value': 'Other', 'label': '📝 Other'},
     ];
-    if (!mounted) return;
+    if (!mounted) {
+      otherReasonController.dispose();
+      return;
+    }
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setStateDialog) {
-          return AlertDialog(
-            backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
-            title: Row(
-              children: [
-                const Icon(Icons.cancel_outlined, color: Colors.red, size: 28),
-                const SizedBox(width: 12),
-                Text(
-                  'Cancel Appointment',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: _isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+    bool? confirmed;
+    try {
+      // ✅ Show dialog
+      confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              title: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: _isDark ? Colors.grey[800] : Colors.grey[50],
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: _isDark ? Colors.grey[700]! : Colors.grey[200]!,
-                      ),
+                  const Icon(
+                    Icons.cancel_outlined,
+                    color: Colors.red,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Cancel Appointment',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: _isDark ? Colors.white : Colors.black87,
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(
-                              apt['is_vip'] == true ? Icons.star : Icons.person,
-                              size: 16,
-                              color: apt['is_vip'] == true
-                                  ? _vipColor
-                                  : AppTheme.primary,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                apt['customer_name'],
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: _isDark
-                                      ? Colors.white
-                                      : Colors.black87,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _isDark ? Colors.grey[800] : Colors.grey[50],
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color:
+                              _isDark ? Colors.grey[700]! : Colors.grey[200]!,
                         ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.person_outline,
-                              size: 14,
-                              color: _isDark
-                                  ? Colors.white60
-                                  : Colors.grey[600],
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Barber: ${apt['barber_name']}',
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                apt['is_vip'] == true
+                                    ? Icons.star
+                                    : Icons.person,
+                                size: 16,
+                                color: apt['is_vip'] == true
+                                    ? _vipColor
+                                    : AppTheme.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  apt['customer_name'],
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: _isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.person_outline,
+                                size: 14,
+                                color: _isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Barber: ${apt['barber_name']}',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: _isDark
+                                        ? Colors.white60
+                                        : Colors.grey[600],
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.calendar_today,
+                                size: 14,
+                                color: _isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '${apt['display_date']} at ${_formatTime(apt['start_time'])}',
                                 style: TextStyle(
                                   fontSize: 13,
                                   color: _isDark
                                       ? Colors.white60
                                       : Colors.grey[600],
                                 ),
-                                overflow: TextOverflow.ellipsis,
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.calendar_today,
-                              size: 14,
-                              color: _isDark
-                                  ? Colors.white60
-                                  : Colors.grey[600],
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              '${apt['display_date']} at ${_formatTime(apt['start_time'])}',
-                              style: TextStyle(
-                                fontSize: 13,
-                                color: _isDark
-                                    ? Colors.white60
-                                    : Colors.grey[600],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 20),
 
-                  Text(
-                    'Reason for cancellation',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: _isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    initialValue: selectedReason,
-                    isExpanded: true,
-                    dropdownColor: _isDark
-                        ? const Color(0xFF2A2A2A)
-                        : Colors.white,
-                    decoration: InputDecoration(
-                      hintText: 'Select a reason',
-                      hintStyle: TextStyle(
-                        color: _isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                      filled: true,
-                      fillColor: _isDark
-                          ? const Color(0xFF2A2A2A)
-                          : Colors.white,
-                    ),
-                    style: TextStyle(
-                      color: _isDark ? Colors.white : Colors.black87,
-                    ),
-                    items: cancelReasons.map((reason) {
-                      return DropdownMenuItem<String>(
-                        value: reason['value'],
-                        child: Text(reason['label']!),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setStateDialog(() {
-                        selectedReason = value;
-                        showOtherField = (value == 'Other');
-                        validationError = null;
-                        if (!showOtherField) {
-                          otherReasonController.clear();
-                        }
-                      });
-                    },
-                  ),
-
-                  if (showOtherField) ...[
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: otherReasonController,
-                      maxLines: 2,
+                    Text(
+                      'Reason for cancellation',
                       style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
                         color: _isDark ? Colors.white : Colors.black87,
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedReason,
+                      isExpanded: true,
+                      dropdownColor: _isDark
+                          ? const Color(0xFF2A2A2A)
+                          : Colors.white,
                       decoration: InputDecoration(
-                        hintText: 'Please specify the reason...',
+                        hintText: 'Select a reason',
                         hintStyle: TextStyle(
                           color: _isDark ? Colors.white60 : Colors.grey[600],
                         ),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(
-                            color: AppTheme.primary,
-                            width: 2,
-                          ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
                         ),
                         filled: true,
                         fillColor: _isDark
                             ? const Color(0xFF2A2A2A)
                             : Colors.white,
                       ),
-                      onChanged: (_) {
+                      style: TextStyle(
+                        color: _isDark ? Colors.white : Colors.black87,
+                      ),
+                      items: cancelReasons.map((reason) {
+                        return DropdownMenuItem<String>(
+                          value: reason['value'],
+                          child: Text(reason['label']!),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
                         setStateDialog(() {
+                          selectedReason = value;
+                          showOtherField = (value == 'Other');
                           validationError = null;
+                          if (!showOtherField) {
+                            otherReasonController.clear();
+                          }
                         });
                       },
                     ),
-                  ],
 
-                  if (validationError != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
+                    if (showOtherField) ...[
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: otherReasonController,
+                        maxLines: 2,
+                        style: TextStyle(
+                          color: _isDark ? Colors.white : Colors.black87,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Please specify the reason...',
+                          hintStyle: TextStyle(
+                            color: _isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: AppTheme.primary,
+                              width: 2,
+                            ),
+                          ),
+                          filled: true,
+                          fillColor: _isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.white,
+                        ),
+                        onChanged: (_) {
+                          setStateDialog(() {
+                            validationError = null;
+                          });
+                        },
+                      ),
+                    ],
+
+                    if (validationError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.error_outline,
+                              size: 16,
+                              color: Colors.red,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                validationError!,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.red,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    const SizedBox(height: 16),
+
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: Colors.orange.withValues(alpha: 0.4),
+                        ),
+                      ),
                       child: Row(
                         children: [
-                          const Icon(
-                            Icons.error_outline,
-                            size: 16,
-                            color: Colors.red,
+                          Icon(
+                            Icons.warning_amber,
+                            size: 18,
+                            color: Colors.orange.shade700,
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 10),
                           Expanded(
                             child: Text(
-                              validationError!,
-                              style: const TextStyle(
+                              'This action cannot be undone. Customer will be notified.',
+                              style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.red,
+                                color: Colors.orange.shade700,
                               ),
                             ),
                           ),
                         ],
                       ),
                     ),
-
-                  const SizedBox(height: 16),
-
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.orange.withValues(alpha: 0.1),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  style: TextButton.styleFrom(
+                    foregroundColor:
+                        _isDark ? Colors.white60 : Colors.grey[600],
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                  ),
+                  child: const Text('KEEP BOOKING'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    if (selectedReason == null) {
+                      setStateDialog(() {
+                        validationError = 'Please select a reason';
+                      });
+                      return;
+                    }
+                    if (selectedReason == 'Other' &&
+                        otherReasonController.text.trim().isEmpty) {
+                      setStateDialog(() {
+                        validationError = 'Please specify the reason';
+                      });
+                      return;
+                    }
+                    Navigator.pop(context, true);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: Colors.orange.withValues(alpha: 0.4),
-                      ),
                     ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.warning_amber,
-                          size: 18,
-                          color: Colors.orange.shade700,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            'This action cannot be undone. Customer will be notified.',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.orange.shade700,
-                            ),
-                          ),
-                        ),
-                      ],
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
                     ),
                   ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                style: TextButton.styleFrom(
-                  foregroundColor: _isDark ? Colors.white60 : Colors.grey[600],
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
+                  child: const Text('YES, CANCEL'),
                 ),
-                child: const Text('KEEP BOOKING'),
-              ),
-              ElevatedButton(
-                onPressed: () {
-                  if (selectedReason == null) {
-                    setStateDialog(() {
-                      validationError = 'Please select a reason';
-                    });
-                    return;
-                  }
-                  if (selectedReason == 'Other' &&
-                      otherReasonController.text.trim().isEmpty) {
-                    setStateDialog(() {
-                      validationError = 'Please specify the reason';
-                    });
-                    return;
-                  }
-                  Navigator.pop(context, true);
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                ),
-                child: const Text('YES, CANCEL'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    setState(() => _isProcessing = true);
-
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) throw Exception('User not found');
-
-      String finalReason;
-      if (selectedReason == 'Other') {
-        finalReason = otherReasonController.text.trim();
-      } else {
-        finalReason = selectedReason!;
-      }
-
-      final result = await supabase.rpc(
-        'cancel_booking_and_reorder',
-        params: {
-          'p_appointment_id': apt['id'],
-          'p_cancelled_by': user.id,
-          'p_cancel_reason': finalReason,
-          'p_role': 'owner',
-        },
+              ],
+            );
+          },
+        ),
       );
 
-      if (result['success'] == true) {
-        if (mounted) {
+      if (confirmed != true) return;
+      if (!mounted) return;
+
+      setState(() => _isProcessing = true);
+
+      try {
+        final user = supabase.auth.currentUser;
+        if (user == null) throw Exception('User not found');
+
+        // ✅ Read controller text BEFORE dispose
+        String finalReason;
+        if (selectedReason == 'Other') {
+          finalReason = otherReasonController.text.trim();
+        } else {
+          finalReason = selectedReason!;
+        }
+
+        final result = await supabase.rpc(
+          'cancel_booking_and_reorder',
+          params: {
+            'p_appointment_id': apt['id'],
+            'p_cancelled_by': user.id,
+            'p_cancel_reason': finalReason,
+            'p_role': 'owner',
+          },
+        );
+
+        if (result['success'] == true) {
+          if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Row(
@@ -1411,21 +1597,23 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
             ),
           );
           await _loadAppointments();
+        } else {
+          throw Exception(result['message'] ?? 'Cancellation failed');
         }
-      } else {
-        throw Exception(result['message'] ?? 'Cancellation failed');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-        );
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() => _isProcessing = false);
+        }
       }
     } finally {
-      if (mounted) {
-        setState(() => _isProcessing = false);
-        otherReasonController.clear();
-      }
+      // ✅ Dispose AFTER all usage complete
+      otherReasonController.dispose();
     }
   }
 
@@ -1610,6 +1798,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     );
 
     if (confirmed != true) return;
+    if (!mounted) return;
 
     setState(() => _isProcessing = true);
 
@@ -1624,28 +1813,27 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
       );
 
       if (result['success'] == true) {
-        if (mounted) {
-          final autoCompleted = result['auto_completed'] == true;
-          final message = autoCompleted
-              ? '✅ Appointment completed & paid — $symbol${total.toStringAsFixed(2)}'
-              : '✅ Payment of $symbol${total.toStringAsFixed(2)} recorded';
+        if (!mounted) return;
+        final autoCompleted = result['auto_completed'] == true;
+        final message = autoCompleted
+            ? '✅ Appointment completed & paid — $symbol${total.toStringAsFixed(2)}'
+            : '✅ Payment of $symbol${total.toStringAsFixed(2)} recorded';
 
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.check_circle, color: Colors.white, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(message)),
-                ],
-              ),
-              backgroundColor: Colors.green.shade600,
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 3),
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(child: Text(message)),
+              ],
             ),
-          );
-          await _loadAppointments();
-        }
+            backgroundColor: Colors.green.shade600,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        await _loadAppointments();
       } else {
         throw Exception(result['message'] ?? 'Failed to mark as paid');
       }
@@ -1671,13 +1859,13 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
       builder: (_) => EditAppointmentServicesSheet(appointment: apt),
     );
 
-    if (changed == true) {
+    if (changed == true && mounted) {
       await _loadAppointments();
     }
   }
 
   // ============================================================
-  // ✅ DATE PICKER
+  // ✅ DATE PICKER (salon timezone for "today")
   // ============================================================
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
@@ -1726,8 +1914,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
   // ✅ MONTH PICKER
   // ============================================================
   Future<void> _pickMonth() async {
-    int tempYear = _selectedYear;
-    int tempMonth = _selectedMonth;
+    final salonNow = _salonNow;
+    int tempYear = _selectedYear != 0 ? _selectedYear : salonNow.year;
+    int tempMonth = _selectedMonth != 0 ? _selectedMonth : salonNow.month;
 
     final picked = await showDialog<int>(
       context: context,
@@ -1889,7 +2078,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
   // ✅ YEAR PICKER
   // ============================================================
   Future<void> _pickYear() async {
-    final currentYear = DateTime.now().year;
+    final currentYear = _salonNow.year;
     final years = List.generate(12, (i) => currentYear - 5 + i);
 
     final picked = await showDialog<int>(
@@ -2019,13 +2208,15 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
         ),
       ),
       body: SafeArea(
-        child: _isLoading
+        child: !_isTimezoneLoaded
             ? _buildLoadingState()
-            : _errorMessage != null
-            ? _buildErrorState()
-            : _isWeb
-            ? _buildWebLayout()
-            : _buildMobileLayout(),
+            : _isLoading
+                ? _buildLoadingState()
+                : _errorMessage != null
+                    ? _buildErrorState()
+                    : _isWeb
+                        ? _buildWebLayout()
+                        : _buildMobileLayout(),
       ),
     );
   }
@@ -2083,9 +2274,64 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     );
   }
 
+  // ============================================================
+  // ✅ TIMEZONE INFO BANNER (only if user tz != salon tz)
+  // ============================================================
+  Widget _buildTimezoneInfoBanner() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blue.withValues(alpha: _isDark ? 0.12 : 0.06),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.blue.withValues(alpha: _isDark ? 0.3 : 0.2),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.info_outline,
+            size: 18,
+            color: _isDark ? Colors.blue[300] : Colors.blue[700],
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Salon timezone: ${TimezoneService.getFullTimezoneDisplayFor(_salonTimezone)}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _isDark ? Colors.blue[300] : Colors.blue[700],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'All times shown in salon\'s timezone. Your timezone: ${TimezoneService.getFullTimezoneDisplayFor(_userTimezone)}',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _isDark ? Colors.white70 : Colors.grey[700],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMobileLayout() {
     return Column(
       children: [
+        if (_isDifferentTimezone)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: _buildTimezoneInfoBanner(),
+          ),
         _buildSearchBar(),
         _buildDatePeriodSelector(),
         _buildPeriodDisplay(),
@@ -2148,6 +2394,10 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (_isDifferentTimezone) ...[
+              _buildTimezoneInfoBanner(),
+              const SizedBox(height: 12),
+            ],
             _buildSearchBar(isWeb: true),
             const SizedBox(height: 12),
             _buildDatePeriodSelector(),
@@ -2864,13 +3114,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
   }
 
   // =====================================================
-  // ✅ APPOINTMENT CARD — Owner screen (with dynamic currency)
-  //    Row 1: Queue badge (Q5/VIP-3) + VIP/Regular label
-  //    Row 2: Customer + PAID/UNPAID + Barber + For
-  //    Row 3: Services (flat rows) + Total
-  //    Row 4: Date/Time
-  //    Row 5: Notes (if any)
-  //    Action buttons (no divider above)
+  // ✅ APPOINTMENT CARD — Owner screen (with reference time)
   // =====================================================
   Widget _buildAppointmentCard(Map<String, dynamic> apt) {
     final isDark = _isDark;
@@ -2885,7 +3129,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     final isVip = apt['is_vip'] as bool? ?? false;
     final isPaid = paymentStatus == 'paid';
 
-    // ✅ Dynamic currency
     final symbol = _currencySymbol(apt['currency_code'] as String?);
 
     final customerName = apt['customer_name'] as String? ?? 'Customer';
@@ -2894,13 +3137,16 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     final displayDate = apt['display_date'] as String? ?? '';
     final startTime = _formatTime(apt['start_time'] ?? '');
     final endTime = _formatTime(apt['end_time'] ?? '');
+    final userStartTime = _formatUtcToUserTime(apt['start_time'] as String?);
+    final userEndTime = _formatUtcToUserTime(apt['end_time'] as String?);
+    final hasUserTime =
+        userStartTime.isNotEmpty && userEndTime.isNotEmpty;
     final regQueue = apt['regular_queue_number'];
     final vipQueue = apt['vip_queue_number'];
     final childName = apt['child_name'] as String?;
 
-    final List<Map<String, dynamic>> services = List<Map<String, dynamic>>.from(
-      apt['services'] ?? [],
-    );
+    final List<Map<String, dynamic>> services =
+        List<Map<String, dynamic>>.from(apt['services'] ?? []);
     final double totalPrice = (apt['price'] as num?)?.toDouble() ?? 0.0;
     final double totalDiscount =
         (apt['total_discount'] as num?)?.toDouble() ?? 0.0;
@@ -2912,14 +3158,11 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
       (a, s) => a + ((s['duration'] as num?)?.toInt() ?? 0),
     );
 
-    // ✅ Button visibility
-    final bool canStart =
-        !isCancelled &&
+    final bool canStart = !isCancelled &&
         !isCompleted &&
         (status == 'pending' || status == 'confirmed');
     final bool canEnd = isInProgress;
-    final bool canCancel =
-        !isCancelled &&
+    final bool canCancel = !isCancelled &&
         !isCompleted &&
         (status == 'pending' || status == 'confirmed');
     final bool canPay = isInProgress || isPendingPayment;
@@ -2929,7 +3172,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     final labelColor = isVip ? _vipColor : _regularQueueColor;
     final labelIcon = isVip ? Icons.star : Icons.confirmation_number;
 
-    // ✅ Card border
     BorderSide borderSide;
     if (isVip) {
       borderSide = BorderSide(color: _vipBorderColor, width: 2);
@@ -2958,9 +3200,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // =====================================================
               // ROW 1: Queue badge + VIP/Regular label
-              // =====================================================
               Row(
                 children: [
                   if (regQueue != null || vipQueue != null)
@@ -3035,9 +3275,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
 
               const SizedBox(height: 12),
 
-              // =====================================================
               // ROW 2: Customer
-              // =====================================================
               Row(
                 children: [
                   Container(
@@ -3195,9 +3433,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
 
               const SizedBox(height: 12),
 
-              // =====================================================
               // ROW 3: Services
-              // =====================================================
               Row(
                 children: [
                   Icon(Icons.content_cut, size: 13, color: AppTheme.primary),
@@ -3410,10 +3646,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
 
               const SizedBox(height: 12),
 
-              // =====================================================
-              // ROW 4: Date/Time
-              // =====================================================
+              // ROW 4: Date/Time (salon) + Reference time (user)
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(
                     child: Row(
@@ -3434,26 +3669,68 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
                       ],
                     ),
                   ),
-                  Icon(
-                    Icons.access_time,
-                    size: 14,
-                    color: isDark ? Colors.white60 : Colors.grey[500],
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '$startTime - $endTime',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white : Colors.black87,
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.access_time,
+                              size: 14,
+                              color: isDark
+                                  ? Colors.white60
+                                  : Colors.grey[500],
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '$startTime - $endTime',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (hasUserTime)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.public,
+                                  size: 10,
+                                  color: isDark
+                                      ? Colors.blue[300]
+                                      : Colors.blue[700],
+                                ),
+                                const SizedBox(width: 3),
+                                Flexible(
+                                  child: Text(
+                                    'Your: $userStartTime - $userEndTime',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontStyle: FontStyle.italic,
+                                      color: isDark
+                                          ? Colors.blue[300]
+                                          : Colors.blue[700],
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                 ],
               ),
 
-              // =====================================================
               // ACTION BUTTONS
-              // =====================================================
               if (canStart ||
                   canEnd ||
                   canPay ||
@@ -3650,6 +3927,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
         isDark: _isDark,
         isWeb: _isWeb,
         currencySymbol: _currencySymbol,
+        salonTimezone: _salonTimezone,
+        userTimezone: _userTimezone,
+        isDifferentTimezone: _isDifferentTimezone,
         onEditServices:
             _editableStatuses.contains(apt['status']) ||
                 (apt['status'] == 'completed' &&
@@ -3680,6 +3960,9 @@ class AppointmentDetailsSheet extends StatelessWidget {
   final bool isDark;
   final bool isWeb;
   final String Function(String?) currencySymbol;
+  final String salonTimezone;
+  final String userTimezone;
+  final bool isDifferentTimezone;
   final VoidCallback? onMarkAsPaid;
   final VoidCallback? onEditServices;
 
@@ -3689,6 +3972,9 @@ class AppointmentDetailsSheet extends StatelessWidget {
     required this.isDark,
     required this.isWeb,
     required this.currencySymbol,
+    required this.salonTimezone,
+    required this.userTimezone,
+    required this.isDifferentTimezone,
     this.onMarkAsPaid,
     this.onEditServices,
   });
@@ -3728,6 +4014,13 @@ class AppointmentDetailsSheet extends StatelessWidget {
     final travelTime = appointment['travel_time_minutes'] ?? 0;
     final isCompleted = status == 'completed';
     final isPaid = paymentStatus == 'paid';
+
+    // User timezone reference
+    final userStartTime = _formatUtcToUserTime(startTime);
+    final userEndTime = _formatUtcToUserTime(endTime);
+    final hasUserTime = isDifferentTimezone &&
+        userStartTime.isNotEmpty &&
+        userEndTime.isNotEmpty;
 
     return DraggableScrollableSheet(
       initialChildSize: 0.85,
@@ -3903,8 +4196,7 @@ class AppointmentDetailsSheet extends StatelessWidget {
                             shape: BoxShape.circle,
                             color: isDark ? Colors.grey[800] : Colors.grey[200],
                           ),
-                          child:
-                              customerAvatar != null &&
+                          child: customerAvatar != null &&
                                   customerAvatar.isNotEmpty
                               ? ClipOval(
                                   child: CachedNetworkImage(
@@ -4012,7 +4304,8 @@ class AppointmentDetailsSheet extends StatelessWidget {
                           final variantLabel = s['variant_label'] as String?;
 
                           final details = [
-                            if (variantLabel != null && variantLabel.isNotEmpty)
+                            if (variantLabel != null &&
+                                variantLabel.isNotEmpty)
                               variantLabel,
                             '$sDuration min',
                           ].join(' • ');
@@ -4060,7 +4353,8 @@ class AppointmentDetailsSheet extends StatelessWidget {
                                               : Colors.grey,
                                         ),
                                       ),
-                                    if (sDiscount > 0) const SizedBox(width: 4),
+                                    if (sDiscount > 0)
+                                      const SizedBox(width: 4),
                                     Text(
                                       '$symbol${(sDiscount > 0 ? sFinal : sOriginal).toStringAsFixed(2)}',
                                       style: TextStyle(
@@ -4124,6 +4418,15 @@ class AppointmentDetailsSheet extends StatelessWidget {
                         'Time',
                         '${_formatTime(startTime)} - ${_formatTime(endTime)}',
                       ),
+                      if (hasUserTime)
+                        _buildDetailRow(
+                          'Your Time',
+                          '$userStartTime - $userEndTime',
+                          valueColor: isDark
+                              ? Colors.blue[300]
+                              : Colors.blue[700],
+                          italic: true,
+                        ),
                       _buildDetailRow('Total Duration', '$duration min'),
                       if (regQueue != null)
                         _buildDetailRow('Queue', 'Q$regQueue'),
@@ -4315,7 +4618,12 @@ class AppointmentDetailsSheet extends StatelessWidget {
     );
   }
 
-  Widget _buildDetailRow(String label, String value) {
+  Widget _buildDetailRow(
+    String label,
+    String value, {
+    Color? valueColor,
+    bool italic = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -4337,7 +4645,9 @@ class AppointmentDetailsSheet extends StatelessWidget {
               style: TextStyle(
                 fontSize: isWeb ? 14 : 13,
                 fontWeight: FontWeight.w500,
-                color: isDark ? Colors.white : Colors.black87,
+                fontStyle: italic ? FontStyle.italic : FontStyle.normal,
+                color:
+                    valueColor ?? (isDark ? Colors.white : Colors.black87),
               ),
             ),
           ),
@@ -4429,16 +4739,44 @@ class AppointmentDetailsSheet extends StatelessWidget {
     }
   }
 
+  /// Format UTC time → salon-local
   String _formatTime(String timeStr) {
+    if (timeStr.isEmpty) return '';
+
+    final tz = salonTimezone.isNotEmpty ? salonTimezone : 'Asia/Colombo';
+
     try {
-      final parts = timeStr.split(':');
-      final hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
-      final period = hour >= 12 ? 'PM' : 'AM';
-      final displayHour = hour % 12 == 0 ? 12 : hour % 12;
-      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
+        timeStr,
+        tz,
+      );
     } catch (e) {
-      return timeStr;
+      try {
+        final parts = timeStr.split(':');
+        final hour = int.parse(parts[0]);
+        final minute = int.parse(parts[1]);
+        final period = hour >= 12 ? 'PM' : 'AM';
+        final displayHour = hour % 12 == 0 ? 12 : hour % 12;
+        return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+      } catch (e2) {
+        return timeStr;
+      }
+    }
+  }
+
+  /// Format UTC time → USER timezone (for reference)
+  String _formatUtcToUserTime(String? utcTimeStr) {
+    if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
+    if (!isDifferentTimezone) return '';
+    if (userTimezone.isEmpty) return '';
+
+    try {
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
+        utcTimeStr,
+        userTimezone,
+      );
+    } catch (e) {
+      return '';
     }
   }
 }

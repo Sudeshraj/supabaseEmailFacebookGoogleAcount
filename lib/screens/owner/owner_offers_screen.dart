@@ -19,10 +19,17 @@ class OwnerOffersScreen extends StatefulWidget {
 
 class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     with SingleTickerProviderStateMixin {
+  // ✅ Default salon timezone (DB default — NOT user timezone!)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
   final supabase = Supabase.instance.client;
   final CurrencyService _currencyService = CurrencyService.instance;
 
-  String _salonCurrencyCode = 'LKR';
+  // ✅ Currency — DB → timezone-derived → LKR fallback
+  String _salonCurrencyCode = '';
+
+  // ✅ Salon timezone
+  String _salonTimezone = '';
 
   List<Map<String, dynamic>> _offers = [];
   List<Map<String, dynamic>> _filteredOffers = [];
@@ -37,13 +44,13 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   bool _showFloatingButton = true;
 
   // Timezone
-  String _userTimezone = '';
+  String userTimezone = '';
   bool _isTimezoneLoaded = false;
 
   late bool _isDark;
   late bool _isWeb;
 
-  // Tab controller for status tabs
+  // Tab controller
   late TabController _tabController;
 
   // Counts
@@ -54,16 +61,46 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
   bool _isProcessing = false;
 
+  // ✅ Effective currency getter
+  String get _effectiveCurrencyCode {
+    if (_salonCurrencyCode.isNotEmpty) {
+      return _salonCurrencyCode;
+    }
+    if (_salonTimezone.isNotEmpty) {
+      return TimezoneService.getCurrencyForTimezone(_salonTimezone);
+    }
+    return 'LKR';
+  }
+
+  // ✅ Currency symbol
   String get _salonCurrencySymbol =>
-      _currencyService.getSymbol(_salonCurrencyCode);
+      _currencyService.getSymbol(_effectiveCurrencyCode);
+
+  // ✅ Salon "today" — fallback to salon default (NOT device)
+  DateTime get _salonToday {
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
+    try {
+      final now = TimezoneService.getNowInTimezone(tz);
+      return DateTime(now.year, now.month, now.day);
+    } catch (e) {
+      debugPrint('❌ Error getting salon today: $e');
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day);
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(_onTabChanged);
-    _initializeTimezone();
     _scrollController.addListener(_onScroll);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _initializeTimezone();
+    });
   }
 
   @override
@@ -90,7 +127,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     if (amount == null) return '$_salonCurrencySymbol 0';
     return _currencyService.format(
       price: amount,
-      currencyCode: _salonCurrencyCode,
+      currencyCode: _effectiveCurrencyCode,
     );
   }
 
@@ -98,10 +135,13 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
-    _userTimezone =
-        prefs.getString(TimezoneService.kUserTimezone) ??
+
+    userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
         TimezoneService.getCurrentTimezone();
-    await TimezoneService.setTimezone(_userTimezone);
+
+    if (userTimezone.isEmpty) {
+      userTimezone = _kDefaultSalonTimezone;
+    }
 
     if (!mounted) return;
 
@@ -112,61 +152,85 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     await _loadSalonAndOffers();
   }
 
-  DateTime _utcToLocalDate(String utcDateStr) {
+  // ============================================
+  // ✅ DATE HELPERS (DATE columns — no timezone)
+  // ============================================
+
+  /// ✅ Offers use DATE columns — no timezone conversion
+  DateTime _parseDateOnly(String dateStr) {
     try {
-      final utcDateTime = DateTime.parse(utcDateStr);
-      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
-        '12:00:00',
-        utcDateTime,
-      );
-      return DateTime(
-        localDateTime.year,
-        localDateTime.month,
-        localDateTime.day,
-      );
+      final parsed = DateTime.parse(dateStr);
+      return DateTime(parsed.year, parsed.month, parsed.day);
     } catch (e) {
-      return DateTime.parse(utcDateStr);
+      debugPrint('❌ Error parsing date: $e');
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day);
     }
   }
 
-  String _formatLocalDate(String utcDateStr) {
+  String _formatLocalDate(String dateStr) {
     try {
-      final localDate = _utcToLocalDate(utcDateStr);
-      return DateFormat('MMM dd, yyyy').format(localDate);
+      final date = _parseDateOnly(dateStr);
+      return DateFormat('MMM dd, yyyy').format(date);
     } catch (e) {
-      return utcDateStr;
+      return dateStr;
     }
   }
 
+  // ✅ Active: is_active=true, valid_from <= today, valid_to > today
   bool _isOfferActive(Map<String, dynamic> offer) {
-    final now = DateTime.now();
-    final nowLocal = DateTime(now.year, now.month, now.day);
-    final validToLocal = _utcToLocalDate(offer['valid_to']);
-    final validFromLocal = _utcToLocalDate(offer['valid_from']);
-    return offer['is_active'] == true &&
-        validToLocal.isAfter(nowLocal) &&
-        !validFromLocal.isAfter(nowLocal);
+    try {
+      final nowLocal = _salonToday;
+      final validToLocal = _parseDateOnly(offer['valid_to'] as String);
+      final validFromLocal = _parseDateOnly(offer['valid_from'] as String);
+      return offer['is_active'] == true &&
+          validToLocal.isAfter(nowLocal) &&
+          !validFromLocal.isAfter(nowLocal);
+    } catch (e) {
+      return false;
+    }
   }
 
+  // ✅ Expired: is_active=true, valid_to < today
   bool _isOfferExpired(Map<String, dynamic> offer) {
-    final now = DateTime.now();
-    final nowLocal = DateTime(now.year, now.month, now.day);
-    final validToLocal = _utcToLocalDate(offer['valid_to']);
-    return validToLocal.isBefore(nowLocal);
+    try {
+      if (offer['is_active'] != true) return false;
+      final nowLocal = _salonToday;
+      final validToLocal = _parseDateOnly(offer['valid_to'] as String);
+      return validToLocal.isBefore(nowLocal);
+    } catch (e) {
+      return false;
+    }
   }
 
+  // ✅ FIX: Inactive includes is_active=false OR future-valid (not yet started)
   bool _isOfferInactive(Map<String, dynamic> offer) {
-    return offer['is_active'] != true;
+    if (offer['is_active'] != true) return true;
+
+    // Also inactive if future-valid (not yet started)
+    try {
+      final nowLocal = _salonToday;
+      final validFromLocal = _parseDateOnly(offer['valid_from'] as String);
+      if (validFromLocal.isAfter(nowLocal)) return true;
+    } catch (e) {
+      // ignore
+    }
+
+    return false;
   }
 
   int _getDaysLeft(Map<String, dynamic> offer) {
-    final now = DateTime.now();
-    final nowLocal = DateTime(now.year, now.month, now.day);
-    final validToLocal = _utcToLocalDate(offer['valid_to']);
-    return validToLocal.difference(nowLocal).inDays;
+    try {
+      final nowLocal = _salonToday;
+      final validToLocal = _parseDateOnly(offer['valid_to'] as String);
+      return validToLocal.difference(nowLocal).inDays;
+    } catch (e) {
+      return 0;
+    }
   }
 
   void _onScroll() {
+    if (!mounted) return;
     if (!_scrollController.hasClients) return;
 
     if (_scrollController.position.pixels > 200 && _showFloatingButton) {
@@ -189,9 +253,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
         _filteredOffers = _offers.where((o) => _isOfferActive(o)).toList();
         break;
       case 1: // Expired
-        _filteredOffers = _offers
-            .where((o) => _isOfferExpired(o) && !_isOfferInactive(o))
-            .toList();
+        _filteredOffers = _offers.where((o) => _isOfferExpired(o)).toList();
         break;
       case 2: // Inactive
         _filteredOffers = _offers.where((o) => _isOfferInactive(o)).toList();
@@ -203,7 +265,25 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     }
   }
 
+  // ✅ Helper: parse salon result → set fields
+  void _setSalonFromResult(Map<String, dynamic> salon) {
+    _currentSalonId = salon['id'] as int;
+    _currentSalonName = salon['name'] as String?;
+
+    final currencyCode = salon['currency_code'] as String?;
+    if (currencyCode != null && currencyCode.isNotEmpty) {
+      _salonCurrencyCode = currencyCode;
+    }
+
+    final timezone = salon['timezone'] as String?;
+    if (timezone != null && timezone.isNotEmpty) {
+      _salonTimezone = timezone;
+    }
+  }
+
   Future<void> _loadSalonAndOffers() async {
+    if (!mounted) return;
+
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
@@ -216,7 +296,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
         return;
       }
 
-      // ✅ Role check by NAME (no hardcoded role_id)
+      // ✅ STEP 1: Check owner role
       final ownerCheck = await supabase
           .from('user_roles')
           .select('status, roles!inner(name)')
@@ -234,32 +314,66 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
         return;
       }
 
-      // Load salon
-      if (widget.salonId != null && widget.salonId!.isNotEmpty) {
-        final salonResult = await supabase
-            .from('salons')
-            .select('id, name, currency_code')
-            .eq('id', int.parse(widget.salonId!))
-            .eq('owner_id', user.id)
-            .maybeSingle();
+      // ✅ STEP 2: Check profile (blocked/inactive)
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_active, is_blocked')
+          .eq('id', user.id)
+          .maybeSingle();
 
-        if (salonResult != null) {
+      if (profileCheck != null) {
+        if (profileCheck['is_blocked'] == true) {
           if (!mounted) return;
           setState(() {
-            _currentSalonId = salonResult['id'] as int;
-            _currentSalonName = salonResult['name'];
-            _salonCurrencyCode =
-                salonResult['currency_code'] as String? ?? 'LKR';
+            _hasError = true;
+            _errorMessage =
+                'Your account has been blocked. Please contact support.';
+            _isLoading = false;
           });
-          await _loadOffers();
+          return;
+        }
+        if (profileCheck['is_active'] == false) {
+          if (!mounted) return;
+          setState(() {
+            _hasError = true;
+            _errorMessage =
+                'Your profile is inactive. Please contact support.';
+            _isLoading = false;
+          });
           return;
         }
       }
 
+      // ✅ STEP 3: Load salon (specific ID or first owned)
+      if (widget.salonId != null && widget.salonId!.isNotEmpty) {
+        final salonIdInt = int.tryParse(widget.salonId!);
+        if (salonIdInt != null) {
+          final salonResult = await supabase
+              .from('salons')
+              .select('id, name, currency_code, timezone')
+              .eq('id', salonIdInt)
+              .eq('owner_id', user.id)
+              .maybeSingle();
+
+          if (salonResult != null) {
+            if (!mounted) return;
+            setState(() {
+              _setSalonFromResult(salonResult);
+            });
+            await _loadOffers();
+            return;
+          }
+        }
+      }
+
+      // ✅ Fallback — first active salon
       final salonResult = await supabase
           .from('salons')
-          .select('id, name, currency_code')
+          .select('id, name, currency_code, timezone')
           .eq('owner_id', user.id)
+          .eq('is_active', true)
+          .order('created_at', ascending: true)
+          .limit(1)
           .maybeSingle();
 
       if (salonResult == null) {
@@ -274,9 +388,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
       if (!mounted) return;
       setState(() {
-        _currentSalonId = salonResult['id'] as int;
-        _currentSalonName = salonResult['name'];
-        _salonCurrencyCode = salonResult['currency_code'] as String? ?? 'LKR';
+        _setSalonFromResult(salonResult);
       });
 
       await _loadOffers();
@@ -291,11 +403,11 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   }
 
   // ============================================
-  // ✅ LOAD OFFERS (variant-aware)
+  // ✅ LOAD OFFERS (variant-aware + grouped)
   // ============================================
   Future<void> _loadOffers() async {
     final salonId = _currentSalonId;
-    if (salonId == null) return;
+    if (salonId == null || !mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -303,7 +415,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     });
 
     try {
-      // ✅ Load offers with variant info
       final result = await supabase
           .from('offers')
           .select('''
@@ -336,7 +447,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
       if (!mounted) return;
 
-      // ✅ Load gender/age lookups for variant labels
+      // ✅ Load gender/age lookups
       final genderIds = <int>{};
       final ageIds = <int>{};
       for (final o in result) {
@@ -382,11 +493,14 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
         }
       }
 
-      // ✅ Enrich offers with scope summary
+      // ✅ FIX: Group scope by service (avoid duplicate service names)
       final offers = List<Map<String, dynamic>>.from(result).map((o) {
         final offer = Map<String, dynamic>.from(o);
         final svcList = (offer['offer_services'] as List? ?? []);
-        final scopeParts = <String>[];
+
+        // Group variants by service name
+        final Map<String, List<String>> groupedByService = {};
+        final Set<String> wholeServices = {};
 
         for (final os in svcList) {
           final service = os['services'];
@@ -394,10 +508,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
           final serviceName = service?['name']?.toString() ?? 'Service';
 
           if (variant == null) {
-            // Service-level → all variants
-            scopeParts.add(serviceName);
+            // Whole service (any variant)
+            wholeServices.add(serviceName);
           } else {
-            // Variant-level
             final gid = variant['salon_gender_id'] as int?;
             final aid = variant['salon_age_category_id'] as int?;
             final gender = gid != null ? (genderMap[gid] ?? '') : '';
@@ -405,17 +518,36 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
             final labelParts = <String>[];
             if (gender.isNotEmpty) labelParts.add(gender);
             if (age.isNotEmpty) labelParts.add(age);
-            final vLabel =
-                labelParts.isEmpty ? 'Standard' : labelParts.join(' ');
-            scopeParts.add('$serviceName · $vLabel');
+            final vLabel = labelParts.isEmpty ? 'Standard' : labelParts.join(' ');
+            groupedByService.putIfAbsent(serviceName, () => []).add(vLabel);
           }
         }
 
-        offer['scope_summary'] =
-            scopeParts.isEmpty ? 'All Services' : scopeParts.join(', ');
+        // Build summary parts
+        final summaryParts = <String>[];
+
+        // Whole services first
+        for (final svcName in wholeServices) {
+          summaryParts.add(svcName);
+        }
+
+        // Then services with variants
+        groupedByService.forEach((svcName, variants) {
+          if (wholeServices.contains(svcName)) return; // already added
+          if (variants.length == 1) {
+            summaryParts.add('$svcName · ${variants.first}');
+          } else {
+            summaryParts.add('$svcName (${variants.length} variants)');
+          }
+        });
+
+        offer['scope_summary'] = summaryParts.isEmpty
+            ? 'All Services'
+            : summaryParts.join(', ');
         return offer;
       }).toList();
 
+      // ✅ Consistent counts (future-valid → inactive)
       int total = offers.length;
       int active = 0;
       int expired = 0;
@@ -428,9 +560,13 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
           expired++;
         } else if (_isOfferActive(offer)) {
           active++;
+        } else {
+          // Edge case safety — count as inactive
+          inactive++;
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _offers = offers;
         _totalCount = total;
@@ -451,8 +587,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     }
   }
 
+  // ✅ Pass salonTimezone to CreateOfferScreen
   Future<void> _openCreateOffer() async {
-    if (_currentSalonId == null) return;
+    if (_currentSalonId == null || !mounted) return;
 
     final result = await Navigator.push<bool>(
       context,
@@ -460,7 +597,8 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
         builder: (_) => CreateOfferScreen(
           salonId: _currentSalonId!,
           salonName: _currentSalonName ?? 'Salon',
-          currencyCode: _salonCurrencyCode,
+          currencyCode: _effectiveCurrencyCode,
+          salonTimezone: _salonTimezone,
         ),
       ),
     );
@@ -471,7 +609,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   }
 
   Future<void> _openEditOffer(Map<String, dynamic> offer) async {
-    if (_currentSalonId == null) return;
+    if (_currentSalonId == null || !mounted) return;
 
     final result = await Navigator.push<bool>(
       context,
@@ -479,7 +617,8 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
         builder: (_) => CreateOfferScreen(
           salonId: _currentSalonId!,
           salonName: _currentSalonName ?? 'Salon',
-          currencyCode: _salonCurrencyCode,
+          currencyCode: _effectiveCurrencyCode,
+          salonTimezone: _salonTimezone,
           editingOffer: offer,
         ),
       ),
@@ -491,7 +630,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   }
 
   Future<void> _toggleOfferStatus(int offerId, bool isActive) async {
-    if (_isProcessing) return;
+    if (_isProcessing || !mounted) return;
     setState(() => _isProcessing = true);
 
     try {
@@ -534,11 +673,12 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   }
 
   Future<void> _deleteOffer(int offerId) async {
+    if (!mounted) return;
     final isDark = _isDark;
 
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
@@ -564,11 +704,11 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
@@ -579,7 +719,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
       ),
     );
 
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     setState(() => _isProcessing = true);
 
@@ -628,25 +768,39 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   Color _getStatusColor(Map<String, dynamic> offer) {
     if (offer['is_active'] != true) return Colors.grey;
     if (_isOfferExpired(offer)) return Colors.red;
+    if (_isOfferInactive(offer)) return Colors.grey;
     return Colors.green;
   }
 
   String _getStatusText(Map<String, dynamic> offer) {
     if (offer['is_active'] != true) return 'Inactive';
     if (_isOfferExpired(offer)) return 'Expired';
+    if (_isOfferInactive(offer)) {
+      // Future-valid
+      final daysUntilStart = _daysUntilStart(offer);
+      return daysUntilStart > 0 ? 'Starts in $daysUntilStart d' : 'Inactive';
+    }
     final daysLeft = _getDaysLeft(offer);
     return daysLeft == 0 ? 'Ends today' : '$daysLeft days left';
   }
 
-  // ✅ UPDATED: Use pre-built scope_summary (variant-aware)
+  int _daysUntilStart(Map<String, dynamic> offer) {
+    try {
+      final nowLocal = _salonToday;
+      final validFromLocal = _parseDateOnly(offer['valid_from'] as String);
+      return validFromLocal.difference(nowLocal).inDays;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // ✅ Use pre-built scope_summary
   String _getServiceScopeSummary(Map<String, dynamic> offer) {
-    // Use backend-built scope summary if available
     final summary = offer['scope_summary']?.toString();
     if (summary != null && summary.isNotEmpty) {
       return '✂️ $summary';
     }
 
-    // Fallback: build from offer_services
     final offerServices = offer['offer_services'] as List? ?? [];
     if (offerServices.isEmpty) return '🌐 All Services';
 
@@ -712,7 +866,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
             ? _buildInitialLoading()
             : _isLoading && _offers.isEmpty
                 ? _buildLoadingState()
-                : _hasError
+                : _hasError && _offers.isEmpty
                     ? _buildErrorState()
                     : _isWeb
                         ? _buildWebLayout()
@@ -799,9 +953,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     );
   }
 
-  // ============================================
-  // WEB LAYOUT
-  // ============================================
   Widget _buildWebLayout() {
     return Center(
       child: ConstrainedBox(
@@ -1026,7 +1177,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
       return RefreshIndicator(
         onRefresh: _loadOffers,
         color: AppTheme.primary,
-        child: _buildEmptyState(),
+        child: _buildEmptyState(scrollable: true),
       );
     }
 
@@ -1096,7 +1247,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            'Tap "New Offer" to create your first offer',
+            'Tap "Create Offer" to create your first offer',
             style: TextStyle(
               fontSize: 13,
               color: _isDark ? Colors.white70 : Colors.grey[500],
@@ -1140,27 +1291,27 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     final statusColor = _getStatusColor(offer);
     final statusText = _getStatusText(offer);
     final discountText = _getDiscountText(offer);
-    final validFrom = _formatLocalDate(offer['valid_from']);
-    final validTo = _formatLocalDate(offer['valid_to']);
+    final validFrom = _formatLocalDate(offer['valid_from'] as String);
+    final validTo = _formatLocalDate(offer['valid_to'] as String);
     final usageLimit = offer['usage_limit'];
     final usedCount = offer['used_count'] ?? 0;
     final serviceScope = _getServiceScopeSummary(offer);
     final pointsRequired = (offer['points_required'] ?? 0) as int;
     final isActive = offer['is_active'] == true;
     final isExpired = _isOfferExpired(offer);
+    final isInactive = _isOfferInactive(offer);
     final daysLeft = _getDaysLeft(offer);
 
-    // Card border color based on status
     BorderSide borderSide;
-    if (isActive && !isExpired) {
-      borderSide = BorderSide(color: Colors.green.shade400, width: 1.5);
-    } else if (isExpired) {
-      borderSide = BorderSide(color: Colors.red.shade300, width: 1.5);
-    } else {
+    if (isInactive) {
       borderSide = BorderSide(
         color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
         width: 1,
       );
+    } else if (isExpired) {
+      borderSide = BorderSide(color: Colors.red.shade300, width: 1.5);
+    } else {
+      borderSide = BorderSide(color: Colors.green.shade400, width: 1.5);
     }
 
     return Card(
@@ -1179,7 +1330,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ROW 1: Status badge + Discount badge
+              // ROW 1: Status + Discount + Days left
               Row(
                 children: [
                   Container(
@@ -1245,7 +1396,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
                   const Spacer(),
 
-                  if (isActive && !isExpired && daysLeft >= 0)
+                  if (!isInactive && !isExpired && daysLeft >= 0)
                     Container(
                       padding: const EdgeInsets.symmetric(
                         horizontal: 6,
@@ -1317,7 +1468,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
               const SizedBox(height: 12),
 
-              // ROW 3: Service scope + Points
+              // ROW 3: Scope + Points
               Row(
                 children: [
                   Expanded(
@@ -1377,7 +1528,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
 
               const SizedBox(height: 10),
 
-              // ROW 4: Usage + Validity
+              // ROW 4: Validity + Usage
               Row(
                 children: [
                   Icon(
@@ -1386,15 +1537,16 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
                     color: isDark ? Colors.white60 : Colors.grey[500],
                   ),
                   const SizedBox(width: 4),
-                  Text(
-                    isSmallScreen ? validTo : '$validFrom - $validTo',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isDark ? Colors.white70 : Colors.grey[600],
+                  Expanded(
+                    child: Text(
+                      isSmallScreen ? validTo : '$validFrom - $validTo',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isDark ? Colors.white70 : Colors.grey[600],
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
-
-                  const Spacer(),
 
                   if (usageLimit != null)
                     Container(

@@ -47,6 +47,7 @@ void _showDialogError(BuildContext context, bool isDark, String message) {
     SnackBar(
       content: Text(message),
       backgroundColor: isDark ? Colors.red[700] : Colors.red,
+      behavior: SnackBarBehavior.floating,
     ),
   );
 }
@@ -61,6 +62,9 @@ class BarberScheduleScreen extends StatefulWidget {
 }
 
 class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
+  // ✅ Default salon timezone (DB default — NOT user timezone!)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
   final supabase = Supabase.instance.client;
 
   bool _isLoading = true;
@@ -79,12 +83,12 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   // ============================================
   // TIMEZONE VARIABLES
   // ============================================
-  String _salonTimezone = '';
+  String _salonTimezone = _kDefaultSalonTimezone;
   String _userTimezone = '';
 
-  // Salon default times (Local for display)
-  TimeOfDay? _salonOpenTimeLocal;
-  TimeOfDay? _salonCloseTimeLocal;
+  // Salon default times (Salon timezone එකේ - NOT user timezone)
+  TimeOfDay? _salonOpenTime;
+  TimeOfDay? _salonCloseTime;
 
   // ============================================
   // RESPONSIVE VARIABLES
@@ -110,7 +114,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeTimezones();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _initializeTimezones();
+      }
+    });
   }
 
   @override
@@ -129,8 +137,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
   // ============================================
   // ✅ TIMEZONE INITIALIZATION
-  //    1st: User timezone from LOCAL STORAGE
-  //    2nd: Fallback to DEVICE timezone
   // ============================================
   Future<void> _initializeTimezones() async {
     await TimezoneService.initialize();
@@ -140,6 +146,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     // ✅ User timezone - Local storage → Device (fallback)
     _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
         TimezoneService.getCurrentTimezone();
+
+    if (_userTimezone.isEmpty) {
+      _userTimezone = _kDefaultSalonTimezone;
+    }
 
     debugPrint('✅ User timezone: $_userTimezone');
 
@@ -154,45 +164,42 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   String _formatUtcToLocalTime(String? utcTime) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
 
-    // ✅ Salon timezone use කරන්න (fallback: user timezone)
+    // ✅ Salon timezone use කරන්න (fallback: salon default, NOT user)
     final tz = _salonTimezone.isNotEmpty
         ? _salonTimezone
-        : TimezoneService.getCurrentTimezone();
+        : _kDefaultSalonTimezone;
 
     try {
       return TimezoneService.utcToLocalTimeRecurringWithTimezone(utcTime, tz);
     } catch (e) {
-      try {
-        final parts = utcTime.split(':');
-        final hour = int.parse(parts[0]);
-        final minute = int.parse(parts[1]);
-        final period = hour >= 12 ? 'PM' : 'AM';
-        final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-        return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
-      } catch (_) {
-        return '--:--';
-      }
+      debugPrint('❌ Error in _formatUtcToLocalTime: $e');
+      return '--:--';
     }
   }
 
+  /// Convert UTC time to salon timezone TimeOfDay
   TimeOfDay _utcToLocalTimeOfDay(String utcTime) {
-    return TimezoneService.utcToTimeOfDayWithTimezone(utcTime, _salonTimezone);
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
+    return TimezoneService.utcToTimeOfDayWithTimezone(utcTime, tz);
   }
 
-  /// ✅ Get salon timezone display (flag + name + offset)
+  /// Get salon timezone display (flag + name + offset)
   String _getSalonTimezoneDisplay() {
     final tz = _salonTimezone.isNotEmpty
         ? _salonTimezone
-        : TimezoneService.getCurrentTimezone();
+        : _kDefaultSalonTimezone;
     return TimezoneService.getFullTimezoneDisplayFor(tz);
   }
 
-  /// ✅ Get user timezone display (flag + name + offset)
+  /// Get user timezone display (flag + name + offset)
   String _getUserTimezoneDisplay() {
+    if (_userTimezone.isEmpty) return '';
     return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
   }
 
-  /// ✅ Check if salon timezone and user timezone are the same
+  /// Check if salon timezone and user timezone are the same
   bool get _isSameTimezone {
     return _salonTimezone.isEmpty || _userTimezone.isEmpty
         ? true
@@ -203,15 +210,19 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   // ✅ CONVERT SALON TIME → USER TIME (Reference)
   // ============================================
 
-  /// Convert a TimeOfDay from salon timezone to user timezone
-  /// Useful for showing "in your time" reference
   TimeOfDay _convertSalonTimeToUserTime(TimeOfDay salonTime) {
     if (_isSameTimezone) return salonTime;
-    return TimezoneService.convertTimeOfDayBetweenTimezones(
-      salonTime,
-      fromTimezone: _salonTimezone,
-      toTimezone: _userTimezone,
-    );
+    if (_userTimezone.isEmpty) return salonTime;
+    try {
+      return TimezoneService.convertTimeOfDayBetweenTimezones(
+        salonTime,
+        fromTimezone: _salonTimezone,
+        toTimezone: _userTimezone,
+      );
+    } catch (e) {
+      debugPrint('❌ Error in _convertSalonTimeToUserTime: $e');
+      return salonTime;
+    }
   }
 
   /// Format a TimeOfDay for display (e.g., "9:30 AM")
@@ -223,22 +234,17 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return '$hour:$minute $period';
   }
 
-  /// ✅ Convert UTC time string directly to user timezone display
-  /// This is the shortcut version for schedule items
+  /// Format UTC time → User timezone (for reference only)
   String _formatUtcToUserTime(String? utcTime) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     if (_isSameTimezone) return '';
+    if (_userTimezone.isEmpty) return '';
 
     try {
-      // 1) UTC → Salon TimeOfDay
-      final salonTime = TimezoneService.utcToTimeOfDayWithTimezone(
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
         utcTime,
-        _salonTimezone,
+        _userTimezone,
       );
-      // 2) Salon → User TimeOfDay
-      final userTime = _convertSalonTimeToUserTime(salonTime);
-      // 3) Format
-      return _formatTimeOfDay(userTime);
     } catch (e) {
       debugPrint('❌ Error in _formatUtcToUserTime: $e');
       return '';
@@ -256,6 +262,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         content: Text(message),
         backgroundColor: color,
         duration: Duration(seconds: seconds),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -268,8 +275,16 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   // LOAD DATA
   // ============================================
 
+  /// ✅ FIX: Salon default fallback always set (NOT user timezone)
   Future<void> _loadSalonTimes() async {
-    if (widget.salonId == null) return;
+    if (widget.salonId == null) {
+      // ✅ Salon default fallback
+      _salonTimezone = _kDefaultSalonTimezone;
+      return;
+    }
+
+    // ✅ Salon default BEFORE the query so it's never empty
+    _salonTimezone = _kDefaultSalonTimezone;
 
     try {
       final salonIdInt = int.parse(widget.salonId!);
@@ -280,21 +295,26 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           .maybeSingle();
 
       if (salonResponse != null) {
-        _salonTimezone =
-            salonResponse['timezone'] ?? TimezoneService.getCurrentTimezone();
+        // ✅ Safe cast + fallback
+        final dbTimezone = salonResponse['timezone'] as String?;
+        if (dbTimezone != null && dbTimezone.isNotEmpty) {
+          _salonTimezone = dbTimezone;
+        }
 
         final openTimeStr = salonResponse['open_time'] as String?;
-        if (openTimeStr != null) {
-          _salonOpenTimeLocal = _utcToLocalTimeOfDay(openTimeStr);
+        if (openTimeStr != null && openTimeStr.isNotEmpty) {
+          _salonOpenTime = _utcToLocalTimeOfDay(openTimeStr);
         }
 
         final closeTimeStr = salonResponse['close_time'] as String?;
-        if (closeTimeStr != null) {
-          _salonCloseTimeLocal = _utcToLocalTimeOfDay(closeTimeStr);
+        if (closeTimeStr != null && closeTimeStr.isNotEmpty) {
+          _salonCloseTime = _utcToLocalTimeOfDay(closeTimeStr);
         }
       }
     } catch (e) {
       debugPrint('Error loading salon times: $e');
+      // ✅ Salon default fallback on error
+      _salonTimezone = _kDefaultSalonTimezone;
     }
   }
 
@@ -542,9 +562,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       builder: (context) => dialog,
     );
 
-    if (result != null && result['success'] == true) {
+    if (result != null && result['success'] == true && mounted) {
       await _updateBarberData(barberId);
-      _showSnack(successMessage, Colors.green);
+      if (mounted) _showSnack(successMessage, Colors.green);
     }
   }
 
@@ -592,15 +612,16 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     required String doneMessage,
   }) async {
     final confirm = await _confirmDelete(confirmTitle, confirmMessage);
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     try {
       await supabase.from(table).delete().eq('id', item['id']);
+      if (!mounted) return;
       await _updateBarberData(item['barber_id']);
-      _showSnack(doneMessage, Colors.orange);
+      if (mounted) _showSnack(doneMessage, Colors.orange);
     } catch (e) {
       debugPrint('Error deleting from $table: $e');
-      _showSnack('Error: $e', Colors.red);
+      if (mounted) _showSnack('Error: $e', Colors.red);
     }
   }
 
@@ -615,8 +636,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         salonId: widget.salonId!,
         salonTimezone: _salonTimezone,
         existingSchedules: _groupedSchedules[barberId] ?? [],
-        defaultOpenTime: _salonOpenTimeLocal,
-        defaultCloseTime: _salonCloseTimeLocal,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
         isDark: _isDark,
       ),
     );
@@ -632,8 +653,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         salonTimezone: _salonTimezone,
         existingBreaks: _groupedBreaks[barberId] ?? [],
         breakTypes: _breakTypes,
-        defaultOpenTime: _salonOpenTimeLocal,
-        defaultCloseTime: _salonCloseTimeLocal,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
         isDark: _isDark,
       ),
     );
@@ -646,8 +667,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       dialog: _EditScheduleDialog(
         schedule: schedule,
         salonTimezone: _salonTimezone,
-        defaultOpenTime: _salonOpenTimeLocal,
-        defaultCloseTime: _salonCloseTimeLocal,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
         isDark: _isDark,
       ),
     );
@@ -661,8 +682,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakItem: breakItem,
         salonTimezone: _salonTimezone,
         breakTypes: _breakTypes,
-        defaultOpenTime: _salonOpenTimeLocal,
-        defaultCloseTime: _salonCloseTimeLocal,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
         isDark: _isDark,
       ),
     );
@@ -690,14 +711,16 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           .update({'is_working': newStatus})
           .eq('id', schedule['id']);
 
-      _showSnack(
-        newStatus ? 'Working day enabled' : 'Working day disabled',
-        newStatus ? Colors.green : Colors.orange,
-        seconds: 1,
-      );
+      if (mounted) {
+        _showSnack(
+          newStatus ? 'Working day enabled' : 'Working day disabled',
+          newStatus ? Colors.green : Colors.orange,
+          seconds: 1,
+        );
+      }
     } catch (e) {
       await _updateBarberData(schedule['barber_id']);
-      _showSnack('Error: $e', Colors.red);
+      if (mounted) _showSnack('Error: $e', Colors.red);
     }
   }
 
@@ -731,8 +754,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         barberId: barberId,
         salonId: widget.salonId!,
         salonTimezone: _salonTimezone,
-        defaultOpenTime: _salonOpenTimeLocal,
-        defaultCloseTime: _salonCloseTimeLocal,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
         isDark: _isDark,
       ),
     );
@@ -747,8 +770,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         salonId: widget.salonId!,
         salonTimezone: _salonTimezone,
         breakTypes: _breakTypes,
-        defaultOpenTime: _salonOpenTimeLocal,
-        defaultCloseTime: _salonCloseTimeLocal,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
         isDark: _isDark,
       ),
     );
@@ -761,8 +784,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       dialog: _EditSpecialScheduleDialog(
         schedule: schedule,
         salonTimezone: _salonTimezone,
-        defaultOpenTime: _salonOpenTimeLocal,
-        defaultCloseTime: _salonCloseTimeLocal,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
         isDark: _isDark,
       ),
     );
@@ -776,8 +799,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         breakItem: breakItem,
         salonTimezone: _salonTimezone,
         breakTypes: _breakTypes,
-        defaultOpenTime: _salonOpenTimeLocal,
-        defaultCloseTime: _salonCloseTimeLocal,
+        defaultOpenTime: _salonOpenTime,
+        defaultCloseTime: _salonCloseTime,
         isDark: _isDark,
       ),
     );
@@ -922,7 +945,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   // ============================================
-  // ✅ TIMEZONE INFO CARD - Shows Salon + User + Salon Hours (in user's time)
+  // ✅ TIMEZONE INFO CARD
   // ============================================
   Widget _buildTimezoneInfoCard() {
     final bool isSame = _isSameTimezone;
@@ -939,7 +962,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             // ✅ Salon timezone (main display)
             Row(
               children: [
-                Icon(
+                const Icon(
                   Icons.store,
                   size: 16,
                   color: AppTheme.primary,
@@ -1009,9 +1032,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 ),
               ),
 
-              // ✅ NEW: Salon hours converted to user's time
-              if (_salonOpenTimeLocal != null &&
-                  _salonCloseTimeLocal != null) ...[
+              // ✅ Salon hours converted to user's time
+              if (_salonOpenTime != null && _salonCloseTime != null) ...[
                 const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.all(8),
@@ -1032,7 +1054,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Salon hours: ${_formatTimeOfDay(_convertSalonTimeToUserTime(_salonOpenTimeLocal!))} - ${_formatTimeOfDay(_convertSalonTimeToUserTime(_salonCloseTimeLocal!))} (Your time)',
+                          'Salon hours: ${_formatTimeOfDay(_convertSalonTimeToUserTime(_salonOpenTime!))} - ${_formatTimeOfDay(_convertSalonTimeToUserTime(_salonCloseTime!))} (Your time)',
                           style: TextStyle(
                             fontSize: 10,
                             color:
@@ -1412,7 +1434,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   // ============================================
-  // ✅ SPECIAL SCHEDULE ITEM (with user time reference)
+  // ✅ SPECIAL SCHEDULE ITEM
   // ============================================
   Widget _buildSpecialScheduleItem(Map<String, dynamic> schedule) {
     final date = DateTime.parse(schedule['schedule_date']);
@@ -1472,7 +1494,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                     color: _isDark ? Colors.white70 : Colors.black87,
                   ),
                 ),
-                // ✅ User time reference
                 if (userStartTime.isNotEmpty && userEndTime.isNotEmpty)
                   Text(
                     'Your time: $userStartTime - $userEndTime',
@@ -1516,7 +1537,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   // ============================================
-  // ✅ SPECIAL BREAK ITEM (with user time reference)
+  // ✅ SPECIAL BREAK ITEM
   // ============================================
   Widget _buildSpecialBreakItem(Map<String, dynamic> breakItem) {
     final date = DateTime.parse(breakItem['break_date']);
@@ -1577,7 +1598,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                     color: _isDark ? Colors.white70 : Colors.black87,
                   ),
                 ),
-                // ✅ User time reference
                 if (userStartTime.isNotEmpty && userEndTime.isNotEmpty)
                   Text(
                     'Your time: $userStartTime - $userEndTime',
@@ -1608,7 +1628,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   // ============================================
-  // ✅ SCHEDULE ITEM (with user time reference)
+  // ✅ SCHEDULE ITEM
   // ============================================
   Widget _buildScheduleItem(Map<String, dynamic> schedule) {
     final dayName = _dayNames[schedule['day_of_week']] ?? 'Unknown';
@@ -1683,7 +1703,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                     decoration: isWorking ? null : TextDecoration.lineThrough,
                   ),
                 ),
-                // ✅ User time reference
                 if (hasUserTime && isWorking)
                   Text(
                     'Your time: $userStartTime - $userEndTime',
@@ -1728,7 +1747,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   // ============================================
-  // ✅ BREAK ITEM (with user time reference)
+  // ✅ BREAK ITEM
   // ============================================
   Widget _buildBreakItem(Map<String, dynamic> breakItem) {
     final dayName = _dayNames[breakItem['day_of_week']] ?? 'Unknown';
@@ -1807,7 +1826,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                     color: Colors.orange,
                   ),
                 ),
-                // ✅ User time reference
                 if (hasUserTime)
                   Text(
                     'Your time: $userStartTime - $userEndTime',

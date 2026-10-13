@@ -49,6 +49,9 @@ class BarberLeavesScreen extends StatefulWidget {
 }
 
 class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
+  // ✅ Default salon timezone (DB default — NOT user timezone!)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
   final supabase = Supabase.instance.client;
   final NotificationService _notificationService = NotificationService();
 
@@ -60,7 +63,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   // ============================================
   // ✅ TIMEZONE VARIABLES
   // ============================================
-  String _salonTimezone = '';
+  String _salonTimezone = _kDefaultSalonTimezone;
   String _userTimezone = '';
 
   // Salon working hours (stored in UTC)
@@ -68,7 +71,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   String? _salonCloseTimeUtc;
   List<Map<String, dynamic>> _holidays = [];
 
-  // Filters (using local date for UI, will convert to UTC for DB queries)
+  // Filters
   DateTime? _selectedLocalDate;
   String? _selectedBarberId;
   String _selectedStatus = 'all';
@@ -84,7 +87,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeAndLoad();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _initializeAndLoad();
+    });
   }
 
   @override
@@ -101,15 +106,18 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   // ============================================
-  // ✅ INITIALIZE - User timezone + Load data
+  // ✅ INITIALIZE
   // ============================================
   Future<void> _initializeAndLoad() async {
     await TimezoneService.initialize();
 
-    // ✅ User timezone - Local storage → Device (fallback)
     final prefs = await SharedPreferences.getInstance();
     _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
         TimezoneService.getCurrentTimezone();
+
+    if (_userTimezone.isEmpty) {
+      _userTimezone = _kDefaultSalonTimezone;
+    }
 
     debugPrint('✅ User timezone: $_userTimezone');
 
@@ -120,7 +128,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   // ✅ TIMEZONE HELPERS
   // ============================================
 
-  /// Check if salon and user timezone are the same
   bool get _isSameTimezone {
     return _salonTimezone.isEmpty || _userTimezone.isEmpty
         ? true
@@ -130,10 +137,11 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   /// Format UTC time to SALON local time
   String _formatUtcToSalonTime(String? utcTimeStr) {
     if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
-    
+
+    // ✅ Salon default fallback (NOT user timezone)
     final tz = _salonTimezone.isNotEmpty
         ? _salonTimezone
-        : TimezoneService.getCurrentTimezone();
+        : _kDefaultSalonTimezone;
 
     try {
       return TimezoneService.utcToLocalTimeRecurringWithTimezone(
@@ -142,44 +150,21 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       );
     } catch (e) {
       debugPrint('❌ Error formatting UTC to salon time: $e');
-      return utcTimeStr;
+      return '--:--';  // ✅ Don't show confusing raw UTC
     }
   }
 
-  /// Convert a TimeOfDay from salon timezone to user timezone
-  TimeOfDay _convertSalonTimeToUserTime(TimeOfDay salonTime) {
-    if (_isSameTimezone) return salonTime;
-    return TimezoneService.convertTimeOfDayBetweenTimezones(
-      salonTime,
-      fromTimezone: _salonTimezone,
-      toTimezone: _userTimezone,
-    );
-  }
-
-  /// Format a TimeOfDay for display (e.g., "9:30 AM")
-  String _formatTimeOfDay(TimeOfDay time) {
-    final hour =
-        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
-    final minute = time.minute.toString().padLeft(2, '0');
-    final period = time.hour >= 12 ? 'PM' : 'AM';
-    return '$hour:$minute $period';
-  }
-
-  /// ✅ Format UTC time to USER timezone (for reference)
+  /// Format UTC time → User timezone (reference only)
   String _formatUtcToUserTime(String? utcTimeStr) {
     if (utcTimeStr == null || utcTimeStr.isEmpty) return '';
     if (_isSameTimezone) return '';
+    if (_userTimezone.isEmpty) return '';
 
     try {
-      // 1) UTC → Salon TimeOfDay
-      final salonTime = TimezoneService.utcToTimeOfDayWithTimezone(
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
         utcTimeStr,
-        _salonTimezone,
+        _userTimezone,
       );
-      // 2) Salon → User TimeOfDay
-      final userTime = _convertSalonTimeToUserTime(salonTime);
-      // 3) Format
-      return _formatTimeOfDay(userTime);
     } catch (e) {
       debugPrint('❌ Error in _formatUtcToUserTime: $e');
       return '';
@@ -207,13 +192,16 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   DateTime _utcDateStringToLocalDate(String utcDateStr) {
     try {
       final utcDateTime = DateTime.parse(utcDateStr);
+      // ✅ Salon default fallback
+      final tz = _salonTimezone.isNotEmpty
+          ? _salonTimezone
+          : _kDefaultSalonTimezone;
+
       final localDateTime =
           TimezoneService.utcToLocalDateTimeForDateWithTimezone(
         '12:00:00',
         utcDateTime,
-        _salonTimezone.isNotEmpty
-            ? _salonTimezone
-            : TimezoneService.getCurrentTimezone(),
+        tz,
       );
       return DateTime(
         localDateTime.year,
@@ -222,7 +210,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       );
     } catch (e) {
       debugPrint('❌ Error converting UTC date to local: $e');
-      return DateTime.now();
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day);
     }
   }
 
@@ -232,18 +221,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   String _formatDateForDisplay(DateTime date) {
     final months = [
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
     ];
     return '${months[date.month - 1]} ${date.day}, ${date.year}';
   }
@@ -291,21 +270,48 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   // ============================================
 
   Future<void> _loadData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
-      // ✅ Load salon data INCLUDING timezone
+      if (widget.salonId == null) {
+        if (!mounted) return;
+        setState(() {
+          _barbers = [];
+          _leaves = [];
+          _isLoading = false;
+        });
+        return;
+      }
+
+      final salonIdInt = int.tryParse(widget.salonId!);
+      if (salonIdInt == null) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      // ✅ Salon default BEFORE query (NOT user timezone)
+      _salonTimezone = _kDefaultSalonTimezone;
+
       final salonResponse = await supabase
           .from('salons')
           .select('open_time, close_time, timezone')
-          .eq('id', int.parse(widget.salonId!))
+          .eq('id', salonIdInt)
           .maybeSingle();
 
       if (salonResponse != null) {
-        _salonOpenTimeUtc = salonResponse['open_time'];
-        _salonCloseTimeUtc = salonResponse['close_time'];
-        _salonTimezone = salonResponse['timezone']?.toString() ??
-            TimezoneService.getCurrentTimezone();
+        _salonOpenTimeUtc = salonResponse['open_time'] as String?;
+        _salonCloseTimeUtc = salonResponse['close_time'] as String?;
+
+        final timezone = salonResponse['timezone'] as String?;
+        if (timezone != null && timezone.isNotEmpty) {
+          _salonTimezone = timezone;
+        } else {
+          debugPrint(
+            '⚠️ Salon TZ empty → default: $_kDefaultSalonTimezone',
+          );
+        }
 
         debugPrint('✅ Salon timezone loaded: $_salonTimezone');
       }
@@ -313,7 +319,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       final holidaysResponse = await supabase
           .from('salon_holidays')
           .select('holiday_date, name, description')
-          .eq('salon_id', int.parse(widget.salonId!))
+          .eq('salon_id', salonIdInt)
           .order('holiday_date', ascending: false);
 
       _holidays = List<Map<String, dynamic>>.from(holidaysResponse);
@@ -332,7 +338,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                 )
             )
         ''')
-          .eq('salon_id', int.parse(widget.salonId!))
+          .eq('salon_id', salonIdInt)
           .eq('status', 'active')
           .eq('profiles.user_roles.role_id', 2)
           .eq('profiles.user_roles.status', 'active');
@@ -341,9 +347,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       for (var entry in salonBarbersResponse) {
         final dynamic profileData = entry['profiles'];
         if (profileData != null) {
-          final Map<String, dynamic> profile = Map<String, dynamic>.from(
-            profileData,
-          );
+          final Map<String, dynamic> profile =
+              Map<String, dynamic>.from(profileData);
           allProfiles.add(profile);
         }
       }
@@ -379,6 +384,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           SnackBar(
             content: Text('Error: $e'),
             backgroundColor: _isDark ? Colors.red[800] : Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -389,11 +395,15 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   Future<void> _loadLeavesWithFilters(List<String> barberIds) async {
     try {
+      if (widget.salonId == null) return;
+      final salonIdInt = int.tryParse(widget.salonId!);
+      if (salonIdInt == null) return;
+
       var query = supabase
           .from('barber_leaves')
           .select()
           .inFilter('barber_id', barberIds)
-          .eq('salon_id', int.parse(widget.salonId!));
+          .eq('salon_id', salonIdInt);
 
       if (_selectedBarberId != null) {
         query = query.eq('barber_id', _selectedBarberId!);
@@ -437,54 +447,96 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   }
 
   Future<void> _applyFilters() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
-    final salonBarbersResponse = await supabase
-        .from('salon_barbers')
-        .select('''
-          barber_id,
-          profiles:barber_id (
-              user_roles!inner (
-                  status
-              )
-          )
-      ''')
-        .eq('salon_id', int.parse(widget.salonId!))
-        .eq('status', 'active')
-        .eq('profiles.user_roles.role_id', 2)
-        .eq('profiles.user_roles.status', 'active');
+    try {
+      if (widget.salonId == null) return;
+      final salonIdInt = int.tryParse(widget.salonId!);
+      if (salonIdInt == null) return;
 
-    final List<String> barberIds = [];
-    for (var entry in salonBarbersResponse) {
-      final dynamic profileData = entry['profiles'];
-      if (profileData != null) {
-        final Map<String, dynamic> profile = Map<String, dynamic>.from(
-          profileData,
-        );
-        final userRoles = profile['user_roles'] as List? ?? [];
-        bool isActive = false;
-        for (var role in userRoles) {
-          if (role['status'] == 'active') {
-            isActive = true;
-            break;
+      final salonBarbersResponse = await supabase
+          .from('salon_barbers')
+          .select('''
+            barber_id,
+            profiles:barber_id (
+                user_roles!inner (
+                    status
+                )
+            )
+        ''')
+          .eq('salon_id', salonIdInt)
+          .eq('status', 'active')
+          .eq('profiles.user_roles.role_id', 2)
+          .eq('profiles.user_roles.status', 'active');
+
+      final List<String> barberIds = [];
+      for (var entry in salonBarbersResponse) {
+        final dynamic profileData = entry['profiles'];
+        if (profileData != null) {
+          final Map<String, dynamic> profile =
+              Map<String, dynamic>.from(profileData);
+          final userRoles = profile['user_roles'] as List? ?? [];
+          bool isActive = false;
+          for (var role in userRoles) {
+            if (role['status'] == 'active') {
+              isActive = true;
+              break;
+            }
           }
-        }
-        if (isActive) {
-          final barberId = entry['barber_id']?.toString();
-          if (barberId != null && barberId.isNotEmpty) {
-            barberIds.add(barberId);
+          if (isActive) {
+            final barberId = entry['barber_id']?.toString();
+            if (barberId != null && barberId.isNotEmpty) {
+              barberIds.add(barberId);
+            }
           }
         }
       }
+
+      await _loadLeavesWithFilters(barberIds);
+    } catch (e) {
+      debugPrint('❌ Error applying filters: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-
-    await _loadLeavesWithFilters(barberIds);
-
-    if (mounted) setState(() => _isLoading = false);
   }
 
   // ============================================
-  // CUSTOMER CHOICE HANDLING (unchanged logic)
+  // ✅ SERVICE NAME via appointment_services
+  // ============================================
+
+  Future<String> _getServiceNameForAppointment(int appointmentId) async {
+    try {
+      final response = await supabase
+          .from('appointment_services')
+          .select('service_name, services(name)')
+          .eq('appointment_id', appointmentId);
+
+      if (response.isEmpty) return 'Unknown Service';
+
+      final names = <String>[];
+      for (var item in response) {
+        final snapshotName = item['service_name'] as String?;
+        if (snapshotName != null && snapshotName.isNotEmpty) {
+          names.add(snapshotName);
+          continue;
+        }
+        final svc = item['services'] as Map?;
+        final svcName = svc?['name'] as String?;
+        if (svcName != null && svcName.isNotEmpty) {
+          names.add(svcName);
+        }
+      }
+
+      return names.isEmpty ? 'Unknown Service' : names.join(', ');
+    } catch (e) {
+      debugPrint('❌ Error getting service name: $e');
+      return 'Unknown Service';
+    }
+  }
+
+  // ============================================
+  // CUSTOMER CHOICE HANDLING
   // ============================================
 
   Future<void> _handleAffectedAppointment(
@@ -499,7 +551,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       final startTimeUtc = appointment['start_time'];
 
       final localDate = _utcDateStringToLocalDate(utcDateStr);
-      // ✅ Use salon time
       final timeFormatted = _formatUtcToSalonTime(startTimeUtc);
       final dateFormatted = _formatDateForDisplay(localDate);
 
@@ -522,11 +573,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         appointmentPriority: priority,
       );
 
-      final service = await supabase
-          .from('services')
-          .select('name')
-          .eq('id', appointment['service_id'])
-          .single();
+      final serviceName = await _getServiceNameForAppointment(
+        appointment['id'] as int,
+      );
 
       if (!mounted) return;
       final choice = await showDialog<String>(
@@ -536,7 +585,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           customerName: customer['full_name'] ?? 'Customer',
           appointmentDate: dateFormatted,
           appointmentTime: timeFormatted,
-          serviceName: service['name'],
+          serviceName: serviceName,
           availableBarber: availableBarber,
           onAcceptNewBarber: () => Navigator.pop(dialogContext, 'accept'),
           onMoveToNextDay: () => Navigator.pop(dialogContext, 'next_day'),
@@ -595,24 +644,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   Future<int> _getAppointmentPriority(Map<String, dynamic> appointment) async {
     try {
-      if (appointment['is_vip'] == true &&
-          appointment['vip_booking_id'] != null) {
-        final vipBooking = await supabase
-            .from('vip_bookings')
-            .select('vip_type_id')
-            .eq('id', appointment['vip_booking_id'])
-            .maybeSingle();
-
-        if (vipBooking != null) {
-          final vipType = await supabase
-              .from('vip_booking_types')
-              .select('priority_level')
-              .eq('id', vipBooking['vip_type_id'])
-              .maybeSingle();
-
-          return vipType?['priority_level'] ?? 4;
-        }
-      }
+      final vipPriority = appointment['vip_priority'];
+      if (vipPriority is int) return vipPriority;
       return 4;
     } catch (e) {
       debugPrint('❌ Error getting appointment priority: $e');
@@ -629,6 +662,9 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     required int appointmentPriority,
   }) async {
     try {
+      final salonIdInt = int.tryParse(salonId);
+      if (salonIdInt == null) return null;
+
       final salonBarbers = await supabase
           .from('salon_barbers')
           .select('''
@@ -639,7 +675,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                 )
             )
         ''')
-          .eq('salon_id', int.parse(salonId))
+          .eq('salon_id', salonIdInt)
           .eq('status', 'active')
           .eq('profiles.user_roles.role_id', 2)
           .eq('profiles.user_roles.status', 'active');
@@ -648,9 +684,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       for (var entry in salonBarbers) {
         final dynamic profileData = entry['profiles'];
         if (profileData != null) {
-          final Map<String, dynamic> profile = Map<String, dynamic>.from(
-            profileData,
-          );
+          final Map<String, dynamic> profile =
+              Map<String, dynamic>.from(profileData);
           final userRoles = profile['user_roles'] as List? ?? [];
           bool isActive = false;
           for (var role in userRoles) {
@@ -700,6 +735,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
+  /// ✅ Correct time-overlap check
   Future<bool> _isBarberAvailable(
     String barberId,
     String appointmentDate,
@@ -740,16 +776,28 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
       if (leave != null) return false;
 
-      final conflict = await supabase
+      final appointments = await supabase
           .from('appointments')
-          .select()
+          .select('start_time, end_time')
           .eq('barber_id', barberId)
           .eq('appointment_date', appointmentDate)
-          .eq('status', 'confirmed')
-          .or('start_time.lte.$endTime,end_time.gte.$startTime')
-          .maybeSingle();
+          .eq('status', 'confirmed');
 
-      return conflict == null;
+      for (final appt in appointments) {
+        final existingStart = appt['start_time'] as String?;
+        final existingEnd = appt['end_time'] as String?;
+        if (existingStart == null || existingEnd == null) continue;
+
+        final noOverlap =
+            endTime.compareTo(existingStart) <= 0 ||
+            startTime.compareTo(existingEnd) >= 0;
+
+        if (!noOverlap) {
+          return false;
+        }
+      }
+
+      return true;
     } catch (e) {
       debugPrint('❌ Error checking barber availability: $e');
       return false;
@@ -783,26 +831,31 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     }
   }
 
-  Future<int> _getVariantDuration(int? variantId) async {
-    if (variantId == null) return 30;
-
+  Future<int> _getAppointmentDuration(int appointmentId) async {
     try {
       final response = await supabase
-          .from('service_variants')
+          .from('appointment_services')
           .select('duration')
-          .eq('id', variantId)
-          .maybeSingle();
+          .eq('appointment_id', appointmentId);
 
-      return response?['duration'] ?? 30;
+      if (response.isEmpty) return 30;
+
+      int totalDuration = 0;
+      for (var item in response) {
+        final dur = item['duration'] as int?;
+        if (dur != null) totalDuration += dur;
+      }
+
+      return totalDuration > 0 ? totalDuration : 30;
     } catch (e) {
-      debugPrint('❌ Error getting variant duration: $e');
+      debugPrint('❌ Error getting appointment duration: $e');
       return 30;
     }
   }
 
   Future<String> _moveToNextDay(Map<String, dynamic> appointment) async {
     try {
-      final duration = await _getVariantDuration(appointment['variant_id']);
+      final duration = await _getAppointmentDuration(appointment['id'] as int);
 
       DateTime nextLocalDate =
           _utcDateStringToLocalDate(appointment['appointment_date'])
@@ -816,6 +869,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       final nextUtcDateStr = _localDateToUtcDateString(nextLocalDate);
       final queueNumber = 1;
 
+      // ✅ Batch shift existing appointments
       final appointmentsToShift = await supabase
           .from('appointments')
           .select('id, queue_number')
@@ -825,6 +879,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .gte('queue_number', queueNumber)
           .order('queue_number', ascending: false);
 
+      // ✅ Batch update — shift in descending order
       for (var appt in appointmentsToShift) {
         await supabase
             .from('appointments')
@@ -859,12 +914,16 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   Future<bool> _isHolidayDate(DateTime localDate) async {
     try {
+      if (widget.salonId == null) return false;
+      final salonIdInt = int.tryParse(widget.salonId!);
+      if (salonIdInt == null) return false;
+
       final utcDateStr = _localDateToUtcDateString(localDate);
 
       final holiday = await supabase
           .from('salon_holidays')
           .select()
-          .eq('salon_id', int.parse(widget.salonId!))
+          .eq('salon_id', salonIdInt)
           .eq('holiday_date', utcDateStr)
           .maybeSingle();
 
@@ -1016,8 +1075,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             .maybeSingle();
 
         if (leaveRecord != null) {
-          startTime = leaveRecord['start_time'] ?? '00:00:00';
-          endTime = leaveRecord['end_time'] ?? '23:59:59';
+          startTime = leaveRecord['start_time'] as String? ?? '00:00:00';
+          endTime = leaveRecord['end_time'] as String? ?? '23:59:59';
         }
       }
 
@@ -1026,12 +1085,13 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           .select('''
             id,
             customer_id,
-            service_id,
-            variant_id,
+            booking_number,
             start_time,
             end_time,
             is_vip,
-            vip_booking_id
+            vip_booking_id,
+            vip_priority,
+            appointment_date
           ''')
           .eq('barber_id', barberId)
           .eq('appointment_date', utcDateStr)
@@ -1054,6 +1114,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           SnackBar(
             content: const Text('Leave approved. No appointments affected.'),
             backgroundColor: _isDark ? Colors.green[800] : Colors.green,
+            behavior: SnackBarBehavior.floating,
           ),
         );
         await _loadData();
@@ -1089,6 +1150,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           backgroundColor: failedCount > 0
               ? (_isDark ? Colors.orange[800] : Colors.orange)
               : (_isDark ? Colors.green[800] : Colors.green),
+          behavior: SnackBarBehavior.floating,
         ),
       );
 
@@ -1101,6 +1163,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           SnackBar(
             content: Text('Error: $e'),
             backgroundColor: _isDark ? Colors.red[800] : Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -1113,103 +1176,105 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
   ) async {
     final TextEditingController reasonController = TextEditingController();
 
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Reject Leave',
-          style: context.titleLarge.copyWith(
-            color: _isDark ? Colors.white : Colors.black87,
+    try {
+      final result = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            'Reject Leave',
+            style: context.titleLarge.copyWith(
+              color: _isDark ? Colors.white : Colors.black87,
+            ),
           ),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Please provide a reason for rejecting this leave request:',
-                style: context.bodyMedium.copyWith(
-                  color: _isDark ? Colors.white70 : Colors.black87,
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Please provide a reason for rejecting this leave request:',
+                  style: context.bodyMedium.copyWith(
+                    color: _isDark ? Colors.white70 : Colors.black87,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: reasonController,
-                maxLines: 3,
+                const SizedBox(height: 16),
+                TextField(
+                  controller: reasonController,
+                  maxLines: 3,
+                  style: TextStyle(
+                    color: _isDark ? Colors.white : Colors.black87,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Enter reason...',
+                    hintStyle: TextStyle(
+                      color: _isDark ? Colors.white70 : Colors.grey[500],
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(
+                        color: _isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(
+                        color: AppTheme.primary,
+                        width: 2,
+                      ),
+                    ),
+                    fillColor: _isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                    filled: true,
+                  ),
+                  autofocus: true,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(
+                'Cancel',
                 style: TextStyle(
-                  color: _isDark ? Colors.white : Colors.black87,
+                  color: _isDark ? Colors.white60 : Colors.grey[600],
                 ),
-                decoration: InputDecoration(
-                  hintText: 'Enter reason...',
-                  hintStyle: TextStyle(
-                    color: _isDark ? Colors.white70 : Colors.grey[500],
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(
-                      color: _isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(
-                      color: AppTheme.primary,
-                      width: 2,
-                    ),
-                  ),
-                  fillColor: _isDark ? const Color(0xFF2A2A2A) : Colors.white,
-                  filled: true,
-                ),
-                autofocus: true,
               ),
-            ],
-          ),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (reasonController.text.trim().isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter a reason'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+                Navigator.pop(context, true);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Reject'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(
-              'Cancel',
-              style: TextStyle(
-                color: _isDark ? Colors.white60 : Colors.grey[600],
-              ),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (reasonController.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Please enter a reason'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-                return;
-              }
-              Navigator.pop(context, true);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Reject'),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true) {
-      await _rejectLeaveWithReason(
-        leaveId,
-        reasonController.text.trim(),
-        leaveData,
       );
-    }
 
-    reasonController.dispose();
+      if (result == true && mounted) {
+        await _rejectLeaveWithReason(
+          leaveId,
+          reasonController.text.trim(),
+          leaveData,
+        );
+      }
+    } finally {
+      reasonController.dispose();
+    }
   }
 
   Future<void> _rejectLeaveWithReason(
@@ -1217,6 +1282,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     String reason,
     Map<String, dynamic> leaveData,
   ) async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
@@ -1240,6 +1306,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           SnackBar(
             content: Text('Leave rejected: $reason'),
             backgroundColor: _isDark ? Colors.red[800] : Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -1250,6 +1317,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           SnackBar(
             content: Text('Error: $e'),
             backgroundColor: _isDark ? Colors.red[800] : Colors.red,
+            behavior: SnackBarBehavior.floating,
           ),
         );
       }
@@ -1398,16 +1466,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           firstDate: today,
           lastDate: now.add(const Duration(days: 365)),
           builder: (context, child) {
-            // ✅ Clamp text scaling — the default CalendarDatePicker's
-            // month header is sized for a 1.0 text scale; on devices/
-            // browsers with a larger system font scale it grows a few
-            // pixels taller than the fixed-height month grid allows,
-            // which is what causes the "overflowed by N pixels on the
-            // bottom" RenderFlex error inside _MonthPicker.
-            //
-            // ✅ _ShortViewportGuard — when the browser viewport is very
-            // short (e.g. DevTools docked at the bottom) the picker gets
-            // scrollable instead of overflowing.
             return MediaQuery(
               data: MediaQuery.of(context).copyWith(
                 textScaler: const TextScaler.linear(1.0),
@@ -1529,9 +1587,15 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           color: isDark ? Colors.white : Colors.black87,
         ),
         items: const [
-          DropdownMenuItem<String>(value: 'all', child: Text('All Types', overflow: TextOverflow.ellipsis)),
-          DropdownMenuItem<String>(value: 'full_day', child: Text('Full Day', overflow: TextOverflow.ellipsis)),
-          DropdownMenuItem<String>(value: 'half_day', child: Text('Half Day', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(
+              value: 'all',
+              child: Text('All Types', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(
+              value: 'full_day',
+              child: Text('Full Day', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(
+              value: 'half_day',
+              child: Text('Half Day', overflow: TextOverflow.ellipsis)),
           DropdownMenuItem<String>(
             value: 'emergency',
             child: Text('Emergency', overflow: TextOverflow.ellipsis),
@@ -1589,10 +1653,18 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
           color: isDark ? Colors.white : Colors.black87,
         ),
         items: const [
-          DropdownMenuItem<String>(value: 'all', child: Text('All Status', overflow: TextOverflow.ellipsis)),
-          DropdownMenuItem<String>(value: 'pending', child: Text('Pending', overflow: TextOverflow.ellipsis)),
-          DropdownMenuItem<String>(value: 'approved', child: Text('Approved', overflow: TextOverflow.ellipsis)),
-          DropdownMenuItem<String>(value: 'rejected', child: Text('Rejected', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(
+              value: 'all',
+              child: Text('All Status', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(
+              value: 'pending',
+              child: Text('Pending', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(
+              value: 'approved',
+              child: Text('Approved', overflow: TextOverflow.ellipsis)),
+          DropdownMenuItem<String>(
+              value: 'rejected',
+              child: Text('Rejected', overflow: TextOverflow.ellipsis)),
         ],
         onChanged: (String? value) {
           if (mounted) {
@@ -1688,7 +1760,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
 
   Future<void> _updateLeaveStatus(int leaveId, String status) async {
     if (status == 'rejected' || status == 'approved') return;
-
     if (!mounted) return;
 
     final bool? confirm = await showDialog<bool>(
@@ -1747,6 +1818,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             SnackBar(
               content: Text('Status updated to ${status.toUpperCase()}'),
               backgroundColor: _isDark ? Colors.orange[800] : Colors.orange,
+              behavior: SnackBarBehavior.floating,
             ),
           );
         }
@@ -1757,6 +1829,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             SnackBar(
               content: Text('Error updating leave: $e'),
               backgroundColor: _isDark ? Colors.red[800] : Colors.red,
+              behavior: SnackBarBehavior.floating,
             ),
           );
         }
@@ -1771,6 +1844,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         const SnackBar(
           content: Text('No barbers to add leave'),
           backgroundColor: Colors.orange,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       return;
@@ -1794,6 +1868,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         const SnackBar(
           content: Text('Leave request added'),
           backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       await _loadData();
@@ -1820,6 +1895,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         const SnackBar(
           content: Text('Leave updated successfully'),
           backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
         ),
       );
       await _loadData();
@@ -1882,6 +1958,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             const SnackBar(
               content: Text('Leave deleted successfully'),
               backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
             ),
           );
         }
@@ -1892,6 +1969,7 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
             SnackBar(
               content: Text('Error deleting leave: $e'),
               backgroundColor: _isDark ? Colors.red[800] : Colors.red,
+              behavior: SnackBarBehavior.floating,
             ),
           );
         }
@@ -2186,14 +2264,20 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
     );
   }
 
+  // ✅ FIX: Added pull-to-refresh for mobile
   Widget _buildMobileContent() {
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _leaves.length,
-      itemBuilder: (context, index) {
-        final leave = _leaves[index];
-        return _buildMobileLeaveCard(leave);
-      },
+    return RefreshIndicator(
+      onRefresh: _loadData,
+      color: AppTheme.primary,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        itemCount: _leaves.length,
+        itemBuilder: (context, index) {
+          final leave = _leaves[index];
+          return _buildMobileLeaveCard(leave);
+        },
+      ),
     );
   }
 
@@ -2231,7 +2315,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               ),
               _buildStatItem(
                 'Approved',
-                _leaves.where((l) => l['status'] == 'approved').length.toString(),
+                _leaves
+                    .where((l) => l['status'] == 'approved')
+                    .length
+                    .toString(),
                 Icons.check_circle,
                 Colors.green,
               ),
@@ -2242,7 +2329,10 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
               ),
               _buildStatItem(
                 'Rejected',
-                _leaves.where((l) => l['status'] == 'rejected').length.toString(),
+                _leaves
+                    .where((l) => l['status'] == 'rejected')
+                    .length
+                    .toString(),
                 Icons.cancel,
                 Colors.red,
               ),
@@ -2417,7 +2507,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       final endSalon = _formatUtcToSalonTime(leave['end_time']);
       timeDisplay = '$startSalon - $endSalon';
 
-      // ✅ User time reference
       final userStart = _formatUtcToUserTime(leave['start_time']);
       final userEnd = _formatUtcToUserTime(leave['end_time']);
       if (userStart.isNotEmpty && userEnd.isNotEmpty) {
@@ -2542,7 +2631,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                       color: isDark ? Colors.white70 : Colors.black87,
                     ),
                   ),
-                  // ✅ User time reference
                   if (userTimeDisplay != null)
                     Text(
                       'Your time: $userTimeDisplay',
@@ -2656,7 +2744,6 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
       final endSalon = _formatUtcToSalonTime(leave['end_time']);
       timeDisplay = '$startSalon - $endSalon';
 
-      // ✅ User time reference
       final userStart = _formatUtcToUserTime(leave['start_time']);
       final userEnd = _formatUtcToUserTime(leave['end_time']);
       if (userStart.isNotEmpty && userEnd.isNotEmpty) {
@@ -2732,7 +2819,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontSize: 13,
-                                color: isDark ? Colors.white70 : Colors.grey[800],
+                                color:
+                                    isDark ? Colors.white70 : Colors.grey[800],
                               ),
                             ),
                           ),
@@ -2763,7 +2851,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 13,
-                              color: isDark ? Colors.white70 : Colors.grey[800],
+                              color:
+                                  isDark ? Colors.white70 : Colors.grey[800],
                             ),
                           ),
                           const SizedBox(width: 8),
@@ -2773,14 +2862,15 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                                 '• $timeDisplay',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: isDark ? Colors.white60 : Colors.grey[600],
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
                         ],
                       ),
-                      // ✅ User time reference
                       if (userTimeDisplay != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 2),
@@ -2790,7 +2880,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
                             style: TextStyle(
                               fontSize: 11,
                               fontStyle: FontStyle.italic,
-                              color: isDark ? Colors.blue[300] : Colors.blue[700],
+                              color:
+                                  isDark ? Colors.blue[300] : Colors.blue[700],
                             ),
                           ),
                         ),
@@ -2889,6 +2980,9 @@ class _StatusDot extends StatelessWidget {
 // ==================== ADD/EDIT LEAVE DIALOG ====================
 
 class _AddEditLeaveDialog extends StatefulWidget {
+  // ✅ Default salon timezone (NOT user timezone)
+  static const String kDefaultSalonTimezone = 'Asia/Colombo';
+
   final List<Map<String, dynamic>> barbers;
   final String salonId;
   final String salonTimezone;
@@ -2939,11 +3033,17 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   late bool _isWeb;
   late bool _isDark;
 
-  /// Check if salon and user timezone are the same
   bool get _isSameTimezone {
     return widget.salonTimezone.isEmpty || widget.userTimezone.isEmpty
         ? true
         : widget.salonTimezone == widget.userTimezone;
+  }
+
+  /// ✅ Effective salon timezone (fallback to default)
+  String get _effectiveSalonTimezone {
+    return widget.salonTimezone.isNotEmpty
+        ? widget.salonTimezone
+        : _AddEditLeaveDialog.kDefaultSalonTimezone;
   }
 
   @override
@@ -2982,7 +3082,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   // ✅ TIMEZONE HELPERS
   // ============================================
 
-  /// Format TimeOfDay
   String _formatTimeOfDay(TimeOfDay time) {
     final hour =
         time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
@@ -2991,14 +3090,19 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     return '$hour:$minute $period';
   }
 
-  /// Convert salon TimeOfDay to user TimeOfDay
   TimeOfDay _convertSalonTimeToUserTime(TimeOfDay salonTime) {
     if (_isSameTimezone) return salonTime;
-    return TimezoneService.convertTimeOfDayBetweenTimezones(
-      salonTime,
-      fromTimezone: widget.salonTimezone,
-      toTimezone: widget.userTimezone,
-    );
+    if (widget.userTimezone.isEmpty) return salonTime;
+    try {
+      return TimezoneService.convertTimeOfDayBetweenTimezones(
+        salonTime,
+        fromTimezone: _effectiveSalonTimezone,
+        toTimezone: widget.userTimezone,
+      );
+    } catch (e) {
+      debugPrint('❌ Error converting salon time: $e');
+      return salonTime;
+    }
   }
 
   void _parseSalonHours() {
@@ -3007,7 +3111,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         final localOpenTimeStr =
             TimezoneService.utcToLocalTimeRecurringWithTimezone(
           widget.salonOpenTimeUtc!,
-          widget.salonTimezone,
+          _effectiveSalonTimezone,
         );
         final openParts = localOpenTimeStr.split(' ');
         final timeParts = openParts[0].split(':');
@@ -3029,7 +3133,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         final localCloseTimeStr =
             TimezoneService.utcToLocalTimeRecurringWithTimezone(
           widget.salonCloseTimeUtc!,
-          widget.salonTimezone,
+          _effectiveSalonTimezone,
         );
         final timeParts = localCloseTimeStr.split(' ');
         final hourMinute = timeParts[0].split(':');
@@ -3062,9 +3166,9 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
             TimezoneService.utcToLocalDateTimeForDateWithTimezone(
           '12:00:00',
           utcDate,
-          widget.salonTimezone,
+          _effectiveSalonTimezone,
         );
-        _checkHoliday(_selectedLocalDate!);
+        _checkHoliday(_selectedLocalDate!, showSnackBar: false);
       } catch (e) {
         debugPrint('Error parsing leave_date: $e');
       }
@@ -3075,12 +3179,12 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         final localStartStr =
             TimezoneService.utcToLocalTimeRecurringWithTimezone(
           leave['start_time'],
-          widget.salonTimezone,
+          _effectiveSalonTimezone,
         );
         final localEndStr =
             TimezoneService.utcToLocalTimeRecurringWithTimezone(
           leave['end_time'],
-          widget.salonTimezone,
+          _effectiveSalonTimezone,
         );
 
         _startLocalTime = _parseTimeString(localStartStr);
@@ -3103,30 +3207,34 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     return TimeOfDay(hour: hour, minute: int.parse(hourMinute[1]));
   }
 
-  void _checkHoliday(DateTime localDate) {
-    final localDateStr =
-        '${localDate.year.toString().padLeft(4, '0')}-${localDate.month.toString().padLeft(2, '0')}-${localDate.day.toString().padLeft(2, '0')}';
+  // ✅ FIX: Added `showSnackBar` parameter to allow silent holiday check
+  void _checkHoliday(DateTime localDate, {bool showSnackBar = true}) {
+    final localDateStr = _formatDateForDb(localDate);
 
     final holiday = widget.holidays.firstWhere((h) {
       final holidayLocalDate = _utcDateStringToLocalDate(h['holiday_date']);
-      final holidayLocalStr =
-          '${holidayLocalDate.year.toString().padLeft(4, '0')}-${holidayLocalDate.month.toString().padLeft(2, '0')}-${holidayLocalDate.day.toString().padLeft(2, '0')}';
+      final holidayLocalStr = _formatDateForDb(holidayLocalDate);
       return holidayLocalStr == localDateStr;
     }, orElse: () => {});
 
-    setState(() {
-      _isHoliday = holiday.isNotEmpty;
-      _holidayName = holiday['name'];
-    });
+    if (mounted) {
+      setState(() {
+        _isHoliday = holiday.isNotEmpty;
+        _holidayName = holiday['name'];
+      });
 
-    if (_isHoliday && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('⚠️ $_holidayName - Salon is closed on this day!'),
-          backgroundColor: _isDark ? Colors.orange[800] : Colors.orange,
-          duration: const Duration(seconds: 3),
-        ),
-      );
+      // ✅ Only show SnackBar if explicitly requested
+      // (the dialog has its own inline warning)
+      if (_isHoliday && showSnackBar) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ $_holidayName - Salon is closed on this day!'),
+            backgroundColor: _isDark ? Colors.orange[800] : Colors.orange,
+            duration: const Duration(seconds: 3),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
     }
   }
 
@@ -3137,7 +3245,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
           TimezoneService.utcToLocalDateTimeForDateWithTimezone(
         '12:00:00',
         utcDateTime,
-        widget.salonTimezone,
+        _effectiveSalonTimezone,
       );
       return DateTime(
         localDateTime.year,
@@ -3146,7 +3254,8 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
       );
     } catch (e) {
       debugPrint('Error converting UTC date to local: $e');
-      return DateTime.now();
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day);
     }
   }
 
@@ -3164,13 +3273,17 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     }
   }
 
+  String _formatDateForDb(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
   String _localTimeToUtcTimeString(TimeOfDay localTime, DateTime localDate) {
     try {
       final timeString =
           '${localTime.hour.toString().padLeft(2, '0')}:${localTime.minute.toString().padLeft(2, '0')}';
       return TimezoneService.localToUtcTimeRecurringWithTimezone(
         timeString,
-        widget.salonTimezone,
+        _effectiveSalonTimezone,
       );
     } catch (e) {
       debugPrint('Error converting local time to UTC: $e');
@@ -3185,15 +3298,11 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
     _isWeb = screenWidth > 800;
     _isDark = context.isDarkMode;
 
-    // ✅ Dialog insetPadding is 24 top + 24 bottom
     final double maxDialogHeight = math.max(
       0.0,
       math.min(screenSize.height * 0.9, screenSize.height - 48),
     );
 
-    // ✅ Header + actions + a little body space need roughly this much.
-    // On a very short viewport we scroll EVERYTHING (header, body, actions)
-    // so the Column can never overflow.
     final bool isCompact = maxDialogHeight < 360;
 
     final Widget body = Padding(
@@ -3224,7 +3333,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
         width: _isWeb ? 600 : screenWidth * 0.95,
         constraints: BoxConstraints(maxHeight: maxDialogHeight),
         child: isCompact
-            // Very short viewport: everything scrolls together
             ? SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -3235,7 +3343,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                   ],
                 ),
               )
-            // Normal viewport: sticky header/actions, scrolling body
             : Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -3409,15 +3516,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
               firstDate: today,
               lastDate: now.add(const Duration(days: 365)),
               builder: (context, child) {
-                // ✅ Clamp text scaling to prevent the CalendarDatePicker's
-                // fixed-height month grid from overflowing (the "2.0 / 9.0
-                // pixels on the bottom" RenderFlex error inside
-                // _MonthPicker) when the system/browser font scale is
-                // above 1.0.
-                //
-                // ✅ _ShortViewportGuard — when the browser viewport is very
-                // short (e.g. DevTools docked at the bottom) the picker gets
-                // scrollable instead of overflowing.
                 return MediaQuery(
                   data: MediaQuery.of(context).copyWith(
                     textScaler: const TextScaler.linear(1.0),
@@ -3452,6 +3550,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
                 _selectedLocalDate = date;
                 _errorMessage = null;
               });
+              // ✅ Show snackbar when user manually picks holiday date
               _checkHoliday(date);
             }
           },
@@ -3751,7 +3850,6 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
               ),
             ],
           ),
-          // ✅ User time reference
           if (hasUserTime)
             Padding(
               padding: const EdgeInsets.only(top: 4, left: 24),
@@ -3969,6 +4067,7 @@ class _AddEditLeaveDialogState extends State<_AddEditLeaveDialog> {
   }
 
   Future<void> _saveLeave() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _errorMessage = null;

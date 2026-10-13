@@ -1,9 +1,46 @@
-// meka use karanne baber list screen eken edit service gihin service baberta add karaddi
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
 import '../../services/currency_service.dart';
+
+// ============================================================
+// ✅ Custom exceptions for cleaner error handling
+// ============================================================
+class BarberRoleNotFoundException implements Exception {
+  final String message;
+  BarberRoleNotFoundException(this.message);
+  @override
+  String toString() => message;
+}
+
+class BarberInactiveException implements Exception {
+  final String message;
+  BarberInactiveException(this.message);
+  @override
+  String toString() => message;
+}
+
+class BarberBlockedException implements Exception {
+  final String message;
+  BarberBlockedException(this.message);
+  @override
+  String toString() => message;
+}
+
+class BarberNotInSalonException implements Exception {
+  final String message;
+  BarberNotInSalonException(this.message);
+  @override
+  String toString() => message;
+}
+
+class InvalidSalonIdException implements Exception {
+  final String message;
+  InvalidSalonIdException(this.message);
+  @override
+  String toString() => message;
+}
 
 class AddBarberServiceScreen extends StatefulWidget {
   final String salonId;
@@ -83,19 +120,23 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     super.initState();
     _loadData();
     _searchController.addListener(() {
-      setState(() {
-        _searchQuery = _searchController.text.toLowerCase();
-      });
+      if (mounted) {
+        setState(() {
+          _searchQuery = _searchController.text.toLowerCase();
+        });
+      }
     });
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // ✅ FIX: Only called here, not in build
     _checkScreenSize();
   }
 
-  // ✅ Android 16: Check screen size for responsive layout
+  // ✅ Check screen size for responsive layout
+  // ✅ FIX: Uses `addPostFrameCallback` to avoid setState during build
   void _checkScreenSize() {
     final size = MediaQuery.of(context).size;
     final isTablet = size.shortestSide >= 600;
@@ -103,10 +144,15 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     final width = size.width;
 
     if (_isTablet != isTablet || _isWeb != isWeb || _screenWidth != width) {
-      setState(() {
-        _isTablet = isTablet;
-        _isWeb = isWeb;
-        _screenWidth = width;
+      // ✅ Safe setState via post-frame callback
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          setState(() {
+            _isTablet = isTablet;
+            _isWeb = isWeb;
+            _screenWidth = width;
+          });
+        }
       });
     }
   }
@@ -120,22 +166,27 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   // ============================================================
   // LOAD DATA
   // ============================================================
-
   Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+    if (mounted) setState(() => _isLoading = true);
 
     try {
-      final salonIdInt = int.parse(widget.salonId);
+      // ✅ Use tryParse instead of parse
+      final salonIdInt = int.tryParse(widget.salonId);
+      if (salonIdInt == null) {
+        throw InvalidSalonIdException(
+          'Invalid salon ID: ${widget.salonId}',
+        );
+      }
 
-      // ==================== ✅ STEP 0: Load salon currency ====================
+      // ==================== STEP 0: Load salon currency ====================
       try {
         final salonCurrencyResponse = await supabase
             .from('salons')
             .select('currency_code')
             .eq('id', salonIdInt)
-            .single();
+            .maybeSingle();
 
-        if (mounted) {
+        if (mounted && salonCurrencyResponse != null) {
           setState(() {
             _salonCurrencyCode =
                 salonCurrencyResponse['currency_code'] as String? ?? 'LKR';
@@ -146,7 +197,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         debugPrint('⚠️ Could not load salon currency, using LKR: $e');
       }
 
-      // ✅ STEP 1: Check if barber has active role in user_roles
+      // ==================== STEP 1: Check barber role ====================
       final barberRoleCheck = await supabase
           .from('user_roles')
           .select('status')
@@ -155,18 +206,18 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           .maybeSingle();
 
       if (barberRoleCheck == null) {
-        throw Exception(
+        throw BarberRoleNotFoundException(
           'Barber role not found. Please assign barber role first.',
         );
       }
 
       if (barberRoleCheck['status'] != 'active') {
-        throw Exception(
+        throw BarberInactiveException(
           'Barber account is ${barberRoleCheck['status']}. Please reactivate the barber first.',
         );
       }
 
-      // ✅ STEP 2: Check if barber profile is active and not blocked
+      // ==================== STEP 2: Check profile status ====================
       final barberProfileCheck = await supabase
           .from('profiles')
           .select('is_active, is_blocked')
@@ -175,16 +226,18 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
 
       if (barberProfileCheck != null) {
         if (barberProfileCheck['is_blocked'] == true) {
-          throw Exception('Barber account is blocked. Please contact support.');
+          throw BarberBlockedException(
+            'Barber account is blocked. Please contact support.',
+          );
         }
         if (barberProfileCheck['is_active'] == false) {
-          throw Exception(
+          throw BarberInactiveException(
             'Barber profile is inactive. Please reactivate the barber first.',
           );
         }
       }
 
-      // Step 3: Get salon_barber_id if not provided
+      // ==================== STEP 3: Get salon_barber_id ====================
       if (widget.salonBarberId == null) {
         final salonBarberResponse = await supabase
             .from('salon_barbers')
@@ -197,13 +250,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         if (salonBarberResponse != null) {
           _salonBarberId = salonBarberResponse['id'] as int;
         } else {
-          throw Exception('Barber not found in this salon');
+          throw BarberNotInSalonException('Barber not found in this salon');
         }
       } else {
         _salonBarberId = widget.salonBarberId;
       }
 
-      // Step 4: Load genders
+      // ==================== STEP 4: Load genders ====================
       final gendersResponse = await supabase
           .from('salon_genders')
           .select('id, display_name')
@@ -215,7 +268,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         _genderMap[g['id']] = g['display_name'];
       }
 
-      // Step 5: Load age categories
+      // ==================== STEP 5: Load age categories ====================
       final ageCategoriesResponse = await supabase
           .from('salon_age_categories')
           .select('id, display_name, min_age, max_age')
@@ -231,7 +284,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         };
       }
 
-      // Step 6: Load categories
+      // ==================== STEP 6: Load categories ====================
       final categoriesResponse = await supabase
           .from('salon_categories')
           .select('id, display_name, icon_name, color')
@@ -247,7 +300,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         };
       }
 
-      // Step 7: Get already assigned services
+      // ==================== STEP 7: Get already assigned services ====================
       final existingServices = await supabase
           .from('barber_services')
           .select('service_id, variant_id')
@@ -262,7 +315,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         }
       }
 
-      // Step 8: Load services
+      // ==================== STEP 8: Load services ====================
       final servicesResponse = await supabase
           .from('services')
           .select('id, name, description, category_id, icon_name')
@@ -270,13 +323,21 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           .eq('is_active', true)
           .order('name');
 
-      // Step 9: Load variants
-      final variantsResponse = await supabase
-          .from('service_variants')
-          .select(
-            'id, service_id, price, duration, salon_gender_id, salon_age_category_id',
-          )
-          .eq('is_active', true);
+      // ✅ Extract service IDs for filtering variants
+      final List<int> serviceIds = servicesResponse
+          .map<int>((s) => s['id'] as int)
+          .toList();
+
+      // ==================== STEP 9: Load variants for those services only ====================
+      final List<dynamic> variantsResponse = serviceIds.isEmpty
+          ? <dynamic>[]
+          : await supabase
+              .from('service_variants')
+              .select(
+                'id, service_id, price, duration, salon_gender_id, salon_age_category_id',
+              )
+              .inFilter('service_id', serviceIds)
+              .eq('is_active', true);
 
       // Group variants by service
       final Map<int, List<Map<String, dynamic>>> variantsByService = {};
@@ -290,8 +351,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         final genderName = _genderMap[genderId] ?? 'Unknown';
 
         final ageId = variant['salon_age_category_id'];
-        final ageData =
-            _ageCategoryMap[ageId] ??
+        final ageData = _ageCategoryMap[ageId] ??
             {'display_name': 'Unknown', 'min_age': 0, 'max_age': 0};
         final ageName =
             '${ageData['display_name']} (${ageData['min_age']}-${ageData['max_age']} yrs)';
@@ -311,15 +371,18 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         });
       }
 
-      // Step 10: Build services list
+      // ==================== STEP 10: Build services list ====================
       final List<Map<String, dynamic>> processedServices = [];
       for (var service in servicesResponse) {
         final serviceId = service['id'] as int;
         final variants = variantsByService[serviceId] ?? [];
         final categoryId = service['category_id'];
-        final category =
-            _categoryMap[categoryId] ??
-            {'display_name': 'Other', 'icon_name': 'build', 'color': '#FF6B8B'};
+        final category = _categoryMap[categoryId] ??
+            {
+              'display_name': 'Other',
+              'icon_name': 'build',
+              'color': '#FF6B8B',
+            };
         final categoryName = category['display_name'];
 
         variants.sort((a, b) {
@@ -329,11 +392,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           return a['age_name'].compareTo(b['age_name']);
         });
 
-        final isFullServiceAssigned = assignedServiceKeys.contains(
-          'service_$serviceId',
-        );
-        final allVariantsAssigned =
-            variants.isNotEmpty &&
+        final isFullServiceAssigned =
+            assignedServiceKeys.contains('service_$serviceId');
+        final allVariantsAssigned = variants.isNotEmpty &&
             variants.every((v) => v['isAssigned'] == true);
 
         processedServices.add({
@@ -353,30 +414,65 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           'allVariantsAssigned': allVariantsAssigned,
           'minPrice': variants.isNotEmpty
               ? variants
-                    .map((v) => v['price'] as double)
-                    .reduce((a, b) => a < b ? a : b)
-              : 0,
+                  .map((v) => (v['price'] as num?)?.toDouble() ?? 0.0)
+                  .reduce((a, b) => a < b ? a : b)
+              : 0.0,
           'maxPrice': variants.isNotEmpty
               ? variants
-                    .map((v) => v['price'] as double)
-                    .reduce((a, b) => a > b ? a : b)
-              : 0,
+                  .map((v) => (v['price'] as num?)?.toDouble() ?? 0.0)
+                  .reduce((a, b) => a > b ? a : b)
+              : 0.0,
         });
       }
 
+      if (!mounted) return;
       setState(() {
         _services = processedServices;
       });
+    } on BarberInactiveException catch (e) {
+      debugPrint('❌ Barber inactive: ${e.message}');
+      if (mounted) {
+        _showSnackBar(e.message, context.errorColor);
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) Navigator.pop(context);
+        });
+      }
+    } on BarberBlockedException catch (e) {
+      debugPrint('❌ Barber blocked: ${e.message}');
+      if (mounted) {
+        _showSnackBar(e.message, context.errorColor);
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) Navigator.pop(context);
+        });
+      }
+    } on BarberRoleNotFoundException catch (e) {
+      debugPrint('❌ Role not found: ${e.message}');
+      if (mounted) {
+        _showSnackBar(e.message, context.errorColor);
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) Navigator.pop(context);
+        });
+      }
+    } on BarberNotInSalonException catch (e) {
+      debugPrint('❌ Not in salon: ${e.message}');
+      if (mounted) {
+        _showSnackBar(e.message, context.errorColor);
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) Navigator.pop(context);
+        });
+      }
+    } on InvalidSalonIdException catch (e) {
+      debugPrint('❌ Invalid salon: ${e.message}');
+      if (mounted) {
+        _showSnackBar(e.message, context.errorColor);
+        Future.delayed(const Duration(seconds: 2), () {
+          if (mounted) Navigator.pop(context);
+        });
+      }
     } catch (e) {
       debugPrint('❌ Error loading services: $e');
       if (mounted) {
         _showSnackBar('Error: ${e.toString()}', context.errorColor);
-        if (e.toString().contains('inactive') ||
-            e.toString().contains('blocked')) {
-          Future.delayed(const Duration(seconds: 2), () {
-            if (mounted) Navigator.pop(context);
-          });
-        }
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -400,11 +496,15 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     });
   }
 
+  /// ✅ Toggle full service selection.
+  /// An empty set means "full service" (all variants selected).
   void _toggleFullService(String serviceId) {
     setState(() {
       if (_selectedVariants.containsKey(serviceId)) {
+        // Already selected → deselect
         _selectedVariants.remove(serviceId);
       } else {
+        // ✅ Empty set = "full service"
         _selectedVariants[serviceId] = {};
       }
     });
@@ -441,9 +541,15 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     return count;
   }
 
+  // ============================================================
+  // ✅ SAVE SERVICES — Single batch insert
+  // ============================================================
   Future<void> _saveServices() async {
     if (_selectedVariants.isEmpty) {
-      _showSnackBar('Please select at least one service', context.warningColor);
+      _showSnackBar(
+        'Please select at least one service',
+        context.warningColor,
+      );
       return;
     }
 
@@ -455,41 +561,60 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     setState(() => _isSaving = true);
 
     try {
-      int addedCount = 0;
+      // ✅ Build all rows first
+      final List<Map<String, dynamic>> rowsToInsert = [];
 
       for (var entry in _selectedVariants.entries) {
-        final serviceId = int.parse(entry.key);
+        final serviceId = int.tryParse(entry.key);
+        if (serviceId == null) continue;
+
         final variantIds = entry.value;
 
         if (variantIds.isEmpty) {
-          await supabase.from('barber_services').insert({
+          // Full service selection
+          rowsToInsert.add({
             'salon_barber_id': _salonBarberId!,
             'service_id': serviceId,
             'variant_id': null,
           });
-          addedCount++;
         } else {
           for (int variantId in variantIds) {
-            await supabase.from('barber_services').insert({
+            rowsToInsert.add({
               'salon_barber_id': _salonBarberId!,
               'service_id': serviceId,
               'variant_id': variantId,
             });
-            addedCount++;
           }
         }
       }
 
-      if (mounted) {
-        _showSnackBar(
-          'Successfully added $addedCount service(s)',
-          context.successColor,
-        );
-        Navigator.pop(context, true);
+      if (rowsToInsert.isEmpty) {
+        _showSnackBar('No valid services to save', context.warningColor);
+        return;
       }
+
+      // ✅ Single batch insert
+      await supabase.from('barber_services').insert(rowsToInsert);
+
+      if (!mounted) return;
+
+      _showSnackBar(
+        'Successfully added ${rowsToInsert.length} service(s)',
+        context.successColor,
+      );
+      Navigator.pop(context, true);
     } catch (e) {
       debugPrint('❌ Error saving services: $e');
-      if (mounted) {
+      if (!mounted) return;
+
+      // ✅ Handle duplicate key violation gracefully
+      if (e.toString().contains('duplicate key') ||
+          e.toString().contains('unique constraint')) {
+        _showSnackBar(
+          'Some services are already assigned to this barber.',
+          context.warningColor,
+        );
+      } else {
         _showSnackBar('Error saving services: $e', context.errorColor);
       }
     } finally {
@@ -558,6 +683,19 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         return Icons.brush;
       case 'cut':
         return Icons.cut;
+      // ✅ Added missing icons
+      case 'water_drop':
+        return Icons.water_drop;
+      case 'masks':
+        return Icons.masks;
+      case 'spa_outlined':
+        return Icons.spa_outlined;
+      case 'palette':
+        return Icons.palette;
+      case 'shower':
+        return Icons.shower;
+      case 'cleaning_services':
+        return Icons.cleaning_services;
       default:
         return Icons.category;
     }
@@ -594,8 +732,6 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   // ============================================================
   @override
   Widget build(BuildContext context) {
-    _checkScreenSize();
-
     final primaryColor = context.primaryColor;
     final backgroundColor = context.backgroundColor;
 
@@ -669,7 +805,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           if (selectedCount > 0)
             Container(
               margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(20),
@@ -677,7 +814,11 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                  const Icon(
+                    Icons.check_circle,
+                    size: 16,
+                    color: Colors.white,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     '$selectedCount',
@@ -741,7 +882,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                       ),
                     )
                   : const Icon(Icons.save),
-              label: Text(_isSaving ? 'Saving...' : 'Save ($selectedCount)'),
+              label: Text(
+                _isSaving ? 'Saving...' : 'Save ($selectedCount)',
+              ),
             )
           : null,
     );
@@ -812,7 +955,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                     ),
                   ),
                   selected: _selectedCategory == 'all',
-                  onSelected: (_) => setState(() => _selectedCategory = 'all'),
+                  onSelected: (_) =>
+                      setState(() => _selectedCategory = 'all'),
                   selectedColor: primaryColor.withValues(alpha: 0.2),
                   checkmarkColor: primaryColor,
                   backgroundColor: cardColor,
@@ -856,42 +1000,72 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   Widget _buildEmptyState() {
     final textColor = context.textColor;
     final secondaryTextColor = context.secondaryTextColor;
+    final primaryColor = context.primaryColor;
+
+    final hasFilters =
+        _searchQuery.isNotEmpty || _selectedCategory != 'all';
 
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.search_off,
-            size: _isWeb ? 80 : 64,
-            color: secondaryTextColor.withValues(alpha: 0.5),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No services found',
-            style: TextStyle(
-              fontSize: _isWeb ? 20 : 18,
-              fontWeight: FontWeight.w500,
-              color: textColor,
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              hasFilters ? Icons.search_off : Icons.inbox_outlined,
+              size: _isWeb ? 80 : 64,
+              color: secondaryTextColor.withValues(alpha: 0.5),
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _searchQuery.isNotEmpty || _selectedCategory != 'all'
-                ? 'Try adjusting your search or filters'
-                : 'No services available',
-            style: TextStyle(
-              fontSize: _isWeb ? 16 : 14,
-              color: secondaryTextColor,
+            const SizedBox(height: 16),
+            Text(
+              hasFilters ? 'No services found' : 'No services available',
+              style: TextStyle(
+                fontSize: _isWeb ? 20 : 18,
+                fontWeight: FontWeight.w500,
+                color: textColor,
+              ),
             ),
-          ),
-        ],
+            const SizedBox(height: 8),
+            Text(
+              hasFilters
+                  ? 'Try adjusting your search or filters'
+                  : 'Add services to this salon first',
+              style: TextStyle(
+                fontSize: _isWeb ? 16 : 14,
+                color: secondaryTextColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            if (hasFilters) ...[
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() => _selectedCategory = 'all');
+                },
+                icon: const Icon(Icons.clear_all, size: 18),
+                label: const Text('Clear Filters'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primaryColor,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 12,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
 
   // ============================================================
-  // ✅ WEB VIEW
+  // ✅ WEB VIEW — Wrap instead of GridView (no overflow)
   // ============================================================
   Widget _buildWebView(double padding, int selectedCount) {
     final primaryColor = context.primaryColor;
@@ -929,9 +1103,19 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                           ),
                         ),
                         ElevatedButton.icon(
-                          onPressed: _saveServices,
-                          icon: const Icon(Icons.save),
-                          label: const Text('Save Now'),
+                          onPressed: _isSaving ? null : _saveServices,
+                          icon: _isSaving
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.save),
+                          label:
+                              Text(_isSaving ? 'Saving...' : 'Save Now'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: primaryColor,
                             foregroundColor: Colors.white,
@@ -943,20 +1127,16 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                 ),
                 const SizedBox(height: 24),
               ],
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                  maxCrossAxisExtent: 400,
-                  crossAxisSpacing: 16,
-                  mainAxisSpacing: 16,
-                  childAspectRatio: 0.9,
-                ),
-                itemCount: _filteredServices.length,
-                itemBuilder: (context, index) {
-                  final service = _filteredServices[index];
-                  return _buildServiceCardWeb(service, index);
-                },
+              // ✅ Wrap instead of GridView — each card takes height it needs
+              Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: _filteredServices.asMap().entries.map((entry) {
+                  return SizedBox(
+                    width: 380,
+                    child: _buildServiceCardWeb(entry.value, entry.key),
+                  );
+                }).toList(),
               ),
             ],
           ),
@@ -966,7 +1146,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   }
 
   // ============================================================
-  // ✅ WEB SERVICE CARD
+  // ✅ WEB SERVICE CARD — No more Expanded with nested ListView
   // ============================================================
   Widget _buildServiceCardWeb(Map<String, dynamic> service, int index) {
     final primaryColor = context.primaryColor;
@@ -1012,8 +1192,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Header
+              // ==================== HEADER ====================
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -1105,193 +1286,183 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                 ),
               ),
 
-              // Content
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (hasVariants && !isCompletelyAssigned) ...[
-                        Text(
-                          _formatPriceRange(
-                            service['minPrice'],
-                            service['maxPrice'],
-                          ),
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: secondaryTextColor,
-                            fontWeight: FontWeight.w500,
-                          ),
+              // ==================== CONTENT ====================
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (hasVariants && !isCompletelyAssigned) ...[
+                      Text(
+                        _formatPriceRange(
+                          service['minPrice'],
+                          service['maxPrice'],
                         ),
-                        const SizedBox(height: 8),
-                      ],
-
-                      if (isCompletelyAssigned)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: successColor.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.check_circle,
-                                size: 12,
-                                color: successColor,
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Already assigned',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: successColor,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: secondaryTextColor,
+                          fontWeight: FontWeight.w500,
                         ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
 
-                      if (!hasVariants && !isCompletelyAssigned) ...[
-                        const Spacer(),
-                        Center(
-                          child: Text(
-                            'Full Service',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: secondaryTextColor,
+                    if (isCompletelyAssigned)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: successColor.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.check_circle,
+                              size: 12,
+                              color: successColor,
                             ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Already assigned',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: successColor,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                    if (!hasVariants && !isCompletelyAssigned) ...[
+                      const SizedBox(height: 8),
+                      Center(
+                        child: Text(
+                          'Full Service',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: secondaryTextColor,
                           ),
                         ),
-                      ],
+                      ),
+                    ],
 
-                      if (hasVariants) ...[
-                        const SizedBox(height: 8),
-                        Expanded(
-                          child: ListView.builder(
-                            itemCount: variants.length,
-                            itemBuilder: (context, vIndex) {
-                              final variant = variants[vIndex];
-                              final variantId = variant['id'] as int;
-                              final isAssigned = variant['isAssigned'] == true;
-                              final isVarSelected = _isVariantSelected(
-                                serviceId,
-                                variantId,
-                              );
+                    // ✅ Variants — Column instead of nested ListView
+                    if (hasVariants) ...[
+                      const SizedBox(height: 8),
+                      ...variants.map((variant) {
+                        final variantId = variant['id'] as int;
+                        final isAssigned = variant['isAssigned'] == true;
+                        final isVarSelected = _isVariantSelected(
+                          serviceId,
+                          variantId,
+                        );
 
-                              return GestureDetector(
-                                onTap: isAssigned || isCompletelyAssigned
-                                    ? null
-                                    : () =>
-                                          _toggleVariant(serviceId, variantId),
-                                child: Container(
-                                  margin: const EdgeInsets.only(bottom: 6),
-                                  padding: const EdgeInsets.all(8),
-                                  decoration: BoxDecoration(
-                                    color: isVarSelected
-                                        ? primaryColor.withValues(alpha: 0.1)
-                                        : (isDark
-                                              ? cardColor.withValues(alpha: 0.5)
-                                              : Colors.white.withValues(
-                                                  alpha: 0.6,
-                                                )),
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(
-                                      color: isVarSelected
-                                          ? primaryColor
-                                          : borderColor,
-                                    ),
-                                  ),
-                                  child: Row(
+                        return GestureDetector(
+                          onTap: isAssigned || isCompletelyAssigned
+                              ? null
+                              : () =>
+                                  _toggleVariant(serviceId, variantId),
+                          child: Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: isVarSelected
+                                  ? primaryColor.withValues(alpha: 0.1)
+                                  : (isDark
+                                      ? cardColor.withValues(alpha: 0.5)
+                                      : Colors.white.withValues(alpha: 0.6)),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: isVarSelected
+                                    ? primaryColor
+                                    : borderColor,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  isVarSelected
+                                      ? Icons.check_circle
+                                      : Icons.circle_outlined,
+                                  size: 14,
+                                  color: isVarSelected
+                                      ? primaryColor
+                                      : secondaryTextColor,
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
-                                      Icon(
-                                        isVarSelected
-                                            ? Icons.check_circle
-                                            : Icons.circle_outlined,
-                                        size: 14,
-                                        color: isVarSelected
-                                            ? primaryColor
-                                            : secondaryTextColor,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              variant['display_text'],
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: isVarSelected
-                                                    ? FontWeight.w600
-                                                    : FontWeight.normal,
-                                                color: isVarSelected
-                                                    ? primaryColor
-                                                    : textColor,
-                                              ),
-                                            ),
-                                            Text(
-                                              '${_formatPrice(variant['price'])} • ${variant['duration']} min',
-                                              style: TextStyle(
-                                                fontSize: 9,
-                                                color: secondaryTextColor,
-                                              ),
-                                            ),
-                                          ],
+                                      Text(
+                                        variant['display_text'],
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: isVarSelected
+                                              ? FontWeight.w600
+                                              : FontWeight.normal,
+                                          color: isVarSelected
+                                              ? primaryColor
+                                              : textColor,
                                         ),
                                       ),
-                                      if (isAssigned)
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: successColor.withValues(
-                                              alpha: 0.15,
-                                            ),
-                                            borderRadius: BorderRadius.circular(
-                                              4,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            'Assigned',
-                                            style: TextStyle(
-                                              fontSize: 8,
-                                              color: successColor,
-                                            ),
-                                          ),
+                                      Text(
+                                        '${_formatPrice(variant['price'])} • ${variant['duration']} min',
+                                        style: TextStyle(
+                                          fontSize: 9,
+                                          color: secondaryTextColor,
                                         ),
+                                      ),
                                     ],
                                   ),
                                 ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-
-                      if (selectedVariantCount > 0)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            '$selectedVariantCount variant${selectedVariantCount > 1 ? 's' : ''} selected',
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: primaryColor,
-                              fontWeight: FontWeight.w500,
+                                if (isAssigned)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 4,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: successColor.withValues(
+                                        alpha: 0.15,
+                                      ),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      'Assigned',
+                                      style: TextStyle(
+                                        fontSize: 8,
+                                        color: successColor,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
-                        ),
+                        );
+                      }),
                     ],
-                  ),
+
+                    if (selectedVariantCount > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          '$selectedVariantCount variant${selectedVariantCount > 1 ? 's' : ''} selected',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: primaryColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],
@@ -1354,13 +1525,15 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
               color: cardBgColor,
             ),
             child: Theme(
-              data: Theme.of(
-                context,
-              ).copyWith(dividerColor: Colors.transparent),
+              data: Theme.of(context).copyWith(
+                dividerColor: Colors.transparent,
+              ),
               child: Column(
                 children: [
                   InkWell(
-                    onTap: hasVariants ? () => _toggleExpand(serviceId) : null,
+                    onTap: hasVariants
+                        ? () => _toggleExpand(serviceId)
+                        : null,
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Row(
@@ -1413,7 +1586,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                         color: categoryColor.withValues(
                                           alpha: 0.15,
                                         ),
-                                        borderRadius: BorderRadius.circular(4),
+                                        borderRadius:
+                                            BorderRadius.circular(4),
                                       ),
                                       child: Text(
                                         service['category_name'],
@@ -1441,7 +1615,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                           ),
                           if (!hasVariants)
                             Checkbox(
-                              value: _selectedVariants.containsKey(serviceId),
+                              value:
+                                  _selectedVariants.containsKey(serviceId),
                               onChanged: isCompletelyAssigned
                                   ? null
                                   : (_) => _toggleFullService(serviceId),
@@ -1481,8 +1656,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                               color: isVarSelected
                                   ? primaryColor.withValues(alpha: 0.08)
                                   : (isDark
-                                        ? cardColor.withValues(alpha: 0.5)
-                                        : Colors.white.withValues(alpha: 0.6)),
+                                      ? cardColor.withValues(alpha: 0.5)
+                                      : Colors.white.withValues(alpha: 0.6)),
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
                                 color: isVarSelected
@@ -1497,10 +1672,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                               ),
                               leading: Checkbox(
                                 value: isVarSelected,
-                                onChanged: isAssigned || isCompletelyAssigned
-                                    ? null
-                                    : (_) =>
-                                          _toggleVariant(serviceId, variantId),
+                                onChanged:
+                                    isAssigned || isCompletelyAssigned
+                                        ? null
+                                        : (_) => _toggleVariant(
+                                            serviceId,
+                                            variantId,
+                                          ),
                                 activeColor: primaryColor,
                                 visualDensity: VisualDensity.compact,
                               ),
@@ -1533,7 +1711,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                                         color: successColor.withValues(
                                           alpha: 0.15,
                                         ),
-                                        borderRadius: BorderRadius.circular(4),
+                                        borderRadius:
+                                            BorderRadius.circular(4),
                                       ),
                                       child: Text(
                                         'Assigned',

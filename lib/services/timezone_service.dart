@@ -1322,6 +1322,26 @@ class TimezoneService {
     }
   }
 
+  /// ✅ Get current date in a specific timezone
+static DateTime getNowInTimezone(String timezone) {
+  try {
+    final location = tz.getLocation(timezone);
+    final now = tz.TZDateTime.now(location);
+    // Convert to local DateTime (without timezone info) for easy use
+    return DateTime(
+      now.year,
+      now.month,
+      now.day,
+      now.hour,
+      now.minute,
+      now.second,
+    );
+  } catch (e) {
+    debugPrint('❌ Error in getNowInTimezone: $e');
+    return DateTime.now();
+  }
+}
+
   // ==================== BACKWARD COMPATIBILITY (DEPRECATED METHODS) ====================
 
   @Deprecated(

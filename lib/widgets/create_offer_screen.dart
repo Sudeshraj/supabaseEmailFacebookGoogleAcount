@@ -6,6 +6,7 @@ import 'package:flutter_application_1/alertBox/time_picker_dialog.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import '../../services/notification_service.dart';
 import '../../services/currency_service.dart';
+import '../../services/timezone_service.dart';
 import '../../extensions/context_extensions.dart';
 
 // ====================================================================
@@ -25,6 +26,8 @@ class CreateOfferScreen extends StatefulWidget {
   final int salonId;
   final String salonName;
   final String currencyCode;
+  // ✅ Salon timezone (for showing timezone info to owner)
+  final String? salonTimezone;
   final Map<String, dynamic>? editingOffer;
 
   const CreateOfferScreen({
@@ -32,6 +35,7 @@ class CreateOfferScreen extends StatefulWidget {
     required this.salonId,
     required this.salonName,
     required this.currencyCode,
+    this.salonTimezone,
     this.editingOffer,
   });
 
@@ -106,6 +110,9 @@ class _ServiceSelection {
 }
 
 class _CreateOfferScreenState extends State<CreateOfferScreen> {
+  // ✅ Default salon timezone (DB default — NOT user timezone!)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
   final supabase = Supabase.instance.client;
   final NotificationService _notificationService = NotificationService();
   final CurrencyService _currencyService = CurrencyService.instance;
@@ -176,6 +183,33 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   bool get _currencyUsesDecimals =>
       _currencyService.getInfo(widget.currencyCode).decimals > 0;
 
+  // ✅ Effective salon timezone (fallback to salon default, NOT device)
+  String get _effectiveSalonTimezone {
+    final tz = widget.salonTimezone;
+    if (tz != null && tz.isNotEmpty) return tz;
+    return _kDefaultSalonTimezone;
+  }
+
+  // ✅ Salon "today" — used for date picker bounds
+  DateTime get _salonToday {
+    final tz = _effectiveSalonTimezone;
+    try {
+      final now = TimezoneService.getNowInTimezone(tz);
+      return DateTime(now.year, now.month, now.day);
+    } catch (e) {
+      debugPrint('❌ Error getting salon today: $e');
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day);
+    }
+  }
+
+  // ✅ Check if salon timezone differs from user
+  bool get _isDifferentTimezone {
+    final salonTz = _effectiveSalonTimezone;
+    final userTz = TimezoneService.getCurrentTimezone();
+    return salonTz.isNotEmpty && userTz.isNotEmpty && salonTz != userTz;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -203,13 +237,17 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         final toStr = offer['valid_to_time'].toString();
         if (fromStr.isNotEmpty && toStr.isNotEmpty) {
           _hasTimeRestriction = true;
+          // ✅ Load times from DB (stored as salon-local, parse directly)
           _validFromTime = _parseTime(fromStr);
           _validToTime = _parseTime(toStr);
         }
       }
     }
 
-    _loadServiceMenuTree();
+    // ✅ FIX: PostFrameCallback - context ready වුනාට පස්සේ load කරනවා
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadServiceMenuTree();
+    });
   }
 
   @override
@@ -234,9 +272,21 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   // ============================================
+  // ✅ TimeOfDay → salon-local time string
+  //
+  // Offers වල time restriction කියන්නේ "salon වේලාවට" අදාළ.
+  // Owner picks time එක salon location එකේ clock එකට අනුව.
+  // ✅ Save as-is (salon local time). No timezone conversion.
+  // ============================================
+  String _timeOfDayToSalonTimeString(TimeOfDay time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
+  }
+
+  // ============================================
   // LOAD SERVICE MENU (category → service → variants)
   // ============================================
   Future<void> _loadServiceMenuTree() async {
+    if (!mounted) return;
     setState(() => _isLoadingServices = true);
 
     try {
@@ -418,6 +468,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       // Apply editing state
       if (_isEditing) {
         _applyEditingOffer();
+        if (mounted) setState(() {});
       }
     } catch (e) {
       debugPrint('Error loading service menu: $e');
@@ -480,16 +531,19 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   Future<void> _selectDateRange() async {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    // ✅ Use SALON today (not device) for date picker bounds
+    final salonToday = _salonToday;
+
     final validFromDay = DateTime(
       _validFrom.year,
       _validFrom.month,
       _validFrom.day,
     );
     final validToDay = DateTime(_validTo.year, _validTo.month, _validTo.day);
-    final firstDate = validFromDay.isBefore(today) ? validFromDay : today;
-    final farthest = today.add(const Duration(days: 365));
+
+    final firstDate =
+        validFromDay.isBefore(salonToday) ? validFromDay : salonToday;
+    final farthest = salonToday.add(const Duration(days: 365));
     final lastDate = validToDay.isAfter(farthest) ? validToDay : farthest;
 
     final picked = await showDateRangePicker(
@@ -501,7 +555,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       builder: _pickerTheme,
     );
 
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _validFrom = picked.start;
         _validTo = picked.end;
@@ -627,6 +681,16 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
 
+      // ✅ Convert time to salon-local time string (save as-is)
+      String? validFromTimeStr;
+      String? validToTimeStr;
+      if (_hasTimeRestriction &&
+          _validFromTime != null &&
+          _validToTime != null) {
+        validFromTimeStr = _timeOfDayToSalonTimeString(_validFromTime!);
+        validToTimeStr = _timeOfDayToSalonTimeString(_validToTime!);
+      }
+
       final offerData = {
         'salon_id': widget.salonId,
         'title': _titleController.text.trim(),
@@ -638,12 +702,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         'points_required': int.tryParse(_pointsRequiredController.text) ?? 0,
         'valid_from': _validFrom.toIso8601String().split('T')[0],
         'valid_to': _validTo.toIso8601String().split('T')[0],
-        'valid_from_time': _hasTimeRestriction && _validFromTime != null
-            ? '${_validFromTime!.hour.toString().padLeft(2, '0')}:${_validFromTime!.minute.toString().padLeft(2, '0')}:00'
-            : null,
-        'valid_to_time': _hasTimeRestriction && _validToTime != null
-            ? '${_validToTime!.hour.toString().padLeft(2, '0')}:${_validToTime!.minute.toString().padLeft(2, '0')}:00'
-            : null,
+        'valid_from_time': validFromTimeStr,
+        'valid_to_time': validToTimeStr,
         'usage_limit': _usageLimitController.text.isNotEmpty
             ? int.parse(_usageLimitController.text)
             : null,
@@ -697,8 +757,11 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         }
       }
 
+      // ✅ Fire-and-forget notifications (don't block save)
       if (!_isEditing && _sendNotification) {
-        await _sendOfferNotifications(offerData, offerId);
+        _sendOfferNotifications(offerData, offerId).catchError((e) {
+          debugPrint('Background notification error: $e');
+        });
       }
 
       if (!mounted) return;
@@ -1283,6 +1346,15 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
             if (_hasTimeRestriction) ...[
               const SizedBox(height: 16),
               _buildTimeRangePicker(),
+              // ✅ Timezone note (only if salon tz != user tz)
+              if (_isDifferentTimezone) ...[
+                const SizedBox(height: 8),
+                _buildInfoBanner(
+                  'Times are interpreted in the salon\'s local timezone (${TimezoneService.getTimezoneNameFor(_effectiveSalonTimezone)}).',
+                  Icons.public,
+                  Colors.blue,
+                ),
+              ],
             ],
           ],
         ),
@@ -1507,7 +1579,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     if (serviceCount > 0) parts.add('$serviceCount service(s)');
     if (variantCount > 0) parts.add('$variantCount variant(s)');
 
-    // Check if any selectable option exists
     final hasSelectable = _serviceMenuTree.any((cat) {
       for (final s in (cat['services'] as List)) {
         final variants = s['variants'] as List;
@@ -1609,7 +1680,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     final isFull = _selection.isServiceFullySelected(sid);
     final isPartial = _selection.isServicePartial(sid);
 
-    // ✅ Service is selectable only if it has at least one priced variant
     final canSelectService = hasVariants && hasPricedVariants;
 
     return Padding(
@@ -1617,7 +1687,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Service row
           InkWell(
             onTap: canSelectService
                 ? () {
@@ -1662,7 +1731,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                       ),
                     ),
                   ),
-                  // ✅ Status badge
                   if (!hasVariants)
                     _buildStatusBadge(
                       'No variants',
@@ -1685,7 +1753,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
               ),
             ),
           ),
-          // Variants
           if (hasVariants)
             Padding(
               padding: const EdgeInsets.only(left: 16),
@@ -1745,7 +1812,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     final label = variant['label']?.toString() ?? 'Standard';
     final connector = isLast ? '└─' : '├─';
 
-    // ✅ Variant is selectable only if it has a valid price
     final hasPrice = price != null && price > 0;
 
     final serviceFull = _selection.isServiceFullySelected(sid);
@@ -1811,12 +1877,15 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
               ),
               const SizedBox(width: 8),
             ],
-            // ✅ Price or "No price" badge
             if (!hasPrice)
               _buildStatusBadge('No price', Colors.orange, Icons.warning_amber)
             else
               Text(
-                'Rs. ${price.toStringAsFixed(0)}',
+                _currencyService.format(
+                  price: price,
+                  currencyCode: widget.currencyCode,
+                  withComma: false,
+                ),
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,

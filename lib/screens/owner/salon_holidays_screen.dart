@@ -22,6 +22,9 @@ class SalonHolidaysScreen extends StatefulWidget {
 }
 
 class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
+  // ✅ Default salon timezone (DB default — NOT user timezone!)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
   final supabase = Supabase.instance.client;
 
   List<Map<String, dynamic>> _holidays = [];
@@ -30,10 +33,27 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   final Set<int> _selectedForDelete = {};
   bool _isSelectMode = false;
 
-  // Timezone variables
+  // ==================== ✅ TIMEZONE ====================
+  // ✅ Salon timezone used ONLY for "today" reference (date-picker bounds)
+  // Holiday dates themselves are timezone-agnostic (DATE column)
   String _userTimezone = '';
-  String _salonTimezone = '';
+  String _salonTimezone = _kDefaultSalonTimezone;
   bool _isTimezoneLoaded = false;
+
+  // ✅ Salon "today" — used for date picker bounds and past/future checks
+  DateTime get _salonToday {
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
+    try {
+      final now = TimezoneService.getNowInTimezone(tz);
+      return DateTime(now.year, now.month, now.day);
+    } catch (e) {
+      debugPrint('❌ Error getting salon now: $e');
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day);
+    }
+  }
 
   // ✅ Web Scroll Controller
   final ScrollController _scrollController = ScrollController();
@@ -41,7 +61,9 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeWithTimezone();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _initializeWithTimezone();
+    });
   }
 
   @override
@@ -50,18 +72,25 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     super.dispose();
   }
 
-  // ==================== CORRECT TIMEZONE FUNCTIONS ====================
+  // ==================== ✅ TIMEZONE INITIALIZATION ====================
 
   Future<void> _initializeWithTimezone() async {
     await TimezoneService.initialize();
 
     final prefs = await SharedPreferences.getInstance();
 
-    _userTimezone =
-        prefs.getString('user_timezone') ??
+    // ✅ User timezone (for "today" reference on user's side)
+    _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
         TimezoneService.getCurrentTimezone();
 
+    if (_userTimezone.isEmpty) {
+      _userTimezone = _kDefaultSalonTimezone;
+    }
+
+    // ✅ Load salon timezone from DB
     await _loadSalonTimezone();
+
+    if (!mounted) return;
 
     setState(() {
       _isTimezoneLoaded = true;
@@ -71,70 +100,82 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
   }
 
   Future<void> _loadSalonTimezone() async {
+    // ✅ Salon default fallback (NOT user timezone)
+    _salonTimezone = _kDefaultSalonTimezone;
+
     try {
       final response = await supabase
           .from('salons')
           .select('timezone')
           .eq('id', widget.salonId)
-          .single();
+          .maybeSingle();
 
-      _salonTimezone =
-          response['timezone'] ?? TimezoneService.getCurrentTimezone();
+      if (response != null) {
+        final timezone = response['timezone'] as String?;
+        if (timezone != null && timezone.isNotEmpty) {
+          _salonTimezone = timezone;
+        } else {
+          debugPrint(
+            '⚠️ Salon TZ empty → default: $_kDefaultSalonTimezone',
+          );
+        }
+      }
     } catch (e) {
       debugPrint('❌ Error loading salon timezone: $e');
-      _salonTimezone = TimezoneService.getCurrentTimezone();
+      _salonTimezone = _kDefaultSalonTimezone;
     }
   }
 
-  DateTime _utcToLocalDate(String utcDateStr) {
+  // ==================== ✅ DATE HELPERS ====================
+  // ✅ FIX: holiday_date is a DATE column (no timezone info).
+  // Do NOT apply any timezone conversion. Simply parse the calendar date.
+
+  /// ✅ Parse a DATE column value — returns date at 00:00 local, no TZ shift
+  DateTime _parseDateOnly(String dateStr) {
     try {
-      final utcDateTime = DateTime.parse(utcDateStr);
-      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
-        '12:00:00',
-        utcDateTime,
-      );
-      return DateTime(
-        localDateTime.year,
-        localDateTime.month,
-        localDateTime.day,
-      );
+      final parsed = DateTime.parse(dateStr);
+      return DateTime(parsed.year, parsed.month, parsed.day);
     } catch (e) {
-      debugPrint('❌ Error converting UTC to local: $e');
-      final utcDateTime = DateTime.parse(utcDateStr);
-      return DateTime(utcDateTime.year, utcDateTime.month, utcDateTime.day);
+      debugPrint('❌ Error parsing date: $e');
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day);
     }
   }
 
-  String _formatDateForDisplay(String utcDateStr) {
+  String _formatDateForDisplay(String dateStr) {
     try {
-      final localDate = _utcToLocalDate(utcDateStr);
-      return DateFormat('EEEE, MMM d, yyyy').format(localDate);
+      final date = _parseDateOnly(dateStr);
+      return DateFormat('EEEE, MMM d, yyyy').format(date);
     } catch (e) {
       debugPrint('❌ Error formatting date: $e');
-      return utcDateStr;
+      return dateStr;
     }
   }
 
-  bool _isPastHoliday(String utcDateStr) {
+  bool _isPastHoliday(String dateStr) {
     try {
-      final localDate = _utcToLocalDate(utcDateStr);
-      final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      return localDate.isBefore(today);
+      final date = _parseDateOnly(dateStr);
+      return date.isBefore(_salonToday);
     } catch (e) {
       debugPrint('❌ Error checking past holiday: $e');
       return false;
     }
   }
 
-  String _getTimezoneDisplay() {
-    return '${TimezoneService.getCurrentFlag()} ${TimezoneService.getTimezoneDisplayName()} (${TimezoneService.getUtcOffsetString()})';
+  // ==================== ✅ TIMEZONE DISPLAY HELPERS ====================
+
+  String _getSalonTimezoneDisplay() {
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
+    return TimezoneService.getFullTimezoneDisplayFor(tz);
   }
 
   // ==================== LOAD HOLIDAYS ====================
 
   Future<void> _loadHolidays() async {
     if (!_isTimezoneLoaded) return;
+    if (!mounted) return;
 
     setState(() => _isLoading = true);
 
@@ -145,6 +186,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
           .eq('salon_id', widget.salonId)
           .order('holiday_date', ascending: false);
 
+      if (!mounted) return;
       setState(() {
         _holidays = List<Map<String, dynamic>>.from(response);
         _isLoading = false;
@@ -153,10 +195,9 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
       debugPrint('✅ Loaded ${_holidays.length} holidays');
     } catch (e) {
       debugPrint('❌ Error loading holidays: $e');
+      if (!mounted) return;
       setState(() => _isLoading = false);
-      if (mounted) {
-        _showSnackBar('Error loading holidays', Colors.red);
-      }
+      _showSnackBar('Error loading holidays', Colors.red);
     }
   }
 
@@ -168,13 +209,12 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
       builder: (context) => _AddEditHolidayDialog(
         salonId: widget.salonId,
         salonTimezone: _salonTimezone,
-        userTimezone: _userTimezone,
       ),
     );
 
-    if (result != null && result['success'] == true) {
-      _loadHolidays();
-      _showSnackBar('Holiday added successfully', Colors.green);
+    if (result != null && result['success'] == true && mounted) {
+      await _loadHolidays();
+      if (mounted) _showSnackBar('Holiday added successfully', Colors.green);
     }
   }
 
@@ -187,17 +227,18 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
         salonId: widget.salonId,
         holidayToEdit: holiday,
         salonTimezone: _salonTimezone,
-        userTimezone: _userTimezone,
       ),
     );
 
-    if (result != null && result['success'] == true) {
-      _loadHolidays();
-      _showSnackBar('Holiday updated successfully', Colors.green);
+    if (result != null && result['success'] == true && mounted) {
+      await _loadHolidays();
+      if (mounted) {
+        _showSnackBar('Holiday updated successfully', Colors.green);
+      }
     }
   }
 
-  // ==================== DELETE SELECTED HOLIDAYS ====================
+  // ==================== DELETE SELECTED HOLIDAYS (BATCH) ====================
 
   Future<void> _deleteSelectedHolidays() async {
     if (_selectedForDelete.isEmpty) return;
@@ -212,14 +253,18 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
 
     if (confirm == true) {
+      if (!mounted) return;
       setState(() => _isDeleting = true);
 
       try {
-        for (int id in _selectedForDelete) {
-          await supabase.from('salon_holidays').delete().eq('id', id);
-        }
+        // ✅ Batch delete — single DB call, atomic
+        await supabase
+            .from('salon_holidays')
+            .delete()
+            .inFilter('id', _selectedForDelete.toList());
 
-        _loadHolidays();
+        await _loadHolidays();
+        if (!mounted) return;
         setState(() {
           _selectedForDelete.clear();
           _isSelectMode = false;
@@ -228,6 +273,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
         _showSnackBar('Holidays deleted successfully', Colors.green);
       } catch (e) {
         debugPrint('❌ Error deleting holidays: $e');
+        if (!mounted) return;
         _showSnackBar('Error deleting holidays', Colors.red);
         setState(() => _isDeleting = false);
       }
@@ -247,12 +293,17 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
 
     if (confirm == true) {
       try {
-        await supabase.from('salon_holidays').delete().eq('id', holiday['id']);
-
-        _loadHolidays();
-        _showSnackBar('Holiday deleted successfully', Colors.green);
+        await supabase
+            .from('salon_holidays')
+            .delete()
+            .eq('id', holiday['id']);
+        await _loadHolidays();
+        if (mounted) {
+          _showSnackBar('Holiday deleted successfully', Colors.green);
+        }
       } catch (e) {
-        _showSnackBar('Error deleting holiday', Colors.red);
+        debugPrint('❌ Error deleting holiday: $e');
+        if (mounted) _showSnackBar('Error deleting holiday', Colors.red);
       }
     }
   }
@@ -324,7 +375,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                 child: CircularProgressIndicator(),
               ),
               SizedBox(height: 16),
-              Text('Loading timezone...'),
+              Text('Loading...'),
             ],
           ),
         ),
@@ -390,20 +441,18 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
           ),
         ],
       ),
-      // ✅ EDGE-TO-EDGE: SafeArea with Web/Mobile layouts
       body: SafeArea(
         child: _isLoading
             ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
             : _holidays.isEmpty
-            ? _buildEmptyState(isWeb)
-            : isWeb
-            ? _buildWebLayout()
-            : _buildMobileLayout(),
+                ? _buildEmptyState(isWeb)
+                : isWeb
+                    ? _buildWebLayout()
+                    : _buildMobileLayout(),
       ),
     );
   }
 
-  // ✅ WEB LAYOUT - Centered with Scrollbar
   Widget _buildWebLayout() {
     return Center(
       child: Container(
@@ -426,7 +475,6 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  // ✅ MOBILE LAYOUT
   Widget _buildMobileLayout() {
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -435,7 +483,6 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  // ✅ CONTENT
   Widget _buildContent() {
     final isDark = context.isDarkMode;
     final isWeb = context.isWeb;
@@ -450,45 +497,11 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Timezone Info Card
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: isDark
-                ? Colors.blue.withValues(alpha: 0.15)
-                : Colors.blue[50],
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark
-                  ? Colors.blue.withValues(alpha: 0.3)
-                  : Colors.blue[200]!,
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                Icons.access_time,
-                size: 20,
-                color: isDark ? Colors.blue[300] : Colors.blue,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  '🌍 Your Timezone: ${_getTimezoneDisplay()}',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: isDark ? Colors.blue[300] : Colors.blueGrey,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-
+        // ✅ Salon timezone info card
+        _buildTimezoneInfoCard(isDark),
         const SizedBox(height: 16),
 
-        // Stats Row
+        // Stats
         if (isWeb)
           Container(
             width: double.infinity,
@@ -565,9 +578,65 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
 
         const SizedBox(height: 16),
 
-        // Holidays List
+        // Holiday list
         if (isWeb) _buildWebHolidaysList() else _buildMobileHolidaysList(),
       ],
+    );
+  }
+
+  // ============================================================
+  // ✅ TIMEZONE INFO CARD (Salon only — holidays are DATE-only)
+  // ============================================================
+  Widget _buildTimezoneInfoCard(bool isDark) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.blue.withValues(alpha: 0.15)
+            : Colors.blue[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark
+              ? Colors.blue.withValues(alpha: 0.3)
+              : Colors.blue[200]!,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.store,
+            size: 18,
+            color: isDark ? Colors.blue[300] : Colors.blue[700],
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Salon timezone: ${_getSalonTimezoneDisplay()}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.blue[300] : Colors.blue[700],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Holidays are calendar dates — same for all timezones',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontStyle: FontStyle.italic,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -650,13 +719,15 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  // ✅ WEB HOLIDAYS LIST - Table View
+  // ============================================================
+  // WEB HOLIDAYS LIST
+  // ============================================================
   Widget _buildWebHolidaysList() {
     final isDark = context.isDarkMode;
 
     return Column(
       children: [
-        // Table Header
+        // Header
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
@@ -726,7 +797,7 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
 
         const SizedBox(height: 8),
 
-        // Holidays Rows
+        // Rows
         ..._holidays.map((holiday) {
           final isSelected = _selectedForDelete.contains(holiday['id']);
           final isPast = _isPastHoliday(holiday['holiday_date']);
@@ -738,10 +809,10 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
               color: isSelected
                   ? Colors.red.withValues(alpha: 0.05)
                   : isPast
-                  ? (isDark
-                        ? Colors.grey[800]
-                        : Colors.grey.withValues(alpha: 0.05))
-                  : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
+                      ? (isDark
+                          ? Colors.grey[800]
+                          : Colors.grey.withValues(alpha: 0.05))
+                      : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: isSelected
@@ -769,7 +840,8 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                       color: isPast
                           ? (isDark ? Colors.white70 : Colors.grey[600])
                           : (isDark ? Colors.white : Colors.black),
-                      decoration: isPast ? TextDecoration.lineThrough : null,
+                      decoration:
+                          isPast ? TextDecoration.lineThrough : null,
                     ),
                   ),
                 ),
@@ -805,7 +877,8 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                     child: holiday['is_recurring'] == true
                         ? Icon(
                             Icons.repeat,
-                            color: isDark ? Colors.orange[300] : Colors.orange,
+                            color:
+                                isDark ? Colors.orange[300] : Colors.orange,
                             size: 20,
                           )
                         : Icon(
@@ -849,7 +922,9 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  // ✅ MOBILE HOLIDAYS LIST - Card View
+  // ============================================================
+  // MOBILE HOLIDAYS LIST
+  // ============================================================
   Widget _buildMobileHolidaysList() {
     final isDark = context.isDarkMode;
 
@@ -863,11 +938,11 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
             margin: const EdgeInsets.only(bottom: 12),
             color: isDark
                 ? (isSelected
-                      ? Colors.red.withValues(alpha: 0.15)
-                      : const Color(0xFF1E1E1E))
+                    ? Colors.red.withValues(alpha: 0.15)
+                    : const Color(0xFF1E1E1E))
                 : (isSelected
-                      ? Colors.red.withValues(alpha: 0.05)
-                      : Colors.white),
+                    ? Colors.red.withValues(alpha: 0.05)
+                    : Colors.white),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
               side: isSelected
@@ -930,8 +1005,12 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
                           style: TextStyle(
                             fontSize: 11,
                             color: isPast
-                                ? (isDark ? Colors.white30 : Colors.grey[500])
-                                : (isDark ? Colors.white60 : Colors.grey[600]),
+                                ? (isDark
+                                    ? Colors.white30
+                                    : Colors.grey[500])
+                                : (isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600]),
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -1006,9 +1085,9 @@ class _SalonHolidaysScreenState extends State<SalonHolidaysScreen> {
     );
   }
 
-  // ✅ FIXED: The empty state now scrolls and sizes itself to the available
-  // space instead of forcing a fixed-size Column into a tighter area — this
-  // was the cause of the "RenderFlex overflowed by 6.0 pixels" error.
+  // ============================================================
+  // EMPTY STATE
+  // ============================================================
   Widget _buildEmptyState(bool isWeb) {
     final isDark = context.isDarkMode;
 
@@ -1082,13 +1161,11 @@ class _AddEditHolidayDialog extends StatefulWidget {
   final int salonId;
   final Map<String, dynamic>? holidayToEdit;
   final String salonTimezone;
-  final String userTimezone;
 
   const _AddEditHolidayDialog({
     required this.salonId,
     this.holidayToEdit,
     required this.salonTimezone,
-    required this.userTimezone,
   });
 
   @override
@@ -1096,6 +1173,9 @@ class _AddEditHolidayDialog extends StatefulWidget {
 }
 
 class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
+  // ✅ Default salon timezone fallback
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
   final supabase = Supabase.instance.client;
 
   DateTime? _selectedLocalDate;
@@ -1123,49 +1203,39 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
     super.dispose();
   }
 
-  DateTime _utcToLocalDate(String utcDateStr) {
+  /// ✅ Parse a DATE column value — no timezone conversion
+  DateTime _parseDateOnly(String dateStr) {
     try {
-      final utcDateTime = DateTime.parse(utcDateStr);
-      final localDateTime = TimezoneService.utcToLocalDateTimeForDate(
-        '12:00:00',
-        utcDateTime,
-      );
-      return DateTime(
-        localDateTime.year,
-        localDateTime.month,
-        localDateTime.day,
-      );
+      final parsed = DateTime.parse(dateStr);
+      return DateTime(parsed.year, parsed.month, parsed.day);
     } catch (e) {
-      debugPrint('Error converting UTC to local: $e');
-      final utcDateTime = DateTime.parse(utcDateStr);
-      return DateTime(utcDateTime.year, utcDateTime.month, utcDateTime.day);
+      debugPrint('Error parsing date: $e');
+      final now = DateTime.now();
+      return DateTime(now.year, now.month, now.day);
     }
   }
 
-  String _localDateToUtcDateString(DateTime localDate) {
-    try {
-      final utcDateTime = DateTime.utc(
-        localDate.year,
-        localDate.month,
-        localDate.day,
-      );
-      return '${utcDateTime.year.toString().padLeft(4, '0')}-${utcDateTime.month.toString().padLeft(2, '0')}-${utcDateTime.day.toString().padLeft(2, '0')}';
-    } catch (e) {
-      debugPrint('Error converting local date to UTC: $e');
-      return '${localDate.year}-${localDate.month.toString().padLeft(2, '0')}-${localDate.day.toString().padLeft(2, '0')}';
-    }
+  /// ✅ Format a DateTime as yyyy-MM-dd for storage in DATE column
+  String _formatDateForStorage(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
   }
 
   void _loadHolidayData() {
     final holiday = widget.holidayToEdit!;
     _editId = holiday['id'] as int;
-    _selectedLocalDate = _utcToLocalDate(holiday['holiday_date']);
+
+    // ✅ Simply parse — no timezone conversion for DATE column
+    _selectedLocalDate = _parseDateOnly(holiday['holiday_date'] as String);
+
     _nameController.text = holiday['name'] ?? '';
     _descriptionController.text = holiday['description'] ?? '';
     _isRecurring = holiday['is_recurring'] ?? false;
 
     debugPrint(
-      '📅 Loading holiday - UTC: ${holiday['holiday_date']} → Local: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)}',
+      '📅 Loading holiday - Stored: ${holiday['holiday_date']} → '
+      'Parsed: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)}',
     );
   }
 
@@ -1188,9 +1258,9 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
           children: [
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: AppTheme.primary,
-                borderRadius: const BorderRadius.only(
+                borderRadius: BorderRadius.only(
                   topLeft: Radius.circular(16),
                   topRight: Radius.circular(16),
                 ),
@@ -1219,7 +1289,7 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Timezone info
+                    // ✅ Info banner
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
@@ -1231,14 +1301,14 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                       child: Row(
                         children: [
                           Icon(
-                            Icons.access_time,
+                            Icons.info_outline,
                             size: 16,
                             color: isDark ? Colors.blue[300] : Colors.blue,
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Your Timezone: ${TimezoneService.getTimezoneDisplayName()}',
+                              'Holiday dates are calendar dates — the same for all timezones',
                               style: TextStyle(
                                 fontSize: 11,
                                 color: isDark
@@ -1350,18 +1420,33 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                     const SizedBox(height: 8),
                     GestureDetector(
                       onTap: () async {
-                        final now = DateTime.now();
-                        final today = DateTime(now.year, now.month, now.day);
+                        // ✅ Use SALON today as reference for date picker bounds
+                        final tz = widget.salonTimezone.isNotEmpty
+                            ? widget.salonTimezone
+                            : _kDefaultSalonTimezone;
+
+                        DateTime today;
+                        try {
+                          final salonNow =
+                              TimezoneService.getNowInTimezone(tz);
+                          today = DateTime(
+                            salonNow.year,
+                            salonNow.month,
+                            salonNow.day,
+                          );
+                        } catch (e) {
+                          final now = DateTime.now();
+                          today = DateTime(now.year, now.month, now.day);
+                        }
 
                         final date = await showDatePicker(
                           context: context,
                           initialDate: _selectedLocalDate ?? today,
                           firstDate: today,
-                          lastDate: DateTime.now().add(
-                            const Duration(days: 365),
-                          ),
+                          lastDate: today.add(const Duration(days: 365)),
                         );
-                        if (date != null) {
+
+                        if (date != null && mounted) {
                           setState(() {
                             _selectedLocalDate = date;
                             _errorMessage = null;
@@ -1389,7 +1474,8 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                             Icon(
                               Icons.calendar_today,
                               size: 16,
-                              color: isDark ? Colors.white60 : Colors.grey[600],
+                              color:
+                                  isDark ? Colors.white60 : Colors.grey[600],
                             ),
                             const SizedBox(width: 8),
                             Expanded(
@@ -1403,8 +1489,8 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                                   color: _selectedLocalDate != null
                                       ? (isDark ? Colors.white : Colors.black)
                                       : (isDark
-                                            ? Colors.white70
-                                            : Colors.grey[500]),
+                                          ? Colors.white70
+                                          : Colors.grey[500]),
                                 ),
                               ),
                             ),
@@ -1477,10 +1563,12 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                           activeColor: AppTheme.primary,
                           checkColor: Colors.white,
                         ),
-                        Text(
-                          'Recurring (repeats every year)',
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
+                        Expanded(
+                          child: Text(
+                            'Recurring (repeats every year)',
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
                           ),
                         ),
                       ],
@@ -1495,13 +1583,15 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
                           child: Text(
                             'Cancel',
                             style: TextStyle(
-                              color: isDark ? Colors.white60 : Colors.grey[600],
+                              color: isDark
+                                  ? Colors.white60
+                                  : Colors.grey[600],
                             ),
                           ),
                         ),
                         const SizedBox(width: 12),
                         ElevatedButton(
-                          onPressed: _saveHoliday,
+                          onPressed: _isLoading ? null : _saveHoliday,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppTheme.primary,
                             foregroundColor: Colors.white,
@@ -1535,16 +1625,12 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
 
   Future<void> _saveHoliday() async {
     if (_nameController.text.trim().isEmpty) {
-      setState(() {
-        _errorMessage = 'Please enter a holiday name';
-      });
+      setState(() => _errorMessage = 'Please enter a holiday name');
       return;
     }
 
     if (_selectedLocalDate == null) {
-      setState(() {
-        _errorMessage = 'Please select a date';
-      });
+      setState(() => _errorMessage = 'Please select a date');
       return;
     }
 
@@ -1554,15 +1640,14 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
     });
 
     try {
-      final utcDateStr = _localDateToUtcDateString(_selectedLocalDate!);
+      // ✅ Format as DATE string (no timezone conversion)
+      final dateStr = _formatDateForStorage(_selectedLocalDate!);
 
-      debugPrint(
-        '📅 Saving holiday - Local: ${DateFormat('yyyy-MM-dd').format(_selectedLocalDate!)} → UTC: $utcDateStr',
-      );
+      debugPrint('📅 Saving holiday - Date: $dateStr');
 
       final holidayData = {
         'salon_id': widget.salonId,
-        'holiday_date': utcDateStr,
+        'holiday_date': dateStr,
         'name': _nameController.text.trim(),
         'description': _descriptionController.text.trim().isEmpty
             ? null
@@ -1578,12 +1663,13 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
       } else {
         final existing = await supabase
             .from('salon_holidays')
-            .select()
+            .select('id')
             .eq('salon_id', widget.salonId)
-            .eq('holiday_date', utcDateStr)
+            .eq('holiday_date', dateStr)
             .maybeSingle();
 
         if (existing != null) {
+          if (!mounted) return;
           setState(() {
             _errorMessage = 'A holiday already exists on this date';
             _isLoading = false;
@@ -1600,6 +1686,7 @@ class _AddEditHolidayDialogState extends State<_AddEditHolidayDialog> {
       }
     } catch (e) {
       debugPrint('❌ Error saving holiday: $e');
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error saving holiday: ${e.toString()}';
         _isLoading = false;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 
@@ -25,7 +26,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadData();
+    });
   }
 
   @override
@@ -62,13 +65,20 @@ class _BarberListScreenState extends State<BarberListScreen> {
       return;
     }
 
+    final salonIdInt = int.tryParse(widget.salonId!);
+    if (salonIdInt == null) {
+      if (mounted) {
+        setState(() {
+          _barbers = [];
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
     if (mounted) setState(() => _isLoading = true);
 
     try {
-      final salonIdInt = int.parse(widget.salonId!);
-
-      // ✅ Filter is applied AFTER the real status is calculated
-      // (blocked status comes from profiles, not from salon_barbers)
       final salonBarbersResponse = await supabase
           .from('salon_barbers')
           .select('id, barber_id, status, joined_at')
@@ -112,14 +122,28 @@ class _BarberListScreenState extends State<BarberListScreen> {
         roleStatusMap[role['user_id']] = role['status'] ?? 'active';
       }
 
-      Map<String, int> serviceCountMap = {};
-      for (var sb in salonBarbersResponse) {
-        final salonBarberId = sb['id'] as int;
-        final count = await supabase
+      // ✅ Single query for all service counts (no N+1)
+      final salonBarberIds = salonBarbersResponse
+          .map((sb) => sb['id'] as int)
+          .toList();
+
+      final Map<int, int> countBySalonBarberId = {};
+      if (salonBarberIds.isNotEmpty) {
+        final allServices = await supabase
             .from('barber_services')
-            .select('id')
-            .eq('salon_barber_id', salonBarberId);
-        serviceCountMap[sb['barber_id']] = count.length;
+            .select('salon_barber_id')
+            .inFilter('salon_barber_id', salonBarberIds);
+
+        for (var svc in allServices) {
+          final sbId = svc['salon_barber_id'] as int;
+          countBySalonBarberId[sbId] = (countBySalonBarberId[sbId] ?? 0) + 1;
+        }
+      }
+
+      final Map<String, int> serviceCountMap = {};
+      for (var sb in salonBarbersResponse) {
+        serviceCountMap[sb['barber_id']] =
+            countBySalonBarberId[sb['id']] ?? 0;
       }
 
       List<Map<String, dynamic>> combinedList = [];
@@ -153,7 +177,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
         });
       }
 
-      // ✅ Apply selected filter on the real status
       final filteredList = _selectedFilter == 'all' || _selectedFilter == null
           ? combinedList
           : combinedList
@@ -176,12 +199,30 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ============================================================
   // ✅ BARBER ACTIONS
   // ============================================================
+
+  /// ✅ FIX: Checks `is_blocked` BEFORE activating
   Future<void> _activateBarber(
     int salonBarberId,
     String barberName,
     String barberId,
   ) async {
     try {
+      // ✅ Blocked check
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_blocked')
+          .eq('id', barberId)
+          .maybeSingle();
+
+      if (profileCheck != null && profileCheck['is_blocked'] == true) {
+        if (mounted) {
+          context.showErrorSnackBar(
+            '⚠️ Cannot activate $barberName — account is blocked by support.',
+          );
+        }
+        return;
+      }
+
       await supabase
           .from('salon_barbers')
           .update({'status': 'active'})
@@ -279,11 +320,32 @@ class _BarberListScreenState extends State<BarberListScreen> {
     }
   }
 
+  /// ✅ FIX: Checks `is_blocked` BEFORE restoring
   Future<void> _restoreBarber(
     int salonBarberId,
     String barberName,
     String barberId,
   ) async {
+    try {
+      // ✅ Blocked check
+      final profileCheck = await supabase
+          .from('profiles')
+          .select('is_blocked')
+          .eq('id', barberId)
+          .maybeSingle();
+
+      if (profileCheck != null && profileCheck['is_blocked'] == true) {
+        if (mounted) {
+          context.showErrorSnackBar(
+            '⚠️ Cannot restore $barberName — account is blocked by support.',
+          );
+        }
+        return;
+      }
+    } catch (e) {
+      debugPrint('❌ Error checking blocked status: $e');
+    }
+
     final confirm = await _showConfirmDialog(
       title: 'Restore Barber',
       message: 'Restore $barberName to inactive status?',
@@ -317,8 +379,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ CONFIRM DIALOG (used by Deactivate / Delete / Restore)
-  // FIX: scrollable: true  -> no more RenderFlex overflow
+  // ✅ CONFIRM DIALOG
   // ============================================================
   Future<bool?> _showConfirmDialog({
     required String title,
@@ -329,26 +390,26 @@ class _BarberListScreenState extends State<BarberListScreen> {
     return showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        scrollable: true, // ✅ FIX
-        backgroundColor: context.cardColor,
+        scrollable: true,
+        backgroundColor: dialogContext.cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           title,
           style: TextStyle(
-            color: context.textColor,
+            color: dialogContext.textColor,
             fontWeight: FontWeight.bold,
           ),
         ),
         content: Text(
           message,
-          style: TextStyle(color: context.secondaryTextColor),
+          style: TextStyle(color: dialogContext.secondaryTextColor),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(
               'Cancel',
-              style: TextStyle(color: context.secondaryTextColor),
+              style: TextStyle(color: dialogContext.secondaryTextColor),
             ),
           ),
           ElevatedButton(
@@ -458,7 +519,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ BUILD METHOD
+  // ✅ BUILD
   // ============================================================
   @override
   Widget build(BuildContext context) {
@@ -507,21 +568,22 @@ class _BarberListScreenState extends State<BarberListScreen> {
         child: _isLoading
             ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
             : _barbers.isEmpty
-            ? _buildEmptyState()
-            : isWeb
-            ? _buildDesktopView()
-            : RefreshIndicator(
-                onRefresh: _loadData,
-                color: AppTheme.primary,
-                child: isTablet ? _buildTabletView() : _buildMobileView(),
-              ),
+                ? _buildEmptyState()
+                : isWeb
+                    ? _buildDesktopView()
+                    : RefreshIndicator(
+                        onRefresh: _loadData,
+                        color: AppTheme.primary,
+                        child: isTablet
+                            ? _buildTabletView()
+                            : _buildMobileView(),
+                      ),
       ),
     );
   }
 
   // ============================================================
   // ✅ EMPTY STATE
-  // FIX: wrapped in SingleChildScrollView (small height safe)
   // ============================================================
   Widget _buildEmptyState() {
     final isWeb = context.isWeb;
@@ -587,7 +649,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ DESKTOP VIEW - With Scrollbar + Proper Spacing
+  // ✅ DESKTOP VIEW
   // ============================================================
   Widget _buildDesktopView() {
     final activeCount = _barbers.where((b) => b['status'] == 'active').length;
@@ -795,8 +857,8 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
                 // ✅ Table Rows
                 ..._barbers.asMap().entries.map(
-                  (entry) => _buildDesktopBarberRow(entry.value, entry.key),
-                ),
+                      (entry) => _buildDesktopBarberRow(entry.value, entry.key),
+                    ),
               ],
             ),
           ),
@@ -806,8 +868,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ DESKTOP BARBER ROW - Proper Design
-  // FIX: Actions use Wrap (no horizontal overflow)
+  // ✅ DESKTOP BARBER ROW
   // ============================================================
   Widget _buildDesktopBarberRow(Map<String, dynamic> barber, int index) {
     final status = barber['status'] ?? 'active';
@@ -844,7 +905,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                       radius: 24,
                       backgroundColor: statusColor.withValues(alpha: 0.15),
                       backgroundImage: avatarUrl != null
-                          ? NetworkImage(avatarUrl)
+                          ? CachedNetworkImageProvider(avatarUrl)
                           : null,
                       child: avatarUrl == null
                           ? Text(
@@ -1005,7 +1066,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
             ),
           ),
 
-          // ✅ Actions (Wrap = never overflows horizontally)
+          // ✅ Actions
           Expanded(
             flex: 4,
             child: Wrap(
@@ -1128,8 +1189,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
   // ============================================================
   // ✅ TABLET VIEW
-  // FIX: GridView with fixed childAspectRatio (1.0) overflowed the cards.
-  // Now a Wrap is used, so every card takes the height it needs.
   // ============================================================
   Widget _buildTabletView() {
     return LayoutBuilder(
@@ -1181,10 +1240,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
-  // ✅ BARBER CARD - Proper Design
-  // FIX: Border(left only) + borderRadius throws
-  //      "A borderRadius can only be given for a uniform Border".
-  //      Now the coloured left bar is drawn with ClipRRect + Stack.
+  // ✅ BARBER CARD
   // ============================================================
   Widget _buildBarberCard(Map<String, dynamic> barber) {
     final status = barber['status'] ?? 'active';
@@ -1205,7 +1261,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
         borderRadius: BorderRadius.circular(16),
         child: Stack(
           children: [
-            // ✅ Coloured status bar on the left
             Positioned(
               left: 0,
               top: 0,
@@ -1217,7 +1272,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // ✅ Header - Avatar + Name + Status
+                  // ✅ Header
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Row(
@@ -1230,7 +1285,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                                 alpha: 0.15,
                               ),
                               backgroundImage: avatarUrl != null
-                                  ? NetworkImage(avatarUrl)
+                                  ? CachedNetworkImageProvider(avatarUrl)
                                   : null,
                               child: avatarUrl == null
                                   ? Text(
@@ -1292,7 +1347,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                               const SizedBox(height: 8),
-                              // ✅ Wrap instead of Row (no horizontal overflow)
                               Wrap(
                                 spacing: 8,
                                 runSpacing: 6,
@@ -1312,10 +1366,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                     ),
                   ),
 
-                  // ✅ Divider
                   Divider(height: 1, color: context.dividerColor),
 
-                  // ✅ Info Row - Phone + Joined
+                  // ✅ Info Row
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -1376,7 +1429,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
                     ),
                   ),
 
-                  // ✅ Divider
                   Divider(height: 1, color: context.dividerColor),
 
                   // ✅ Action Buttons
@@ -1498,13 +1550,17 @@ class _BarberListScreenState extends State<BarberListScreen> {
     );
   }
 
+  /// ✅ FIX: dark mode consistency
   Widget _buildStatusChip(Color color, IconData icon, String text) {
+    final isDark = context.isDarkMode;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withValues(alpha: isDark ? 0.15 : 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(
+          color: color.withValues(alpha: isDark ? 0.3 : 0.3),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1525,17 +1581,20 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   Widget _buildServiceChip(int count) {
+    final isDark = context.isDarkMode;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.blue.withValues(alpha: 0.1),
+        color: Colors.blue.withValues(alpha: isDark ? 0.15 : 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+        border: Border.all(
+          color: Colors.blue.withValues(alpha: isDark ? 0.3 : 0.3),
+        ),
       ),
       child: Text(
         '$count services',
         style: TextStyle(
-          color: context.isDarkMode ? Colors.blue[300] : Colors.blue[700],
+          color: isDark ? Colors.blue[300] : Colors.blue[700],
           fontSize: 10,
           fontWeight: FontWeight.w600,
         ),
@@ -1647,7 +1706,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
   // ============================================================
   // ✅ FILTER DIALOG
-  // FIX: scrollable: true  -> no more RenderFlex overflow
   // ============================================================
   void _showFilterDialog() {
     String tempFilter = _selectedFilter ?? 'all';
@@ -1657,7 +1715,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            scrollable: true, // ✅ FIX
+            scrollable: true,
             backgroundColor: context.cardColor,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),

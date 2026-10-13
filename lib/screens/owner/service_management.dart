@@ -1,5 +1,4 @@
 // servite list <--menue eka
-
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/owner/add_services.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
@@ -37,20 +36,27 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   List<Map<String, dynamic>> _genders = [];
   List<Map<String, dynamic>> _ageCategories = [];
 
-  // ✅ Currency Service (singleton)
+  // Currency Service (singleton)
   final CurrencyService _currencyService = CurrencyService.instance;
 
-  // ✅ Salon currency code (loaded from DB)
-  String _salonCurrencyCode = 'LKR';
+  // Empty initial - DB එකෙන් load වෙනකම් effective getter use කරනවා
+  String _salonCurrencyCode = '';
 
-  // ✅ Currency getters (from CurrencyService)
+  // Effective currency code getter - DB load fail නම් fallback
+  String get _effectiveCurrencyCode {
+    if (_salonCurrencyCode.isNotEmpty) return _salonCurrencyCode;
+    return 'LKR'; // Last resort only
+  }
+
+  // Currency getters
   String get _salonCurrencySymbol =>
-      _currencyService.getSymbol(_salonCurrencyCode);
+      _currencyService.getSymbol(_effectiveCurrencyCode);
 
-  String get _salonPriceHint => _currencyService.getHint(_salonCurrencyCode);
+  String get _salonPriceHint =>
+      _currencyService.getHint(_effectiveCurrencyCode);
 
   bool get _currencyUsesDecimals =>
-      _currencyService.getInfo(_salonCurrencyCode).decimals > 0;
+      _currencyService.getInfo(_effectiveCurrencyCode).decimals > 0;
 
   // For expansion state - track expanded services
   final Set<int> _expandedServices = {};
@@ -74,7 +80,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadData();
+    });
   }
 
   @override
@@ -87,15 +95,13 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   // ✅ CURRENCY HELPERS
   // ============================================
 
-  /// Format price with salon currency
   String _formatPrice(dynamic price) {
     return _currencyService.format(
       price: price,
-      currencyCode: _salonCurrencyCode,
+      currencyCode: _effectiveCurrencyCode,
     );
   }
 
-  /// Validate price for currency decimals
   String? _validatePriceForCurrency(String priceText) {
     if (priceText.isEmpty) return null;
 
@@ -103,33 +109,35 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     if (price == null) return 'Please enter a valid number';
     if (price <= 0) return 'Price must be greater than 0';
 
-    // ✅ Currency-aware decimal validation
     if (!_currencyUsesDecimals && priceText.contains('.')) {
       final decimalPart = priceText.split('.').last;
       if (decimalPart.isNotEmpty && int.tryParse(decimalPart) != 0) {
-        return '$_salonCurrencyCode does not use decimals';
+        return '$_effectiveCurrencyCode does not use decimals';
       }
     }
 
     return null;
   }
 
-  /// Load salon currency from DB
   Future<void> _loadSalonCurrency() async {
     try {
       final response = await supabase
           .from('salons')
           .select('currency_code')
           .eq('id', widget.salonId)
-          .single();
+          .maybeSingle();
 
       if (!mounted) return;
 
-      setState(() {
-        _salonCurrencyCode = response['currency_code'] as String? ?? 'LKR';
-      });
-
-      debugPrint('✅ Salon currency loaded: $_salonCurrencyCode');
+      if (response != null) {
+        final currency = response['currency_code'] as String?;
+        if (currency != null && currency.isNotEmpty) {
+          setState(() {
+            _salonCurrencyCode = currency;
+          });
+          debugPrint('✅ Salon currency loaded: $_salonCurrencyCode');
+        }
+      }
     } catch (e) {
       debugPrint('Error loading salon currency: $e');
     }
@@ -140,6 +148,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   // ============================================
 
   Future<void> _loadData() async {
+    if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
@@ -246,6 +255,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
           .eq('is_active', true)
           .order('display_order');
 
+      if (!mounted) return;
+
       setState(() {
         _categories = List<Map<String, dynamic>>.from(categoriesResponse);
         _genders = List<Map<String, dynamic>>.from(gendersResponse);
@@ -264,8 +275,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   Future<void> _loadServices() async {
+    if (!mounted) return;
+
     try {
-      // ✅ STEP 1: Load services
       final servicesResponse = await supabase
           .from('services')
           .select('''
@@ -284,6 +296,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       final services = List<Map<String, dynamic>>.from(servicesResponse);
 
       if (services.isEmpty) {
+        if (!mounted) return;
         setState(() {
           _services = [];
           _expandedServices.clear();
@@ -291,10 +304,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         return;
       }
 
-      // ✅ STEP 2: Get all service IDs
       final serviceIds = services.map<int>((s) => s['id'] as int).toList();
 
-      // ✅ STEP 3: Load ALL variants for these services in ONE query
       final variantsResponse = await supabase
           .from('service_variants')
           .select('''
@@ -311,7 +322,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
       final allVariants = List<Map<String, dynamic>>.from(variantsResponse);
 
-      // ✅ STEP 4: Build lookup maps for gender + age category names
       final genderIdToName = <int, String>{};
       for (var g in _genders) {
         genderIdToName[g['id'] as int] = g['display_name'] as String;
@@ -322,20 +332,17 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         ageIdToInfo[a['id'] as int] = a;
       }
 
-      // ✅ STEP 5: Group variants by service_id
       final Map<int, List<Map<String, dynamic>>> variantsByService = {};
       for (var v in allVariants) {
         final sid = v['service_id'] as int;
         final genderId = v['salon_gender_id'] as int?;
         final ageId = v['salon_age_category_id'] as int?;
 
-        // Resolve gender name
         String genderName = 'Any';
         if (genderId != null && genderIdToName.containsKey(genderId)) {
           genderName = genderIdToName[genderId]!;
         }
 
-        // Resolve age name
         String ageName = 'Any';
         if (ageId != null && ageIdToInfo.containsKey(ageId)) {
           final ageInfo = ageIdToInfo[ageId]!;
@@ -359,7 +366,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         });
       }
 
-      // ✅ STEP 6: Attach variants + category name to each service
       for (var service in services) {
         final sid = service['id'] as int;
         final serviceVariants = variantsByService[sid] ?? [];
@@ -375,10 +381,10 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         service['category_name'] = category['display_name'];
       }
 
+      if (!mounted) return;
       setState(() {
         _services = services;
 
-        // Auto-expand all services that have variants
         _expandedServices.clear();
         for (var service in services) {
           if (service['has_variants'] == true) {
@@ -420,10 +426,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // ✅ ADD VARIANT DIALOG (WITH CURRENCY)
+  // ✅ ADD VARIANT DIALOG (with proper controller dispose)
   // ============================================
-
-  void _showAddVariantDialog(Map<String, dynamic> service) {
+  Future<void> _showAddVariantDialog(Map<String, dynamic> service) async {
     int? selectedGenderId;
     int? selectedAgeCategoryId;
     final priceController = TextEditingController();
@@ -448,440 +453,471 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       }
     }
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final isDark = context.isDarkMode;
+    try {
+      await showDialog(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) {
+            final isDark = context.isDarkMode;
 
-          return AlertDialog(
-            backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            title: null,
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          _getIconForName(service['icon_name']),
-                          color: AppTheme.primary,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Add New Option',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
+            return AlertDialog(
+              backgroundColor:
+                  isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: null,
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            _getIconForName(service['icon_name']),
+                            color: AppTheme.primary,
+                            size: 24,
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.grey[800] : Colors.grey[100],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.room_service,
-                          size: 20,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
-                        ),
-                        const SizedBox(width: 8),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            service['name'],
+                            'Add New Option',
                             style: TextStyle(
-                              fontWeight: FontWeight.w500,
-                              fontSize: 14,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
                               color: isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  Text(
-                    'Gender',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
-                    initialValue: selectedGenderId,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(
-                        Icons.wc,
-                        color: Colors.grey,
-                        size: 20,
-                      ),
-                      border: OutlineInputBorder(
+                    const SizedBox(height: 20),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey[800] : Colors.grey[100],
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      filled: true,
-                      fillColor: isDark
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.room_service,
+                            size: 20,
+                            color: isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              service['name'],
+                              style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    Text(
+                      'Gender',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<int>(
+                      initialValue: selectedGenderId,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(
+                          Icons.wc,
+                          color: Colors.grey,
+                          size: 20,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                      ),
+                      hint: Text(
+                        'Select gender',
+                        style: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.grey,
+                        ),
+                      ),
+                      dropdownColor: isDark
                           ? const Color(0xFF2A2A2A)
                           : Colors.white,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                    ),
-                    hint: Text(
-                      'Select gender',
-                      style: TextStyle(
-                        color: isDark ? Colors.white60 : Colors.grey,
-                      ),
-                    ),
-                    dropdownColor: isDark
-                        ? const Color(0xFF2A2A2A)
-                        : Colors.white,
-                    items: _genders.map((gender) {
-                      return DropdownMenuItem<int>(
-                        value: gender['id'] as int,
-                        child: Text(
-                          gender['display_name'],
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
+                      items: _genders.map((gender) {
+                        return DropdownMenuItem<int>(
+                          value: gender['id'] as int,
+                          child: Text(
+                            gender['display_name'],
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
                           ),
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setDialogState(() {
-                        selectedGenderId = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-
-                  Text(
-                    'Age Category',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selectedGenderId = value;
+                        });
+                      },
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<int>(
-                    initialValue: selectedAgeCategoryId,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      prefixIcon: const Icon(
-                        Icons.timeline,
-                        color: Colors.grey,
-                        size: 20,
+                    const SizedBox(height: 16),
+
+                    Text(
+                      'Age Category',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
                       ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<int>(
+                      initialValue: selectedAgeCategoryId,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(
+                          Icons.timeline,
+                          color: Colors.grey,
+                          size: 20,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
                       ),
-                      filled: true,
-                      fillColor: isDark
+                      hint: Text(
+                        'Select age category',
+                        style: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.grey,
+                        ),
+                      ),
+                      dropdownColor: isDark
                           ? const Color(0xFF2A2A2A)
                           : Colors.white,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
+                      items: _ageCategories.map((ageCat) {
+                        String displayName = ageCat['display_name'];
+                        if (ageCat['min_age'] != null &&
+                            ageCat['max_age'] != null) {
+                          displayName =
+                              '$displayName (${ageCat['min_age']}-${ageCat['max_age']} yrs)';
+                        }
+                        return DropdownMenuItem<int>(
+                          value: ageCat['id'] as int,
+                          child: Text(
+                            displayName,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selectedAgeCategoryId = value;
+                        });
+                      },
                     ),
-                    hint: Text(
-                      'Select age category',
-                      style: TextStyle(
-                        color: isDark ? Colors.white60 : Colors.grey,
-                      ),
-                    ),
-                    dropdownColor: isDark
-                        ? const Color(0xFF2A2A2A)
-                        : Colors.white,
-                    items: _ageCategories.map((ageCat) {
-                      String displayName = ageCat['display_name'];
-                      if (ageCat['min_age'] != null &&
-                          ageCat['max_age'] != null) {
-                        displayName =
-                            '$displayName (${ageCat['min_age']}-${ageCat['max_age']} yrs)';
-                      }
-                      return DropdownMenuItem<int>(
-                        value: ageCat['id'] as int,
-                        child: Text(
-                          displayName,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Price ($_salonCurrencySymbol)',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                controller: priceController,
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                style: TextStyle(
+                                  color:
+                                      isDark ? Colors.white : Colors.black87,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: _salonPriceHint,
+                                  hintStyle: TextStyle(
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.grey,
+                                  ),
+                                  prefixIcon: CurrencyPrefix(
+                                    symbol: _salonCurrencySymbol,
+                                    type: CurrencyDisplayType.text,
+                                    color:
+                                        isDark ? Colors.white70 : Colors.grey,
+                                    fontSize: 16,
+                                  ),
+                                  prefixIconConstraints:
+                                      const BoxConstraints(
+                                    minWidth: 50,
+                                    minHeight: 20,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  filled: true,
+                                  fillColor: isDark
+                                      ? const Color(0xFF2A2A2A)
+                                      : Colors.white,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 12,
+                                  ),
+                                  errorText: priceError,
+                                  errorMaxLines: 2,
+                                  errorStyle: TextStyle(
+                                    color: isDark
+                                        ? Colors.red[300]
+                                        : Colors.red,
+                                  ),
+                                ),
+                                onChanged: (value) {
+                                  validatePrice();
+                                  setDialogState(() {});
+                                },
+                              ),
+                            ],
                           ),
                         ),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setDialogState(() {
-                        selectedAgeCategoryId = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-
-                  Row(
-                    children: [
-                      // ✅ Price field with dynamic currency
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Price ($_salonCurrencySymbol)',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextFormField(
-                              controller: priceController,
-                              keyboardType:
-                                  const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
-                              style: TextStyle(
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                              decoration: InputDecoration(
-                                hintText: _salonPriceHint,
-                                hintStyle: TextStyle(
-                                  color: isDark ? Colors.white70 : Colors.grey,
-                                ),
-                                // ✅ CurrencyPrefix instead of hardcoded icon
-                                prefixIcon: CurrencyPrefix(
-                                  symbol: _salonCurrencySymbol,
-                                  type: CurrencyDisplayType.text,
-                                  color: isDark ? Colors.white70 : Colors.grey,
-                                  fontSize: 16,
-                                ),
-                                prefixIconConstraints: const BoxConstraints(
-                                  minWidth: 50,
-                                  minHeight: 20,
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                filled: true,
-                                fillColor: isDark
-                                    ? const Color(0xFF2A2A2A)
-                                    : Colors.white,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 12,
-                                ),
-                                errorText: priceError,
-                                errorMaxLines: 2,
-                                errorStyle: TextStyle(
-                                  color: isDark ? Colors.red[300] : Colors.red,
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Duration (mins)',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark ? Colors.white : Colors.black87,
                                 ),
                               ),
-                              onChanged: (value) {
-                                validatePrice();
-                                setDialogState(() {});
-                              },
-                            ),
-                          ],
+                              const SizedBox(height: 8),
+                              TextFormField(
+                                controller: durationController,
+                                keyboardType: TextInputType.number,
+                                style: TextStyle(
+                                  color:
+                                      isDark ? Colors.white : Colors.black87,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText: 'e.g., 30',
+                                  hintStyle: TextStyle(
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.grey,
+                                  ),
+                                  prefixIcon: const Icon(
+                                    Icons.timer,
+                                    color: Colors.grey,
+                                    size: 20,
+                                  ),
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  filled: true,
+                                  fillColor: isDark
+                                      ? const Color(0xFF2A2A2A)
+                                      : Colors.white,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 12,
+                                  ),
+                                  errorText: durationError,
+                                  errorMaxLines: 2,
+                                  errorStyle: TextStyle(
+                                    color: isDark
+                                        ? Colors.red[300]
+                                        : Colors.red,
+                                  ),
+                                ),
+                                onChanged: (value) {
+                                  validateDuration();
+                                  setDialogState(() {});
+                                },
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Duration (mins)',
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            TextFormField(
-                              controller: durationController,
-                              keyboardType: TextInputType.number,
-                              style: TextStyle(
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                              decoration: InputDecoration(
-                                hintText: 'e.g., 30',
-                                hintStyle: TextStyle(
-                                  color: isDark ? Colors.white70 : Colors.grey,
-                                ),
-                                prefixIcon: const Icon(
-                                  Icons.timer,
-                                  color: Colors.grey,
-                                  size: 20,
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                filled: true,
-                                fillColor: isDark
-                                    ? const Color(0xFF2A2A2A)
-                                    : Colors.white,
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 12,
-                                ),
-                                errorText: durationError,
-                                errorMaxLines: 2,
-                                errorStyle: TextStyle(
-                                  color: isDark ? Colors.red[300] : Colors.red,
-                                ),
-                              ),
-                              onChanged: (value) {
-                                validateDuration();
-                                setDialogState(() {});
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(
-                    color: isDark ? Colors.white60 : Colors.black87,
-                  ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-              ElevatedButton(
-                onPressed: () async {
-                  validatePrice();
-                  validateDuration();
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.black87,
+                    ),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    validatePrice();
+                    validateDuration();
 
-                  if (selectedGenderId == null) {
-                    _showSnackBar('Please select a gender', Colors.orange);
-                    return;
-                  }
-                  if (selectedAgeCategoryId == null) {
-                    _showSnackBar(
-                      'Please select an age category',
-                      Colors.orange,
-                    );
-                    return;
-                  }
+                    if (selectedGenderId == null) {
+                      _showSnackBar('Please select a gender', Colors.orange);
+                      return;
+                    }
+                    if (selectedAgeCategoryId == null) {
+                      _showSnackBar(
+                        'Please select an age category',
+                        Colors.orange,
+                      );
+                      return;
+                    }
 
-                  final price = double.tryParse(priceController.text.trim());
-                  final duration = int.tryParse(durationController.text.trim());
+                    final price =
+                        double.tryParse(priceController.text.trim());
+                    final duration =
+                        int.tryParse(durationController.text.trim());
 
-                  if (price == null || price <= 0) {
-                    _showSnackBar('Please enter a valid price', Colors.orange);
-                    return;
-                  }
-                  if (duration == null || duration <= 0) {
-                    _showSnackBar(
-                      'Please enter a valid duration',
-                      Colors.orange,
-                    );
-                    return;
-                  }
+                    if (price == null || price <= 0) {
+                      _showSnackBar(
+                        'Please enter a valid price',
+                        Colors.orange,
+                      );
+                      return;
+                    }
+                    if (duration == null || duration <= 0) {
+                      _showSnackBar(
+                        'Please enter a valid duration',
+                        Colors.orange,
+                      );
+                      return;
+                    }
 
-                  final bool isDuplicate = service['variants'].any((variant) {
-                    return variant['gender_id'] == selectedGenderId &&
-                        variant['age_category_id'] == selectedAgeCategoryId;
-                  });
-
-                  if (isDuplicate) {
-                    _showSnackBar('This option already exists!', Colors.orange);
-                    return;
-                  }
-
-                  if (!mounted) return;
-                  setState(() => _isProcessing = true);
-
-                  try {
-                    await supabase.from('service_variants').insert({
-                      'service_id': service['id'],
-                      'salon_gender_id': selectedGenderId,
-                      'salon_age_category_id': selectedAgeCategoryId,
-                      'price': price,
-                      'duration': duration,
-                      'is_active': true,
+                    final bool isDuplicate =
+                        service['variants'].any((variant) {
+                      return variant['gender_id'] == selectedGenderId &&
+                          variant['age_category_id'] ==
+                              selectedAgeCategoryId;
                     });
 
-                    if (dialogContext.mounted) {
-                      Navigator.pop(dialogContext);
+                    if (isDuplicate) {
+                      _showSnackBar(
+                        'This option already exists!',
+                        Colors.orange,
+                      );
+                      return;
                     }
 
-                    await _loadServices();
+                    if (!mounted) return;
+                    setState(() => _isProcessing = true);
 
-                    if (mounted) {
-                      _showSnackBar('Option added successfully!', Colors.green);
+                    try {
+                      await supabase.from('service_variants').insert({
+                        'service_id': service['id'],
+                        'salon_gender_id': selectedGenderId,
+                        'salon_age_category_id': selectedAgeCategoryId,
+                        'price': price,
+                        'duration': duration,
+                        'is_active': true,
+                      });
+
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext);
+                      }
+
+                      await _loadServices();
+
+                      if (mounted) {
+                        _showSnackBar(
+                          'Option added successfully!',
+                          Colors.green,
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        _showSnackBar(
+                          'Error adding option: $e',
+                          Colors.red,
+                        );
+                      }
+                    } finally {
+                      if (mounted) setState(() => _isProcessing = false);
                     }
-                  } catch (e) {
-                    if (mounted) {
-                      _showSnackBar('Error adding option: $e', Colors.red);
-                    }
-                  } finally {
-                    if (mounted) setState(() => _isProcessing = false);
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Add Option',
+                    style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
-                child: const Text(
-                  'Add Option',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+              ],
+            );
+          },
+        ),
+      );
+    } finally {
+      // ✅ Dispose controllers after dialog closes
+      priceController.dispose();
+      durationController.dispose();
+    }
   }
 
   // ============================================
-  // ✅ EDIT VARIANT DIALOG (WITH CURRENCY)
+  // ✅ EDIT VARIANT DIALOG (with proper controller dispose)
   // ============================================
-
-  void _showEditVariantDialog(
+  Future<void> _showEditVariantDialog(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
-  ) {
-    // ✅ Clean price display (no .0 for LKR)
+  ) async {
     final double priceValue = (variant['price'] as num).toDouble();
     final String initialPriceText = _currencyUsesDecimals
         ? priceValue.toString()
@@ -911,292 +947,317 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       }
     }
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          final isDark = context.isDarkMode;
+    try {
+      await showDialog(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) {
+            final isDark = context.isDarkMode;
 
-          return AlertDialog(
-            backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            title: null,
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Icon(
-                          _getIconForName(service['icon_name']),
-                          color: AppTheme.primary,
-                          size: 24,
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Edit Option',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.grey[800] : Colors.grey[100],
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+            return AlertDialog(
+              backgroundColor:
+                  isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: null,
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.room_service,
-                              size: 16,
-                              color: Colors.grey,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              service['name'],
-                              style: TextStyle(
-                                fontWeight: FontWeight.w500,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                          ],
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            _getIconForName(service['icon_name']),
+                            color: AppTheme.primary,
+                            size: 24,
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            const Icon(Icons.wc, size: 16, color: Colors.grey),
-                            const SizedBox(width: 8),
-                            Text(
-                              variant['gender_name'],
-                              style: TextStyle(
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            const Icon(
-                              Icons.calendar_today,
-                              size: 16,
-                              color: Colors.grey,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              variant['age_name'],
-                              style: TextStyle(
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                          ],
+                        const SizedBox(width: 12),
+                        Text(
+                          'Edit Option',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Price & Duration',
+                    const SizedBox(height: 20),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.grey[800] : Colors.grey[100],
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.room_service,
+                                size: 16,
+                                color: Colors.grey,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                service['name'],
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w500,
+                                  color:
+                                      isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.wc,
+                                size: 16,
+                                color: Colors.grey,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                variant['gender_name'],
+                                style: TextStyle(
+                                  color:
+                                      isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.calendar_today,
+                                size: 16,
+                                color: Colors.grey,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                variant['age_name'],
+                                style: TextStyle(
+                                  color:
+                                      isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      'Price & Duration',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: priceController,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: 'Price ($_salonCurrencySymbol)',
+                              labelStyle: TextStyle(
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              prefixIcon: CurrencyPrefix(
+                                symbol: _salonCurrencySymbol,
+                                type: CurrencyDisplayType.text,
+                                color: isDark ? Colors.white70 : Colors.grey,
+                                fontSize: 14,
+                              ),
+                              prefixIconConstraints: const BoxConstraints(
+                                minWidth: 50,
+                                minHeight: 20,
+                              ),
+                              filled: true,
+                              fillColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.white,
+                              errorText: priceError,
+                              errorStyle: TextStyle(
+                                color:
+                                    isDark ? Colors.red[300] : Colors.red,
+                              ),
+                            ),
+                            onChanged: (value) {
+                              validatePrice();
+                              setDialogState(() {});
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: durationController,
+                            keyboardType: TextInputType.number,
+                            style: TextStyle(
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                            decoration: InputDecoration(
+                              labelText: 'Duration (mins)',
+                              labelStyle: TextStyle(
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              prefixIcon: const Icon(
+                                Icons.timer,
+                                size: 20,
+                                color: Colors.grey,
+                              ),
+                              filled: true,
+                              fillColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.white,
+                              errorText: durationError,
+                              errorStyle: TextStyle(
+                                color:
+                                    isDark ? Colors.red[300] : Colors.red,
+                              ),
+                            ),
+                            onChanged: (value) {
+                              validateDuration();
+                              setDialogState(() {});
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text(
+                    'Cancel',
                     style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
+                      color: isDark ? Colors.white60 : Colors.black87,
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      // ✅ Price field with dynamic currency
-                      Expanded(
-                        child: TextFormField(
-                          controller: priceController,
-                          keyboardType:
-                              const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                          decoration: InputDecoration(
-                            labelText: 'Price ($_salonCurrencySymbol)',
-                            labelStyle: TextStyle(
-                              color: isDark ? Colors.white60 : Colors.grey[600],
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            // ✅ CurrencyPrefix instead of hardcoded icon
-                            prefixIcon: CurrencyPrefix(
-                              symbol: _salonCurrencySymbol,
-                              type: CurrencyDisplayType.text,
-                              color: isDark ? Colors.white70 : Colors.grey,
-                              fontSize: 14,
-                            ),
-                            prefixIconConstraints: const BoxConstraints(
-                              minWidth: 50,
-                              minHeight: 20,
-                            ),
-                            filled: true,
-                            fillColor: isDark
-                                ? const Color(0xFF2A2A2A)
-                                : Colors.white,
-                            errorText: priceError,
-                            errorStyle: TextStyle(
-                              color: isDark ? Colors.red[300] : Colors.red,
-                            ),
-                          ),
-                          onChanged: (value) {
-                            validatePrice();
-                            setDialogState(() {});
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: TextFormField(
-                          controller: durationController,
-                          keyboardType: TextInputType.number,
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                          decoration: InputDecoration(
-                            labelText: 'Duration (mins)',
-                            labelStyle: TextStyle(
-                              color: isDark ? Colors.white60 : Colors.grey[600],
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            prefixIcon: const Icon(
-                              Icons.timer,
-                              size: 20,
-                              color: Colors.grey,
-                            ),
-                            filled: true,
-                            fillColor: isDark
-                                ? const Color(0xFF2A2A2A)
-                                : Colors.white,
-                            errorText: durationError,
-                            errorStyle: TextStyle(
-                              color: isDark ? Colors.red[300] : Colors.red,
-                            ),
-                          ),
-                          onChanged: (value) {
-                            validateDuration();
-                            setDialogState(() {});
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(
-                    color: isDark ? Colors.white60 : Colors.black87,
-                  ),
                 ),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  validatePrice();
-                  validateDuration();
+                ElevatedButton(
+                  onPressed: () async {
+                    validatePrice();
+                    validateDuration();
 
-                  final price = double.tryParse(priceController.text.trim());
-                  final duration = int.tryParse(durationController.text.trim());
+                    final price =
+                        double.tryParse(priceController.text.trim());
+                    final duration =
+                        int.tryParse(durationController.text.trim());
 
-                  if (price == null || price <= 0) {
-                    _showSnackBar('Please enter a valid price', Colors.orange);
-                    return;
-                  }
-                  if (duration == null || duration <= 0) {
-                    _showSnackBar(
-                      'Please enter a valid duration',
-                      Colors.orange,
-                    );
-                    return;
-                  }
-
-                  if (!mounted) return;
-                  setState(() => _isProcessing = true);
-
-                  try {
-                    await supabase
-                        .from('service_variants')
-                        .update({
-                          'price': price,
-                          'duration': duration,
-                          'updated_at': DateTime.now().toIso8601String(),
-                        })
-                        .eq('id', variant['id']);
-
-                    if (dialogContext.mounted) {
-                      Navigator.pop(dialogContext);
-                    }
-
-                    await _loadServices();
-
-                    if (mounted) {
+                    if (price == null || price <= 0) {
                       _showSnackBar(
-                        'Option updated successfully!',
-                        Colors.green,
+                        'Please enter a valid price',
+                        Colors.orange,
                       );
+                      return;
                     }
-                  } catch (e) {
-                    if (mounted) {
-                      _showSnackBar('Error updating option: $e', Colors.red);
+                    if (duration == null || duration <= 0) {
+                      _showSnackBar(
+                        'Please enter a valid duration',
+                        Colors.orange,
+                      );
+                      return;
                     }
-                  } finally {
-                    if (mounted) setState(() => _isProcessing = false);
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+
+                    if (!mounted) return;
+                    setState(() => _isProcessing = true);
+
+                    try {
+                      await supabase
+                          .from('service_variants')
+                          .update({
+                            'price': price,
+                            'duration': duration,
+                            'updated_at': DateTime.now().toIso8601String(),
+                          })
+                          .eq('id', variant['id']);
+
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext);
+                      }
+
+                      await _loadServices();
+
+                      if (mounted) {
+                        _showSnackBar(
+                          'Option updated successfully!',
+                          Colors.green,
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        _showSnackBar(
+                          'Error updating option: $e',
+                          Colors.red,
+                        );
+                      }
+                    } finally {
+                      if (mounted) setState(() => _isProcessing = false);
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Save Changes',
+                    style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
-                child: const Text(
-                  'Save Changes',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+              ],
+            );
+          },
+        ),
+      );
+    } finally {
+      // ✅ Dispose controllers after dialog closes
+      priceController.dispose();
+      durationController.dispose();
+    }
   }
 
   // ============================================
-  // ✅ DELETE VARIANT (WITH CURRENCY)
+  // ✅ DELETE VARIANT
   // ============================================
-
   Future<void> _deleteVariant(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
@@ -1271,7 +1332,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    // ✅ Dynamic currency
                     Text(
                       '${_formatPrice(variant['price'])} | ${variant['duration']} mins',
                       style: TextStyle(
@@ -1298,7 +1358,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(
               'Cancel',
-              style: TextStyle(color: isDark ? Colors.white60 : Colors.black87),
+              style:
+                  TextStyle(color: isDark ? Colors.white60 : Colors.black87),
             ),
           ),
           ElevatedButton(
@@ -1341,9 +1402,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // SERVICE MANAGEMENT FUNCTIONS
+  // ✅ EDIT SERVICE (with proper controller dispose)
   // ============================================
-
   Future<void> _editService(Map<String, dynamic> service) async {
     final nameController = TextEditingController(text: service['name']);
     final descriptionController = TextEditingController(
@@ -1353,195 +1413,213 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
 
     final isDark = context.isDarkMode;
 
-    await showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(20),
-            ),
-            title: null,
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.1),
+    try {
+      await showDialog(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor:
+                  isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              title: null,
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            _getIconForName(service['icon_name']),
+                            color: AppTheme.primary,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Edit Service',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    TextFormField(
+                      controller: nameController,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: 'Service Name',
+                        labelStyle: TextStyle(
+                          color:
+                              isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                        border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(
-                          _getIconForName(service['icon_name']),
-                          color: AppTheme.primary,
-                          size: 24,
-                        ),
+                        filled: true,
+                        fillColor: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Edit Service',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: descriptionController,
+                      maxLines: 3,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: 'Description',
+                        labelStyle: TextStyle(
+                          color:
+                              isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<int>(
+                      initialValue: selectedCategoryId,
+                      decoration: InputDecoration(
+                        labelText: 'Category',
+                        labelStyle: TextStyle(
+                          color:
+                              isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: isDark
+                            ? const Color(0xFF2A2A2A)
+                            : Colors.white,
+                      ),
+                      dropdownColor: isDark
+                          ? const Color(0xFF2A2A2A)
+                          : Colors.white,
+                      items: _categories.map((category) {
+                        return DropdownMenuItem<int>(
+                          value: category['id'] as int,
+                          child: Text(
+                            category['display_name'],
+                            style: TextStyle(
+                              color:
+                                  isDark ? Colors.white : Colors.black87,
+                            ),
                           ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  TextFormField(
-                    controller: nameController,
-                    style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black87,
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selectedCategoryId = value;
+                        });
+                      },
                     ),
-                    decoration: InputDecoration(
-                      labelText: 'Service Name',
-                      labelStyle: TextStyle(
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: isDark
-                          ? const Color(0xFF2A2A2A)
-                          : Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: descriptionController,
-                    maxLines: 3,
-                    style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                    decoration: InputDecoration(
-                      labelText: 'Description',
-                      labelStyle: TextStyle(
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: isDark
-                          ? const Color(0xFF2A2A2A)
-                          : Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<int>(
-                    initialValue: selectedCategoryId,
-                    decoration: InputDecoration(
-                      labelText: 'Category',
-                      labelStyle: TextStyle(
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      filled: true,
-                      fillColor: isDark
-                          ? const Color(0xFF2A2A2A)
-                          : Colors.white,
-                    ),
-                    dropdownColor: isDark
-                        ? const Color(0xFF2A2A2A)
-                        : Colors.white,
-                    items: _categories.map((category) {
-                      return DropdownMenuItem<int>(
-                        value: category['id'] as int,
-                        child: Text(
-                          category['display_name'],
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setDialogState(() {
-                        selectedCategoryId = value;
-                      });
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: Text(
-                  'Cancel',
-                  style: TextStyle(
-                    color: isDark ? Colors.white60 : Colors.black87,
-                  ),
+                  ],
                 ),
               ),
-              ElevatedButton(
-                onPressed: () async {
-                  if (nameController.text.trim().isEmpty) {
-                    _showSnackBar('Please enter service name', Colors.orange);
-                    return;
-                  }
-
-                  if (!mounted) return;
-                  setState(() => _isProcessing = true);
-
-                  try {
-                    await supabase
-                        .from('services')
-                        .update({
-                          'name': nameController.text.trim(),
-                          'description':
-                              descriptionController.text.trim().isEmpty
-                              ? null
-                              : descriptionController.text.trim(),
-                          'category_id': selectedCategoryId,
-                          'updated_at': DateTime.now().toIso8601String(),
-                        })
-                        .eq('id', service['id']);
-
-                    if (dialogContext.mounted) {
-                      Navigator.pop(dialogContext);
-                    }
-
-                    await _loadServices();
-
-                    if (mounted) {
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      color: isDark ? Colors.white60 : Colors.black87,
+                    ),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (nameController.text.trim().isEmpty) {
                       _showSnackBar(
-                        'Service updated successfully!',
-                        Colors.green,
+                        'Please enter service name',
+                        Colors.orange,
                       );
+                      return;
                     }
-                  } catch (e) {
-                    if (mounted) {
-                      _showSnackBar('Error updating service: $e', Colors.red);
+
+                    if (!mounted) return;
+                    setState(() => _isProcessing = true);
+
+                    try {
+                      await supabase
+                          .from('services')
+                          .update({
+                            'name': nameController.text.trim(),
+                            'description':
+                                descriptionController.text.trim().isEmpty
+                                    ? null
+                                    : descriptionController.text.trim(),
+                            'category_id': selectedCategoryId,
+                            'updated_at':
+                                DateTime.now().toIso8601String(),
+                          })
+                          .eq('id', service['id']);
+
+                      if (dialogContext.mounted) {
+                        Navigator.pop(dialogContext);
+                      }
+
+                      await _loadServices();
+
+                      if (mounted) {
+                        _showSnackBar(
+                          'Service updated successfully!',
+                          Colors.green,
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        _showSnackBar(
+                          'Error updating service: $e',
+                          Colors.red,
+                        );
+                      }
+                    } finally {
+                      if (mounted) setState(() => _isProcessing = false);
                     }
-                  } finally {
-                    if (mounted) setState(() => _isProcessing = false);
-                  }
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
+                  child: const Text('Save Changes'),
                 ),
-                child: const Text('Save Changes'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
+              ],
+            );
+          },
+        ),
+      );
+    } finally {
+      // ✅ Dispose controllers after dialog closes
+      nameController.dispose();
+      descriptionController.dispose();
+    }
   }
 
   Future<void> _deleteService(Map<String, dynamic> service) async {
@@ -1642,7 +1720,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
             onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(
               'Cancel',
-              style: TextStyle(color: isDark ? Colors.white60 : Colors.black87),
+              style:
+                  TextStyle(color: isDark ? Colors.white60 : Colors.black87),
             ),
           ),
           ElevatedButton(
@@ -1923,7 +2002,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF3A3A3A) : Colors.white,
+                      color:
+                          isDark ? const Color(0xFF3A3A3A) : Colors.white,
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
@@ -1959,7 +2039,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           service['category_name'],
                           style: TextStyle(
                             fontSize: 12,
-                            color: isDark ? Colors.white60 : Colors.grey[600],
+                            color:
+                                isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                       ],
@@ -2046,7 +2127,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white70 : Colors.grey[700],
+                            color:
+                                isDark ? Colors.white70 : Colors.grey[700],
                           ),
                         ),
                         const Spacer(),
@@ -2090,7 +2172,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                 width: 40,
                                 height: 40,
                                 decoration: BoxDecoration(
-                                  color: Colors.orange.withValues(alpha: 0.1),
+                                  color:
+                                      Colors.orange.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: const Icon(
@@ -2115,7 +2198,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                       ),
                                     ),
                                     const SizedBox(height: 4),
-                                    // ✅ Dynamic currency format
                                     Text(
                                       '${_formatPrice(variant['price'])} | ${variant['duration']} mins',
                                       style: TextStyle(
@@ -2173,8 +2255,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               : Colors.white.withValues(alpha: 0.7),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color:
-                                isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                            color: isDark
+                                ? Colors.grey[700]!
+                                : Colors.grey[200]!,
                           ),
                         ),
                         child: Column(
@@ -2260,7 +2343,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF3A3A3A) : Colors.white,
+                        color:
+                            isDark ? const Color(0xFF3A3A3A) : Colors.white,
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
@@ -2279,7 +2363,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
                               fontSize: 16,
-                              color: isDark ? Colors.white : Colors.grey[800],
+                              color:
+                                  isDark ? Colors.white : Colors.grey[800],
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -2403,7 +2488,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white70 : Colors.black87,
+                            color:
+                                isDark ? Colors.white70 : Colors.black87,
                           ),
                         ),
                         const Spacer(),
@@ -2465,7 +2551,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                           : Colors.black87,
                                     ),
                                   ),
-                                  // ✅ Dynamic currency format
                                   Text(
                                     '${_formatPrice(variant['price'])} | ${variant['duration']} mins',
                                     style: TextStyle(
@@ -2502,7 +2587,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                   ),
                                   onPressed: _isProcessing
                                       ? null
-                                      : () => _deleteVariant(service, variant),
+                                      : () =>
+                                          _deleteVariant(service, variant),
                                 ),
                               ],
                             ),
@@ -2658,6 +2744,12 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         return Icons.brush;
       case 'cut':
         return Icons.cut;
+      case 'water_drop':
+        return Icons.water_drop;
+      case 'masks':
+        return Icons.masks;
+      case 'spa_outlined':
+        return Icons.spa_outlined;
       default:
         return Icons.build;
     }
@@ -2726,7 +2818,10 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       ),
       body: SafeArea(
         child: _isLoading
-            ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
+            ? Center(
+                child:
+                    CircularProgressIndicator(color: AppTheme.primary),
+              )
             : isWeb
                 ? _buildWebLayout()
                 : _buildMobileLayout(),
@@ -2776,7 +2871,8 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                 _searchQuery = value;
               });
             },
-            style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+            style:
+                TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
               hintText: 'Search services...',
               hintStyle: TextStyle(
@@ -2806,10 +2902,12 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               ),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+                borderSide:
+                    const BorderSide(color: AppTheme.primary, width: 2),
               ),
               filled: true,
-              fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+              fillColor:
+                  isDark ? const Color(0xFF2A2A2A) : Colors.white,
               contentPadding: const EdgeInsets.symmetric(
                 horizontal: 16,
                 vertical: 12,
@@ -2831,8 +2929,10 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     ),
                   ),
                   selected: _selectedCategoryId == null,
-                  onSelected: (_) => setState(() => _selectedCategoryId = null),
-                  selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                  onSelected: (_) =>
+                      setState(() => _selectedCategoryId = null),
+                  selectedColor:
+                      AppTheme.primary.withValues(alpha: 0.2),
                   checkmarkColor: AppTheme.primary,
                   backgroundColor: isDark
                       ? const Color(0xFF2A2A2A)
@@ -2846,14 +2946,16 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       label: Text(
                         category['display_name'],
                         style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black87,
+                          color:
+                              isDark ? Colors.white : Colors.black87,
                         ),
                       ),
                       selected: _selectedCategoryId == category['id'],
                       onSelected: (_) => setState(() {
                         _selectedCategoryId = category['id'] as int;
                       }),
-                      selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+                      selectedColor:
+                          AppTheme.primary.withValues(alpha: 0.2),
                       checkmarkColor: AppTheme.primary,
                       backgroundColor: isDark
                           ? const Color(0xFF2A2A2A)

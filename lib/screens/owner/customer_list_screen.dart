@@ -32,6 +32,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   String _selectedFilter = 'All'; // All, Followers, Bookings, Newest
   bool _showFilterOptions = false;
 
+  // ✅ Search text controller — clear button actually clears the field
+  final TextEditingController _searchController = TextEditingController();
+
   // ✅ Responsive variables
   late bool _isWeb;
   late bool _isDark;
@@ -45,7 +48,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   @override
   void initState() {
     super.initState();
-    _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadData();
+    });
   }
 
   @override
@@ -58,10 +63,13 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
   Future<void> _loadData() async {
+    if (!mounted) return;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -70,6 +78,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) {
+        if (!mounted) return;
         setState(() {
           _errorMessage = 'Please login to view customers';
           _isLoading = false;
@@ -79,14 +88,27 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
 
       // Get salon name if salonId is provided
       if (widget.salonId != null) {
+        final salonIdInt = int.tryParse(widget.salonId!);
+        if (salonIdInt == null) {
+          if (!mounted) return;
+          setState(() {
+            _errorMessage = 'Invalid salon ID';
+            _isLoading = false;
+          });
+          return;
+        }
+
         final salonResponse = await supabase
             .from('salons')
             .select('name')
-            .eq('id', int.parse(widget.salonId!))
+            .eq('id', salonIdInt)
             .maybeSingle();
 
         if (salonResponse != null) {
-          _selectedSalonName = salonResponse['name'];
+          final name = salonResponse['name'] as String?;
+          if (name != null && name.isNotEmpty) {
+            _selectedSalonName = name;
+          }
         }
       }
 
@@ -98,6 +120,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
         if (widget.salonId != null) {
           await _loadSalonCustomers(widget.salonId!);
         } else {
+          if (!mounted) return;
           setState(() {
             _errorMessage = 'No salon selected';
             _isLoading = false;
@@ -105,6 +128,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
         }
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading customers: ${e.toString()}';
         _isLoading = false;
@@ -138,6 +162,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             .eq('customer_id', userId)
             .eq('status', 'completed');
 
+        if (!mounted) return;
         setState(() {
           _customers = [
             {
@@ -158,12 +183,14 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           _isLoading = false;
         });
       } else {
+        if (!mounted) return;
         setState(() {
           _errorMessage = 'Profile not found';
           _isLoading = false;
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading profile: ${e.toString()}';
         _isLoading = false;
@@ -172,8 +199,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   }
 
   // ============================================================
-  // ✅ LOAD BARBER CUSTOMERS (barber ගේ appointments වල customers)
-  //    - Barber ගේ salon_id = widget.salonId (dashboard එකෙන් pass)
+  // ✅ LOAD BARBER CUSTOMERS
+  //    - Barber ගේ completed appointments වල customers
   //    - Followers load කරන්නේ නෑ (barber ට followers නෑ)
   // ============================================================
   Future<void> _loadBarberCustomers(String barberId) async {
@@ -200,7 +227,10 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
 
       // ✅ Salon filter — dashboard එකෙන් pass කරන salon එකට විතරයි
       if (salonId != null && salonId.isNotEmpty) {
-        query = query.eq('salon_id', int.parse(salonId));
+        final salonIdInt = int.tryParse(salonId);
+        if (salonIdInt != null) {
+          query = query.eq('salon_id', salonIdInt);
+        }
       }
 
       final response = await query.order(
@@ -225,7 +255,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             'avatar_url': profile['avatar_url'],
             'created_at': profile['created_at'],
             'booking_count': 0,
-            'is_follower': false, // ✅ Barber ට followers නෑ
+            'is_follower': false,
             'followed_at': null,
           };
         }
@@ -239,10 +269,11 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
               (b['booking_count'] as int).compareTo(a['booking_count'] as int),
         );
 
+      if (!mounted) return;
       setState(() {
         _customers = customers;
         _totalCustomers = customers.length;
-        _totalFollowers = 0; // ✅ Barber ට followers නෑ
+        _totalFollowers = 0;
         _totalBookings = customers.fold(
           0,
           (sum, c) => sum + (c['booking_count'] as int),
@@ -255,6 +286,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
         debugPrint('   - Filtered by salon: $salonId');
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading customers: ${e.toString()}';
         _isLoading = false;
@@ -263,115 +295,66 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
   }
 
   // ============================================================
-  // LOAD SALON CUSTOMERS (for owner) - INCLUDES FOLLOWERS
+  // ✅ LOAD SALON CUSTOMERS (for owner) — uses RPC
+  //    - All customers with appointments (excluding cancelled/no_show)
+  //    - All followers
+  //    - Efficient: single RPC call
   // ============================================================
   Future<void> _loadSalonCustomers(String salonId) async {
     try {
-      final salonIdInt = int.parse(salonId);
-
-      final appointmentsResponse = await supabase
-          .from('appointments')
-          .select('''
-            customer_id,
-            profiles!appointments_customer_id_fkey (
-              id,
-              full_name,
-              email,
-              phone,
-              avatar_url,
-              created_at
-            )
-          ''')
-          .eq('salon_id', salonIdInt)
-          .neq('status', 'cancelled')
-          .order('appointment_date', ascending: false);
-
-      final followersResponse = await supabase
-          .from('salon_followers')
-          .select('''
-            customer_id,
-            created_at,
-            profiles!salon_followers_customer_id_fkey (
-              id,
-              full_name,
-              email,
-              phone,
-              avatar_url,
-              created_at
-            )
-          ''')
-          .eq('salon_id', salonIdInt)
-          .order('created_at', ascending: false);
-
-      final Map<String, Map<String, dynamic>> customerMap = {};
-
-      for (var appointment in appointmentsResponse) {
-        final profile = appointment['profiles'] as Map?;
-        if (profile == null) continue;
-
-        final customerId = profile['id'] as String;
-
-        if (!customerMap.containsKey(customerId)) {
-          customerMap[customerId] = {
-            'id': customerId,
-            'full_name': profile['full_name'] ?? 'Unknown',
-            'email': profile['email'] ?? '',
-            'phone': profile['phone'] ?? '',
-            'avatar_url': profile['avatar_url'],
-            'created_at': profile['created_at'],
-            'booking_count': 0,
-            'is_follower': false,
-            'followed_at': null,
-          };
-        }
-        customerMap[customerId]!['booking_count'] =
-            (customerMap[customerId]!['booking_count'] as int) + 1;
-      }
-
-      int followerCount = 0;
-      for (var follower in followersResponse) {
-        final profile = follower['profiles'] as Map?;
-        if (profile == null) continue;
-
-        final customerId = profile['id'] as String;
-
-        if (!customerMap.containsKey(customerId)) {
-          customerMap[customerId] = {
-            'id': customerId,
-            'full_name': profile['full_name'] ?? 'Unknown',
-            'email': profile['email'] ?? '',
-            'phone': profile['phone'] ?? '',
-            'avatar_url': profile['avatar_url'],
-            'created_at': profile['created_at'],
-            'booking_count': 0,
-            'is_follower': true,
-            'followed_at': follower['created_at'],
-          };
-          followerCount++;
-        } else {
-          customerMap[customerId]!['is_follower'] = true;
-          if (customerMap[customerId]!['followed_at'] == null) {
-            customerMap[customerId]!['followed_at'] = follower['created_at'];
-          }
-        }
-      }
-
-      final customers = customerMap.values.toList()
-        ..sort((a, b) {
-          final bookingCompare = (b['booking_count'] as int).compareTo(
-            a['booking_count'] as int,
-          );
-          if (bookingCompare != 0) return bookingCompare;
-          if (a['is_follower'] == true && b['is_follower'] == false) return -1;
-          if (a['is_follower'] == false && b['is_follower'] == true) return 1;
-          return 0;
+      final salonIdInt = int.tryParse(salonId);
+      if (salonIdInt == null) {
+        if (!mounted) return;
+        setState(() {
+          _errorMessage = 'Invalid salon ID';
+          _isLoading = false;
         });
+        return;
+      }
 
-      final totalBookings = customers.fold(
-        0,
-        (sum, c) => sum + (c['booking_count'] as int),
+      // ✅ Single RPC call — returns all customers with aggregates
+      final response = await supabase.rpc(
+        'get_salon_customers',
+        params: {'p_salon_id': salonIdInt},
       );
 
+      final List<Map<String, dynamic>> customers = [];
+
+      int followerCount = 0;
+      int totalBookings = 0;
+
+      for (final row in (response as List)) {
+        final bookingCount = (row['booking_count'] as num?)?.toInt() ?? 0;
+        final isFollower = row['is_follower'] == true;
+
+        if (isFollower) followerCount++;
+        totalBookings += bookingCount;
+
+        customers.add({
+          'id': row['customer_id'],
+          'full_name': row['full_name'] ?? 'Unknown',
+          'email': row['email'] ?? '',
+          'phone': row['phone'] ?? '',
+          'avatar_url': row['avatar_url'],
+          'created_at': row['created_at'],
+          'booking_count': bookingCount,
+          'is_follower': isFollower,
+          'followed_at': row['followed_at'],
+        });
+      }
+
+      // ✅ Sort: bookings desc → followers first
+      customers.sort((a, b) {
+        final bookingCompare = (b['booking_count'] as int).compareTo(
+          a['booking_count'] as int,
+        );
+        if (bookingCompare != 0) return bookingCompare;
+        if (a['is_follower'] == true && b['is_follower'] == false) return -1;
+        if (a['is_follower'] == false && b['is_follower'] == true) return 1;
+        return 0;
+      });
+
+      if (!mounted) return;
       setState(() {
         _customers = customers;
         _totalCustomers = customers.length;
@@ -382,10 +365,11 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
 
       debugPrint('✅ Loaded ${customers.length} customers for salon $salonId');
       debugPrint(
-        '   - ${customers.where((c) => c['booking_count'] > 0).length} with bookings',
+        '   - ${customers.where((c) => (c['booking_count'] as int) > 0).length} with bookings',
       );
-      debugPrint('   - $_totalFollowers followers');
+      debugPrint('   - $followerCount followers');
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading customers: ${e.toString()}';
         _isLoading = false;
@@ -415,11 +399,13 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
       case 'Followers':
         filtered = filtered.where((c) => c['is_follower'] == true).toList();
         filtered.sort(
-          (a, b) => (b['followed_at'] ?? '').compareTo(a['followed_at'] ?? ''),
+          (a, b) => (b['followed_at'] ?? '').toString().compareTo(
+                (a['followed_at'] ?? '').toString(),
+              ),
         );
         break;
       case 'Bookings':
-        filtered = filtered.where((c) => c['booking_count'] > 0).toList();
+        filtered = filtered.where((c) => (c['booking_count'] as int) > 0).toList();
         filtered.sort(
           (a, b) =>
               (b['booking_count'] as int).compareTo(a['booking_count'] as int),
@@ -427,7 +413,9 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
         break;
       case 'Newest':
         filtered.sort(
-          (a, b) => (b['created_at'] ?? '').compareTo(a['created_at'] ?? ''),
+          (a, b) => (b['created_at'] ?? '').toString().compareTo(
+                (a['created_at'] ?? '').toString(),
+              ),
         );
         break;
       default:
@@ -446,13 +434,14 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) => CustomerDetailsSheet(
         customer: customer,
-        showFollowers: _showFollowers, // ✅ Barber ට followers section hide
+        showFollowers: _showFollowers,
       ),
     );
   }
@@ -484,7 +473,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
             value: '$_totalCustomers',
             color: Colors.blue,
           ),
-          // ✅ Owner ට විතරයි Followers පෙන්නන්නේ
           if (_showFollowers) ...[
             Container(
               width: 1,
@@ -535,7 +523,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: isDark ? color : color,
+                color: color,
               ),
             ),
           ],
@@ -638,12 +626,15 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                         color: isDark ? Colors.white30 : Colors.grey[400],
                       ),
                       const SizedBox(height: 16),
-                      Text(
-                        _errorMessage!,
-                        style: TextStyle(
-                          color: isDark ? Colors.white60 : Colors.grey[600],
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(
+                            color: isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                          textAlign: TextAlign.center,
                         ),
-                        textAlign: TextAlign.center,
                       ),
                       const SizedBox(height: 24),
                       ElevatedButton(
@@ -708,6 +699,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                       ],
                     ),
                     child: TextField(
+                      controller: _searchController,
                       onChanged: (value) {
                         setState(() {
                           _searchQuery = value;
@@ -739,6 +731,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                                       : Colors.grey[600],
                                 ),
                                 onPressed: () {
+                                  _searchController.clear();
                                   setState(() {
                                     _searchQuery = '';
                                   });
@@ -768,7 +761,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                           children: [
                             _buildFilterChip('All'),
                             const SizedBox(width: 8),
-                            // ✅ Owner ට විතරයි Followers filter
                             if (_showFollowers) ...[
                               _buildFilterChip('Followers'),
                               const SizedBox(width: 8),
@@ -821,7 +813,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                             crossAxisCount: 2,
                             crossAxisSpacing: 16,
                             mainAxisSpacing: 16,
-                            childAspectRatio: 1.2,
+                            childAspectRatio: 1.5,
                           ),
                           itemCount: filteredCustomers.length,
                           itemBuilder: (context, index) {
@@ -872,6 +864,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                 ],
               ),
               child: TextField(
+                controller: _searchController,
                 onChanged: (value) {
                   setState(() {
                     _searchQuery = value;
@@ -900,6 +893,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                             color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                           onPressed: () {
+                            _searchController.clear();
                             setState(() {
                               _searchQuery = '';
                             });
@@ -930,7 +924,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                   children: [
                     _buildFilterChip('All'),
                     const SizedBox(width: 8),
-                    // ✅ Owner ට විතරයි Followers filter
                     if (_showFollowers) ...[
                       _buildFilterChip('Followers'),
                       const SizedBox(width: 8),
@@ -1018,6 +1011,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
           if (_searchQuery.isNotEmpty)
             TextButton(
               onPressed: () {
+                _searchController.clear();
                 setState(() {
                   _searchQuery = '';
                 });
@@ -1071,7 +1065,7 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
     final email = customer['email']?.toString() ?? '';
     final phone = customer['phone']?.toString() ?? '';
     final avatarUrl = customer['avatar_url']?.toString();
-    final bookingCount = customer['booking_count'] as int? ?? 0;
+    final bookingCount = (customer['booking_count'] as num?)?.toInt() ?? 0;
     final isCurrentUser = customer['is_current_user'] == true;
     final isFollower = customer['is_follower'] == true;
     final hasBookings = bookingCount > 0;
@@ -1239,8 +1233,8 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                             color: hasBookings
                                 ? Colors.blue.withValues(alpha: 0.1)
                                 : (isDark
-                                      ? Colors.grey[800]
-                                      : Colors.grey.withValues(alpha: 0.1)),
+                                    ? Colors.grey[800]
+                                    : Colors.grey.withValues(alpha: 0.1)),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Row(
@@ -1269,7 +1263,6 @@ class _CustomerListScreenState extends State<CustomerListScreen> {
                             ],
                           ),
                         ),
-                        // ✅ Owner ට විතරයි Follower badge
                         if (isFollower && _showFollowers)
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -1339,7 +1332,7 @@ class CustomerDetailsSheet extends StatelessWidget {
     final email = customer['email']?.toString() ?? '';
     final phone = customer['phone']?.toString() ?? '';
     final avatarUrl = customer['avatar_url']?.toString();
-    final bookingCount = customer['booking_count'] as int? ?? 0;
+    final bookingCount = (customer['booking_count'] as num?)?.toInt() ?? 0;
     final isFollower = customer['is_follower'] == true;
     final followedAt = customer['followed_at']?.toString() ?? '';
     final isCurrentUser = customer['is_current_user'] == true;
@@ -1358,7 +1351,6 @@ class CustomerDetailsSheet extends StatelessWidget {
           ),
           child: Column(
             children: [
-              // Handle
               Center(
                 child: Container(
                   width: 40,
@@ -1489,7 +1481,6 @@ class CustomerDetailsSheet extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            // ✅ Owner ට විතරයි Follower badge
                             if (isFollower && showFollowers)
                               Container(
                                 padding: const EdgeInsets.symmetric(
@@ -1684,6 +1675,10 @@ class CustomerDetailsSheet extends StatelessWidget {
       final date = DateTime.parse(dateStr);
       final now = DateTime.now();
       final difference = now.difference(date);
+
+      if (difference.inDays < 0) {
+        return '${date.day}/${date.month}/${date.year}';
+      }
 
       if (difference.inDays == 0) {
         return 'Today';

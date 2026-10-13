@@ -30,8 +30,7 @@ import '../../utils/image_compression.dart';
 //  - When editing, business hours are converted to the USER's local
 //    timezone so the picker feels natural. On save they are converted
 //    back to the salon's timezone and stored as UTC.
-//  - Currency is auto-synced to the user's timezone when editing, but
-//    can be changed manually.
+//  - Currency starts from the DB value; user can change it manually.
 //  - AppBar: [Cancel] [Save]
 // ====================================================================
 class EditSalonScreen extends StatefulWidget {
@@ -44,6 +43,9 @@ class EditSalonScreen extends StatefulWidget {
 }
 
 class _EditSalonScreenState extends State<EditSalonScreen> {
+  // ✅ Default salon timezone (DB default — NOT user timezone)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
   // ==================== MODE ====================
   bool _isEditMode = false;
 
@@ -77,24 +79,22 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _coverRemoved = false;
 
   // ==================== TIMEZONE ====================
-  String _userTimezone = ''; // device timezone
-  String _salonTimezone = ''; // DB timezone of the salon
+  String _userTimezone = '';
+  String _salonTimezone = '';
   String _openTimeUtc = '';
   String _closeTimeUtc = '';
-  TimeOfDay? _openTimeLocal; // shown in EDIT MODE (user tz)
-  TimeOfDay? _closeTimeLocal; // shown in EDIT MODE (user tz)
-  TimeOfDay? _openTimeSalonLocal; // shown in VIEW MODE (salon tz)
-  TimeOfDay? _closeTimeSalonLocal; // shown in VIEW MODE (salon tz)
+  TimeOfDay? _openTimeLocal; // EDIT MODE (user tz)
+  TimeOfDay? _closeTimeLocal; // EDIT MODE (user tz)
+  TimeOfDay? _openTimeSalonLocal; // VIEW MODE (salon tz)
+  TimeOfDay? _closeTimeSalonLocal; // VIEW MODE (salon tz)
   bool _isTimezoneLoaded = false;
   bool _isLoading = true;
   bool _isSaving = false;
   bool _isDeleting = false;
 
   // ==================== CURRENCY ====================
-  // Original values from DB (used in VIEW mode)
   String _dbCurrencyCode = 'LKR';
   String _dbCurrencySymbol = 'Rs.';
-  // Working values (used in EDIT mode — starts as copy of DB, can change)
   String _salonCurrencyCode = 'LKR';
   String _salonCurrencySymbol = 'Rs.';
 
@@ -127,25 +127,38 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   late bool _isWeb;
   late bool _isDark;
 
-  /// ✅ VIEW MODE: show the salon's timezone EXACTLY as saved in DB.
-  /// (No conversion to user's local timezone.)
+  // ============================================
+  // ✅ TIMEZONE DISPLAY HELPERS (with fallback)
+  // ============================================
   String _getSalonTimezoneDisplay() {
-    if (_salonTimezone.isEmpty) return 'Loading...';
-    return _salonTimezone;
+    final tz =
+        _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
+    return tz;
   }
 
-  /// ✅ EDIT MODE: show the user's local timezone (so the picker makes sense).
   String _getUserTimezoneDisplay() {
-    if (_userTimezone.isEmpty) return 'Loading...';
-    return _userTimezone;
+    final tz = _userTimezone.isEmpty ? _kDefaultSalonTimezone : _userTimezone;
+    return tz;
   }
 
+  /// ✅ Check if salon and user timezones differ
+  bool get _isSameTimezone {
+    final salonTz = _salonTimezone.isEmpty
+        ? _kDefaultSalonTimezone
+        : _salonTimezone;
+    final userTz =
+        _userTimezone.isEmpty ? _kDefaultSalonTimezone : _userTimezone;
+    return salonTz == userTz;
+  }
+
+  /// ✅ Cleaner symbol lookup
   String _getSymbolForCode(String code) {
-    final match = _supportedCurrencies.firstWhere(
-      (c) => c['code'] == code,
-      orElse: () => {'symbol': _salonCurrencySymbol},
-    );
-    return match['symbol'] ?? _salonCurrencySymbol;
+    for (final c in _supportedCurrencies) {
+      if (c['code'] == code) {
+        return c['symbol'] ?? 'Rs.';
+      }
+    }
+    return 'Rs.';
   }
 
   @override
@@ -176,19 +189,40 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
 
   Future<void> _initializeWithTimezone() async {
-    await TimezoneService.initialize();
-    final prefs = await SharedPreferences.getInstance();
-    _userTimezone = prefs.getString('user_timezone') ??
-        TimezoneService.getCurrentTimezone();
+    try {
+      await TimezoneService.initialize();
+      final prefs = await SharedPreferences.getInstance();
 
-    setState(() => _isTimezoneLoaded = true);
-    await _loadAllData();
+      _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
+          TimezoneService.getCurrentTimezone();
+
+      // ✅ Fallback if empty
+      if (_userTimezone.isEmpty) {
+        _userTimezone = _kDefaultSalonTimezone;
+        debugPrint('⚠️ User TZ empty → default: $_kDefaultSalonTimezone');
+      }
+
+      if (!mounted) return;
+      setState(() => _isTimezoneLoaded = true);
+
+      await _loadAllData();
+    } catch (e) {
+      debugPrint('❌ Error initializing timezone: $e');
+      if (mounted) {
+        setState(() {
+          _userTimezone = _kDefaultSalonTimezone;
+          _salonTimezone = _kDefaultSalonTimezone;
+          _isTimezoneLoaded = true;
+          _isLoading = false;
+        });
+        _showSnackBar('Error loading timezone', Colors.red);
+      }
+    }
   }
 
   Future<void> _loadAllData() async {
-    setState(() {
-      _isLoading = true;
-    });
+    if (!mounted) return;
+    setState(() => _isLoading = true);
 
     try {
       await _loadSalonData();
@@ -202,19 +236,25 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       }
     } finally {
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
+        setState(() => _isLoading = false);
       }
     }
   }
 
+  // ============================================
+  // ✅ FIX: Load salon data — .maybeSingle() + explicit "not found"
+  // ============================================
   Future<void> _loadSalonData() async {
     final response = await supabase
         .from('salons')
         .select()
         .eq('id', widget.salonId)
-        .single();
+        .maybeSingle();
+
+    // ✅ FIX: Better error message on missing salon
+    if (response == null) {
+      throw Exception('Salon not found');
+    }
 
     _nameController.text = response['name'] ?? '';
     _addressController.text = response['address'] ?? '';
@@ -222,12 +262,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     _emailController.text = response['email'] ?? '';
     _descriptionController.text = response['description'] ?? '';
 
-    _currentLogoUrl = response['logo_url'];
-    _currentCoverUrl = response['cover_url'];
+    _currentLogoUrl = response['logo_url'] as String?;
+    _currentCoverUrl = response['cover_url'] as String?;
 
-    // ✅ SALON TIMEZONE: always from DB
-    _salonTimezone =
-        response['timezone'] ?? TimezoneService.getCurrentTimezone();
+    // ✅ Salon timezone with fallback
+    final dbTimezone = response['timezone'] as String?;
+    if (dbTimezone != null && dbTimezone.isNotEmpty) {
+      _salonTimezone = dbTimezone;
+    } else {
+      _salonTimezone = _kDefaultSalonTimezone;
+      debugPrint('⚠️ Salon TZ empty → default: $_kDefaultSalonTimezone');
+    }
 
     // ✅ CURRENCY: from DB (fallback to auto-detect if missing)
     final savedCurrencyCode = response['currency_code']?.toString();
@@ -241,36 +286,47 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _dbCurrencySymbol =
           TimezoneService.getSymbolForCurrency(_dbCurrencyCode);
     }
-    // Working copy for EDIT mode starts as the DB values
+    // Working copy for EDIT mode
     _salonCurrencyCode = _dbCurrencyCode;
     _salonCurrencySymbol = _dbCurrencySymbol;
 
     // ============ TIMES ============
-    // Load UTC strings from DB
     if (response['open_time'] != null) {
       _openTimeUtc = response['open_time'] as String;
     } else {
       _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
-          const TimeOfDay(hour: 9, minute: 0), _salonTimezone);
+        const TimeOfDay(hour: 9, minute: 0),
+        _salonTimezone,
+      );
     }
     if (response['close_time'] != null) {
       _closeTimeUtc = response['close_time'] as String;
     } else {
       _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
-          const TimeOfDay(hour: 18, minute: 0), _salonTimezone);
+        const TimeOfDay(hour: 18, minute: 0),
+        _salonTimezone,
+      );
     }
 
-    // ✅ VIEW MODE: convert UTC → salon timezone (this is the "real" salon time)
+    // ✅ VIEW MODE: UTC → salon timezone
     _openTimeSalonLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-        _openTimeUtc, _salonTimezone);
+      _openTimeUtc,
+      _salonTimezone,
+    );
     _closeTimeSalonLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-        _closeTimeUtc, _salonTimezone);
+      _closeTimeUtc,
+      _salonTimezone,
+    );
 
-    // ✅ EDIT MODE: convert UTC → user timezone (so the picker feels natural)
+    // ✅ EDIT MODE: UTC → user timezone
     _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-        _openTimeUtc, _userTimezone);
+      _openTimeUtc,
+      _userTimezone,
+    );
     _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-        _closeTimeUtc, _userTimezone);
+      _closeTimeUtc,
+      _userTimezone,
+    );
   }
 
   // ============================================
@@ -283,20 +339,19 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _currentStep = 0;
       _furthestStep = 0;
 
-      // ✅ When entering edit mode, re-sync the working values:
-      //  - Times → convert UTC → USER timezone (already done in load,
-      //    but re-do it in case user changed device tz)
+      // ✅ Re-sync times: UTC → user timezone (fresh)
       _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-          _openTimeUtc, _userTimezone);
+        _openTimeUtc,
+        _userTimezone,
+      );
       _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-          _closeTimeUtc, _userTimezone);
+        _closeTimeUtc,
+        _userTimezone,
+      );
 
-      //  - Currency → auto-detect from USER's timezone (a fresh suggestion
-      //    for the edit session), but user can still override.
-      _salonCurrencyCode =
-          TimezoneService.getCurrencyForTimezone(_userTimezone);
-      _salonCurrencySymbol =
-          TimezoneService.getSymbolForCurrency(_salonCurrencyCode);
+      // ✅ Preserve DB currency (don't auto-overwrite!)
+      _salonCurrencyCode = _dbCurrencyCode;
+      _salonCurrencySymbol = _dbCurrencySymbol;
     });
   }
 
@@ -338,10 +393,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       }
     });
   }
-
-  // ============================================
-  // STEP VALIDATION
-  // ============================================
 
   bool _canProceedFromStep(int step) {
     switch (step) {
@@ -386,44 +437,46 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         maxHeight: 1600,
         imageQuality: 90,
       );
-      if (pickedFile != null) {
-        if (kIsWeb) {
-          final rawBytes = await pickedFile.readAsBytes();
+      if (pickedFile == null) return;
+
+      if (kIsWeb) {
+        final rawBytes = await pickedFile.readAsBytes();
+        final compressed = await compressAvatarBytes(rawBytes);
+        if (!mounted) return;
+        setState(() {
+          _logoWebBytes = compressed;
+          _logoFile = null;
+          _logoRemoved = false;
+        });
+      } else {
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Crop Logo',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              initAspectRatio: CropAspectRatioPreset.square,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
+          ],
+        );
+        if (croppedFile != null) {
+          final rawBytes = await File(croppedFile.path).readAsBytes();
           final compressed = await compressAvatarBytes(rawBytes);
+          if (!mounted) return;
           setState(() {
             _logoWebBytes = compressed;
             _logoFile = null;
             _logoRemoved = false;
           });
-        } else {
-          final croppedFile = await ImageCropper().cropImage(
-            sourcePath: pickedFile.path,
-            aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-            uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Logo',
-                toolbarColor: AppTheme.primary,
-                toolbarWidgetColor: Colors.white,
-                initAspectRatio: CropAspectRatioPreset.square,
-                lockAspectRatio: true,
-              ),
-              IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
-            ],
-          );
-          if (croppedFile != null) {
-            final rawBytes = await File(croppedFile.path).readAsBytes();
-            final compressed = await compressAvatarBytes(rawBytes);
-            setState(() {
-              _logoWebBytes = compressed;
-              _logoFile = null;
-              _logoRemoved = false;
-            });
-          }
         }
       }
     } catch (e) {
       debugPrint('❌ Error picking logo: $e');
-      _showSnackBar('Error picking logo', Colors.red);
+      if (mounted) _showSnackBar('Error picking logo', Colors.red);
     }
   }
 
@@ -435,43 +488,45 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         maxHeight: 1600,
         imageQuality: 90,
       );
-      if (pickedFile != null) {
-        if (kIsWeb) {
-          final rawBytes = await pickedFile.readAsBytes();
+      if (pickedFile == null) return;
+
+      if (kIsWeb) {
+        final rawBytes = await pickedFile.readAsBytes();
+        final compressed = await compressAvatarBytes(rawBytes);
+        if (!mounted) return;
+        setState(() {
+          _logoWebBytes = compressed;
+          _logoFile = null;
+          _logoRemoved = false;
+        });
+      } else {
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Crop Logo',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
+          ],
+        );
+        if (croppedFile != null) {
+          final rawBytes = await File(croppedFile.path).readAsBytes();
           final compressed = await compressAvatarBytes(rawBytes);
+          if (!mounted) return;
           setState(() {
             _logoWebBytes = compressed;
             _logoFile = null;
             _logoRemoved = false;
           });
-        } else {
-          final croppedFile = await ImageCropper().cropImage(
-            sourcePath: pickedFile.path,
-            aspectRatio: const CropAspectRatio(ratioX: 1, ratioY: 1),
-            uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Logo',
-                toolbarColor: AppTheme.primary,
-                toolbarWidgetColor: Colors.white,
-                lockAspectRatio: true,
-              ),
-              IOSUiSettings(title: 'Crop Logo', aspectRatioLockEnabled: true),
-            ],
-          );
-          if (croppedFile != null) {
-            final rawBytes = await File(croppedFile.path).readAsBytes();
-            final compressed = await compressAvatarBytes(rawBytes);
-            setState(() {
-              _logoWebBytes = compressed;
-              _logoFile = null;
-              _logoRemoved = false;
-            });
-          }
         }
       }
     } catch (e) {
-      debugPrint('❌ Error: $e');
-      _showSnackBar('Error taking photo', Colors.red);
+      debugPrint('❌ Error taking logo photo: $e');
+      if (mounted) _showSnackBar('Error taking photo', Colors.red);
     }
   }
 
@@ -492,44 +547,46 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         maxHeight: 1350,
         imageQuality: 90,
       );
-      if (pickedFile != null) {
-        if (kIsWeb) {
-          final rawBytes = await pickedFile.readAsBytes();
+      if (pickedFile == null) return;
+
+      if (kIsWeb) {
+        final rawBytes = await pickedFile.readAsBytes();
+        final compressed = await compressCoverBytes(rawBytes);
+        if (!mounted) return;
+        setState(() {
+          _coverWebBytes = compressed;
+          _coverFile = null;
+          _coverRemoved = false;
+        });
+      } else {
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Crop Cover',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              initAspectRatio: CropAspectRatioPreset.ratio16x9,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
+          ],
+        );
+        if (croppedFile != null) {
+          final rawBytes = await File(croppedFile.path).readAsBytes();
           final compressed = await compressCoverBytes(rawBytes);
+          if (!mounted) return;
           setState(() {
             _coverWebBytes = compressed;
             _coverFile = null;
             _coverRemoved = false;
           });
-        } else {
-          final croppedFile = await ImageCropper().cropImage(
-            sourcePath: pickedFile.path,
-            aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
-            uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Cover',
-                toolbarColor: AppTheme.primary,
-                toolbarWidgetColor: Colors.white,
-                initAspectRatio: CropAspectRatioPreset.ratio16x9,
-                lockAspectRatio: true,
-              ),
-              IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
-            ],
-          );
-          if (croppedFile != null) {
-            final rawBytes = await File(croppedFile.path).readAsBytes();
-            final compressed = await compressCoverBytes(rawBytes);
-            setState(() {
-              _coverWebBytes = compressed;
-              _coverFile = null;
-              _coverRemoved = false;
-            });
-          }
         }
       }
     } catch (e) {
       debugPrint('❌ Error picking cover: $e');
-      _showSnackBar('Error picking cover', Colors.red);
+      if (mounted) _showSnackBar('Error picking cover', Colors.red);
     }
   }
 
@@ -541,43 +598,45 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         maxHeight: 1350,
         imageQuality: 90,
       );
-      if (pickedFile != null) {
-        if (kIsWeb) {
-          final rawBytes = await pickedFile.readAsBytes();
+      if (pickedFile == null) return;
+
+      if (kIsWeb) {
+        final rawBytes = await pickedFile.readAsBytes();
+        final compressed = await compressCoverBytes(rawBytes);
+        if (!mounted) return;
+        setState(() {
+          _coverWebBytes = compressed;
+          _coverFile = null;
+          _coverRemoved = false;
+        });
+      } else {
+        final croppedFile = await ImageCropper().cropImage(
+          sourcePath: pickedFile.path,
+          aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
+          uiSettings: [
+            AndroidUiSettings(
+              toolbarTitle: 'Crop Cover',
+              toolbarColor: AppTheme.primary,
+              toolbarWidgetColor: Colors.white,
+              lockAspectRatio: true,
+            ),
+            IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
+          ],
+        );
+        if (croppedFile != null) {
+          final rawBytes = await File(croppedFile.path).readAsBytes();
           final compressed = await compressCoverBytes(rawBytes);
+          if (!mounted) return;
           setState(() {
             _coverWebBytes = compressed;
             _coverFile = null;
             _coverRemoved = false;
           });
-        } else {
-          final croppedFile = await ImageCropper().cropImage(
-            sourcePath: pickedFile.path,
-            aspectRatio: const CropAspectRatio(ratioX: 16, ratioY: 9),
-            uiSettings: [
-              AndroidUiSettings(
-                toolbarTitle: 'Crop Cover',
-                toolbarColor: AppTheme.primary,
-                toolbarWidgetColor: Colors.white,
-                lockAspectRatio: true,
-              ),
-              IOSUiSettings(title: 'Crop Cover', aspectRatioLockEnabled: true),
-            ],
-          );
-          if (croppedFile != null) {
-            final rawBytes = await File(croppedFile.path).readAsBytes();
-            final compressed = await compressCoverBytes(rawBytes);
-            setState(() {
-              _coverWebBytes = compressed;
-              _coverFile = null;
-              _coverRemoved = false;
-            });
-          }
         }
       }
     } catch (e) {
-      debugPrint('❌ Error: $e');
-      _showSnackBar('Error taking photo', Colors.red);
+      debugPrint('❌ Error taking cover photo: $e');
+      if (mounted) _showSnackBar('Error taking photo', Colors.red);
     }
   }
 
@@ -589,6 +648,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _coverRemoved = true;
     });
   }
+
+  // ============================================
+  // ✅ FIX: Upload with throw on error (no silent failure)
+  // ============================================
 
   Future<String?> _uploadLogo() async {
     final userId = supabase.auth.currentUser?.id;
@@ -607,7 +670,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       return _currentLogoUrl;
     }
 
-    setState(() => _isUploadingLogo = true);
+    if (mounted) setState(() => _isUploadingLogo = true);
     try {
       if (_logoWebBytes != null) {
         await supabase.storage.from('salon-images').uploadBinary(
@@ -632,7 +695,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading logo: $e');
-      return _currentLogoUrl;
+      // ✅ FIX: Throw instead of silent fallback
+      rethrow;
     } finally {
       if (mounted) setState(() => _isUploadingLogo = false);
     }
@@ -655,7 +719,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       return _currentCoverUrl;
     }
 
-    setState(() => _isUploadingCover = true);
+    if (mounted) setState(() => _isUploadingCover = true);
     try {
       if (_coverWebBytes != null) {
         await supabase.storage.from('salon-images').uploadBinary(
@@ -680,7 +744,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading cover: $e');
-      return _currentCoverUrl;
+      // ✅ FIX: Throw instead of silent fallback
+      rethrow;
     } finally {
       if (mounted) setState(() => _isUploadingCover = false);
     }
@@ -726,18 +791,39 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   Future<void> _performUpdateSalon() async {
+    if (!mounted) return;
     setState(() => _isSaving = true);
 
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null) throw Exception('Not logged in');
 
-      final logoUrl = await _uploadLogo();
-      final coverUrl = await _uploadCover();
+      if (_openTimeLocal == null || _closeTimeLocal == null) {
+        throw Exception('Business hours are not set');
+      }
 
-      // ✅ Convert the user-edited local times → UTC using the SALON's timezone.
-      // The picker showed times in the user's local timezone; we first
-      // convert those to the salon's timezone, then to UTC.
+      // ✅ FIX: Handle image upload failures gracefully
+      bool imageUploadFailed = false;
+      String? logoUrl;
+      String? coverUrl;
+
+      try {
+        logoUrl = await _uploadLogo();
+      } catch (e) {
+        debugPrint('❌ Logo upload failed: $e');
+        logoUrl = _currentLogoUrl; // Keep existing
+        imageUploadFailed = true;
+      }
+
+      try {
+        coverUrl = await _uploadCover();
+      } catch (e) {
+        debugPrint('❌ Cover upload failed: $e');
+        coverUrl = _currentCoverUrl; // Keep existing
+        imageUploadFailed = true;
+      }
+
+      // ✅ Direct conversion chain (user tz → salon tz → UTC)
       final openTimeSalon = TimezoneService.convertTimeOfDayBetweenTimezones(
         _openTimeLocal!,
         fromTimezone: _userTimezone,
@@ -782,9 +868,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         'updated_at': DateTime.now().toIso8601String(),
       };
 
-      await supabase.from('salons').update(updateData).eq('id', widget.salonId);
+      await supabase
+          .from('salons')
+          .update(updateData)
+          .eq('id', widget.salonId);
 
       if (!mounted) return;
+
+      // ✅ Show success dialog (with image warning if uploads failed)
+      final imageWarning = imageUploadFailed
+          ? '\n\n⚠️ Note: Some images failed to upload. You can retry from Edit mode.'
+          : '';
 
       await showCustomAlert(
         context: context,
@@ -792,24 +886,23 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         message:
             "${_nameController.text.trim()} has been updated successfully.\n\n"
             "🕐 Your local time: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)} ($_userTimezone)\n"
-            "🕐 Salon time: ${openTimeSalon.format(context)} - ${closeTimeSalon.format(context)} ($_salonTimezone)",
+            "🕐 Salon time: ${openTimeSalon.format(context)} - ${closeTimeSalon.format(context)} ($_salonTimezone)$imageWarning",
         isError: false,
       );
 
       if (!mounted) return;
 
-      // ✅ Return to VIEW mode after successful save
+      // ✅ Return to VIEW mode
       setState(() {
         _isEditMode = false;
         _currentStep = 0;
         _furthestStep = 0;
       });
 
-      // Reload from DB so VIEW mode shows exactly what's now saved
       await _loadAllData();
     } catch (e) {
       debugPrint('❌ Error updating salon: $e');
-      _showSnackBar('Error: $e', Colors.red);
+      if (mounted) _showSnackBar('Error: $e', Colors.red);
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -824,7 +917,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
@@ -894,7 +987,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(
               'Cancel',
               style: TextStyle(
@@ -904,7 +997,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
@@ -920,38 +1013,38 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       ),
     );
 
-    if (confirmed == true) {
-      setState(() => _isDeleting = true);
-      try {
-        final userId = supabase.auth.currentUser?.id;
-        if (userId != null) {
-          try {
-            await supabase.storage.from('salon-images').remove([
-              'salons/$userId/${widget.salonId}/logo.jpg',
-              'salons/$userId/${widget.salonId}/cover.jpg',
-            ]);
-          } catch (e) {
-            debugPrint('⚠️ Could not delete salon images: $e');
-          }
-        }
+    if (confirmed != true) return;
+    if (!mounted) return;
 
-        await supabase.from('salons').delete().eq('id', widget.salonId);
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('✅ Salon deleted successfully'),
-              backgroundColor: Colors.green,
-            ),
-          );
-          if (mounted) Navigator.pop(context, true);
+    setState(() => _isDeleting = true);
+    try {
+      final userId = supabase.auth.currentUser?.id;
+      if (userId != null) {
+        try {
+          await supabase.storage.from('salon-images').remove([
+            'salons/$userId/${widget.salonId}/logo.jpg',
+            'salons/$userId/${widget.salonId}/cover.jpg',
+          ]);
+        } catch (e) {
+          debugPrint('⚠️ Could not delete salon images: $e');
         }
-      } catch (e) {
-        debugPrint('❌ Error deleting salon: $e');
-        if (mounted) _showSnackBar('Error deleting salon', Colors.red);
-      } finally {
-        if (mounted) setState(() => _isDeleting = false);
       }
+
+      await supabase.from('salons').delete().eq('id', widget.salonId);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('✅ Salon deleted successfully'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      Navigator.pop(context, true);
+    } catch (e) {
+      debugPrint('❌ Error deleting salon: $e');
+      if (mounted) _showSnackBar('Error deleting salon', Colors.red);
+    } finally {
+      if (mounted) setState(() => _isDeleting = false);
     }
   }
 
@@ -1114,7 +1207,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Cover
         _buildCoverSectionReadOnly(),
         Transform.translate(
           offset: const Offset(16, -40),
@@ -1125,7 +1217,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         ),
         const SizedBox(height: 16),
 
-        // Title
         Text(
           _nameController.text.trim().isEmpty
               ? 'Unnamed Salon'
@@ -1157,14 +1248,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         ],
         const SizedBox(height: 16),
 
-        // ✅ Info banner — everything below is DB data (raw)
         _buildInfoBanner(
           'Viewing data exactly as saved in the database. Tap the Edit button to make changes.',
           Icons.info_outline,
           Colors.blue,
         ),
 
-        // Basic Info
         _buildViewInfoCard(
           title: 'Basic Information',
           icon: Icons.store,
@@ -1184,7 +1273,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         ),
         const SizedBox(height: 12),
 
-        // Contact
         _buildViewInfoCard(
           title: 'Contact Information',
           icon: Icons.phone,
@@ -1203,7 +1291,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         ),
         const SizedBox(height: 12),
 
-        // ✅ Business Hours — SHOWS SALON TIMEZONE TIMES (no conversion)
         _buildViewInfoCard(
           title: 'Business Hours',
           icon: Icons.access_time,
@@ -1221,7 +1308,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         ),
         const SizedBox(height: 12),
 
-        // ✅ Currency — from DB
         _buildViewInfoCard(
           title: 'Currency',
           icon: Icons.currency_exchange,
@@ -1412,6 +1498,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final isDesktop = _isWeb;
     final isDark = _isDark;
 
+    final hasImage = _coverFile != null ||
+        _coverWebBytes != null ||
+        _currentCoverUrl != null;
+
     return Container(
       height: isDesktop ? 250 : 180,
       width: double.infinity,
@@ -1419,25 +1509,21 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       child: Stack(
         children: [
           GestureDetector(
-            onTap: () => _showCoverSourceDialog(),
+            onTap: _showCoverSourceDialog,
             child: Container(
               width: double.infinity,
               height: double.infinity,
               decoration: BoxDecoration(
                 color: isDark ? Colors.grey[800] : Colors.grey[200],
                 borderRadius: BorderRadius.circular(16),
-                image: (_coverFile != null ||
-                        _coverWebBytes != null ||
-                        _currentCoverUrl != null)
+                image: hasImage
                     ? DecorationImage(
                         image: _getCoverImageProvider(),
                         fit: BoxFit.cover,
                       )
                     : null,
               ),
-              child: (_coverFile == null &&
-                      _coverWebBytes == null &&
-                      _currentCoverUrl == null)
+              child: !hasImage
                   ? Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1461,14 +1547,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   : null,
             ),
           ),
-          if (_coverFile != null ||
-              _coverWebBytes != null ||
-              _currentCoverUrl != null)
+          if (hasImage)
             Positioned(
               bottom: 12,
               right: 12,
               child: GestureDetector(
-                onTap: () => _showCoverSourceDialog(),
+                onTap: _showCoverSourceDialog,
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1499,17 +1583,22 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     if (_coverWebBytes != null) return MemoryImage(_coverWebBytes!);
     if (_coverFile != null) return FileImage(_coverFile!);
     if (_currentCoverUrl != null) return NetworkImage(_currentCoverUrl!);
-    return const AssetImage('placeholder.png');
+    // This should never be reached — hasImage check guards it
+    return const AssetImage('assets/placeholder.png');
   }
 
   Widget _buildLogoSeparate() {
     final isDesktop = _isWeb;
     final isDark = _isDark;
 
+    final hasImage = _logoFile != null ||
+        _logoWebBytes != null ||
+        _currentLogoUrl != null;
+
     return Container(
       margin: const EdgeInsets.only(left: 16, top: 0, bottom: 16),
       child: GestureDetector(
-        onTap: () => _showLogoSourceDialog(),
+        onTap: _showLogoSourceDialog,
         child: Container(
           width: isDesktop ? 100 : 80,
           height: isDesktop ? 100 : 80,
@@ -1523,18 +1612,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 offset: const Offset(0, 2),
               ),
             ],
-            image: (_logoFile != null ||
-                    _logoWebBytes != null ||
-                    _currentLogoUrl != null)
+            image: hasImage
                 ? DecorationImage(
                     image: _getLogoImageProvider(),
                     fit: BoxFit.cover,
                   )
                 : null,
           ),
-          child: (_logoFile == null &&
-                  _logoWebBytes == null &&
-                  _currentLogoUrl == null)
+          child: !hasImage
               ? Container(
                   decoration: BoxDecoration(
                     color: isDark ? Colors.grey[800] : Colors.grey[300],
@@ -1593,7 +1678,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     if (_logoWebBytes != null) return MemoryImage(_logoWebBytes!);
     if (_logoFile != null) return FileImage(_logoFile!);
     if (_currentLogoUrl != null) return NetworkImage(_currentLogoUrl!);
-    return const AssetImage('placeholder.png');
+    // This should never be reached — hasImage check guards it
+    return const AssetImage('assets/placeholder.png');
   }
 
   void _showLogoSourceDialog() {
@@ -1605,7 +1691,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1630,7 +1716,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _pickLogo();
               },
             ),
@@ -1642,7 +1728,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _takeLogoPhoto();
               },
             ),
@@ -1657,7 +1743,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       TextStyle(color: isDark ? Colors.red[300] : Colors.red),
                 ),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   _removeLogo();
                 },
               ),
@@ -1677,7 +1763,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1702,7 +1788,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _pickCover();
               },
             ),
@@ -1714,7 +1800,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _takeCoverPhoto();
               },
             ),
@@ -1729,7 +1815,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       TextStyle(color: isDark ? Colors.red[300] : Colors.red),
                 ),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   _removeCover();
                 },
               ),
@@ -1746,6 +1832,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Widget _buildBusinessHoursCard() {
     final isDark = _isDark;
+    final showUserTime = !_isSameTimezone;
 
     return Card(
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
@@ -1765,8 +1852,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
             const SizedBox(height: 8),
 
-            // ✅ Two timezone pills: the salon's (from DB) and the user's
-            // (the timezone the picker uses while editing).
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -1795,30 +1880,31 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     ],
                   ),
                 ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.teal.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.person_pin_circle,
-                          size: 14, color: Colors.teal),
-                      const SizedBox(width: 6),
-                      Text(
-                        'You: ${_getUserTimezoneDisplay()}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          color: isDark ? Colors.white : Colors.black87,
+                if (showUserTime)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.teal.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.person_pin_circle,
+                            size: 14, color: Colors.teal),
+                        const SizedBox(width: 6),
+                        Text(
+                          'You: ${_getUserTimezoneDisplay()}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -1870,7 +1956,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Your local time: ${_openTimeLocal?.format(context)} - ${_closeTimeLocal?.format(context)} ($_userTimezone)',
+                      'Your local time: ${_openTimeLocal?.format(context) ?? '—'} - ${_closeTimeLocal?.format(context) ?? '—'} ($_userTimezone)',
                       style: TextStyle(
                         fontSize: 10,
                         color: isDark ? Colors.white70 : Colors.grey,
@@ -1924,7 +2010,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   ),
                 ),
                 const Spacer(),
-                // ✅ Auto badge — shows it was auto-suggested from user tz
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2158,7 +2243,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           icon: Icons.access_time,
           title: 'Business Hours & Currency',
           value:
-              '${_openTimeLocal?.format(context)} - ${_closeTimeLocal?.format(context)} ($_userTimezone) · $_salonCurrencyCode ($_salonCurrencySymbol)',
+              '${_openTimeLocal?.format(context) ?? '—'} - ${_closeTimeLocal?.format(context) ?? '—'} ($_userTimezone) · $_salonCurrencyCode ($_salonCurrencySymbol)',
+          onEdit: () => _goToStep(1),
+        ),
+        _buildReviewTile(
+          icon: Icons.public,
+          title: 'Salon Timezone',
+          value: _getSalonTimezoneDisplay(),
           onEdit: () => _goToStep(1),
         ),
         const SizedBox(height: 8),
@@ -2409,9 +2500,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   // ============================================
-  // STEP ACTIONS (EDIT MODE) — lives at the bottom of the scroll
-  // content (not a fixed bottomNavigationBar). Both buttons share
-  // the row width via Expanded so they never overlap on mobile.
+  // STEP ACTIONS (EDIT MODE)
   // ============================================
 
   Widget _buildStepActions() {
@@ -2439,11 +2528,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: FittedBox(
+                  child: const FittedBox(
                     fit: BoxFit.scaleDown,
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
-                      children: const [
+                      children: [
                         Icon(Icons.arrow_back, size: 18),
                         SizedBox(width: 6),
                         Text('Back'),
@@ -2540,6 +2629,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   void _showSnackBar(String msg, Color color) {
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(msg),
@@ -2637,10 +2727,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           ],
         ],
       ),
-      // ✅ No fixed bottomNavigationBar anymore — the Continue/Save
-      // action row now lives at the bottom of the scrollable content
-      // (see _buildStepActions), so it never overlaps other content
-      // on narrow/mobile screens and stays responsive.
       body: SafeArea(
         child: Container(
           color: isDark ? const Color(0xFF121212) : Colors.grey[50],
