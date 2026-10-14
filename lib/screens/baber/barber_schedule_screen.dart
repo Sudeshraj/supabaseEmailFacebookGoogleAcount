@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../../services/timezone_service.dart';
+import '../../services/currency_service.dart';
 import '../../theme/app_theme.dart';
 import '../../extensions/context_extensions.dart';
 
@@ -26,11 +27,15 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   String? _salonName;
   String _barberId = '';
 
-  // Timezone
-  String _salonTimezone = '';
+  // ✅ Timezone (salon + user)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  String _salonTimezone = _kDefaultSalonTimezone;
   String _userTimezone = '';
 
-  // Selected date
+  // ✅ Currency
+  String _salonCurrencyCode = 'LKR';
+
+  // Selected date (in salon timezone)
   DateTime _selectedDate = DateTime.now();
 
   // Data
@@ -44,9 +49,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   Map<int, List<Map<String, dynamic>>> _groupedSchedules = {};
   Map<int, List<Map<String, dynamic>>> _groupedBreaks = {};
 
-  // ✅ Android 16: Responsive variables
-  bool _isLargeScreen = false;
-  bool _isTablet = false;
+  // ✅ Responsive
   bool _isWeb = false;
 
   // ✅ Web Scroll Controller
@@ -62,10 +65,29 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
     7: 'Sunday',
   };
 
+  // ============================================================
+  // ✅ SALON "NOW" - consistent timezone reference
+  // ============================================================
+  DateTime get _salonNow {
+    final tz =
+        _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+    try {
+      return TimezoneService.getNowInTimezone(tz);
+    } catch (e) {
+      debugPrint('❌ Error getting salon now: $e');
+      return DateTime.now();
+    }
+  }
+
+  DateTime get _salonToday {
+    final now = _salonNow;
+    return DateTime(now.year, now.month, now.day);
+  }
+
   @override
   void initState() {
     super.initState();
-    _initializeTimezones();
+    _initialize();
   }
 
   @override
@@ -80,51 +102,78 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
     super.dispose();
   }
 
-  // ✅ Android 16: Check screen size for responsive layout
+  // ✅ MediaQuery.sizeOf (only reacts to size changes)
   void _checkScreenSize() {
-    final size = MediaQuery.of(context).size;
-    final isLarge = size.width > 800 || size.height > 800;
-    final isTablet = size.shortestSide >= 600;
+    final size = MediaQuery.sizeOf(context);
     final isWeb = size.width > 800;
 
-    if (_isLargeScreen != isLarge || _isTablet != isTablet || _isWeb != isWeb) {
+    if (_isWeb != isWeb) {
       setState(() {
-        _isLargeScreen = isLarge;
-        _isTablet = isTablet;
         _isWeb = isWeb;
       });
     }
   }
 
   // ============================================================
-  // TIMEZONE INITIALIZATION
+  // INITIALIZATION
   // ============================================================
 
-  Future<void> _initializeTimezones() async {
+  Future<void> _initialize() async {
     await TimezoneService.initialize();
 
     _userTimezone = TimezoneService.getCurrentTimezone();
-
-    if (widget.salonId != null) {
-      try {
-        final salonIdInt = int.parse(widget.salonId!);
-        final salonResponse = await supabase
-            .from('salons')
-            .select('name, timezone')
-            .eq('id', salonIdInt)
-            .maybeSingle();
-
-        if (salonResponse != null) {
-          _salonName = salonResponse['name'];
-          _salonTimezone = salonResponse['timezone'] ?? _userTimezone;
-        }
-      } catch (e) {
-        debugPrint('Error loading salon info: $e');
-        _salonTimezone = _userTimezone;
-      }
+    if (_userTimezone.isEmpty) {
+      _userTimezone = _kDefaultSalonTimezone;
     }
 
+    await _loadSalonInfo();
+
+    // ✅ Set _selectedDate based on salon timezone
+    if (!mounted) return;
+    setState(() {
+      _selectedDate = _salonToday;
+    });
+
     await _loadBarberData();
+  }
+
+  /// ✅ Load salon info (name, timezone, currency)
+  Future<void> _loadSalonInfo() async {
+    if (widget.salonId == null) return;
+
+    // ✅ Defaults BEFORE query so they're never empty
+    _salonTimezone = _kDefaultSalonTimezone;
+    _salonCurrencyCode = 'LKR';
+
+    try {
+      final salonIdInt = int.parse(widget.salonId!);
+      final salonResponse = await supabase
+          .from('salons')
+          .select('name, timezone, currency_code')
+          .eq('id', salonIdInt)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      if (salonResponse != null) {
+        setState(() {
+          _salonName = salonResponse['name'];
+
+          final tz = salonResponse['timezone'] as String?;
+          if (tz != null && tz.isNotEmpty) {
+            _salonTimezone = tz;
+          }
+
+          final currCode = salonResponse['currency_code'] as String?;
+          if (currCode != null && currCode.isNotEmpty) {
+            _salonCurrencyCode = currCode;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading salon info: $e');
+      // ✅ Fallbacks already set above
+    }
   }
 
   // ============================================================
@@ -132,6 +181,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   // ============================================================
 
   Future<void> _loadBarberData() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -140,6 +190,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) {
+        if (!mounted) return;
         setState(() {
           _errorMessage = 'Please login to view your schedule';
           _isLoading = false;
@@ -149,26 +200,24 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
       _barberId = currentUser.id;
 
-      if (widget.salonId != null && _salonName == null) {
-        final salonResponse = await supabase
-            .from('salons')
-            .select('name, timezone')
-            .eq('id', int.parse(widget.salonId!))
-            .maybeSingle();
-
-        if (salonResponse != null) {
-          _salonName = salonResponse['name'];
-          _salonTimezone = salonResponse['timezone'] ?? _userTimezone;
-        }
+      if (widget.salonId == null) {
+        if (!mounted) return;
+        setState(() {
+          _errorMessage = 'Salon ID is required';
+          _isLoading = false;
+        });
+        return;
       }
 
       await _loadAllData();
 
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
       });
     } catch (e) {
       debugPrint('❌ Error loading data: $e');
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading data: ${e.toString()}';
         _isLoading = false;
@@ -176,67 +225,70 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
     }
   }
 
+  /// ✅ Parallel queries (Future.wait) + mounted checks after await
   Future<void> _loadAllData() async {
     if (_barberId.isEmpty || widget.salonId == null) return;
 
     final salonIdInt = int.parse(widget.salonId!);
 
-    final schedulesResponse = await supabase
-        .from('barber_schedules')
-        .select()
-        .eq('barber_id', _barberId)
-        .eq('salon_id', salonIdInt)
-        .order('day_of_week');
+    // ✅ Parallel queries for all 4 tables
+    final results = await Future.wait([
+      supabase
+          .from('barber_schedules')
+          .select()
+          .eq('barber_id', _barberId)
+          .eq('salon_id', salonIdInt)
+          .order('day_of_week'),
+      supabase
+          .from('barber_breaks')
+          .select()
+          .eq('barber_id', _barberId)
+          .eq('salon_id', salonIdInt)
+          .order('day_of_week'),
+      supabase
+          .from('barber_special_schedules')
+          .select()
+          .eq('barber_id', _barberId)
+          .eq('salon_id', salonIdInt)
+          .order('schedule_date'),
+      supabase
+          .from('barber_special_breaks')
+          .select()
+          .eq('barber_id', _barberId)
+          .eq('salon_id', salonIdInt)
+          .order('break_date'),
+    ]);
 
-    _regularSchedules = List<Map<String, dynamic>>.from(schedulesResponse);
+    // ✅ Mounted check after await
+    if (!mounted) return;
 
+    // Regular schedules
+    _regularSchedules = List<Map<String, dynamic>>.from(results[0]);
     _groupedSchedules = {};
     for (var schedule in _regularSchedules) {
-      final day = schedule['day_of_week'] as int;
-      if (!_groupedSchedules.containsKey(day)) {
-        _groupedSchedules[day] = [];
+      final day = schedule['day_of_week'] as int?;
+      if (day != null) {
+        _groupedSchedules.putIfAbsent(day, () => []).add(schedule);
       }
-      _groupedSchedules[day]!.add(schedule);
     }
 
-    final breaksResponse = await supabase
-        .from('barber_breaks')
-        .select()
-        .eq('barber_id', _barberId)
-        .eq('salon_id', salonIdInt)
-        .order('day_of_week');
-
-    _regularBreaks = List<Map<String, dynamic>>.from(breaksResponse);
-
+    // Regular breaks
+    _regularBreaks = List<Map<String, dynamic>>.from(results[1]);
     _groupedBreaks = {};
     for (var breakItem in _regularBreaks) {
-      final day = breakItem['day_of_week'] as int;
-      if (!_groupedBreaks.containsKey(day)) {
-        _groupedBreaks[day] = [];
+      final day = breakItem['day_of_week'] as int?;
+      if (day != null) {
+        _groupedBreaks.putIfAbsent(day, () => []).add(breakItem);
       }
-      _groupedBreaks[day]!.add(breakItem);
     }
 
-    final specialSchedulesResponse = await supabase
-        .from('barber_special_schedules')
-        .select()
-        .eq('barber_id', _barberId)
-        .eq('salon_id', salonIdInt)
-        .order('schedule_date');
+    // Special schedules
+    _specialSchedules = List<Map<String, dynamic>>.from(results[2]);
 
-    _specialSchedules = List<Map<String, dynamic>>.from(
-      specialSchedulesResponse,
-    );
+    // Special breaks
+    _specialBreaks = List<Map<String, dynamic>>.from(results[3]);
 
-    final specialBreaksResponse = await supabase
-        .from('barber_special_breaks')
-        .select()
-        .eq('barber_id', _barberId)
-        .eq('salon_id', salonIdInt)
-        .order('break_date');
-
-    _specialBreaks = List<Map<String, dynamic>>.from(specialBreaksResponse);
-
+    // Appointments
     await _loadAppointments();
 
     debugPrint('✅ Loaded all data successfully');
@@ -248,7 +300,9 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   }
 
   // ============================================================
-  // LOAD APPOINTMENTS
+  // ✅ LOAD APPOINTMENTS
+  // ✅ no_show included + specific date TZ conversion
+  // ✅ mounted check after await
   // ============================================================
 
   Future<void> _loadAppointments() async {
@@ -269,19 +323,18 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
             end_time,
             status,
             price,
-            service_id,
             salon_id,
             queue_number,
             queue_token,
             is_vip,
             created_at,
-            services!inner (
-              name
-            ),
-            service_variants!left (
+            appointment_services (
+              service_name,
+              variant_label,
               duration,
-              salon_genders!left (display_name),
-              salon_age_categories!left (display_name)
+              original_price,
+              discount_amount,
+              final_price
             ),
             profiles!appointments_customer_id_fkey (
               full_name,
@@ -294,78 +347,202 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
           .eq('appointment_date', dateStr)
           .eq('salon_id', salonIdInt)
           .neq('status', 'cancelled')
-          .neq('status', 'no_show')
           .order('start_time', ascending: true);
+
+      // ✅ Mounted check after await
+      if (!mounted) return;
 
       final List<Map<String, dynamic>> appointments = [];
 
       for (var item in response) {
-        final service = item['services'] as Map?;
-        final variant = item['service_variants'] as Map?;
+        final appointmentServices =
+            item['appointment_services'] as List? ?? [];
         final customer = item['profiles'] as Map?;
         final status = item['status'] as String? ?? 'pending';
-        final startTime = item['start_time'] as String;
-        final endTime = item['end_time'] as String;
+        final startTime = item['start_time'] as String? ?? '';
+        final endTime = item['end_time'] as String? ?? '';
         final price = (item['price'] as num?)?.toDouble() ?? 0.0;
+
+        // ✅ Null-safe date parsing
+        DateTime appointmentDate;
+        final dateStrRaw = item['appointment_date'] as String?;
+        if (dateStrRaw != null && dateStrRaw.isNotEmpty) {
+          try {
+            appointmentDate = DateTime.parse(dateStrRaw);
+          } catch (_) {
+            appointmentDate = _selectedDate;
+          }
+        } else {
+          appointmentDate = _selectedDate;
+        }
+
+        // ✅ Multi-service name resolution
+        String serviceName = 'Unknown Service';
+        int totalDuration = 0;
+        String variantLabel = '';
+
+        if (appointmentServices.isNotEmpty) {
+          final names = appointmentServices
+              .map((s) => s['service_name']?.toString() ?? '')
+              .where((n) => n.isNotEmpty)
+              .toList();
+
+          if (names.isNotEmpty) {
+            serviceName = names.length == 1
+                ? names.first
+                : '${names.first} +${names.length - 1} more';
+          }
+
+          for (var s in appointmentServices) {
+            totalDuration += (s['duration'] as num?)?.toInt() ?? 0;
+          }
+
+          variantLabel =
+              appointmentServices.first['variant_label']?.toString() ?? '';
+        }
+
+        // ✅ Specific date TZ conversion (NOT recurring)
+        final localStart = _formatUtcToLocalTimeForDate(
+          startTime,
+          appointmentDate,
+          _salonTimezone,
+        );
+        final localEnd = _formatUtcToLocalTimeForDate(
+          endTime,
+          appointmentDate,
+          _salonTimezone,
+        );
 
         appointments.add({
           'id': item['id'],
           'booking_number': item['booking_number'],
+          'appointment_date': item['appointment_date'],
           'customer_name': customer?['full_name'] ?? 'Unknown Customer',
           'customer_avatar': customer?['avatar_url'],
           'customer_phone': customer?['phone'] ?? '',
           'customer_email': customer?['email'] ?? '',
-          'service_name': service?['name'] ?? 'Unknown Service',
-          'start_time': _formatUtcToLocalTime(startTime),
-          'end_time': _formatUtcToLocalTime(endTime),
+          'service_name': serviceName,
+          'service_count': appointmentServices.length,
+          'start_time': localStart,
+          'end_time': localEnd,
           'start_time_raw': startTime,
           'end_time_raw': endTime,
           'status': status,
           'price': price,
-          'duration': variant?['duration'] ?? 30,
+          'duration': totalDuration > 0 ? totalDuration : 30,
           'is_vip': item['is_vip'] ?? false,
           'queue_number': item['queue_number'],
           'queue_token': item['queue_token'],
-          'gender': variant?['salon_genders']?['display_name'] ?? '',
-          'age_category':
-              variant?['salon_age_categories']?['display_name'] ?? '',
+          'variant_label': variantLabel,
         });
       }
 
+      if (!mounted) return;
       setState(() {
         _appointments = appointments;
       });
 
-      debugPrint('✅ Loaded ${appointments.length} appointments for $_selectedDate');
+      debugPrint(
+          '✅ Loaded ${appointments.length} appointments for $_selectedDate');
     } catch (e) {
       debugPrint('❌ Error loading appointments: $e');
+      if (mounted) {
+        setState(() {
+          _appointments = [];
+        });
+      }
     }
   }
 
   // ============================================================
-  // TIMEZONE HELPERS
+  // ✅ TIMEZONE HELPERS
   // ============================================================
 
-  String _formatUtcToLocalTime(String? utcTime) {
+  /// ✅ Specific date TZ conversion (NOT recurring)
+  String _formatUtcToLocalTimeForDate(
+    String? utcTime,
+    DateTime date,
+    String? timezone,
+  ) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
+
+    final tz = timezone ??
+        (_salonTimezone.isNotEmpty ? _salonTimezone : _userTimezone);
+
+    if (tz.isEmpty) {
+      // Fallback: manual parsing
+      try {
+        final parts = utcTime.split(':');
+        final hour = int.parse(parts[0]);
+        final minute = int.parse(parts[1]);
+        final period = hour >= 12 ? 'PM' : 'AM';
+        final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+        return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+      } catch (e) {
+        return '--:--';
+      }
+    }
+
     try {
-      return TimezoneService.utcToLocalTimeRecurring(utcTime);
+      return TimezoneService.utcToLocalTimeForDateWithTimezone(
+        utcTime,
+        date,
+        tz,
+      );
     } catch (e) {
-      final parts = utcTime.split(':');
-      final hour = int.parse(parts[0]);
-      final minute = int.parse(parts[1]);
-      final period = hour >= 12 ? 'PM' : 'AM';
-      final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-      return '$displayHour:${minute.toString().padLeft(2, '0')} $period';
+      debugPrint('❌ Error converting time: $e');
+      return '--:--';
     }
   }
 
-  String _getTimezoneDisplay() {
-    return TimezoneService.getFullTimezoneDisplay();
+  /// ✅ UTC → USER timezone reference (only if different)
+  /// ✅ Specific date (NOT recurring)
+  String _formatUtcToUserTime(String? utcTime, DateTime appointmentDate) {
+    if (utcTime == null || utcTime.isEmpty) return '';
+    if (_userTimezone.isEmpty) return '';
+    if (_salonTimezone == _userTimezone) return '';
+
+    try {
+      return TimezoneService.utcToLocalTimeForDateWithTimezone(
+        utcTime,
+        appointmentDate,
+        _userTimezone,
+      );
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /// ✅ Salon timezone display
+  String _getSalonTimezoneDisplay() {
+    final tz = _salonTimezone.isNotEmpty ? _salonTimezone : _userTimezone;
+    if (tz.isEmpty) return 'Unknown';
+    return TimezoneService.getFullTimezoneDisplayFor(tz);
+  }
+
+  /// ✅ User timezone display
+  String _getUserTimezoneDisplay() {
+    if (_userTimezone.isEmpty) return '';
+    return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
+  }
+
+  /// ✅ Check if user timezone differs from salon
+  bool get _isDifferentTimezone {
+    if (_salonTimezone.isEmpty || _userTimezone.isEmpty) return false;
+    return _salonTimezone != _userTimezone;
+  }
+
+  /// ✅ Currency format helper
+  String _formatPrice(dynamic price) {
+    return CurrencyService.instance.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
   }
 
   // ============================================================
   // DATE NAVIGATION
+  // ✅ Date picker uses salon timezone bounds
   // ============================================================
 
   void _previousDate() {
@@ -384,17 +561,20 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
   void _goToToday() {
     setState(() {
-      _selectedDate = DateTime.now();
+      _selectedDate = _salonToday;
     });
     _loadAppointments();
   }
 
   Future<void> _selectDate() async {
+    // ✅ Date picker bounds based on salon timezone
+    final salonToday = _salonToday;
+
     final picked = await showDatePicker(
       context: context,
       initialDate: _selectedDate,
-      firstDate: DateTime.now().subtract(const Duration(days: 30)),
-      lastDate: DateTime.now().add(const Duration(days: 90)),
+      firstDate: salonToday.subtract(const Duration(days: 30)),
+      lastDate: salonToday.add(const Duration(days: 90)),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -408,7 +588,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
       },
     );
 
-    if (picked != null) {
+    if (picked != null && mounted) {
       setState(() {
         _selectedDate = picked;
       });
@@ -418,6 +598,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
   // ============================================================
   // STATUS HELPERS
+  // ✅ no_show case is reachable (no_show NOT excluded from query)
   // ============================================================
 
   (Color, String, IconData) _getStatusInfo(String status) {
@@ -474,6 +655,8 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
   // ============================================================
   // ✅ BUILD: APPOINTMENT CARD
+  // ✅ customer_name null safety + user TZ specific date
+  // ✅ null-safe date parsing
   // ============================================================
 
   Widget _buildAppointmentCard(Map<String, dynamic> appointment) {
@@ -481,6 +664,40 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
     final status = appointment['status'] as String? ?? 'pending';
     final (statusColor, statusLabel, statusIcon) = _getStatusInfo(status);
     final isVip = appointment['is_vip'] == true;
+
+    // ✅ Null-safe date parsing
+    DateTime appointmentDate;
+    final dateStrRaw = appointment['appointment_date'] as String?;
+    if (dateStrRaw != null && dateStrRaw.isNotEmpty) {
+      try {
+        appointmentDate = DateTime.parse(dateStrRaw);
+      } catch (_) {
+        appointmentDate = _selectedDate;
+      }
+    } else {
+      appointmentDate = _selectedDate;
+    }
+
+    // ✅ User time reference (specific date)
+    final userStartTime = _formatUtcToUserTime(
+      appointment['start_time_raw'] as String?,
+      appointmentDate,
+    );
+    final userEndTime = _formatUtcToUserTime(
+      appointment['end_time_raw'] as String?,
+      appointmentDate,
+    );
+    final hasUserTime = userStartTime.isNotEmpty && userEndTime.isNotEmpty;
+
+    // ✅ Service count
+    final serviceCount = (appointment['service_count'] as int?) ?? 0;
+
+    // ✅ Null-safe customer name initial
+    final customerName =
+        (appointment['customer_name'] as String?) ?? 'Unknown Customer';
+    final customerInitial = customerName.isNotEmpty
+        ? customerName[0].toUpperCase()
+        : '?';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -543,11 +760,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        statusIcon,
-                        size: 12,
-                        color: statusColor,
-                      ),
+                      Icon(statusIcon, size: 12, color: statusColor),
                       const SizedBox(width: 4),
                       Text(
                         statusLabel,
@@ -562,6 +775,20 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                 ),
               ],
             ),
+
+            // ✅ User time reference (only if different)
+            if (hasUserTime)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Your time: $userStartTime - $userEndTime',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontStyle: FontStyle.italic,
+                    color: isDark ? Colors.blue[300] : Colors.blue[700],
+                  ),
+                ),
+              ),
             const SizedBox(height: 8),
 
             // Customer Info
@@ -569,16 +796,15 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
               children: [
                 CircleAvatar(
                   radius: 20,
-                  backgroundColor: isDark ? Colors.grey[800] : Colors.grey[200],
+                  backgroundColor:
+                      isDark ? Colors.grey[800] : Colors.grey[200],
                   backgroundImage: appointment['customer_avatar'] != null
                       ? CachedNetworkImageProvider(
                           appointment['customer_avatar'])
                       : null,
                   child: appointment['customer_avatar'] == null
                       ? Text(
-                          (appointment['customer_name'] as String?)?[0]
-                                  .toUpperCase() ??
-                              '?',
+                          customerInitial,
                           style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
@@ -596,12 +822,12 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              appointment['customer_name'] ??
-                                  'Unknown Customer',
+                              customerName,
                               style: TextStyle(
                                 fontSize: 14,
                                 fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white : Colors.black87,
+                                color:
+                                    isDark ? Colors.white : Colors.black87,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -638,12 +864,43 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                             ),
                         ],
                       ),
-                      Text(
-                        appointment['service_name'] ?? 'Unknown Service',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              appointment['service_name'] ??
+                                  'Unknown Service',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          // ✅ Service count badge
+                          if (serviceCount > 1)
+                            Container(
+                              margin: const EdgeInsets.only(left: 4),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '$serviceCount services',
+                                style: const TextStyle(
+                                  fontSize: 9,
+                                  color: Colors.blue,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),
@@ -664,20 +921,14 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                 ),
                 _buildDetailChip(
                   icon: Icons.attach_money,
-                  label: 'Rs. ${appointment['price'].toStringAsFixed(0)}',
+                  label: _formatPrice(appointment['price']),
                   color: Colors.green,
                 ),
-                if (appointment['gender']?.isNotEmpty ?? false)
+                if (appointment['variant_label']?.isNotEmpty ?? false)
                   _buildDetailChip(
                     icon: Icons.people,
-                    label: appointment['gender'],
+                    label: appointment['variant_label'],
                     color: Colors.purple,
-                  ),
-                if (appointment['age_category']?.isNotEmpty ?? false)
-                  _buildDetailChip(
-                    icon: Icons.cake,
-                    label: appointment['age_category'],
-                    color: Colors.orange,
                   ),
               ],
             ),
@@ -694,6 +945,8 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   Widget _buildScheduleDayItem(
       String dayName, List<Map<String, dynamic>> schedules) {
     final isDark = context.isDarkMode;
+    // ✅ Use a reference date for recurring schedule TZ conversion
+    final referenceDate = DateTime(2024, 1, 1);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
@@ -724,8 +977,17 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
               runSpacing: 4,
               children: schedules.map((schedule) {
                 final isWorking = schedule['is_working'] ?? true;
-                final startTime = _formatUtcToLocalTime(schedule['start_time']);
-                final endTime = _formatUtcToLocalTime(schedule['end_time']);
+                // ✅ Recurring schedules use reference date
+                final startTime = _formatUtcToLocalTimeForDate(
+                  schedule['start_time'] as String?,
+                  referenceDate,
+                  _salonTimezone,
+                );
+                final endTime = _formatUtcToLocalTimeForDate(
+                  schedule['end_time'] as String?,
+                  referenceDate,
+                  _salonTimezone,
+                );
 
                 return Container(
                   padding: const EdgeInsets.symmetric(
@@ -776,10 +1038,12 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
   // ============================================================
   // ✅ BUILD: TIMEZONE INFO CARD
+  // ✅ Salon timezone main + user reference (only if different)
   // ============================================================
 
   Widget _buildTimezoneInfoCard() {
     final isDark = context.isDarkMode;
+    final showUserTz = _isDifferentTimezone;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -790,38 +1054,82 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
           color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.access_time,
-            size: 16,
-            color: isDark ? Colors.white60 : Colors.grey,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              '⏰ Times shown in: ${_getTimezoneDisplay()}',
-              style: TextStyle(
-                fontSize: 12,
+          // ✅ Salon timezone (MAIN)
+          Row(
+            children: [
+              Icon(
+                Icons.store,
+                size: 16,
                 color: isDark ? Colors.white60 : Colors.grey,
               ),
-            ),
-          ),
-          if (_salonTimezone.isNotEmpty && _salonTimezone != _userTimezone)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                'Salon: ${_salonTimezone.split('/').last}',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: isDark ? Colors.orange[300] : Colors.orange,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '⏰ Salon times: ${_getSalonTimezoneDisplay()}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white70 : Colors.grey[700],
+                  ),
                 ),
               ),
+            ],
+          ),
+
+          // ✅ User timezone reference (only if different)
+          if (showUserTz) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.person,
+                    size: 14,
+                    color: Colors.orange[700],
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'You are in: ${_getUserTimezoneDisplay()}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange[700],
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Main times are for salon location',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontStyle: FontStyle.italic,
+                            color: isDark
+                                ? Colors.white60
+                                : Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
+          ],
         ],
       ),
     );
@@ -829,13 +1137,13 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
   // ============================================================
   // ✅ BUILD: DATE NAVIGATOR
+  // ✅ isToday based on salon timezone
   // ============================================================
 
   Widget _buildDateNavigator() {
     final isDark = context.isDarkMode;
-    final isToday = _selectedDate.isAtSameMomentAs(
-      DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
-    );
+    final salonToday = _salonToday;
+    final isToday = _selectedDate.isAtSameMomentAs(salonToday);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -879,7 +1187,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                         minimumSize: const Size(0, 20),
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
-                      child: Text(
+                      child: const Text(
                         'Go to Today',
                         style: TextStyle(
                           fontSize: 12,
@@ -903,10 +1211,32 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
   // ============================================================
   // ✅ BUILD: APPOINTMENTS SECTION
+  // ✅ isToday/isYesterday/isTomorrow based on salon timezone
   // ============================================================
 
   Widget _buildAppointmentsSection() {
     final isDark = context.isDarkMode;
+
+    // ✅ Use salon today for relative day detection
+    final salonToday = _salonToday;
+    final isToday = _selectedDate.isAtSameMomentAs(salonToday);
+    final isYesterday = _selectedDate.isAtSameMomentAs(
+      salonToday.subtract(const Duration(days: 1)),
+    );
+    final isTomorrow = _selectedDate.isAtSameMomentAs(
+      salonToday.add(const Duration(days: 1)),
+    );
+
+    String title;
+    if (isToday) {
+      title = "Today's Appointments";
+    } else if (isYesterday) {
+      title = "Yesterday's Appointments";
+    } else if (isTomorrow) {
+      title = "Tomorrow's Appointments";
+    } else {
+      title = '${DateFormat('MMM dd').format(_selectedDate)} Appointments';
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -929,15 +1259,17 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
               children: [
                 const Icon(Icons.calendar_today, color: AppTheme.primary),
                 const SizedBox(width: 8),
-                Text(
-                  "Today's Appointments",
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
@@ -971,7 +1303,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'No appointments today',
+                      'No appointments',
                       style: TextStyle(
                         color: isDark ? Colors.white70 : Colors.grey[500],
                       ),
@@ -1089,6 +1421,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
   // ============================================================
   // ✅ BUILD: SPECIAL SCHEDULES SECTION
+  // ✅ null-safe date parsing + specific date TZ conversion
   // ============================================================
 
   Widget _buildSpecialSchedulesSection() {
@@ -1148,11 +1481,33 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
               children: _specialSchedules.map((schedule) {
-                final date = DateTime.parse(schedule['schedule_date']);
+                // ✅ null-safe date parsing
+                final dateStr = schedule['schedule_date'] as String?;
+                if (dateStr == null || dateStr.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+
+                DateTime date;
+                try {
+                  date = DateTime.parse(dateStr);
+                } catch (_) {
+                  return const SizedBox.shrink();
+                }
+
                 final isWorking = schedule['is_working'] ?? true;
                 final reason = schedule['reason'] ?? 'Special day';
-                final startTime = _formatUtcToLocalTime(schedule['start_time']);
-                final endTime = _formatUtcToLocalTime(schedule['end_time']);
+
+                // ✅ Specific date TZ conversion for special schedules
+                final startTime = _formatUtcToLocalTimeForDate(
+                  schedule['start_time'] as String?,
+                  date,
+                  _salonTimezone,
+                );
+                final endTime = _formatUtcToLocalTimeForDate(
+                  schedule['end_time'] as String?,
+                  date,
+                  _salonTimezone,
+                );
 
                 return Container(
                   margin: const EdgeInsets.only(bottom: 6),
@@ -1173,14 +1528,18 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                         width: 90,
                         child: Text(
                           DateFormat('MMM dd').format(date),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 12,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                       ),
                       Expanded(
-                        child: Row(
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -1206,7 +1565,9 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                         ? Icons.check_circle
                                         : Icons.cancel,
                                     size: 12,
-                                    color: isWorking ? Colors.green : Colors.red,
+                                    color: isWorking
+                                        ? Colors.green
+                                        : Colors.red,
                                   ),
                                   const SizedBox(width: 4),
                                   Text(
@@ -1222,8 +1583,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                 ],
                               ),
                             ),
-                            if (isWorking) ...[
-                              const SizedBox(width: 8),
+                            if (isWorking)
                               Container(
                                 padding: const EdgeInsets.symmetric(
                                   horizontal: 8,
@@ -1237,21 +1597,22 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                   '$startTime - $endTime',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: isDark ? Colors.blue[300] : Colors.blue[700],
+                                    color: isDark
+                                        ? Colors.blue[300]
+                                        : Colors.blue[700],
                                   ),
                                 ),
                               ),
-                            ],
-                            if (reason.isNotEmpty) ...[
-                              const SizedBox(width: 8),
+                            if (reason.isNotEmpty)
                               Text(
                                 reason,
                                 style: TextStyle(
                                   fontSize: 11,
-                                  color: isDark ? Colors.white70 : Colors.grey[500],
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.grey[500],
                                 ),
                               ),
-                            ],
                           ],
                         ),
                       ),
@@ -1269,10 +1630,13 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
   // ============================================================
   // ✅ BUILD: REGULAR BREAKS SECTION
+  // ✅ Recurring TZ conversion via reference date
   // ============================================================
 
   Widget _buildRegularBreaksSection() {
     final isDark = context.isDarkMode;
+    // ✅ Use reference date for recurring breaks
+    final referenceDate = DateTime(2024, 1, 1);
 
     return Container(
       decoration: BoxDecoration(
@@ -1353,9 +1717,10 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                         width: 90,
                         child: Text(
                           dayName,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 13,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                       ),
@@ -1364,11 +1729,36 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                           spacing: 8,
                           runSpacing: 4,
                           children: breaks.map((breakItem) {
-                            final startTime =
-                                _formatUtcToLocalTime(breakItem['start_time']);
-                            final endTime =
-                                _formatUtcToLocalTime(breakItem['end_time']);
-                            final breakType = breakItem['break_type'] ?? 'Break';
+                            // ✅ Recurring breaks use reference date
+                            final startTime = _formatUtcToLocalTimeForDate(
+                              breakItem['start_time'] as String?,
+                              referenceDate,
+                              _salonTimezone,
+                            );
+                            final endTime = _formatUtcToLocalTimeForDate(
+                              breakItem['end_time'] as String?,
+                              referenceDate,
+                              _salonTimezone,
+                            );
+                            final breakType =
+                                breakItem['break_type'] ?? 'Break';
+
+                            // ✅ Break type icon + label
+                            IconData icon;
+                            String label;
+                            switch (breakType) {
+                              case 'lunch':
+                                icon = Icons.lunch_dining;
+                                label = 'Lunch';
+                                break;
+                              case 'tea':
+                                icon = Icons.coffee;
+                                label = 'Tea';
+                                break;
+                              default:
+                                icon = Icons.free_breakfast;
+                                label = 'Custom';
+                            }
 
                             return Container(
                               padding: const EdgeInsets.symmetric(
@@ -1376,17 +1766,19 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                 vertical: 4,
                               ),
                               decoration: BoxDecoration(
-                                color: Colors.orange.withValues(alpha: 0.1),
+                                color:
+                                    Colors.orange.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: Colors.orange.withValues(alpha: 0.3),
+                                  color: Colors.orange
+                                      .withValues(alpha: 0.3),
                                 ),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(
-                                    Icons.coffee,
+                                  Icon(
+                                    icon,
                                     size: 12,
                                     color: Colors.orange,
                                   ),
@@ -1405,14 +1797,19 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: isDark ? Colors.grey[800] : Colors.grey[200],
-                                      borderRadius: BorderRadius.circular(4),
+                                      color: isDark
+                                          ? Colors.grey[800]
+                                          : Colors.grey[200],
+                                      borderRadius:
+                                          BorderRadius.circular(4),
                                     ),
                                     child: Text(
-                                      breakType,
+                                      label,
                                       style: TextStyle(
                                         fontSize: 8,
-                                        color: isDark ? Colors.white60 : Colors.grey[600],
+                                        color: isDark
+                                            ? Colors.white60
+                                            : Colors.grey[600],
                                       ),
                                     ),
                                   ),
@@ -1436,6 +1833,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
 
   // ============================================================
   // ✅ BUILD: SPECIAL BREAKS SECTION
+  // ✅ null-safe date parsing + specific date TZ
   // ============================================================
 
   Widget _buildSpecialBreaksSection() {
@@ -1495,13 +1893,33 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
               children: _specialBreaks.map((breakItem) {
-                final date = DateTime.parse(breakItem['break_date']);
-                final startTime =
-                    _formatUtcToLocalTime(breakItem['start_time']);
-                final endTime = _formatUtcToLocalTime(breakItem['end_time']);
+                // ✅ null-safe date parsing
+                final dateStr = breakItem['break_date'] as String?;
+                if (dateStr == null || dateStr.isEmpty) {
+                  return const SizedBox.shrink();
+                }
+
+                DateTime date;
+                try {
+                  date = DateTime.parse(dateStr);
+                } catch (_) {
+                  return const SizedBox.shrink();
+                }
+
+                // ✅ Specific date TZ conversion
+                final startTime = _formatUtcToLocalTimeForDate(
+                  breakItem['start_time'] as String?,
+                  date,
+                  _salonTimezone,
+                );
+                final endTime = _formatUtcToLocalTimeForDate(
+                  breakItem['end_time'] as String?,
+                  date,
+                  _salonTimezone,
+                );
                 final breakType = breakItem['break_type'] ?? 'custom';
 
-                String breakTypeLabel = 'Break';
+                String breakTypeLabel = 'Custom';
                 IconData breakIcon = Icons.free_breakfast;
                 switch (breakType) {
                   case 'lunch':
@@ -1536,14 +1954,17 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                         width: 90,
                         child: Text(
                           DateFormat('MMM dd').format(date),
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 12,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                       ),
                       Expanded(
-                        child: Row(
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 4,
                           children: [
                             Container(
                               padding: const EdgeInsets.symmetric(
@@ -1554,7 +1975,8 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                 color: Colors.teal.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: Colors.teal.withValues(alpha: 0.3),
+                                  color: Colors.teal
+                                      .withValues(alpha: 0.3),
                                 ),
                               ),
                               child: Row(
@@ -1570,7 +1992,9 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                     '$startTime - $endTime',
                                     style: TextStyle(
                                       fontSize: 11,
-                                      color: isDark ? Colors.teal[300] : Colors.teal[700],
+                                      color: isDark
+                                          ? Colors.teal[300]
+                                          : Colors.teal[700],
                                     ),
                                   ),
                                   const SizedBox(width: 4),
@@ -1580,14 +2004,19 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                                       vertical: 2,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: isDark ? Colors.grey[800] : Colors.grey[200],
-                                      borderRadius: BorderRadius.circular(4),
+                                      color: isDark
+                                          ? Colors.grey[800]
+                                          : Colors.grey[200],
+                                      borderRadius:
+                                          BorderRadius.circular(4),
                                     ),
                                     child: Text(
                                       breakTypeLabel,
                                       style: TextStyle(
                                         fontSize: 8,
-                                        color: isDark ? Colors.white60 : Colors.grey[600],
+                                        color: isDark
+                                            ? Colors.white60
+                                            : Colors.grey[600],
                                       ),
                                     ),
                                   ),
@@ -1626,12 +2055,15 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
             color: isDark ? Colors.white70 : Colors.grey[400],
           ),
           const SizedBox(height: 16),
-          Text(
-            _errorMessage!,
-            style: TextStyle(
-              color: isDark ? Colors.white60 : Colors.grey[600],
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              _errorMessage ?? 'Something went wrong',
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+              textAlign: TextAlign.center,
             ),
-            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 24),
           ElevatedButton(
@@ -1648,7 +2080,7 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   }
 
   // ============================================================
-  // ✅ BUILD: DASHBOARD CONTENT
+  // ✅ BUILD: CONTENT
   // ============================================================
 
   Widget _buildContent() {
@@ -1663,21 +2095,25 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
         _buildDateNavigator(),
         const SizedBox(height: 16),
 
-        // Today's Appointments
+        // Appointments
         _buildAppointmentsSection(),
         const SizedBox(height: 16),
 
-        // Regular Schedule (All days)
+        // Regular Schedule
         _buildRegularScheduleSection(),
         const SizedBox(height: 16),
 
         // Special Schedules
-        if (_specialSchedules.isNotEmpty) _buildSpecialSchedulesSection(),
-        const SizedBox(height: 16),
+        if (_specialSchedules.isNotEmpty) ...[
+          _buildSpecialSchedulesSection(),
+          const SizedBox(height: 16),
+        ],
 
         // Regular Breaks
-        if (_regularBreaks.isNotEmpty) _buildRegularBreaksSection(),
-        const SizedBox(height: 16),
+        if (_regularBreaks.isNotEmpty) ...[
+          _buildRegularBreaksSection(),
+          const SizedBox(height: 16),
+        ],
 
         // Special Breaks
         if (_specialBreaks.isNotEmpty) _buildSpecialBreaksSection(),
@@ -1686,30 +2122,29 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
   }
 
   // ============================================================
-  // ✅ BUILD METHOD - WITH WEB FRAME
+  // ✅ BUILD METHOD
   // ============================================================
 
   @override
   Widget build(BuildContext context) {
-    _checkScreenSize();
     final isDark = context.isDarkMode;
-    final isWeb = _isWeb;
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: Text(
           _salonName != null ? 'My Schedule - $_salonName' : 'My Schedule',
-          style: TextStyle(
+          style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
             color: Colors.white,
           ),
+          overflow: TextOverflow.ellipsis,
         ),
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
         elevation: 0,
-        centerTitle: isWeb,
+        centerTitle: _isWeb,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
@@ -1721,7 +2156,6 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
             onPressed: _selectDate,
             tooltip: 'Select Date',
           ),
-          // ✅ Refresh button removed from AppBar
         ],
       ),
       body: SafeArea(
@@ -1742,15 +2176,15 @@ class _BarberScheduleViewScreenState extends State<BarberScheduleViewScreen> {
                 ),
               )
             : _errorMessage != null
-            ? _buildErrorState()
-            : isWeb
-            ? _buildWebLayout()
-            : _buildMobileLayout(),
+                ? _buildErrorState()
+                : _isWeb
+                    ? _buildWebLayout()
+                    : _buildMobileLayout(),
       ),
     );
   }
 
-  // ✅ WEB LAYOUT - Centered with Scrollbar
+  // ✅ WEB LAYOUT
   Widget _buildWebLayout() {
     return Center(
       child: Container(

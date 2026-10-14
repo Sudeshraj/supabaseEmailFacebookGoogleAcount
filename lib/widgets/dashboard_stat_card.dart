@@ -14,9 +14,7 @@ class DashboardStatCard extends StatelessWidget {
   final bool showProgress;
   final double progressValue;
 
-  /// ✅ NEW: Mobile එකේ icon text එක hide කරන්න
-  /// true නම් → Mobile එකේ icon text එක පෙන්නන්නේ නෑ
-  /// (value text එකේම currency symbol එක තියෙන නිසා)
+  /// ✅ Mobile එකේ icon text එක hide කරන්න
   final bool hideIconTextOnMobile;
 
   const DashboardStatCard({
@@ -32,7 +30,7 @@ class DashboardStatCard extends StatelessWidget {
     this.percentageChange,
     this.showProgress = false,
     this.progressValue = 0.7,
-    this.hideIconTextOnMobile = false, // ✅ Default: false (පරණ behavior)
+    this.hideIconTextOnMobile = false,
   }) : assert(
           icon != null || iconText != null,
           'Either icon or iconText must be provided',
@@ -43,7 +41,7 @@ class DashboardStatCard extends StatelessWidget {
     // ✅ Responsive sizing
     final isTablet = context.isTablet;
     final isDark = context.isDarkMode;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isMobile = screenWidth < 600;
 
     // ✅ Mobile එකේ icon text එක hide කරන්නද?
@@ -61,6 +59,31 @@ class DashboardStatCard extends StatelessWidget {
         ? Colors.black.withValues(alpha: 0.3)
         : Colors.grey.withValues(alpha: 0.1);
 
+    // ✅ FIX: Determine what to show in the icon container
+    // Priority:
+    //   1. iconText (if not hidden) → Text (e.g., "Rs.")
+    //   2. icon → Icon (e.g., Icons.attach_money)
+    final Widget? iconWidget;
+    if (iconText != null && !shouldHideIconText) {
+      // ✅ Text icon (e.g., "Rs." for LKR)
+      iconWidget = Center(
+        widthFactor: 1.0,
+        child: Text(
+          iconText!,
+          style: TextStyle(
+            fontSize: iconSize * 0.75,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+      );
+    } else if (icon != null) {
+      // ✅ Icon (e.g., Icons.attach_money for USD)
+      iconWidget = Icon(icon!, color: color, size: iconSize);
+    } else {
+      iconWidget = null;
+    }
+
     return Material(
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(borderRadius),
@@ -71,9 +94,7 @@ class DashboardStatCard extends StatelessWidget {
         highlightColor: color.withValues(alpha: 0.05),
         child: Container(
           width: fullWidth ? double.infinity : null,
-          constraints: BoxConstraints(
-            minHeight: minHeight,
-          ),
+          constraints: BoxConstraints(minHeight: minHeight),
           padding: EdgeInsets.all(padding),
           decoration: BoxDecoration(
             color: context.cardColor,
@@ -96,8 +117,8 @@ class DashboardStatCard extends StatelessWidget {
               // ✅ Icon and Value Row
               Row(
                 children: [
-                  // ✅ Icon/Text container - Mobile එකේ hide කරන්න පුළුවන්
-                  if (!shouldHideIconText) ...[
+                  // ✅ Icon/Text container
+                  if (iconWidget != null) ...[
                     Container(
                       padding: EdgeInsets.all(iconPadding),
                       decoration: BoxDecoration(
@@ -106,42 +127,28 @@ class DashboardStatCard extends StatelessWidget {
                           isTablet ? 14.0 : 12.0,
                         ),
                       ),
-                      child: iconText != null
-                          ? Center(
-                              widthFactor: 1.0,
-                              child: Text(
-                                iconText!,
-                                style: TextStyle(
-                                  fontSize: iconSize * 0.75,
-                                  fontWeight: FontWeight.bold,
-                                  color: color,
-                                ),
-                              ),
-                            )
-                          : Icon(
-                              icon!,
-                              color: color,
-                              size: iconSize,
-                            ),
+                      child: iconWidget,
                     ),
                     const SizedBox(width: 8),
                   ],
-                  // ✅ Value - Expanded + ellipsis
+                  // ✅ Value - FittedBox (never cut off)
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(
-                          value,
-                          style: TextStyle(
-                            fontSize: valueSize,
-                            fontWeight: FontWeight.bold,
-                            color: color,
-                            height: 1.2,
+                        FittedBox(
+                          fit: BoxFit.scaleDown,
+                          alignment: Alignment.centerRight,
+                          child: Text(
+                            value,
+                            style: TextStyle(
+                              fontSize: valueSize,
+                              fontWeight: FontWeight.bold,
+                              color: color,
+                              height: 1.2,
+                            ),
+                            maxLines: 1,
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.end,
                         ),
                         if (percentageChange != null)
                           Row(
