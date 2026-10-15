@@ -54,6 +54,10 @@ dependencies:
   # PayHere Payment Gateway
   payhere_mobilesdk_flutter: ^3.2.3
 
+  # google pay biling
+  in_app_purchase_android: ^0.5.4
+  in_app_purchase: ^3.3.1
+
   # PDF export සඳහා (Platinum plan එකට)
   pdf: ^3.13.1
   printing: ^5.15.1

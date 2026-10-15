@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter_application_1/screens/subscription/screens/play_billing_service.dart';
 import '../models/subscription_plan.dart';
 import '../services/subscription_service.dart';
 
@@ -10,6 +13,8 @@ class SubscriptionProvider extends ChangeNotifier {
   int? _currentSalonId;
   bool _loading = false;
   String? _error;
+
+  StreamSubscription<PlayPurchaseEvent>? _playSub;
 
   List<SubscriptionPlan> get plans => _plans;
   Map<String, dynamic>? get capabilities => _currentCapabilities;
@@ -35,6 +40,12 @@ class SubscriptionProvider extends ChangeNotifier {
 
   bool get isPaidPlan => currentPlanName != 'bronze';
 
+  /// 'free' | 'payhere' | 'google_play'
+  String get planSource => _currentCapabilities?['plan']?['source'] ?? 'free';
+  bool get isPlaySource => planSource == 'google_play';
+  String? get playProductId =>
+      _currentCapabilities?['plan']?['play_product_id'] as String?;
+
   DateTime? get expiresAt {
     final raw = _currentCapabilities?['plan']?['expires_at'];
     if (raw is String) return DateTime.tryParse(raw)?.toLocal();
@@ -54,8 +65,10 @@ class SubscriptionProvider extends ChangeNotifier {
     return (diff.inHours / 24).ceil();
   }
 
-  /// A paid plan can be renewed during its last 7 days
-  bool get canRenew => isPaidPlan && (daysRemaining ?? 999) <= 7;
+  /// PayHere (web) plans can be renewed during the last 7 days.
+  /// Google Play renews by itself, so there is nothing to "renew" there.
+  bool get canRenew =>
+      isPaidPlan && !isPlaySource && (daysRemaining ?? 999) <= 7;
 
   // ---------- feature checks ----------
   bool get canViewHistory =>
@@ -72,6 +85,16 @@ class SubscriptionProvider extends ChangeNotifier {
       _currentCapabilities?['capabilities']?['customers_screen'] ?? false;
   bool get canExportData =>
       _currentCapabilities?['capabilities']?['export_data'] ?? false;
+
+  /// Android only: listen for Google Play purchases (also the ones that finish
+  /// outside the app, e.g. a delayed payment) and refresh the plan afterwards.
+  void _ensurePlayBilling() {
+    if (!PlayBillingService.isSupported) return;
+    _playSub ??= PlayBillingService.instance.events.listen((event) {
+      if (event.type == PlayEventType.verified) refresh();
+    });
+    PlayBillingService.instance.start();
+  }
 
   /// Load plans list
   Future<void> loadPlans() async {
@@ -110,6 +133,8 @@ class SubscriptionProvider extends ChangeNotifier {
 
     _loading = false;
     notifyListeners();
+
+    _ensurePlayBilling();
   }
 
   /// Refresh current capabilities
@@ -126,10 +151,20 @@ class SubscriptionProvider extends ChangeNotifier {
     _currentSalonId = null;
     _error = null;
     _loading = false;
+    _playSub?.cancel();
+    _playSub = null;
+    PlayBillingService.instance.stop();
     notifyListeners();
   }
 
-  /// Request plan change. Pass [salonId] explicitly from screens that know it.
+  @override
+  void dispose() {
+    _playSub?.cancel();
+    super.dispose();
+  }
+
+  /// Request a plan change through the server (PayHere / free plans only).
+  /// On Android paid plans are bought with Google Play Billing instead.
   Future<Map<String, dynamic>> requestPlanChange({
     required String newPlanName,
     required String ownerId,
@@ -153,7 +188,8 @@ class SubscriptionProvider extends ChangeNotifier {
     return result;
   }
 
-  /// Cancel subscription (access continues until the period end)
+  /// Cancel a PayHere subscription (access continues until the period end).
+  /// Google Play subscriptions are cancelled in Google Play.
   Future<Map<String, dynamic>> cancelSubscription({
     required String ownerId,
     String? reason,

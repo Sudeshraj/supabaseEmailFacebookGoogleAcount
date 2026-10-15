@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/screens/subscription/providers/subscription_provider.dart';
 import 'package:flutter_application_1/screens/subscription/screens/payment_history_screen.dart';
 import 'package:flutter_application_1/screens/subscription/screens/plans_comparison_screen.dart';
+import 'package:flutter_application_1/screens/subscription/screens/play_billing_service.dart';
 import 'package:provider/provider.dart';
-import '../providers/subscription_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class SubscriptionScreen extends StatefulWidget {
   final int salonId;
@@ -166,6 +169,16 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   ],
                 ),
               ),
+            if (provider.isPlaySource)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  provider.cancelAtPeriodEnd
+                      ? 'Billed through Google Play (will not renew)'
+                      : 'Billed through Google Play (renews automatically)',
+                  style: TextStyle(color: Colors.grey[700]),
+                ),
+              ),
             Text(
               'Salons: ${provider.currentSalons} / ${provider.maxSalons == -1 ? "∞" : provider.maxSalons}',
               style: TextStyle(color: Colors.grey[700]),
@@ -239,8 +252,55 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             ),
           ),
         ),
-        // Already cancelled -> nothing left to cancel
-        if (isPaid && !provider.cancelAtPeriodEnd) ...[
+
+        // Google Play subscriptions are cancelled in Google Play
+        if (provider.isPlaySource) ...[
+          const SizedBox(height: 12),
+          if (PlayBillingService.isSupported)
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () async {
+                  final opened = await launchUrl(
+                    PlayBillingService.manageUri,
+                    mode: LaunchMode.externalApplication,
+                  );
+                  if (!opened && mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Could not open Google Play'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.manage_accounts),
+                label: const Text('Manage in Google Play'),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            )
+          else if (kIsWeb)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Text(
+                'This subscription is billed through Google Play. Change or '
+                'cancel it in the Android app (Google Play > Subscriptions).',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+        ],
+
+        // PayHere (web) subscriptions: cancel here. Already cancelled -> nothing left.
+        if (isPaid &&
+            !provider.isPlaySource &&
+            !provider.cancelAtPeriodEnd) ...[
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,

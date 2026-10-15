@@ -1,24 +1,30 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/screens/subscription/models/subscription_plan.dart';
+import 'package:flutter_application_1/screens/subscription/providers/subscription_provider.dart';
+import 'package:flutter_application_1/screens/subscription/screens/play_billing_service.dart';
+import 'package:flutter_application_1/screens/subscription/services/payment_service.dart';
+import 'package:flutter_application_1/screens/subscription/services/subscription_service.dart';
 import 'package:go_router/go_router.dart';
+import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-import '../models/subscription_plan.dart';
-import '../providers/subscription_provider.dart';
-import '../services/payment_service.dart';
-import '../services/subscription_service.dart';
 import 'reduce_salons_screen.dart';
 
 // ============================================================
 // PLANS COMPARISON SCREEN
 // ------------------------------------------------------------
-//   • Upgrade / Renew  → PayHere payment (price decided by the SERVER)
-//       - Mobile: native PayHere SDK
-//       - Web:    iframe popup; if it can't start, a same-tab redirect and
-//                 PayHere returns the user to /payment-return
-//                 (PaymentReturnScreen)
-//   • Downgrade (with salon-count validation)
-//   • "Reason" banner when redirected from a locked route
+//   • ANDROID: paid plans are bought with Google Play Billing (required by
+//     the Google Play policy for digital features). The app never opens a
+//     PayHere payment on Android.
+//   • WEB: PayHere (iframe popup; same-tab redirect as a fallback, PayHere
+//     then returns the user to /payment-return)
+//   • Downgrade to the free plan of a PayHere plan: through the server, no
+//     payment involved.
 // ============================================================
 class PlansComparisonScreen extends StatefulWidget {
   final int salonId;
@@ -36,7 +42,7 @@ class PlansComparisonScreen extends StatefulWidget {
 
 class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   final SubscriptionService _service = SubscriptionService();
-  final PaymentService _payment = PaymentService();
+  final PaymentService _payment = PaymentService(); // web only
 
   List<SubscriptionPlan> _plans = [];
   bool _loading = true;
@@ -47,10 +53,23 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   String? _reason;
   String? _requiredPlan;
 
+  // ---- Google Play (Android) ----
+  Map<String, GooglePlayProductDetails> _playProducts = {};
+  StreamSubscription<PlayPurchaseEvent>? _playSub;
+  Timer? _playTimeout;
+  SubscriptionPlan? _awaitingPlan;
+
+  bool get _isAndroid => PlayBillingService.isSupported;
+
   @override
   void initState() {
     super.initState();
     _loadPlans();
+
+    if (_isAndroid) {
+      _playSub = PlayBillingService.instance.events.listen(_onPlayEvent);
+    }
+
     // make sure the provider is looking at THIS salon
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -59,6 +78,13 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         provider.loadCapabilities(widget.salonId);
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _playSub?.cancel();
+    _playTimeout?.cancel();
+    super.dispose();
   }
 
   @override
@@ -86,6 +112,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
           _plans = plans;
           _loading = false;
         });
+        if (_isAndroid) _loadPlayProducts();
       }
     } catch (e) {
       if (mounted) {
@@ -94,6 +121,16 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
           _loading = false;
         });
       }
+    }
+  }
+
+  Future<void> _loadPlayProducts() async {
+    final ids = _plans.map((p) => p.playProductId).whereType<String>().toSet();
+    try {
+      final products = await PlayBillingService.instance.loadProducts(ids);
+      if (mounted) setState(() => _playProducts = products);
+    } catch (e) {
+      debugPrint('❌ loading Google Play products failed: $e');
     }
   }
 
@@ -107,13 +144,203 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   }
 
   // ============================================================
+  // GOOGLE PLAY EVENTS (result of the purchase sheet)
+  // ============================================================
+
+  void _onPlayEvent(PlayPurchaseEvent event) {
+    _playTimeout?.cancel();
+    if (!mounted) return;
+
+    switch (event.type) {
+      case PlayEventType.verified:
+        // only celebrate a purchase that was started on THIS screen
+        final plan = _awaitingPlan;
+        if (plan == null) return;
+        _awaitingPlan = null;
+        setState(() => _processing = false);
+        _showSuccessDialog(
+          plan.displayName,
+          'Thank you! Your ${plan.displayName} plan is now active.',
+        );
+        break;
+
+      case PlayEventType.pending:
+        setState(() => _processing = false);
+        _showSnack(
+          'Your payment is pending. The plan activates as soon as it completes.',
+        );
+        break;
+
+      case PlayEventType.canceled:
+        _awaitingPlan = null;
+        setState(() => _processing = false);
+        _showSnack('Purchase cancelled');
+        break;
+
+      case PlayEventType.error:
+        if (_awaitingPlan == null && !_processing) return;
+        _awaitingPlan = null;
+        setState(() => _processing = false);
+        _showSnack(event.message ?? 'Purchase failed', isError: true);
+        break;
+    }
+  }
+
+  Future<void> _openPlaySubscriptions() async {
+    final opened = await launchUrl(
+      PlayBillingService.manageUri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened) _showSnack('Could not open Google Play', isError: true);
+  }
+
+  // ============================================================
   // PLAN SELECTION
   // ============================================================
 
   Future<void> _handlePlanSelection(SubscriptionPlan plan) async {
+    if (_isAndroid) {
+      await _handleAndroidSelection(plan);
+      return;
+    }
+    if (!kIsWeb) {
+      _showSnack('Subscriptions are not available on this platform yet');
+      return;
+    }
+    await _handleWebSelection(plan);
+  }
+
+  // ---------------- ANDROID ----------------
+
+  Future<void> _handleAndroidSelection(SubscriptionPlan plan) async {
+    final provider = context.read<SubscriptionProvider>();
+    final current = _currentPlan;
+    if (current == null) return;
+
+    final isCurrent = plan.id == current.id;
+
+    // ---- free plan ----
+    if (plan.price == 0) {
+      if (isCurrent) {
+        _showSnack('You are already on the ${plan.displayName} plan');
+        return;
+      }
+      if (provider.isPlaySource) {
+        // a Google Play subscription is cancelled in Google Play
+        await _openPlaySubscriptions();
+        return;
+      }
+      // plan that was NOT bought with Google Play: downgrade, no payment
+      final confirmed = await _showConfirmDialog(
+        plan,
+        current,
+        isRenewal: false,
+      );
+      if (confirmed != true) return;
+      setState(() => _processing = true);
+      try {
+        await _changePlanOnServer(plan);
+      } finally {
+        if (mounted) setState(() => _processing = false);
+      }
+      return;
+    }
+
+    // ---- paid plan ----
+    if (isCurrent) {
+      if (provider.isPlaySource) {
+        await _openPlaySubscriptions();
+      } else {
+        _showSnack('You are already on the ${plan.displayName} plan');
+      }
+      return;
+    }
+
+    final product = plan.playProductId == null
+        ? null
+        : _playProducts[plan.playProductId];
+    if (product == null) {
+      _showSnack('This plan is not available in Google Play yet', isError: true);
+      return;
+    }
+
+    final isUpgrade = plan.planRank > current.planRank;
+    final hasPlaySub = provider.isPlaySource;
+    final deferred = hasPlaySub && !isUpgrade; // downgrade: next renewal
+
+    final confirmed = await _showPlayConfirmDialog(
+      plan,
+      product,
+      isUpgrade: isUpgrade,
+      hasPlaySub: hasPlaySub,
+    );
+    if (confirmed != true) return;
+
+    setState(() => _processing = true);
+    try {
+      GooglePlayPurchaseDetails? oldPurchase;
+      if (hasPlaySub) {
+        final ids = _plans
+            .map((p) => p.playProductId)
+            .whereType<String>()
+            .toSet();
+        oldPurchase = await PlayBillingService.instance.findCurrentPurchase(
+          ids,
+        );
+        if (oldPurchase == null) {
+          if (mounted) setState(() => _processing = false);
+          _showSnack(
+            'Could not find your current Google Play subscription. Please try again.',
+            isError: true,
+          );
+          return;
+        }
+      }
+
+      _awaitingPlan = plan;
+      final started = await PlayBillingService.instance.buy(
+        product: product,
+        ownerId: widget.ownerId,
+        oldPurchase: oldPurchase,
+        deferred: deferred,
+      );
+
+      if (!started) {
+        _awaitingPlan = null;
+        if (mounted) setState(() => _processing = false);
+        _showSnack('Could not start the purchase', isError: true);
+        return;
+      }
+
+      if (deferred) {
+        // Google applies a downgrade at the next renewal, so there is no
+        // purchase event to wait for.
+        _awaitingPlan = null;
+        if (mounted) setState(() => _processing = false);
+        _showSnack(
+          'If you confirmed, your plan changes to ${plan.displayName} at the '
+          'end of the current billing period.',
+        );
+        return;
+      }
+
+      // safety net in case no event ever arrives
+      _playTimeout?.cancel();
+      _playTimeout = Timer(const Duration(seconds: 120), () {
+        if (mounted && _processing) setState(() => _processing = false);
+      });
+    } catch (e) {
+      _awaitingPlan = null;
+      if (mounted) setState(() => _processing = false);
+      _showSnack('Error: $e', isError: true);
+    }
+  }
+
+  // ---------------- WEB (PayHere) ----------------
+
+  Future<void> _handleWebSelection(SubscriptionPlan plan) async {
     final provider = context.read<SubscriptionProvider>();
     final currentPlan = _currentPlan;
-
     if (currentPlan == null) return;
 
     final isRenewal = plan.id == currentPlan.id;
@@ -133,6 +360,19 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     final previousExpiry = isRenewal ? provider.expiresAt : null;
 
     setState(() => _processing = true);
+    try {
+      await _changePlanOnServer(plan, previousExpiry: previousExpiry);
+    } finally {
+      if (mounted) setState(() => _processing = false);
+    }
+  }
+
+  /// request_plan_change RPC (+ PayHere payment on web)
+  Future<void> _changePlanOnServer(
+    SubscriptionPlan plan, {
+    DateTime? previousExpiry,
+  }) async {
+    final provider = context.read<SubscriptionProvider>();
 
     try {
       final result = await provider.requestPlanChange(
@@ -147,7 +387,14 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
 
       switch (actionRequired) {
         case 'PAYMENT_REQUIRED':
-          await _handlePaymentFlow(plan, previousExpiry: previousExpiry);
+          if (_isAndroid || !kIsWeb) {
+            _showSnack(
+              'Paid plans on Android are bought with Google Play.',
+              isError: true,
+            );
+          } else {
+            await _handlePaymentFlow(plan, previousExpiry: previousExpiry);
+          }
           break;
 
         case 'REDUCE_SALONS':
@@ -172,22 +419,15 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
           }
       }
     } catch (e) {
-      if (mounted) {
-        _showSnack('Error: $e', isError: true);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _processing = false);
-      }
+      if (mounted) _showSnack('Error: $e', isError: true);
     }
   }
 
   // ============================================================
-  // PAYMENT FLOW
+  // PAYHERE PAYMENT FLOW (WEB ONLY)
   // ============================================================
 
   /// PayHere sends the user here after a web redirect payment.
-  /// It carries everything PaymentReturnScreen needs (no router `extra`).
   String _buildReturnUrl(
     String status,
     String planName,
@@ -209,17 +449,11 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     SubscriptionPlan plan, {
     DateTime? previousExpiry,
   }) async {
-    // Customer info from Supabase auth
     final user = Supabase.instance.client.auth.currentUser;
     final email = user?.email ?? '';
     final name =
         user?.userMetadata?['full_name'] as String? ?? email.split('@').first;
     final phone = user?.userMetadata?['phone'] as String? ?? '0770000000';
-
-    debugPrint(
-      '💳 Starting payment — platform=${_payment.isWeb ? "web" : "mobile"}, '
-      'plan=${plan.name}',
-    );
 
     final paymentId = await _payment.startSubscriptionPayment(
       salonId: widget.salonId,
@@ -227,12 +461,8 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       customerEmail: email,
       customerName: name,
       customerPhone: phone,
-      returnUrl: _payment.isWeb
-          ? _buildReturnUrl('return', plan.name, previousExpiry)
-          : null,
-      cancelUrl: _payment.isWeb
-          ? _buildReturnUrl('cancel', plan.name, previousExpiry)
-          : null,
+      returnUrl: _buildReturnUrl('return', plan.name, previousExpiry),
+      cancelUrl: _buildReturnUrl('cancel', plan.name, previousExpiry),
     );
 
     if (!mounted) return;
@@ -242,12 +472,9 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       return;
     }
 
-    // WEB fallback: this tab is navigating to PayHere. The result is shown by
-    // PaymentReturnScreen when PayHere redirects back.
+    // redirect fallback: PaymentReturnScreen shows the result
     if (paymentId == PaymentService.redirectSentinel) return;
 
-    // Mobile SDK / web iframe popup: payment submitted — the webhook
-    // activates the plan, so wait for it.
     _showSnack('Payment received. Activating plan...');
     final activated = await _waitForPlan(
       plan.name,
@@ -266,8 +493,6 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     }
   }
 
-  /// Polls until the webhook has activated [planName]
-  /// (for a renewal: until expires_at moved past [previousExpiry]).
   Future<bool> _waitForPlan(String planName, {DateTime? previousExpiry}) async {
     final provider = context.read<SubscriptionProvider>();
     for (var i = 0; i < 15; i++) {
@@ -393,6 +618,82 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     );
   }
 
+  /// Subscription terms are shown BEFORE the purchase (Google Play policy):
+  /// price, billing period, auto-renewal and how to cancel.
+  Future<bool?> _showPlayConfirmDialog(
+    SubscriptionPlan plan,
+    GooglePlayProductDetails product, {
+    required bool isUpgrade,
+    required bool hasPlaySub,
+  }) {
+    final deferred = hasPlaySub && !isUpgrade;
+
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          hasPlaySub
+              ? (isUpgrade ? 'Upgrade plan?' : 'Downgrade plan?')
+              : 'Subscribe to ${plan.displayName}?',
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.payment, color: Colors.amber),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '${product.price} / month',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (deferred)
+              Text(
+                'Your plan changes to ${plan.displayName} at the end of your '
+                'current billing period. You keep your current features until then.',
+                style: const TextStyle(fontSize: 13),
+              )
+            else if (hasPlaySub)
+              const Text(
+                'You are charged now for the difference, prorated for the '
+                'remaining time of your current period.',
+                style: TextStyle(fontSize: 13),
+              ),
+            const SizedBox(height: 8),
+            const Text(
+              'Billed monthly through Google Play. The subscription renews '
+              'automatically until you cancel it in Google Play > Subscriptions.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(hasPlaySub ? 'Confirm' : 'Subscribe'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showSuccessDialog(String planName, String message) {
     showDialog(
       context: context,
@@ -490,7 +791,9 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         ),
         const SizedBox(height: 4),
         Text(
-          'Upgrade anytime. Downgrade takes effect immediately.',
+          _isAndroid
+              ? 'Plans are billed monthly through Google Play.'
+              : 'Upgrade anytime. Downgrade takes effect immediately.',
           style: TextStyle(color: Colors.grey[600]),
         ),
         const SizedBox(height: 20),
@@ -570,11 +873,28 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   // PLAN CARD
   // ============================================================
 
+  /// On Android the price shown MUST be the one Google Play will charge
+  String _priceText(SubscriptionPlan plan) {
+    if (plan.price == 0) return 'Free';
+    if (_isAndroid && plan.playProductId != null) {
+      final product = _playProducts[plan.playProductId];
+      if (product != null) return product.price;
+    }
+    return 'Rs. ${plan.price.toStringAsFixed(0)}';
+  }
+
   Widget _buildPlanCard(SubscriptionPlan plan) {
     final provider = context.watch<SubscriptionProvider>();
     final isCurrent = plan.name == provider.currentPlanName;
     final isUpgrade = plan.planRank > provider.currentPlanRank;
-    final canRenewThis = isCurrent && provider.canRenew;
+    // PayHere renewals exist on the web only
+    final canRenewThis = isCurrent && provider.canRenew && !_isAndroid;
+    final unavailableOnAndroid =
+        _isAndroid &&
+        plan.price > 0 &&
+        !isCurrent &&
+        (plan.playProductId == null ||
+            !_playProducts.containsKey(plan.playProductId));
 
     final borderColor = isCurrent
         ? Colors.green
@@ -638,13 +958,14 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  plan.price == 0
-                      ? 'Free'
-                      : 'Rs. ${plan.price.toStringAsFixed(0)}',
-                  style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
+                Flexible(
+                  child: Text(
+                    _priceText(plan),
+                    style: const TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 if (plan.price > 0) ...[
@@ -704,35 +1025,76 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
-              child: (isCurrent && !canRenewThis)
-                  ? OutlinedButton(
-                      onPressed: null,
-                      child: const Text('Current Plan'),
-                    )
-                  : ElevatedButton(
-                      onPressed: _processing
-                          ? null
-                          : () => _handlePlanSelection(plan),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: (isUpgrade || canRenewThis)
-                            ? Colors.amber[700]
-                            : Colors.grey[700],
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      child: Text(
-                        canRenewThis
-                            ? 'Renew ${plan.displayName}'
-                            : (isUpgrade
-                                  ? 'Upgrade to ${plan.displayName}'
-                                  : 'Downgrade to ${plan.displayName}'),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
+              child: _buildActionButton(
+                plan: plan,
+                provider: provider,
+                isCurrent: isCurrent,
+                isUpgrade: isUpgrade,
+                canRenewThis: canRenewThis,
+                unavailable: unavailableOnAndroid,
+              ),
             ),
+            if (_isAndroid && plan.price > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'Auto-renews monthly until cancelled. '
+                  'Cancel any time in Google Play > Subscriptions.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                ),
+              ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required SubscriptionPlan plan,
+    required SubscriptionProvider provider,
+    required bool isCurrent,
+    required bool isUpgrade,
+    required bool canRenewThis,
+    required bool unavailable,
+  }) {
+    // Current plan bought with Google Play -> manage it there
+    if (isCurrent && _isAndroid && provider.isPlaySource && plan.price > 0) {
+      return OutlinedButton(
+        onPressed: _openPlaySubscriptions,
+        child: const Text('Manage in Google Play'),
+      );
+    }
+
+    if (isCurrent && !canRenewThis) {
+      return OutlinedButton(onPressed: null, child: const Text('Current Plan'));
+    }
+
+    final String label;
+    if (canRenewThis) {
+      label = 'Renew ${plan.displayName}';
+    } else if (_isAndroid && plan.price == 0 && provider.isPlaySource) {
+      label = 'Cancel in Google Play';
+    } else if (isUpgrade) {
+      label = 'Upgrade to ${plan.displayName}';
+    } else {
+      label = 'Downgrade to ${plan.displayName}';
+    }
+
+    return ElevatedButton(
+      onPressed: (_processing || unavailable)
+          ? null
+          : () => _handlePlanSelection(plan),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: (isUpgrade || canRenewThis)
+            ? Colors.amber[700]
+            : Colors.grey[700],
+        padding: const EdgeInsets.symmetric(vertical: 14),
+      ),
+      child: Text(
+        unavailable ? 'Not available yet' : label,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
         ),
       ),
     );
