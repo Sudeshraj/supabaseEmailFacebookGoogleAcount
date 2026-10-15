@@ -36,8 +36,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   List<Map<String, dynamic>> _selectedServices = [];
   bool _isLoadingServices = false;
   bool _servicesLoaded = false;
-  String? _selectedCategoryTab;
-  int? _expandedServiceId;
 
   final Map<String, List<Map<String, dynamic>>> _availableOffersPerService = {};
   final Map<String, Map<String, dynamic>> _serviceOffers = {};
@@ -48,6 +46,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   Map<DateTime, String> _holidayNames = {};
   bool _isDateUnavailable = false;
   String? _unavailableReason;
+  bool _isCheckingDate = false;
+  bool _scheduleLoaded = false;
+  Set<int> _workingWeekdays = {};
+  int _calendarVersion = 0;
 
   // Step 3: Barber
   List<Map<String, dynamic>> _availableBarbers = [];
@@ -156,7 +158,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       }
     }
 
-    // ✅ Extract skip_to_date flag
     //   true  → Salon Profile path  → jump to Date step (2)
     //   false → Dashboard offer path → stay on Service step (1)
     if (initial.containsKey('skip_to_date')) {
@@ -237,7 +238,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         }
       }
 
-      // ✅ Read skip_to_date from extra map
       if (map.containsKey('skip_to_date')) {
         _skipToDate = map['skip_to_date'] == true;
         debugPrint('🎯 skip_to_date (from extra): $_skipToDate');
@@ -246,13 +246,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // PER-SERVICE OFFER HELPERS (variant-aware)
+  // PER-SERVICE OFFER HELPERS
   // ============================================
 
   String _serviceKey(int serviceId, int? variantId) =>
       '${serviceId}_${variantId ?? 0}';
 
-  // ✅ UPDATED: variant_id parameter added (variant-level offers)
   Future<List<Map<String, dynamic>>> _loadOffersForService(
     int serviceId,
     double price, {
@@ -270,7 +269,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'p_service_id': serviceId,
           'p_service_price': price,
           'p_customer_id': user?.id,
-          'p_variant_id': variantId, // ✅ NEW: variant-aware offers
+          'p_variant_id': variantId, // variant-aware offers
         },
       );
 
@@ -364,27 +363,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     });
   }
 
-  // ✅ Show ⭐ "Applied" badge for claimed offers
-  String _getOfferLabel(Map<String, dynamic> offer) {
-    final title = offer['title']?.toString() ?? 'Offer';
-    final type = offer['discount_type']?.toString();
-    final value = (offer['discount_value'] as num?)?.toDouble() ?? 0;
-    final isClaimed = offer['is_claimed'] == true;
-
-    String label;
-    if (type == 'percentage') {
-      label = '$title (${value.toStringAsFixed(0)}% OFF)';
-    } else if (type == 'fixed') {
-      label = '$title (Rs. ${value.toStringAsFixed(0)} OFF)';
-    } else if (type == 'free_service') {
-      label = '$title (FREE)';
-    } else {
-      label = title;
-    }
-
-    return isClaimed ? '⭐ $label (Applied)' : label;
-  }
-
   void _showErrorSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -472,7 +450,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final hasPreselected =
         _preselectedServices != null && _preselectedServices!.isNotEmpty;
 
-    // ✅ Decide starting step:
+    // Decide starting step:
     //   - skip_to_date = true  → Date step (2)  [Salon Profile path]
     //   - skip_to_date = false → Service step (1) [Dashboard offer path]
     final int startingStep;
@@ -496,7 +474,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     await _loadSalonServices();
     await _applyPreselectedServices();
 
-    // ✅ Always load holidays (needed for Date step)
+    // Always load holidays (needed for Date step)
     await _loadHolidays();
 
     try {
@@ -555,11 +533,14 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _barbersLoaded = false;
       _availableBarbers = [];
       _availableSlots = [];
-      _selectedCategoryTab = null;
       _salonServices = [];
       _holidays = {};
       _holidayNames = {};
       _isDateUnavailable = false;
+      _isCheckingDate = false;
+      _scheduleLoaded = false;
+      _workingWeekdays = {};
+      _calendarVersion++;
       _barberAvailability = {};
       _childNameController.clear();
       _selectedChildName = null;
@@ -567,7 +548,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _duplicateError = null;
       _slotErrorMessage = null;
       _slotErrorType = null;
-      _expandedServiceId = null;
       _appliedOffer = null;
       _availableOffersPerService.clear();
       _serviceOffers.clear();
@@ -575,45 +555,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _originalTotalPrice = 0;
       _finalTotalPrice = 0;
     });
-  }
-
-  Widget _buildTimezoneFlag() {
-    final isDark = context.isDarkMode;
-
-    return Container(
-      margin: const EdgeInsets.only(right: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.2),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            TimezoneService.getCurrentFlag(),
-            style: const TextStyle(fontSize: 16),
-          ),
-          const SizedBox(width: 4),
-          if (_isDST())
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.amber.shade900 : Colors.amber.shade100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                'DST',
-                style: TextStyle(
-                  fontSize: 8,
-                  color: isDark ? Colors.amber.shade300 : Colors.amber.shade800,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
   }
 
   // ==================== STEP 0: SALON ====================
@@ -811,16 +752,22 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .toList();
 
       Map<int, String> categoryMap = {};
+      final Map<int, Map<String, dynamic>> categoryMeta = {};
       if (categoryIds.isNotEmpty) {
         try {
           final categoriesResponse = await supabase
               .from('salon_categories')
-              .select('id, display_name')
+              .select('id, display_name, icon_name, color, display_order')
               .inFilter('id', categoryIds);
 
           for (var cat in categoriesResponse) {
             categoryMap[cat['id'] as int] =
                 cat['display_name']?.toString() ?? 'Other';
+            categoryMeta[cat['id'] as int] = {
+              'icon_name': cat['icon_name'],
+              'color': cat['color'],
+              'display_order': (cat['display_order'] as num?)?.toInt() ?? 9999,
+            };
           }
         } catch (e) {
           debugPrint('⚠️ Categories failed: $e');
@@ -856,15 +803,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .toList();
 
       Map<int, String> ageMap = {};
+      final Map<int, String> ageRangeMap = {};
       if (ageIds.isNotEmpty) {
         try {
           final agesResponse = await supabase
               .from('salon_age_categories')
-              .select('id, display_name')
+              .select('id, display_name, min_age, max_age')
               .inFilter('id', ageIds);
 
           for (var a in agesResponse) {
             ageMap[a['id'] as int] = a['display_name']?.toString() ?? '';
+            ageRangeMap[a['id'] as int] = _ageRangeText(
+              (a['min_age'] as num?)?.toInt(),
+              (a['max_age'] as num?)?.toInt(),
+            );
           }
         } catch (e) {
           debugPrint('⚠️ Age categories failed: $e');
@@ -876,14 +828,23 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       for (var service in servicesResponse) {
         final serviceId = service['id'] as int;
         final categoryId = service['category_id'] as int?;
+        final Map<String, dynamic>? catMeta = categoryId == null
+            ? null
+            : categoryMeta[categoryId];
 
         groupedServices[serviceId] = {
           'id': serviceId,
           'name': service['name']?.toString() ?? 'Service',
           'description': service['description']?.toString(),
+          'category_id': categoryId,
           'category_name': categoryId != null
               ? (categoryMap[categoryId] ?? 'Other')
               : 'Other',
+          'category_icon': catMeta == null ? null : catMeta['icon_name'],
+          'category_color': catMeta == null ? null : catMeta['color'],
+          'category_order': categoryId == null
+              ? 99999
+              : (catMeta == null ? 9999 : (catMeta['display_order'] as int)),
           'variants': [],
         };
       }
@@ -897,6 +858,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'id': variant['id'],
           'gender': genderId != null ? (genderMap[genderId] ?? '') : '',
           'age': ageId != null ? (ageMap[ageId] ?? '') : '',
+          'age_range': ageId != null ? (ageRangeMap[ageId] ?? '') : '',
           'price': (variant['price'] as num?)?.toDouble() ?? 0.0,
           'duration': variant['duration'] ?? 30,
         });
@@ -912,6 +874,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         _isLoadingServices = false;
         _servicesLoaded = true;
       });
+
+      // Load offers in the background so "offer available" badges show
+      unawaited(_preloadVariantOffers(servicesList));
     } catch (e, stackTrace) {
       debugPrint('❌ [SERVICE LOAD ERROR] $e');
       debugPrint('   Stack: $stackTrace');
@@ -940,7 +905,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 
-  // ✅ Variant-aware + auto-select claimed offer
   Future<void> _toggleVariant(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
@@ -962,7 +926,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       setState(() {
         _selectedServices.removeAt(existingIndex);
         _serviceOffers.remove(key);
-        _availableOffersPerService.remove(key);
         _recalculateTotals();
       });
       return;
@@ -985,15 +948,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _recalculateTotals();
     });
 
-    // ✅ Pass variant ID for variant-aware offer loading
-    final offers = await _loadOffersForService(sid, price, variantId: vid);
+    var offers = _availableOffersPerService[key] ?? <Map<String, dynamic>>[];
+    if (offers.isEmpty) {
+      offers = await _loadOffersForService(sid, price, variantId: vid);
+    }
 
     if (offers.isNotEmpty && mounted) {
       setState(() {
         _availableOffersPerService[key] = offers;
       });
 
-      // ✅ Auto-select claimed offer
+      // Auto-select claimed offer
       final claimedOffer = offers.firstWhere(
         (o) => o['is_claimed'] == true,
         orElse: () => <String, dynamic>{},
@@ -1006,6 +971,41 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         );
         _applyOfferToService(sid, vid, claimedOffer);
       }
+    }
+  }
+
+  Future<void> _preloadVariantOffers(
+    List<Map<String, dynamic>> services,
+  ) async {
+    final tasks = <List<dynamic>>[];
+    for (final svc in services) {
+      for (final v in (svc['variants'] as List)) {
+        tasks.add([svc['id'], v]);
+      }
+    }
+
+    const batchSize = 8;
+    for (int i = 0; i < tasks.length; i += batchSize) {
+      if (!mounted) return;
+      final chunk = tasks.skip(i).take(batchSize);
+      await Future.wait(
+        chunk.map((t) async {
+          final int sid = t[0] as int;
+          final Map v = t[1] as Map;
+          final int vid = v['id'] as int;
+          final double price = (v['price'] as num?)?.toDouble() ?? 0.0;
+          final key = _serviceKey(sid, vid);
+          if (_availableOffersPerService.containsKey(key)) return;
+
+          final offers = await _loadOffersForService(
+            sid,
+            price,
+            variantId: vid,
+          );
+          if (!mounted || offers.isEmpty) return;
+          setState(() => _availableOffersPerService[key] = offers);
+        }),
+      );
     }
   }
 
@@ -1050,11 +1050,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       await _toggleVariant(service, variant);
     }
 
-    // ✅ Backup auto-apply for any missed claimed offers
+    // Backup auto-apply for any missed claimed offers
     await _autoApplyClaimedOffers();
   }
 
-  // ✅ Variant-aware backup auto-apply
   Future<void> _autoApplyClaimedOffers() async {
     debugPrint('🎁 [Auto-Apply] Checking claimed offers...');
 
@@ -1074,7 +1073,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
       if (offers.isEmpty) {
         final price = (service['price'] as num?)?.toDouble() ?? 0;
-        // ✅ Pass variant ID for variant-aware offer loading
         offers = await _loadOffersForService(sid, price, variantId: vid);
 
         if (offers.isNotEmpty && mounted) {
@@ -1118,32 +1116,73 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         }
       });
 
-      final today = DateTime(
-        DateTime.now().year,
-        DateTime.now().month,
-        DateTime.now().day,
-      );
-
-      if (_holidays.contains(today) && _selectedDate == null) {
-        DateTime nextDate = today.add(const Duration(days: 1));
-        for (int i = 0; i < 30; i++) {
-          if (!_holidays.contains(nextDate)) {
-            setState(() {
-              _selectedDate = nextDate;
-            });
-            await _checkDateAvailability(nextDate);
-            break;
-          }
-          nextDate = nextDate.add(const Duration(days: 1));
-        }
+      // Which weekdays have at least one working barber
+      try {
+        final schedules = await supabase
+            .from('barber_schedules')
+            .select('day_of_week')
+            .eq('salon_id', _selectedSalon!['id'])
+            .eq('is_working', true);
+        if (!mounted) return;
+        setState(() {
+          _workingWeekdays = schedules
+              .map<int>((r) => (r['day_of_week'] as num).toInt())
+              .toSet();
+          _scheduleLoaded = true;
+        });
+      } catch (e) {
+        debugPrint('Error loading working weekdays: $e');
+        _scheduleLoaded = false;
       }
+
+      await _ensureDefaultDate();
     } catch (e) {
       debugPrint('Error loading holidays: $e');
     }
   }
 
+  DateTime get _todayDate =>
+      DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
+
+  /// A day can be picked when it is not past, not a holiday and (if the
+  /// schedule is known) at least one barber works on that weekday.
+  bool _isDaySelectable(DateTime date) {
+    final d = DateTime(date.year, date.month, date.day);
+    if (d.isBefore(_todayDate)) return false;
+    if (_holidays.contains(d)) return false;
+    if (_scheduleLoaded && !_workingWeekdays.contains(d.weekday)) return false;
+    return true;
+  }
+
+  DateTime? _firstSelectableDate() {
+    for (int i = 0; i <= 30; i++) {
+      final d = _todayDate.add(Duration(days: i));
+      if (_isDaySelectable(d)) return d;
+    }
+    return null;
+  }
+
+  /// Pre-selects today (or the next available day) so "Continue" works
+  /// without the user having to tap the date again.
+  Future<void> _ensureDefaultDate() async {
+    if (!mounted) return;
+    if (_selectedDate != null && _isDaySelectable(_selectedDate!)) return;
+
+    final first = _firstSelectableDate();
+    setState(() {
+      _selectedDate = first;
+      _isDateUnavailable = false;
+      _unavailableReason = null;
+      _calendarVersion++;
+    });
+    if (first != null) {
+      await _checkDateAvailability(first);
+    }
+  }
+
   Future<void> _checkDateAvailability(DateTime date) async {
     if (_selectedSalon == null) return;
+    if (mounted) setState(() => _isCheckingDate = true);
     try {
       final schedules = await supabase
           .from('barber_schedules')
@@ -1152,7 +1191,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           .eq('day_of_week', date.weekday)
           .eq('is_working', true);
       if (!mounted) return;
+      if (_selectedDate != null && !DateUtils.isSameDay(_selectedDate, date)) {
+        return; // user already picked another date
+      }
       setState(() {
+        _isCheckingDate = false;
         _isDateUnavailable = schedules.isEmpty;
         _unavailableReason = schedules.isEmpty
             ? 'No barbers working on ${DateFormat('EEEE').format(date)}'
@@ -1164,6 +1207,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       });
     } catch (e) {
       debugPrint('Error checking date availability: $e');
+      if (mounted) setState(() => _isCheckingDate = false);
     }
   }
 
@@ -1196,25 +1240,25 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
       if (roleCheck == null) {
         result['is_available'] = false;
-        result['reason'] = 'Barber profile not found';
+        result['reason'] = 'Currently unavailable';
         return result;
       }
 
       final status = roleCheck['status'] as String? ?? 'active';
       if (status != 'active') {
-        String reason = 'Barber account is ';
+        String reason = 'Barber is ';
         switch (status) {
           case 'inactive':
-            reason += 'deactivated';
+            reason += 'unavailable';
             break;
           case 'scheduled_for_deletion':
-            reason += 'scheduled for deletion';
+            reason += 'unavailable';
             break;
           case 'deleted':
-            reason += 'deleted';
+            reason += 'unavailable';
             break;
           default:
-            reason += 'not active';
+            reason += 'unavailable';
         }
         result['is_available'] = false;
         result['reason'] = reason;
@@ -1230,12 +1274,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       if (profileCheck != null) {
         if (profileCheck['is_blocked'] == true) {
           result['is_available'] = false;
-          result['reason'] = 'Barber account is blocked';
+          result['reason'] = 'Currently unavailable';
           return result;
         }
         if (profileCheck['is_active'] == false) {
           result['is_available'] = false;
-          result['reason'] = 'Barber profile is inactive';
+          result['reason'] = 'Currently unavailable';
           return result;
         }
       }
@@ -1251,12 +1295,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         final salonStatus = salonBarberCheck['status'] as String? ?? 'active';
         if (salonStatus != 'active') {
           result['is_available'] = false;
-          result['reason'] = 'Barber is not assigned to this salon';
+          result['reason'] = 'Currently unavailable';
           return result;
         }
       } else {
         result['is_available'] = false;
-        result['reason'] = 'Barber not found in this salon';
+        result['reason'] = 'Currently unavailable';
         return result;
       }
 
@@ -1281,14 +1325,14 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         final leaveType = schedule['leave_type'] as String?;
         if (leaveType == 'full_day') {
           result['is_available'] = false;
-          result['reason'] = 'On full day leave';
+          result['reason'] = 'On leave on this date';
           return result;
         }
 
         final workStart = schedule['work_start'] as String?;
         if (workStart == null) {
           result['is_available'] = false;
-          result['reason'] = 'Not working on this day';
+          result['reason'] = 'Not working on this date';
           return result;
         }
       }
@@ -1299,7 +1343,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     } catch (e) {
       debugPrint('Error checking barber availability: $e');
       result['is_available'] = false;
-      result['reason'] = 'Error checking availability';
+      result['reason'] = 'Could not check availability';
       return result;
     }
   }
@@ -1440,66 +1484,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ==================== STEP 5: TIME SLOT ====================
-
-  Widget _buildTimezoneIndicator() {
-    final isDark = context.isDarkMode;
-
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
-        borderRadius: BorderRadius.circular(25),
-        border: Border.all(
-          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            TimezoneService.getCurrentFlag(),
-            style: const TextStyle(fontSize: 16),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            TimezoneService.getTimezoneDisplayName(),
-            style: TextStyle(
-              fontSize: 13,
-              color: isDark ? Colors.white70 : Colors.grey[700],
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            '(${TimezoneService.getUtcOffsetString()})',
-            style: TextStyle(
-              fontSize: 11,
-              color: isDark ? Colors.white70 : Colors.grey[500],
-            ),
-          ),
-          if (_isDST()) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.amber.shade900 : Colors.amber.shade100,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                'DST',
-                style: TextStyle(
-                  fontSize: 9,
-                  color: isDark ? Colors.amber.shade300 : Colors.amber.shade800,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 
   Future<void> _loadAvailableSlots() async {
     if (_selectedDate == null) {
@@ -1970,12 +1954,167 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
+  // SHARED UI HELPERS
+  // ============================================
+
+  /// Compact title shown at the top of a step: what the user must do here.
+  Widget _buildStepTitle(
+    bool isDark,
+    IconData icon,
+    String title,
+    String subtitle,
+  ) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 18, color: AppTheme.primary),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Selected-date row used by Person & Time.
+  Widget _buildSelectedDateRow(bool isDark) {
+    if (_selectedDate == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(Icons.calendar_today, size: 18, color: _secondaryColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Bottom bar: short Back button + Continue button (same height).
+  Widget _buildBottomBar({
+    required bool isDark,
+    required bool enabled,
+    required VoidCallback onPressed,
+    required Widget child,
+    bool backEnabled = true,
+  }) {
+    const double buttonHeight = 44;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.1),
+            blurRadius: 8,
+            offset: const Offset(0, -2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 48,
+            height: buttonHeight,
+            child: OutlinedButton(
+              onPressed: backEnabled
+                  ? () => setState(() {
+                      if (_currentStep > 0) _currentStep--;
+                    })
+                  : null,
+              style: OutlinedButton.styleFrom(
+                padding: EdgeInsets.zero,
+                foregroundColor: AppTheme.primary,
+                side: BorderSide(
+                  color: backEnabled ? AppTheme.primary : Colors.grey,
+                  width: 1.5,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Icon(Icons.arrow_back, size: 20),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: SizedBox(
+              height: buttonHeight,
+              child: ElevatedButton(
+                onPressed: enabled ? onPressed : null,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: enabled
+                      ? AppTheme.primary
+                      : (isDark ? Colors.grey[700] : Colors.grey[400]),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 2,
+                ),
+                child: child,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================
   // BUILD
   // ============================================
 
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
+
+    // Window dragged to an unusably small width (web / dev-tools resize):
+    // draw nothing, otherwise AppBar and other rows throw overflow errors.
+    if (screenWidth < 300) return const Scaffold(body: SizedBox.shrink());
+
     final isMobile = screenWidth < 600;
     final isDark = context.isDarkMode;
 
@@ -2012,8 +2151,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       );
     }
 
-    final stepSize = isMobile ? 36.0 : 42.0;
-    final iconSize = isMobile ? 18.0 : 20.0;
+    // Smaller icons on phones so all 7 steps fit without scrolling
+    final stepSize = isMobile ? 32.0 : 42.0;
+    final iconSize = isMobile ? 16.0 : 20.0;
     final stepFontSize = isMobile ? 9.0 : 11.0;
     final connectorWidth = isMobile ? 20.0 : 35.0;
     final showLabels = !isMobile;
@@ -2036,8 +2176,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
           onPressed: () {
-            // ✅ Natural step-by-step back
-            //    6 → 5 → 4 → 3 → 2 → 1 → 0 → Close
+            // Natural step-by-step back: 6 → 5 → 4 → 3 → 2 → 1 → 0 → Close
             if (_currentStep > 0) {
               setState(() => _currentStep--);
             } else {
@@ -2046,7 +2185,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           },
         ),
         actions: [
-          _buildTimezoneFlag(),
           if (_currentStep > 0)
             TextButton(
               onPressed: _resetBooking,
@@ -2063,6 +2201,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
+            // Window is being resized to an unusably small width: skip layout
+            // for a frame instead of throwing RenderFlex overflow errors.
+            if (constraints.maxWidth < 300) return const SizedBox.shrink();
+
             final double safeHeight =
                 (constraints.maxHeight.isFinite && constraints.maxHeight >= 200)
                 ? constraints.maxHeight
@@ -2134,6 +2276,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
+  /// Step indicator: connectors are Expanded so the whole row always fits the
+  /// screen width (no horizontal scrolling → the last "Confirm" icon is never
+  /// cut off on mobile).
   Widget _buildStepIndicatorRow(
     bool isMobile,
     double stepSize,
@@ -2142,108 +2287,57 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     double connectorWidth,
     bool showLabels,
   ) {
+    const labels = [
+      'Salon',
+      'Service',
+      'Date',
+      'Barber',
+      'Person',
+      'Time',
+      'Confirm',
+    ];
+    const icons = [
+      Icons.store,
+      Icons.content_cut,
+      Icons.calendar_today,
+      Icons.person,
+      Icons.badge,
+      Icons.access_time,
+      Icons.check_circle,
+    ];
+
+    final children = <Widget>[];
+    for (int i = 0; i < 7; i++) {
+      children.add(
+        _buildStepIndicatorResponsive(
+          i,
+          showLabels ? labels[i] : '',
+          icons[i],
+          stepSize,
+          iconSize,
+          stepFontSize,
+        ),
+      );
+      if (i < 6) {
+        children.add(
+          Expanded(
+            child: Container(
+              height: 2,
+              margin: const EdgeInsets.symmetric(horizontal: 3),
+              color: _currentStep > i ? AppTheme.primary : Colors.grey[300],
+            ),
+          ),
+        );
+      }
+    }
+
     return Container(
       color: context.cardColor,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        physics: const BouncingScrollPhysics(),
-        child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: isMobile ? 12 : 20,
-            vertical: isMobile ? 12 : 16,
-          ),
-          child: Row(
-            children: [
-              _buildStepIndicatorResponsive(
-                0,
-                showLabels ? 'Salon' : '',
-                Icons.store,
-                stepSize,
-                iconSize,
-                stepFontSize,
-              ),
-              Container(
-                width: connectorWidth,
-                height: 2,
-                color: _currentStep > 0 ? AppTheme.primary : Colors.grey[300],
-              ),
-              _buildStepIndicatorResponsive(
-                1,
-                showLabels ? 'Service' : '',
-                Icons.content_cut,
-                stepSize,
-                iconSize,
-                stepFontSize,
-              ),
-              Container(
-                width: connectorWidth,
-                height: 2,
-                color: _currentStep > 1 ? AppTheme.primary : Colors.grey[300],
-              ),
-              _buildStepIndicatorResponsive(
-                2,
-                showLabels ? 'Date' : '',
-                Icons.calendar_today,
-                stepSize,
-                iconSize,
-                stepFontSize,
-              ),
-              Container(
-                width: connectorWidth,
-                height: 2,
-                color: _currentStep > 2 ? AppTheme.primary : Colors.grey[300],
-              ),
-              _buildStepIndicatorResponsive(
-                3,
-                showLabels ? 'Barber' : '',
-                Icons.person,
-                stepSize,
-                iconSize,
-                stepFontSize,
-              ),
-              Container(
-                width: connectorWidth,
-                height: 2,
-                color: _currentStep > 3 ? AppTheme.primary : Colors.grey[300],
-              ),
-              _buildStepIndicatorResponsive(
-                4,
-                showLabels ? 'Person' : '',
-                Icons.badge,
-                stepSize,
-                iconSize,
-                stepFontSize,
-              ),
-              Container(
-                width: connectorWidth,
-                height: 2,
-                color: _currentStep > 4 ? AppTheme.primary : Colors.grey[300],
-              ),
-              _buildStepIndicatorResponsive(
-                5,
-                showLabels ? 'Time' : '',
-                Icons.access_time,
-                stepSize,
-                iconSize,
-                stepFontSize,
-              ),
-              Container(
-                width: connectorWidth,
-                height: 2,
-                color: _currentStep > 5 ? AppTheme.primary : Colors.grey[300],
-              ),
-              _buildStepIndicatorResponsive(
-                6,
-                showLabels ? 'Confirm' : '',
-                Icons.check_circle,
-                stepSize,
-                iconSize,
-                stepFontSize,
-              ),
-            ],
-          ),
-        ),
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 12 : 20,
+        vertical: isMobile ? 12 : 16,
       ),
+      child: Row(children: children),
     );
   }
 
@@ -2318,6 +2412,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   Widget _buildContent() {
     return LayoutBuilder(
       builder: (context, constraints) {
+        if (constraints.maxWidth < 280) return const SizedBox.shrink();
+
         final double safeHeight =
             (constraints.maxHeight.isFinite && constraints.maxHeight >= 200)
             ? constraints.maxHeight
@@ -2703,127 +2799,47 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   Widget _buildServiceSelectionStep() {
     final isDark = context.isDarkMode;
-    final Map<String, List<Map<String, dynamic>>> grouped = {};
-    for (var s in _salonServices) {
-      final catName = s['category_name']?.toString() ?? 'Other';
-      (grouped[catName] ??= []).add(s);
-    }
-    final categories = grouped.keys.toList();
-    if (_selectedCategoryTab == null && categories.isNotEmpty) {
-      _selectedCategoryTab = categories.first;
-    }
-    final servicesToShow = _selectedCategoryTab == null
-        ? _salonServices
-        : grouped[_selectedCategoryTab] ?? [];
-
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final tree = _buildServiceTree();
 
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          child: Row(
-            children: [
-              Container(
-                width: 45,
-                height: 45,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  image:
-                      (_selectedSalon?['logo_url'] as String?) != null &&
-                          (_selectedSalon!['logo_url'] as String).isNotEmpty
-                      ? DecorationImage(
-                          image: NetworkImage(_selectedSalon!['logo_url']),
-                          fit: BoxFit.cover,
-                        )
-                      : null,
-                ),
-                child:
-                    (_selectedSalon?['logo_url'] == null ||
-                        (_selectedSalon!['logo_url'] as String).isEmpty)
-                    ? Center(
-                        child: Text(
-                          (_selectedSalon?['name'] as String?)
-                                  ?.substring(0, 1)
-                                  .toUpperCase() ??
-                              'S',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      )
-                    : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Selected Salon',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _selectedSalon?['name'] ?? '',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              TextButton(
-                onPressed: () => setState(() => _currentStep = 0),
-                child: Text(
-                  'Change',
-                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
-                ),
-              ),
-            ],
+        if (_selectedServices.isEmpty)
+          _buildStepTitle(
+            isDark,
+            Icons.content_cut,
+            'Choose your services',
+            'Tick the options you want',
           ),
-        ),
 
         if (_selectedServices.isNotEmpty)
           GestureDetector(
             onTap: () => _showSelectedServicesSheet(),
             child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               decoration: BoxDecoration(
-                color: AppTheme.primary,
-                borderRadius: BorderRadius.circular(16),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppTheme.primary.withValues(alpha: 0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
+                color: AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.08),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: AppTheme.primary.withValues(alpha: 0.35),
+                ),
               ),
               child: Row(
                 children: [
                   Container(
-                    padding: const EdgeInsets.all(8),
+                    width: 48,
+                    height: 48,
+                    alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
+                      color: AppTheme.primary,
+                      borderRadius: BorderRadius.circular(14),
                     ),
                     child: Text(
                       '${_selectedServices.length}',
-                      style: TextStyle(
-                        fontSize: 18,
+                      style: const TextStyle(
+                        fontSize: 26,
                         fontWeight: FontWeight.bold,
-                        color: AppTheme.primary,
+                        color: Colors.white,
                       ),
                     ),
                   ),
@@ -2833,68 +2849,74 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '${_selectedServices.length} Service${_selectedServices.length > 1 ? 's' : ''} Selected',
-                          style: const TextStyle(
+                          _selectedServices.length > 1
+                              ? 'Services selected'
+                              : 'Service selected',
+                          style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          _selectedServices
-                              .map((s) => s['name']?.toString() ?? '')
-                              .take(2)
-                              .join(', '),
+                          () {
+                            final names = _selectedServices
+                                .map((s) => s['name']?.toString() ?? '')
+                                .toList();
+                            final shown = names.take(2).join(', ');
+                            return names.length > 2
+                                ? '$shown +${names.length - 2} more'
+                                : shown;
+                          }(),
                           style: TextStyle(
-                            fontSize: 11,
-                            color: Colors.white.withValues(alpha: 0.8),
+                            fontSize: 12,
+                            color: isDark ? Colors.white70 : Colors.grey[700],
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      children: [
-                        if (_discountAmount > 0) ...[
-                          Text(
-                            'Rs. ${_calculateTotalPrice().toStringAsFixed(0)}',
-                            style: TextStyle(
-                              fontSize: 11,
-                              color: Colors.white.withValues(alpha: 0.7),
-                              decoration: TextDecoration.lineThrough,
+                        if (_discountAmount > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              'You save Rs. ${_discountAmount.toStringAsFixed(0)}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? Colors.green.shade300
+                                    : Colors.green.shade700,
+                              ),
                             ),
                           ),
-                          const SizedBox(width: 4),
-                        ],
-                        Text(
-                          'Rs. ${_getDisplayTotalPrice().toStringAsFixed(0)}',
-                          style: const TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        const Icon(
-                          Icons.chevron_right,
-                          size: 16,
-                          color: Colors.white,
-                        ),
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      if (_discountAmount > 0)
+                        Text(
+                          'Rs. ${_calculateTotalPrice().toStringAsFixed(0)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            decoration: TextDecoration.lineThrough,
+                            color: isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                        ),
+                      Text(
+                        'Rs. ${_getDisplayTotalPrice().toStringAsFixed(0)}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Icon(Icons.chevron_right, size: 20, color: AppTheme.primary),
                 ],
               ),
             ),
@@ -2902,62 +2924,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
         _buildLegacyOfferBanner(isDark),
 
-        SizedBox(
-          height: 45,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            children: [
-              FilterChip(
-                label: Text(
-                  'All',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: _selectedCategoryTab == null
-                        ? Colors.white
-                        : (isDark ? Colors.white70 : Colors.grey[700]),
-                  ),
-                ),
-                selected: _selectedCategoryTab == null,
-                onSelected: (_) => setState(() => _selectedCategoryTab = null),
-                backgroundColor: isDark
-                    ? const Color(0xFF2A2A2A)
-                    : Colors.white,
-                selectedColor: AppTheme.primary,
-              ),
-              const SizedBox(width: 8),
-              ...categories.map(
-                (c) => Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: Text(
-                      c,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: _selectedCategoryTab == c
-                            ? Colors.white
-                            : (isDark ? Colors.white70 : Colors.grey[700]),
-                      ),
-                    ),
-                    selected: _selectedCategoryTab == c,
-                    onSelected: (_) => setState(() => _selectedCategoryTab = c),
-                    backgroundColor: isDark
-                        ? const Color(0xFF2A2A2A)
-                        : Colors.white,
-                    selectedColor: AppTheme.primary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-
         Expanded(
           child: _isLoadingServices
               ? Center(
                   child: CircularProgressIndicator(color: AppTheme.primary),
                 )
-              : servicesToShow.isEmpty
+              : tree.isEmpty
               ? Center(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(24),
@@ -2982,57 +2954,35 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                   ),
                 )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: servicesToShow.length,
-                  itemBuilder: (context, index) =>
-                      _buildServiceCard(servicesToShow[index], index, isMobile),
-                ),
+              : _buildServiceTreeList(tree, isDark),
         ),
 
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _selectedServices.isEmpty
-                  ? null
-                  : () {
-                      setState(() {
-                        _currentStep = 2;
-                      });
-                      _loadHolidays();
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _selectedServices.isNotEmpty
-                    ? AppTheme.primary
-                    : (isDark ? Colors.grey[700] : Colors.grey[400]),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+        _buildBottomBar(
+          isDark: isDark,
+          enabled: _selectedServices.isNotEmpty,
+          onPressed: () {
+            setState(() {
+              _currentStep = 2;
+            });
+            _loadHolidays();
+          },
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                _selectedServices.isEmpty
+                    ? 'Select a Service'
+                    : 'Continue to Date',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
                 ),
-                elevation: 2,
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _selectedServices.isEmpty
-                        ? 'Select a Service'
-                        : 'Continue to Date',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (_selectedServices.isNotEmpty) ...[
-                    const SizedBox(width: 8),
-                    const Icon(Icons.arrow_forward, size: 18),
-                  ],
-                ],
-              ),
-            ),
+              if (_selectedServices.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                const Icon(Icons.arrow_forward, size: 18),
+              ],
+            ],
           ),
         ),
       ],
@@ -3119,189 +3069,306 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
-  Widget _buildServiceCard(
-    Map<String, dynamic> service,
-    int index,
-    bool isMobile,
-  ) {
-    final isDark = context.isDarkMode;
-    final variants = service['variants'] as List? ?? [];
-    final isAnyVariantSelected = _selectedServices.any(
-      (s) => s['id'] == service['id'],
-    );
-    final int serviceId = service['id'] as int;
-    final isExpanded = _expandedServiceId == serviceId;
+  // ============================================
+  // SERVICE TREE (Category → Service → Variant)
+  // ============================================
 
-    final String serviceName = service['name']?.toString() ?? 'Service';
-    final String categoryName = service['category_name']?.toString() ?? '';
+  String _ageRangeText(int? minAge, int? maxAge) {
+    if (minAge == null || maxAge == null) return '';
+    if (maxAge >= 100) return '$minAge+ yrs';
+    return '$minAge–$maxAge yrs';
+  }
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      color: isDark
-          ? const Color(0xFF2A2A2A)
-          : _cardColors[index % _cardColors.length],
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: isAnyVariantSelected ? AppTheme.primary : Colors.transparent,
-          width: 2,
+  Color _hexToTreeColor(String? hex) {
+    if (hex != null && hex.startsWith('#') && hex.length >= 7) {
+      try {
+        return Color(int.parse('0xFF${hex.substring(1, 7)}'));
+      } catch (_) {}
+    }
+    return AppTheme.primary;
+  }
+
+  IconData _treeIconFromName(String? name) {
+    switch (name) {
+      case 'content_cut':
+        return Icons.content_cut;
+      case 'face':
+        return Icons.face;
+      case 'face_retouching_natural':
+        return Icons.face_retouching_natural;
+      case 'spa':
+        return Icons.spa;
+      case 'handshake':
+        return Icons.handshake;
+      case 'build':
+        return Icons.build;
+      case 'brush':
+        return Icons.brush;
+      case 'water_drop':
+        return Icons.water_drop;
+      case 'masks':
+        return Icons.masks;
+      case 'spa_outlined':
+        return Icons.spa_outlined;
+      default:
+        return Icons.content_cut;
+    }
+  }
+
+  /// Groups services by category (ordered by display_order) → one tree.
+  List<Map<String, dynamic>> _buildServiceTree() {
+    final Map<String, Map<String, dynamic>> byCategory = {};
+
+    for (final s in _salonServices) {
+      final catName = s['category_name']?.toString() ?? 'Other';
+      final entry = byCategory.putIfAbsent(
+        catName,
+        () => {
+          'name': catName,
+          'icon': s['category_icon'],
+          'color': s['category_color'],
+          'order': (s['category_order'] as num?)?.toInt() ?? 9999,
+          'services': <Map<String, dynamic>>[],
+        },
+      );
+      (entry['services'] as List<Map<String, dynamic>>).add(s);
+    }
+
+    final list = byCategory.values.toList()
+      ..sort((a, b) => (a['order'] as int).compareTo(b['order'] as int));
+
+    for (final c in list) {
+      (c['services'] as List<Map<String, dynamic>>).sort(
+        (a, b) => (a['name']?.toString() ?? '').compareTo(
+          b['name']?.toString() ?? '',
         ),
-      ),
+      );
+    }
+    return list;
+  }
+
+  Widget _buildServiceTreeList(List<Map<String, dynamic>> tree, bool isDark) {
+    final isMobile = MediaQuery.of(context).size.width < 600;
+    final hPad = isMobile ? 10.0 : 16.0;
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(hPad, 12, hPad, 12),
       child: Container(
+        width: double.infinity,
+        padding: EdgeInsets.fromLTRB(
+          isMobile ? 8 : 14,
+          6,
+          isMobile ? 8 : 14,
+          6,
+        ),
         decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(16),
-          color: isDark
-              ? const Color(0xFF2A2A2A)
-              : _cardColors[index % _cardColors.length],
+          border: Border.all(
+            color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          ),
         ),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            InkWell(
-              onTap: () {
-                if (isMobile && variants.isNotEmpty) {
-                  setState(() {
-                    if (isExpanded) {
-                      _expandedServiceId = null;
-                    } else {
-                      _expandedServiceId = serviceId;
-                    }
-                  });
-                }
-              },
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16),
-                topRight: Radius.circular(16),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 50,
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF3A3A3A) : Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Icon(
-                        _getServiceIcon(serviceName),
-                        color: AppTheme.primary,
-                        size: 28,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            serviceName,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                          Text(
-                            categoryName,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: isDark ? Colors.white60 : Colors.grey[600],
-                            ),
-                          ),
-                          if (isAnyVariantSelected) ...[
-                            const SizedBox(height: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                '${_selectedServices.where((s) => s['id'] == service['id']).length} selected',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w500,
-                                  color: AppTheme.primary,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                    if (isMobile && variants.isNotEmpty)
-                      Icon(
-                        isExpanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        color: isDark ? Colors.white60 : Colors.grey[500],
-                        size: 24,
-                      ),
-                  ],
-                ),
-              ),
-            ),
-
-            if (variants.isNotEmpty && (!isMobile || isExpanded))
-              Column(
-                children: [
-                  const Divider(color: Colors.grey, height: 1),
-                  Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Column(
-                      children: variants
-                          .map((v) => _buildVariantRow(service, v))
-                          .toList(),
-                    ),
-                  ),
-                ],
-              ),
-
-            if (variants.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.grey[800] : Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        size: 16,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'No variants available',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+            const SizedBox(height: 4),
+            ...tree.map((cat) => _buildTreeCategoryBlock(cat, isDark)),
           ],
         ),
       ),
     );
   }
 
-  // ✅ Variant row with service-only support
+  Widget _buildTreeCategoryBlock(Map<String, dynamic> cat, bool isDark) {
+    final color = _hexToTreeColor(cat['color']?.toString());
+    final icon = _treeIconFromName(cat['icon']?.toString());
+    final services = cat['services'] as List<Map<String, dynamic>>;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: isDark ? 0.18 : 0.10),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: color.withValues(alpha: 0.18),
+                  ),
+                  child: Icon(icon, size: 16, color: color),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    cat['name']?.toString() ?? 'Category',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${services.length}',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: color,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.only(left: 16),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    color: color.withValues(alpha: 0.45),
+                    width: 2,
+                  ),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: services
+                    .map((svc) => _buildTreeServiceBlock(svc, color, isDark))
+                    .toList(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTreeServiceBlock(
+    Map<String, dynamic> service,
+    Color catColor,
+    bool isDark,
+  ) {
+    final variants = (service['variants'] as List?) ?? [];
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 14,
+                height: 2,
+                color: catColor.withValues(alpha: 0.45),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  service['name']?.toString() ?? 'Service',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (variants.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(left: 22, top: 4),
+              child: Text(
+                'No pricing options yet',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                ),
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(left: 14),
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border(
+                    left: BorderSide(
+                      color: catColor.withValues(alpha: 0.25),
+                      width: 1.5,
+                    ),
+                  ),
+                ),
+                child: Column(
+                  children: variants
+                      .map(
+                        (v) => _buildVariantRow(
+                          service,
+                          Map<String, dynamic>.from(v as Map),
+                          catColor,
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoChip(IconData icon, String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Variant row (tree leaf) – checkbox select + per-variant offers
   Widget _buildVariantRow(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
+    Color catColor,
   ) {
     final isDark = context.isDarkMode;
     final int serviceId = service['id'] as int;
@@ -3311,25 +3378,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final isSelected = _selectedServices.any(
       (s) => s['id'] == serviceId && s['variant_id'] == variantId,
     );
-    final isMobile = MediaQuery.of(context).size.width < 600;
 
     final String gender = variant['gender']?.toString() ?? '';
     final String age = variant['age']?.toString() ?? '';
-    final String genderLower = gender.toLowerCase();
-
-    // ✅ Service-only variant detection (no gender, no age)
-    final bool isServiceOnly = gender.isEmpty && age.isEmpty;
-
-    IconData genderIcon;
-    if (isServiceOnly) {
-      genderIcon = Icons.spa_outlined; // ✅ Service-only icon
-    } else if (genderLower.contains('male')) {
-      genderIcon = Icons.male;
-    } else if (genderLower.contains('female')) {
-      genderIcon = Icons.female;
-    } else {
-      genderIcon = Icons.people;
-    }
+    final String ageRange = variant['age_range']?.toString() ?? '';
+    final String ageText = age.isEmpty
+        ? ''
+        : (ageRange.isEmpty ? age : '$age ($ageRange)');
 
     final double price = (variant['price'] as num?)?.toDouble() ?? 0.0;
     final int duration = (variant['duration'] as num?)?.toInt() ?? 30;
@@ -3340,315 +3395,173 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final finalPrice = price - discount;
     final hasOffer = selectedOffer != null && discount > 0;
 
-    // ✅ Service-only → "Standard", else "$gender $age"
-    final String displayText = isServiceOnly
-        ? 'Standard'
-        : '$gender $age'.trim();
+    final greenColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
+
+    // Offer info (read-only): applied offer, or "available" hint
+    final bool hasClaimed = availableOffers.any((o) => o['is_claimed'] == true);
+    Widget? offerChip;
+    if (isSelected && hasOffer) {
+      offerChip = _buildInfoChip(
+        Icons.card_giftcard,
+        '${selectedOffer['title'] ?? 'Offer'} applied • save Rs. ${discount.toStringAsFixed(0)}',
+        Colors.green.shade600,
+      );
+    } else if (availableOffers.isNotEmpty) {
+      offerChip = _buildInfoChip(
+        Icons.local_offer_outlined,
+        hasClaimed
+            ? 'Your claimed offer'
+            : (availableOffers.length == 1
+                  ? '1 offer available'
+                  : '${availableOffers.length} offers available'),
+        Colors.orange.shade700,
+      );
+    }
 
     return Column(
       children: [
-        GestureDetector(
-          onTap: () => _toggleVariant(service, variant),
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 8),
-            padding: EdgeInsets.all(isMobile ? 10 : 12),
-            decoration: BoxDecoration(
-              color: isSelected
-                  ? AppTheme.primary.withValues(alpha: 0.1)
-                  : (isDark ? const Color(0xFF1E1E1E) : Colors.white),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isSelected
-                    ? AppTheme.primary
-                    : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
-                width: 1.5,
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Row(
+            children: [
+              Container(
+                width: 10,
+                height: 1.5,
+                color: catColor.withValues(alpha: 0.35),
               ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: isMobile ? 40 : 44,
-                  height: isMobile ? 40 : 44,
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppTheme.primary.withValues(alpha: 0.2)
-                        : (isDark ? const Color(0xFF3A3A3A) : Colors.white),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    genderIcon,
-                    size: isMobile ? 22 : 24,
-                    color: isSelected
-                        ? AppTheme.primary
-                        : (isDark ? Colors.white60 : Colors.grey[600]),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        displayText, // ✅ "Standard" හෝ "Male Adult"
-                        style: TextStyle(
-                          fontWeight: isSelected
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                          fontSize: isMobile ? 13 : 15,
-                          color: isSelected
-                              ? AppTheme.primary
-                              : (isDark ? Colors.white : _textDark),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 4,
-                        children: [
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.currency_rupee,
-                                size: 12,
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.grey[500],
-                              ),
-                              const SizedBox(width: 2),
-                              if (hasOffer && isSelected)
-                                Text(
-                                  price.toStringAsFixed(0),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.grey[500],
-                                    decoration: TextDecoration.lineThrough,
-                                  ),
-                                ),
-                              if (hasOffer && isSelected)
-                                const SizedBox(width: 4),
-                              Text(
-                                (isSelected && hasOffer ? finalPrice : price)
-                                    .toStringAsFixed(0),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: isSelected
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                                  color: hasOffer && isSelected
-                                      ? (isDark
-                                            ? Colors.green.shade300
-                                            : Colors.green.shade700)
-                                      : (isDark
-                                            ? Colors.white70
-                                            : Colors.grey[700]),
-                                ),
-                              ),
-                            ],
-                          ),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.timer,
-                                size: 12,
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.grey[500],
-                              ),
-                              const SizedBox(width: 2),
-                              Text(
-                                '$duration min',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isDark
-                                      ? Colors.white60
-                                      : Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: isMobile ? 10 : 12,
-                    vertical: isMobile ? 6 : 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppTheme.primary
-                        : (isDark ? Colors.grey[800] : Colors.grey[100]),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isSelected ? Icons.check : Icons.add,
-                        size: isMobile ? 14 : 16,
-                        color: isSelected ? Colors.white : AppTheme.primary,
-                      ),
-                      if (!isMobile) ...[
-                        const SizedBox(width: 4),
-                        Text(
-                          isSelected ? 'Selected' : 'Select',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: isSelected ? Colors.white : AppTheme.primary,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-
-        if (isSelected && availableOffers.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.only(left: 8, right: 8, bottom: 12),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.amber.shade900.withValues(alpha: 0.2)
-                    : Colors.amber.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isDark ? Colors.amber.shade700 : Colors.amber.shade200,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.local_offer,
-                        size: 14,
-                        color: isDark
-                            ? Colors.amber.shade300
-                            : Colors.amber.shade700,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Available Offers (${availableOffers.length})',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: isDark
-                              ? Colors.amber.shade200
-                              : Colors.amber.shade900,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<Map<String, dynamic>?>(
-                    key: ValueKey(
-                      'offer_${key}_${selectedOffer?['id'] ?? 'none'}',
-                    ),
-                    initialValue: selectedOffer,
-                    isExpanded: true,
-                    isDense: true,
-                    decoration: InputDecoration(
-                      hintText: 'No offer applied',
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      filled: true,
-                      fillColor: isDark
-                          ? const Color(0xFF2A2A2A)
-                          : Colors.white,
-                      isDense: true,
-                    ),
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                    items: [
-                      DropdownMenuItem<Map<String, dynamic>?>(
-                        value: null,
-                        child: Text(
-                          'No offer',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark ? Colors.white60 : Colors.grey,
-                          ),
-                        ),
-                      ),
-                      ...availableOffers.map((offer) {
-                        return DropdownMenuItem<Map<String, dynamic>?>(
-                          value: offer,
-                          child: Text(
-                            _getOfferLabel(offer),
-                            style: const TextStyle(fontSize: 12),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        );
-                      }),
-                    ],
-                    onChanged: (offer) {
-                      _applyOfferToService(serviceId, variantId, offer);
-                    },
-                  ),
-                  if (hasOffer) ...[
-                    const SizedBox(height: 8),
-                    Container(
+              const SizedBox(width: 4),
+              Expanded(
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: () => _toggleVariant(service, variant),
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
+                        horizontal: 6,
                         vertical: 6,
                       ),
                       decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.green.shade900.withValues(alpha: 0.5)
-                            : Colors.green.shade50,
-                        borderRadius: BorderRadius.circular(8),
+                        color: isSelected
+                            ? AppTheme.primary.withValues(alpha: 0.08)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected
+                              ? AppTheme.primary.withValues(alpha: 0.5)
+                              : (isDark ? Colors.grey[700]! : Colors.grey[300]!)
+                                    .withValues(alpha: 0.7),
+                        ),
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            Icons.check_circle,
-                            size: 14,
-                            color: isDark
-                                ? Colors.green.shade300
-                                : Colors.green.shade700,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              'Save Rs. ${discount.toStringAsFixed(2)} → Pay Rs. ${finalPrice.toStringAsFixed(2)}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: isDark
-                                    ? Colors.green.shade200
-                                    : Colors.green.shade800,
-                              ),
+                          SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: Checkbox(
+                              value: isSelected,
+                              onChanged: (_) =>
+                                  _toggleVariant(service, variant),
+                              activeColor: AppTheme.primary,
+                              materialTapTargetSize:
+                                  MaterialTapTargetSize.shrinkWrap,
                             ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 4,
+                                  children: [
+                                    if (gender.isNotEmpty)
+                                      _buildInfoChip(
+                                        Icons.person_outline,
+                                        gender,
+                                        Colors.blue.shade400,
+                                      ),
+                                    if (ageText.isNotEmpty)
+                                      _buildInfoChip(
+                                        Icons.cake_outlined,
+                                        ageText,
+                                        Colors.purple.shade400,
+                                      ),
+                                    if (gender.isEmpty && ageText.isEmpty)
+                                      _buildInfoChip(
+                                        Icons.check_circle_outline,
+                                        'Standard',
+                                        Colors.grey.shade600,
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.timer_outlined,
+                                      size: 12,
+                                      color: isDark
+                                          ? Colors.white60
+                                          : Colors.grey[600],
+                                    ),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '$duration min',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isDark
+                                            ? Colors.white60
+                                            : Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (offerChip != null) ...[
+                                  const SizedBox(height: 6),
+                                  offerChip,
+                                ],
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              if (hasOffer && isSelected)
+                                Text(
+                                  'Rs. ${price.toStringAsFixed(0)}',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    decoration: TextDecoration.lineThrough,
+                                    color: isDark
+                                        ? Colors.white60
+                                        : Colors.grey[500],
+                                  ),
+                                ),
+                              Text(
+                                'Rs. ${(hasOffer && isSelected ? finalPrice : price).toStringAsFixed(0)}',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: hasOffer && isSelected
+                                      ? greenColor
+                                      : AppTheme.primary,
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
                     ),
-                  ],
-                ],
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
-        ],
+        ),
       ],
     );
   }
@@ -3727,7 +3640,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         onPressed: () {
                           setState(() {
                             _selectedServices.clear();
-                            _availableOffersPerService.clear();
                             _serviceOffers.clear();
                             _recalculateTotals();
                           });
@@ -3934,12 +3846,14 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
-  // ✅ Selected service item with "Standard" label support
   Widget _buildSelectedServiceItem(Map<String, dynamic> service, int index) {
     final isDark = context.isDarkMode;
     final String serviceName = service['name']?.toString() ?? 'Service';
     final String gender = service['gender']?.toString() ?? '';
     final String age = service['age']?.toString() ?? '';
+    final String variantLabel = (gender.isEmpty && age.isEmpty)
+        ? 'Standard'
+        : '$gender $age'.trim();
     final double price = (service['price'] as num?)?.toDouble() ?? 0.0;
     final double discount =
         (service['discount_amount'] as num?)?.toDouble() ?? 0;
@@ -3947,11 +3861,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         (service['final_price'] as num?)?.toDouble() ?? price;
     final int duration = (service['duration'] as num?)?.toInt() ?? 30;
     final offer = service['offer'] as Map<String, dynamic>?;
-
-    // ✅ Service-only → "Standard", else "$gender $age"
-    final String variantLabel = (gender.isEmpty && age.isEmpty)
-        ? 'Standard'
-        : '$gender $age'.trim();
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -3990,7 +3899,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '$variantLabel • $duration min', // ✅ "Standard • 30 min"
+                      '$variantLabel • $duration min',
                       style: TextStyle(
                         fontSize: 11,
                         color: isDark ? Colors.white60 : Colors.grey[600],
@@ -4035,7 +3944,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       removed['variant_id'] as int?,
                     );
                     _serviceOffers.remove(key);
-                    _availableOffersPerService.remove(key);
                     _recalculateTotals();
                   });
                 },
@@ -4097,44 +4005,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       DateTime.now().day,
     );
     final maxDate = today.add(const Duration(days: 30));
-    final isMobile = MediaQuery.of(context).size.width < 600;
 
-    bool isDateSelectable(DateTime date) {
-      if (_holidays.contains(date)) return false;
-      if (date.isBefore(today)) return false;
-      return true;
-    }
+    final firstSelectable = _firstSelectableDate();
+    final noDatesAvailable = _scheduleLoaded && firstSelectable == null;
+    final calendarInitial =
+        (_selectedDate != null && _isDaySelectable(_selectedDate!))
+        ? _selectedDate!
+        : (firstSelectable ?? today);
 
-    DateTime getFirstAvailableDate() {
-      DateTime checkDate = today;
-      if (!_holidays.contains(checkDate)) {
-        return checkDate;
-      }
-      for (int i = 1; i < 30; i++) {
-        checkDate = today.add(Duration(days: i));
-        if (!_holidays.contains(checkDate)) {
-          return checkDate;
-        }
-      }
-      return today.add(const Duration(days: 1));
-    }
-
-    void initializeDefaultDate() {
-      if (_selectedDate == null) {
-        final firstAvailable = getFirstAvailableDate();
-        if (_holidays.contains(today)) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            setState(() {
-              _selectedDate = firstAvailable;
-              _isDateUnavailable = false;
-            });
-            _checkDateAvailability(firstAvailable);
-          });
-        }
-      }
-    }
-
-    initializeDefaultDate();
+    final bool canContinue =
+        _selectedDate != null &&
+        !_isDateUnavailable &&
+        !_isCheckingDate &&
+        !_holidays.contains(_selectedDate) &&
+        _isDaySelectable(_selectedDate!);
 
     final isSelectedDateHoliday =
         _selectedDate != null && _holidays.contains(_selectedDate);
@@ -4146,8 +4030,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
     return Column(
       children: [
+        _buildStepTitle(
+          isDark,
+          Icons.calendar_today,
+          'Pick a date',
+          'Choose the day for your visit',
+        ),
         if (_selectedServices.isNotEmpty)
           Container(
+            width: double.infinity,
             padding: const EdgeInsets.all(12),
             color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
             child: Row(
@@ -4164,13 +4055,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                   ),
                 ),
-                TextButton(
-                  onPressed: () => setState(() => _currentStep = 1),
-                  child: Text(
-                    'Change',
-                    style: TextStyle(color: AppTheme.primary, fontSize: 13),
-                  ),
-                ),
               ],
             ),
           ),
@@ -4178,12 +4062,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         Expanded(
           child: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 16,
-              bottom: isMobile ? 100 : 16,
-            ),
+            padding: const EdgeInsets.all(16),
             child: Column(
               children: [
                 if (_holidays.contains(today))
@@ -4233,7 +4112,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                 ),
                               ),
                               Text(
-                                'Auto-selected next available date: ${DateFormat('EEEE, MMM dd').format(_selectedDate ?? getFirstAvailableDate())}',
+                                'Auto-selected next available date: ${DateFormat('EEEE, MMM dd').format(_selectedDate ?? firstSelectable ?? today)}',
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: isDark
@@ -4249,29 +4128,68 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                   ),
 
-                Card(
-                  elevation: 3,
-                  color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Container(
+                if (noDatesAvailable)
+                  Container(
+                    width: double.infinity,
                     padding: const EdgeInsets.all(16),
-                    child: CalendarDatePicker(
-                      initialDate: getFirstAvailableDate(),
-                      firstDate: today,
-                      lastDate: maxDate,
-                      selectableDayPredicate: (date) => isDateSelectable(date),
-                      onDateChanged: (date) async {
-                        setState(() {
-                          _selectedDate = date;
-                          _isDateUnavailable = false;
-                        });
-                        await _checkDateAvailability(date);
-                      },
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.orange.shade900
+                          : Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.event_busy,
+                          color: isDark
+                              ? Colors.orange.shade300
+                              : Colors.orange.shade700,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'No dates available in the next 30 days.',
+                            style: TextStyle(
+                              color: isDark
+                                  ? Colors.orange.shade300
+                                  : Colors.orange.shade700,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Card(
+                    elevation: 3,
+                    color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      child: CalendarDatePicker(
+                        key: ValueKey('cal_$_calendarVersion'),
+                        initialDate: calendarInitial,
+                        firstDate: today,
+                        lastDate: maxDate,
+                        selectableDayPredicate: (date) =>
+                            _isDaySelectable(date),
+                        onDateChanged: (date) async {
+                          setState(() {
+                            _selectedDate = date;
+                            _isDateUnavailable = false;
+                            _unavailableReason = null;
+                          });
+                          await _checkDateAvailability(date);
+                        },
+                      ),
                     ),
                   ),
-                ),
+
+                _buildUnavailableDaysHint(isDark, today, maxDate),
 
                 if (isSelectedDateHoliday)
                   Container(
@@ -4420,80 +4338,131 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           ),
         ),
 
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.1),
-                blurRadius: 8,
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed:
-                  (_selectedDate != null &&
-                      !_isDateUnavailable &&
-                      !_holidays.contains(_selectedDate))
-                  ? () async {
-                      setState(() {
-                        _currentStep = 3;
-                        _barbersLoaded = false;
-                        _barberAvailability.clear();
-                        _availableBarbers = [];
-                        _selectedBarber = null;
-                      });
-                      await _loadAvailableBarbers();
-                    }
-                  : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    (_selectedDate != null &&
-                        !_isDateUnavailable &&
-                        !_holidays.contains(_selectedDate))
-                    ? AppTheme.primary
-                    : (isDark ? Colors.grey[700] : Colors.grey[400]),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 2,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _selectedDate == null
-                        ? 'Please Select a Date'
-                        : (_holidays.contains(_selectedDate)
-                              ? '🚫 Holiday - Not Available'
-                              : (_isDateUnavailable
-                                    ? 'No Barbers Available'
-                                    : 'Continue to Barber')),
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
+        _buildBottomBar(
+          isDark: isDark,
+          enabled: canContinue,
+          onPressed: () async {
+            setState(() {
+              _currentStep = 3;
+              _barbersLoaded = false;
+              _barberAvailability.clear();
+              _availableBarbers = [];
+              _selectedBarber = null;
+            });
+            await _loadAvailableBarbers();
+          },
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Text(
+                  _selectedDate == null
+                      ? (noDatesAvailable
+                            ? 'No Dates Available'
+                            : 'Please Select a Date')
+                      : (_holidays.contains(_selectedDate)
+                            ? '🚫 Holiday - Not Available'
+                            : (_isDateUnavailable
+                                  ? 'No Barbers Available'
+                                  : (_isCheckingDate
+                                        ? 'Checking availability...'
+                                        : 'Continue to Barber'))),
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
                   ),
-                  if (_selectedDate != null &&
-                      !_isDateUnavailable &&
-                      !_holidays.contains(_selectedDate))
-                    const SizedBox(width: 8),
-                  if (_selectedDate != null &&
-                      !_isDateUnavailable &&
-                      !_holidays.contains(_selectedDate))
-                    const Icon(Icons.arrow_forward, size: 18),
-                ],
+                ),
               ),
-            ),
+              if (canContinue) const SizedBox(width: 8),
+              if (canContinue) const Icon(Icons.arrow_forward, size: 18),
+            ],
           ),
         ),
       ],
+    );
+  }
+
+  /// Short, friendly explanation of the greyed-out days in the calendar.
+  Widget _buildUnavailableDaysHint(
+    bool isDark,
+    DateTime today,
+    DateTime maxDate,
+  ) {
+    final reasons = <String>[];
+
+    if (_scheduleLoaded) {
+      final closedDays = <int>[
+        for (int d = 1; d <= 7; d++)
+          if (!_workingWeekdays.contains(d)) d,
+      ];
+      if (closedDays.isNotEmpty && closedDays.length < 7) {
+        final names = closedDays
+            .map((d) => DateFormat('EEE').format(DateTime(2024, 1, d)))
+            .join(', ');
+        reasons.add('No barbers on $names');
+      }
+    }
+
+    final upcomingHolidays =
+        _holidays
+            .where((h) => !h.isBefore(today) && !h.isAfter(maxDate))
+            .toList()
+          ..sort();
+    for (final h in upcomingHolidays.take(3)) {
+      final name = _holidayNames[h];
+      reasons.add(
+        '${DateFormat('MMM dd').format(h)} holiday'
+        '${name != null && name.isNotEmpty ? ' ($name)' : ''}',
+      );
+    }
+
+    if (reasons.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.info_outline,
+                size: 14,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'Greyed-out days are unavailable',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white70 : Colors.grey[700],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ...reasons.map(
+            (r) => Padding(
+              padding: const EdgeInsets.only(left: 20, top: 2),
+              child: Text(
+                '• $r',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -4513,77 +4482,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          child: Row(
-            children: [
-              Container(
-                width: 45,
-                height: 45,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  image:
-                      (_selectedSalon?['logo_url'] as String?) != null &&
-                          (_selectedSalon!['logo_url'] as String).isNotEmpty
-                      ? DecorationImage(
-                          image: NetworkImage(_selectedSalon!['logo_url']),
-                          fit: BoxFit.cover,
-                        )
-                      : null,
-                ),
-                child:
-                    (_selectedSalon?['logo_url'] == null ||
-                        (_selectedSalon!['logo_url'] as String).isEmpty)
-                    ? Center(
-                        child: Text(
-                          (_selectedSalon?['name'] as String?)
-                                  ?.substring(0, 1)
-                                  .toUpperCase() ??
-                              'S',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      )
-                    : null,
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Services: ${_selectedServices.length}',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${_calculateTotalDuration()} min total • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              TextButton(
-                onPressed: () => setState(() => _currentStep = 1),
-                child: Text(
-                  'Change',
-                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
-                ),
-              ),
-            ],
-          ),
+        _buildStepTitle(
+          isDark,
+          Icons.person,
+          'Choose your barber',
+          _selectedDate == null
+              ? 'Tap a barber to select'
+              : 'Availability on ${DateFormat('EEE, MMM dd').format(_selectedDate!)}',
         ),
         Expanded(
           child: _isLoadingBarbers
@@ -4641,62 +4546,35 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       _buildBarberCard(_availableBarbers[index]),
                 ),
         ),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.1),
-                blurRadius: 8,
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _selectedBarber == null
-                  ? null
-                  : () {
-                      setState(() {
-                        _currentStep = 4;
-                        _childNameController.clear();
-                        _selectedChildName = null;
-                        _isSameAsCustomer = true;
-                        _duplicateError = null;
-                      });
-                    },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _selectedBarber != null
-                    ? AppTheme.primary
-                    : (isDark ? Colors.grey[700] : Colors.grey[400]),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+        _buildBottomBar(
+          isDark: isDark,
+          enabled: _selectedBarber != null,
+          onPressed: () {
+            setState(() {
+              _currentStep = 4;
+              _childNameController.clear();
+              _selectedChildName = null;
+              _isSameAsCustomer = true;
+              _duplicateError = null;
+            });
+          },
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                _selectedBarber == null
+                    ? 'Select a Barber'
+                    : 'Continue to Person',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
                 ),
-                elevation: 2,
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _selectedBarber == null
-                        ? 'Select a Barber'
-                        : 'Continue to Person',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (_selectedBarber != null) ...[
-                    const SizedBox(width: 8),
-                    const Icon(Icons.arrow_forward, size: 18),
-                  ],
-                ],
-              ),
-            ),
+              if (_selectedBarber != null) ...[
+                const SizedBox(width: 8),
+                const Icon(Icons.arrow_forward, size: 18),
+              ],
+            ],
           ),
         ),
       ],
@@ -4708,8 +4586,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final isSelected = _selectedBarber?['id'] == barber['id'];
     final availability = _barberAvailability[barber['id']];
     final isAvailable = availability?['is_available'] ?? true;
-    final hasSpecialSchedule = availability?['has_special_schedule'] ?? false;
-    final hasSpecialBreak = availability?['has_special_break'] ?? false;
 
     final String barberName = barber['full_name']?.toString() ?? 'Barber';
     final String avatarUrl = barber['avatar_url']?.toString() ?? '';
@@ -4832,58 +4708,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           ),
                         ],
                       ),
-                      if (hasSpecialSchedule)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 6),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.star,
-                                size: 14,
-                                color: isDark
-                                    ? Colors.amber.shade300
-                                    : Colors.amber.shade600,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Special schedule today',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? Colors.amber.shade300
-                                      : Colors.amber.shade700,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      if (hasSpecialBreak)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.free_breakfast,
-                                size: 14,
-                                color: isDark
-                                    ? Colors.blue.shade300
-                                    : Colors.blue.shade600,
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                'Special break today',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? Colors.blue.shade300
-                                      : Colors.blue.shade700,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
                       if (!isAvailable && availability?['reason'] != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 8),
@@ -4959,86 +4783,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
-                child: Text(
-                  _selectedBarber?['full_name']
-                          ?.toString()
-                          .substring(0, 1)
-                          .toUpperCase() ??
-                      'B',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _selectedBarber?['full_name']?.toString() ?? 'Barber',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    Text(
-                      '${_calculateTotalDuration()} min service • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              TextButton(
-                onPressed: () => setState(() => _currentStep = 3),
-                child: Text(
-                  'Change',
-                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (_selectedDate != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.calendar_today, size: 18, color: _secondaryColor),
-                const SizedBox(width: 8),
-                Text(
-                  DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                const Spacer(),
-                TextButton(
-                  onPressed: () => setState(() => _currentStep = 2),
-                  child: Text(
-                    'Change',
-                    style: TextStyle(color: AppTheme.primary, fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        _buildSelectedDateRow(isDark),
         Expanded(
           child: SingleChildScrollView(
             physics: const BouncingScrollPhysics(),
@@ -5046,110 +4791,196 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Who is this appointment for?',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Select who will receive the service',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: isDark ? Colors.white60 : Colors.grey[600],
-                  ),
-                ),
-                const SizedBox(height: 24),
-                _buildPersonOption(
-                  isSelected: _isSameAsCustomer,
-                  icon: Icons.person,
-                  title: 'Myself',
-                  subtitle: customerName,
-                  description: 'Booking for yourself',
-                  onTap: () {
-                    setState(() {
-                      _isSameAsCustomer = true;
-                      _selectedChildName = null;
-                      _childNameController.clear();
-                      _duplicateError = null;
-                    });
-                    _checkDuplicateBooking();
-                  },
-                ),
-                const SizedBox(height: 12),
-                _buildPersonOption(
-                  isSelected: !_isSameAsCustomer,
-                  icon: Icons.group,
-                  title: 'Someone else',
-                  subtitle: 'Family member, friend, or child',
-                  description:
-                      !_isSameAsCustomer &&
-                          _selectedChildName != null &&
-                          _selectedChildName!.isNotEmpty
-                      ? 'Will book for: $_selectedChildName'
-                      : null,
-                  onTap: () => setState(() {
-                    _isSameAsCustomer = false;
-                    _duplicateError = null;
-                  }),
-                ),
-                if (!_isSameAsCustomer) ...[
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: _childNameController,
-                    style: TextStyle(
-                      fontSize: 16,
-                      color: isDark ? Colors.white : Colors.black87,
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
                     ),
-                    decoration: InputDecoration(
-                      hintText: 'Enter full name',
-                      hintStyle: TextStyle(
-                        fontSize: 15,
-                        color: isDark ? Colors.white70 : Colors.grey[400],
-                      ),
-                      prefixIcon: Icon(
-                        Icons.person_outline,
-                        color: AppTheme.primary,
-                        size: 22,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(
-                          color: AppTheme.primary,
-                          width: 2,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // ---- centered header ----
+                      Center(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 10, bottom: 10),
+                          child: Column(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: AppTheme.primary.withValues(
+                                    alpha: 0.12,
+                                  ),
+                                ),
+                                child: Icon(
+                                  Icons.badge,
+                                  size: 22,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Who is this booking for?',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Choose one option',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
-                      filled: true,
-                      fillColor: isDark
-                          ? const Color(0xFF2A2A2A)
-                          : Colors.white,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 16,
+
+                      // ---- tree: root node ----
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.person_pin_circle_outlined,
+                            size: 18,
+                            color: AppTheme.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Booking for',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    onChanged: (v) {
-                      setState(() {
-                        _selectedChildName = v.trim();
-                        _duplicateError = null;
-                      });
-                      _checkDuplicateBooking();
-                    },
+                      const SizedBox(height: 4),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            border: Border(
+                              left: BorderSide(
+                                color: AppTheme.primary.withValues(alpha: 0.4),
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              _buildPersonOption(
+                                isSelected: _isSameAsCustomer,
+                                icon: Icons.person,
+                                title: 'Myself',
+                                subtitle: customerName,
+                                onTap: () {
+                                  setState(() {
+                                    _isSameAsCustomer = true;
+                                    _selectedChildName = null;
+                                    _childNameController.clear();
+                                    _duplicateError = null;
+                                  });
+                                  _checkDuplicateBooking();
+                                },
+                              ),
+                              _buildPersonOption(
+                                isSelected: !_isSameAsCustomer,
+                                icon: Icons.group,
+                                title: 'Someone else',
+                                subtitle: 'Family member, friend or child',
+                                onTap: () => setState(() {
+                                  _isSameAsCustomer = false;
+                                  _duplicateError = null;
+                                }),
+                              ),
+                              if (!_isSameAsCustomer)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 20,
+                                    top: 8,
+                                  ),
+                                  child: TextField(
+                                    controller: _childNameController,
+                                    autofocus: true,
+                                    textCapitalization:
+                                        TextCapitalization.words,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black87,
+                                    ),
+                                    decoration: InputDecoration(
+                                      isDense: true,
+                                      hintText: "Enter the person's name",
+                                      hintStyle: TextStyle(
+                                        fontSize: 13,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.grey[400],
+                                      ),
+                                      prefixIcon: Icon(
+                                        Icons.edit_outlined,
+                                        color: AppTheme.primary,
+                                        size: 18,
+                                      ),
+                                      border: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      focusedBorder: OutlineInputBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                        borderSide: BorderSide(
+                                          color: AppTheme.primary,
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                      filled: true,
+                                      fillColor: isDark
+                                          ? const Color(0xFF2A2A2A)
+                                          : Colors.grey[50],
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 12,
+                                          ),
+                                    ),
+                                    onChanged: (v) {
+                                      setState(() {
+                                        _selectedChildName = v.trim();
+                                        _duplicateError = null;
+                                      });
+                                      _checkDuplicateBooking();
+                                    },
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
                 if (_duplicateError != null)
                   Container(
-                    margin: const EdgeInsets.only(top: 20),
-                    padding: const EdgeInsets.all(14),
+                    margin: const EdgeInsets.only(top: 12),
+                    padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
                       color: isDark ? Colors.red.shade900 : Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       children: [
@@ -5174,110 +5005,51 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       ],
                     ),
                   ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.blue.shade900 : Colors.blue.shade50,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        color: isDark
-                            ? Colors.blue.shade300
-                            : Colors.blue.shade700,
-                        size: 22,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          'Each person can only have one booking per day.',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark
-                                ? Colors.blue.shade300
-                                : Colors.blue.shade700,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             ),
           ),
         ),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.1),
-                blurRadius: 8,
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _canProceedToTimeSlot()
-                  ? () async {
-                      if (await _validateAndProceed()) {
-                        setState(() {
-                          _currentStep = 5;
-                          _showTravelTimeSelector = false;
-                          _selectedTravelTime = 0;
-                          _availableSlots = [];
-                          _selectedSlot = null;
-                          _isLoadingSlots = true;
-                          _slotErrorMessage = null;
-                          _slotErrorType = null;
-                        });
-                        await _loadAvailableSlots();
-                      }
-                    }
-                  : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _canProceedToTimeSlot()
-                    ? AppTheme.primary
-                    : (isDark ? Colors.grey[700] : Colors.grey[400]),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 2,
-              ),
-              child: _isCheckingDuplicate
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+        _buildBottomBar(
+          isDark: isDark,
+          enabled: _canProceedToTimeSlot(),
+          onPressed: () async {
+            if (await _validateAndProceed()) {
+              setState(() {
+                _currentStep = 5;
+                _showTravelTimeSelector = false;
+                _selectedTravelTime = 0;
+                _availableSlots = [];
+                _selectedSlot = null;
+                _isLoadingSlots = true;
+                _slotErrorMessage = null;
+                _slotErrorType = null;
+              });
+              await _loadAvailableSlots();
+            }
+          },
+          child: _isCheckingDuplicate
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Text(
+                      'Continue to Time Slot',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
                       ),
-                    )
-                  : Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Text(
-                          'Continue to Time Slot',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        SizedBox(width: 8),
-                        Icon(Icons.arrow_forward, size: 18),
-                      ],
                     ),
-            ),
-          ),
+                    SizedBox(width: 8),
+                    Icon(Icons.arrow_forward, size: 18),
+                  ],
+                ),
         ),
       ],
     );
@@ -5288,104 +5060,99 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     required IconData icon,
     required String title,
     required String subtitle,
-    String? description,
     required VoidCallback onTap,
   }) {
     final isDark = context.isDarkMode;
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 0),
-      elevation: isSelected ? 4 : 1,
-      color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: isSelected
-              ? AppTheme.primary
-              : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
-          width: isSelected ? 2 : 1,
-        ),
-      ),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              Container(
-                width: 55,
-                height: 55,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                child: Icon(icon, size: 30, color: AppTheme.primary),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 12,
+            height: 2,
+            color: AppTheme.primary.withValues(alpha: 0.4),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? AppTheme.primary.withValues(alpha: 0.08)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isSelected
+                          ? AppTheme.primary.withValues(alpha: 0.5)
+                          : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isSelected
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_unchecked,
+                        size: 20,
+                        color: isSelected
+                            ? AppTheme.primary
+                            : (isDark ? Colors.white54 : Colors.grey[500]),
                       ),
-                    ),
-                    if (description != null)
+                      const SizedBox(width: 8),
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        margin: const EdgeInsets.only(top: 8),
+                        width: 32,
+                        height: 32,
                         decoration: BoxDecoration(
                           color: AppTheme.primary.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(15),
+                          shape: BoxShape.circle,
                         ),
-                        child: Text(
-                          description,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: AppTheme.primary,
-                            fontWeight: FontWeight.w500,
-                          ),
+                        child: Icon(icon, size: 18, color: AppTheme.primary),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: isSelected
+                                    ? AppTheme.primary
+                                    : (isDark ? Colors.white : Colors.black87),
+                              ),
+                            ),
+                            Text(
+                              subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                  ],
-                ),
-              ),
-              Container(
-                width: 28,
-                height: 28,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isSelected ? AppTheme.primary : Colors.transparent,
-                  border: Border.all(
-                    color: isSelected
-                        ? AppTheme.primary
-                        : (isDark ? Colors.grey[600]! : Colors.grey[400]!),
-                    width: 2,
+                    ],
                   ),
                 ),
-                child: isSelected
-                    ? const Icon(Icons.check, size: 16, color: Colors.white)
-                    : null,
               ),
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -5394,92 +5161,80 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   // STEP 5: TIME SLOT SELECTION
   // ============================================
 
+  Widget _buildTimezoneIndicator() {
+    final isDark = context.isDarkMode;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+        borderRadius: BorderRadius.circular(25),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            TimezoneService.getCurrentFlag(),
+            style: const TextStyle(fontSize: 16),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              TimezoneService.getTimezoneDisplayName(),
+              style: TextStyle(
+                fontSize: 13,
+                color: isDark ? Colors.white70 : Colors.grey[700],
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '(${TimezoneService.getUtcOffsetString()})',
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? Colors.white70 : Colors.grey[500],
+            ),
+          ),
+          if (_isDST()) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.amber.shade900 : Colors.amber.shade100,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                'DST',
+                style: TextStyle(
+                  fontSize: 9,
+                  color: isDark ? Colors.amber.shade300 : Colors.amber.shade800,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildTimeSlotStep() {
     final isDark = context.isDarkMode;
-    final isMobile = MediaQuery.of(context).size.width < 600;
+
+    final canContinue =
+        _selectedSlot != null &&
+        !_isLoadingSlots &&
+        _availableSlots.isNotEmpty &&
+        _slotErrorMessage == null;
 
     return Column(
       children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          child: Row(
-            children: [
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
-                child: Text(
-                  _selectedBarber?['full_name']
-                          ?.toString()
-                          .substring(0, 1)
-                          .toUpperCase() ??
-                      'B',
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _selectedBarber?['full_name']?.toString() ?? 'Barber',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    Text(
-                      '${_calculateTotalDuration()} min service • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              TextButton(
-                onPressed: () => setState(() => _currentStep = 3),
-                child: Text(
-                  'Change',
-                  style: TextStyle(color: AppTheme.primary, fontSize: 14),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (_selectedDate != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.calendar_today, size: 18, color: _secondaryColor),
-                const SizedBox(width: 8),
-                Text(
-                  DateFormat('EEEE, MMM dd, yyyy').format(_selectedDate!),
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                const Spacer(),
-                TextButton(
-                  onPressed: () => setState(() => _currentStep = 2),
-                  child: Text(
-                    'Change',
-                    style: TextStyle(color: AppTheme.primary, fontSize: 14),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        _buildSelectedDateRow(isDark),
         _buildTimezoneIndicator(),
         Expanded(
           child: _isLoadingSlots
@@ -5490,7 +5245,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ? _buildNoSlotsState(isDark)
               : SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
-                  padding: EdgeInsets.only(bottom: isMobile ? 100 : 16),
+                  padding: const EdgeInsets.only(bottom: 16),
                   child: Column(
                     children: [
                       if (_availableSlots.isNotEmpty)
@@ -5500,55 +5255,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ),
                 ),
         ),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.1),
-                blurRadius: 8,
-                offset: const Offset(0, -2),
+        _buildBottomBar(
+          isDark: isDark,
+          enabled: canContinue,
+          onPressed: () => setState(() => _currentStep = 6),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: const [
+              Text(
+                'Continue to Confirmation',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
               ),
+              SizedBox(width: 8),
+              Icon(Icons.arrow_forward, size: 18),
             ],
-          ),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed:
-                  (_selectedSlot != null &&
-                      !_isLoadingSlots &&
-                      _availableSlots.isNotEmpty &&
-                      _slotErrorMessage == null)
-                  ? () => setState(() => _currentStep = 6)
-                  : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor:
-                    (_selectedSlot != null &&
-                        !_isLoadingSlots &&
-                        _availableSlots.isNotEmpty &&
-                        _slotErrorMessage == null)
-                    ? AppTheme.primary
-                    : (isDark ? Colors.grey[700] : Colors.grey[400]),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                elevation: 2,
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Text(
-                    'Continue to Confirmation',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
-                  SizedBox(width: 8),
-                  Icon(Icons.arrow_forward, size: 18),
-                ],
-              ),
-            ),
           ),
         ),
       ],
@@ -6195,8 +5915,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         final offer = s['offer'] as Map<String, dynamic>?;
                         final gender = s['gender']?.toString() ?? '';
                         final age = s['age']?.toString() ?? '';
-
-                        // ✅ Service-only → "Standard"
                         final details = (gender.isEmpty && age.isEmpty)
                             ? 'Standard'
                             : '$gender $age'.trim();
@@ -6210,7 +5928,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                 children: [
                                   Expanded(
                                     child: Text(
-                                      '• ${s['name']?.toString() ?? 'Service'} ($details)',
+                                      '• ${s['name']?.toString() ?? 'Service'}${details.isNotEmpty ? ' ($details)' : ''}',
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: isDark
@@ -6388,49 +6106,76 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
                   Icons.attach_money,
-                  'Final Amount',
+                  'Estimated Amount',
                   'Rs. ${totalPrice.toStringAsFixed(2)}',
-                  _discountAmount > 0
-                      ? 'Saved Rs. ${_discountAmount.toStringAsFixed(2)}'
-                      : '',
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_discountAmount > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            'Saved Rs. ${_discountAmount.toStringAsFixed(2)}',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isDark
+                                  ? Colors.green.shade300
+                                  : Colors.green.shade700,
+                            ),
+                          ),
+                        ),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            size: 14,
+                            color: isDark
+                                ? Colors.orange.shade300
+                                : Colors.orange.shade800,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              'Price may change after your service. The barber '
+                              'can charge extra for additional work, so this '
+                              'may not be the final bill.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                height: 1.3,
+                                color: isDark
+                                    ? Colors.orange.shade300
+                                    : Colors.orange.shade800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _isBooking ? null : _confirmBooking,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
+        _buildBottomBar(
+          isDark: isDark,
+          enabled: !_isBooking,
+          backEnabled: !_isBooking,
+          onPressed: _confirmBooking,
+          child: _isBooking
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Text(
+                  'Confirm Booking',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
                 ),
-                elevation: 3,
-              ),
-              child: _isBooking
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
-                      ),
-                    )
-                  : const Text(
-                      'Confirm Booking',
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-            ),
-          ),
         ),
       ],
     );
