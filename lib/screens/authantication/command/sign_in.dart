@@ -1720,19 +1720,26 @@ class _SignInScreenState extends State<SignInScreen>
     await _handlePostLogin(user.id);
   }
 
-  Future<void> _handlePostLogin(String userId) async {
-    if (!mounted) return;
+Future<void> _handlePostLogin(String userId) async {
+  if (!mounted) return;
 
-    try {
-      await SessionManager.setPendingQuickLogout(false);
-      await appState.refreshState();
-    } catch (e) {
-      debugPrint('❌ Error refreshing app state after login: $e');
-    }
-
-    if (!mounted) return;
-    context.go('/');
+  try {
+    await SessionManager.setPendingQuickLogout(false);
+    await appState.refreshState();
+  } catch (e) {
+    debugPrint('❌ Error refreshing app state after login: $e');
   }
+
+  if (!mounted) return;
+
+  // Restore / reactivation pending නම් කෙලින්ම ඒ screen එකට
+  if (appState.pendingDeletionRestore || appState.pendingReactivation) {
+    context.go('/account-restore-pending');
+    return;
+  }
+
+  context.go('/');
+}
 
   String _getOAuthErrorMessage(AuthException e, String provider) {
     if (kReleaseMode) {

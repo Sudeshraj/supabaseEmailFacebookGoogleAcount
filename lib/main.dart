@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:app_links/app_links.dart';
+import 'package:flutter_application_1/alertBox/account_restore_pending_screen.dart';
 import 'package:flutter_application_1/firebase_options.dart';
 import 'package:flutter_application_1/screens/subscription/providers/subscription_provider.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
@@ -1136,9 +1137,13 @@ GoRouter _createRouter() {
         builder: (_, _) => const VerifyInvalidScreen(),
       ),
       GoRoute(path: '/continue', builder: (_, _) => const ContinueScreen()),
+      // ✅ FIX: restore / reactivate confirmation is now a real PAGE
+      // (with its own Restore / Log Out buttons) instead of a dialog.
+      // A dialog is a pageless route and got removed by the Navigator
+      // as soon as the page under it (/login) was replaced by this one.
       GoRoute(
         path: '/account-restore-pending',
-        builder: (_, _) => const _PendingRestoreScreen(),
+        builder: (_, _) => const PendingRestoreScreen(),
       ),
       GoRoute(
         path: '/role-selector',
@@ -1712,13 +1717,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   StreamSubscription<bool>? _networkSub;
   bool _offline = false;
 
-  bool _restoreDialogShowing = false;
+  // ✅ FIX: the restore / reactivate dialogs (_showRestoreDialog,
+  // _showReactivateDialog), the `_restoreDialogShowing` flag and the
+  // appState listener that triggered them were all REMOVED. That flow
+  // now lives on the /account-restore-pending page
+  // (PendingRestoreScreen) which has its own Restore / Log Out buttons.
 
   @override
   void initState() {
     super.initState();
     _initNetworkMonitoring();
-    appState.addListener(_onAppStateChanged);
     themeNotifier.addListener(_onThemeChanged);
 
     // ✅ FIX: keep the OS in sync with the platform brightness when the
@@ -1732,7 +1740,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     // the best-effort call made in main().
     WidgetsBinding.instance.addPostFrameCallback((_) {
       applySystemUIOverlayStyle(_resolveIsDark());
-      _onAppStateChanged();
     });
   }
 
@@ -1765,174 +1772,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     });
   }
 
-  void _onAppStateChanged() {
-    if (_restoreDialogShowing) return;
-
-    if (appState.pendingDeletionRestore) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _showRestoreDialog());
-    } else if (appState.pendingReactivation) {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _showReactivateDialog(),
-      );
-    }
-  }
-
-  // ============================================================
-  // ✅ RESTORE DIALOG - AppTheme based
-  // ============================================================
-  Future<void> _showRestoreDialog() async {
-    final dialogContext = navigatorKey.currentContext;
-    if (dialogContext == null || _restoreDialogShowing) return;
-
-    _restoreDialogShowing = true;
-
-    final daysRemaining = appState.deletionRestoreDaysRemaining;
-    final isDark = dialogContext.isDarkMode;
-    final primaryColor = dialogContext.primaryColor;
-    final textColor = dialogContext.textColor;
-    final secondaryTextColor = dialogContext.secondaryTextColor;
-
-    await showDialog<void>(
-      context: dialogContext,
-      barrierDismissible: false,
-      builder: (context) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          // ✅ Use isDark for theme-aware dialog
-          backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: Row(
-            children: [
-              Icon(Icons.restore, color: primaryColor),
-              const SizedBox(width: 8),
-              Text('Restore Your Account?', style: TextStyle(color: textColor)),
-            ],
-          ),
-          content: Text(
-            daysRemaining != null
-                ? 'Your account is scheduled for deletion in $daysRemaining '
-                      'days. Would you like to restore it and continue using '
-                      'the app, or log out and let the deletion proceed?'
-                : 'Your account is scheduled for deletion. Would you like '
-                      'to restore it and continue using the app, or log out '
-                      'and let the deletion proceed?',
-            style: TextStyle(color: secondaryTextColor),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                await appState.declineRestoreAndLogout();
-                _restoreDialogShowing = false;
-                if (navigatorKey.currentContext != null) {
-                  router.go('/login');
-                }
-              },
-              style: TextButton.styleFrom(
-                foregroundColor: isDark ? Colors.white70 : Colors.grey[700],
-              ),
-              child: const Text('Log Out'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                await appState.confirmRestoreScheduledProfile();
-                _restoreDialogShowing = false;
-                _onAppStateChanged();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryColor,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Restore My Account'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ============================================================
-  // ✅ REACTIVATE DIALOG - AppTheme based
-  // ============================================================
-  // ✅ FIX: previously this dialog didn't read isDarkMode / textColor
-  // / secondaryTextColor like _showRestoreDialog() did, so in dark
-  // mode it always rendered with the (light) default AlertDialog
-  // background and default black text — inconsistent and hard to
-  // read against the rest of the dark-themed app. Now mirrors the
-  // restore dialog's theming.
-  Future<void> _showReactivateDialog() async {
-    final dialogContext = navigatorKey.currentContext;
-    if (dialogContext == null || _restoreDialogShowing) return;
-
-    _restoreDialogShowing = true;
-    final isDark = dialogContext.isDarkMode;
-    final primaryColor = dialogContext.primaryColor;
-    final textColor = dialogContext.textColor;
-    final secondaryTextColor = dialogContext.secondaryTextColor;
-
-    await showDialog<void>(
-      context: dialogContext,
-      barrierDismissible: false,
-      builder: (context) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: Row(
-            children: [
-              Icon(Icons.restore, color: primaryColor),
-              const SizedBox(width: 8),
-              Text(
-                'Reactivate Your Account?',
-                style: TextStyle(color: textColor),
-              ),
-            ],
-          ),
-          content: Text(
-            'Your account is currently deactivated. Would you like to '
-            'reactivate it and continue using the app, or log out and '
-            'keep it deactivated?',
-            style: TextStyle(color: secondaryTextColor),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                await appState.declineReactivationAndLogout(); // ✅
-                _restoreDialogShowing = false;
-                if (navigatorKey.currentContext != null) {
-                  router.go('/login');
-                }
-              },
-              style: TextButton.styleFrom(
-                foregroundColor: isDark ? Colors.white70 : Colors.grey[700],
-              ),
-              child: const Text('Log Out'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                await appState.confirmReactivateProfile(); // ✅
-                _restoreDialogShowing = false;
-                _onAppStateChanged();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryColor,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Reactivate My Account'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     _networkSub?.cancel();
@@ -1943,7 +1782,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     // something owned by this State. MyApp is the root widget passed
     // to runApp() and is only disposed when the whole engine/process
     // tears down, at which point the subscription dies with it anyway.
-    appState.removeListener(_onAppStateChanged);
     themeNotifier.removeListener(_onThemeChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -1990,23 +1828,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-// ====================
-// PENDING RESTORE SCREEN - AppTheme based
-// ====================
-class _PendingRestoreScreen extends StatelessWidget {
-  const _PendingRestoreScreen();
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: context.backgroundColor,
-      body: Center(
-        child: CircularProgressIndicator(color: context.primaryColor),
       ),
     );
   }

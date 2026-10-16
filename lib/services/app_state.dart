@@ -255,49 +255,49 @@ class AppState extends ChangeNotifier {
   }
 
   // Refresh app state
-  Future<void> refreshState({bool silent = false}) async {
-    if (!silent) _setLoading(true);
-    // ✅ FIX: previously this was called at the END of the try block
-    // (after _updateUserProfile()), which meant it silently erased any
-    // real error _updateUserProfile() had just set — e.g. 'Account
-    // blocked' or 'Account inactive' when logout() gets triggered
-    // in-band during this same refreshState() call. By the time this
-    // method returned, the UI could never see why the user got logged
-    // out. Clearing it up-front (matching initializeApp()'s pattern)
-    // means only a stale PREVIOUS error gets cleared, and a fresh one
-    // set later in this same call correctly survives.
-    _setErrorMessage(null);
+// Concurrent refreshState() calls (auth listener + _handlePostLogin)
+// එකිනෙකට අතරමං කරන්නේ නැතුව පිළිවෙළට run කරන්න.
+Future<void> _refreshChain = Future.value();
 
-    try {
-      _setCurrentUser(Supabase.instance.client.auth.currentUser);
-      await _checkAuthenticationState();
-      await _updateUserProfile();
+Future<void> refreshState({bool silent = false}) {
+  final next = _refreshChain.then((_) => _refreshStateImpl(silent: silent));
+  _refreshChain = next.catchError((_) {});
+  return next;
+}
 
-      final hasProfiles = await SessionManager.hasProfile();
-      final rememberMe = await SessionManager.isRememberMeEnabled();
+Future<void> _refreshStateImpl({bool silent = false}) async {
+  if (!silent) _setLoading(true);
+  _setErrorMessage(null);
 
-      _setHasLocalProfile(hasProfiles);
-      _setRememberMeEnabled(rememberMe);
+  try {
+    _setCurrentUser(Supabase.instance.client.auth.currentUser);
+    await _checkAuthenticationState();
+    await _updateUserProfile();
 
-      _lastUpdateTime = DateTime.now();
+    final hasProfiles = await SessionManager.hasProfile();
+    final rememberMe = await SessionManager.isRememberMeEnabled();
 
-      developer.log(
-        'AppState: Refreshed - Roles: $_roles, Current: $_currentRole',
-        name: 'AppState',
-      );
-    } catch (e, stackTrace) {
-      developer.log(
-        'State refresh error: $e',
-        name: 'AppState',
-        error: e,
-        stackTrace: stackTrace,
-      );
+    _setHasLocalProfile(hasProfiles);
+    _setRememberMeEnabled(rememberMe);
 
-      if (!silent) _setErrorMessage('Failed to refresh state');
-    } finally {
-      if (!silent) _setLoading(false);
-    }
+    _lastUpdateTime = DateTime.now();
+
+    developer.log(
+      'AppState: Refreshed - Roles: $_roles, Current: $_currentRole',
+      name: 'AppState',
+    );
+  } catch (e, stackTrace) {
+    developer.log(
+      'State refresh error: $e',
+      name: 'AppState',
+      error: e,
+      stackTrace: stackTrace,
+    );
+    if (!silent) _setErrorMessage('Failed to refresh state');
+  } finally {
+    if (!silent) _setLoading(false);
   }
+}
 
   // Logout user
   /// Full, permanent logout - actually revokes the token server-side
@@ -513,7 +513,6 @@ class AppState extends ChangeNotifier {
   /// (respecting their original deletion request). Signs them out
   /// rather than leaving them in a half-active state.
   Future<void> declineRestoreAndLogout() async {
-    _setPendingDeletionRestore(pending: false);
     await logout();
   }
 
@@ -558,7 +557,6 @@ class AppState extends ChangeNotifier {
   /// User declined to reactivate their deactivated account. Signs
   /// them out rather than leaving them in a half-active state.
   Future<void> declineReactivationAndLogout() async {
-    _setPendingReactivation(false);
     await logout();
   }
 

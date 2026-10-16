@@ -796,6 +796,24 @@ class _ContinueScreenState extends State<ContinueScreen> {
         if (!mounted) return;
 
         // ═══════════════════════════════════════════════════════════
+        // ✅ NEW: Delete කරන්න schedule කරපු / deactivate කරපු
+        // account එකක් නම් කෙලින්ම restore screen එකට යවන්න.
+        // role.isEmpty branch එකේ /verify-email හෝ /reg එකට යන්න
+        // කලින් මේක check වෙන්න ඕන, නැත්නම් user ව වැරදි screen
+        // එකකට යවනවා.
+        //
+        // (`return` කළත් පහළ `finally` block එක තාම run වෙලා
+        // loading state reset කරනවා.)
+        // ═══════════════════════════════════════════════════════════
+        if (appState.pendingDeletionRestore || appState.pendingReactivation) {
+          debugPrint(
+            '⏸️ Pending restore/reactivation → /account-restore-pending',
+          );
+          context.go('/account-restore-pending');
+          return;
+        }
+
+        // ═══════════════════════════════════════════════════════════
         // 🔥 FIX: role.isEmpty (role select කරලා නෑ / reg flow එක
         // complete කරලා නෑ) නම්, කෙලින්ම '/' route එකට යනවා වෙනුවට
         // explicit විදිහටම නිවැරදි screen එකට redirect කරනවා:
