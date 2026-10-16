@@ -766,7 +766,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
       }
 
       if (loginSuccess && mounted) {
-        debugPrint('✅ Login successful for role: ${role.isEmpty ? "(none)" : role}');
+        debugPrint(
+          '✅ Login successful for role: ${role.isEmpty ? "(none)" : role}',
+        );
 
         final savedToken = await SessionManager.getRefreshToken(email);
         debugPrint(
@@ -782,10 +784,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
           if (currentUser != null) {
             await supabase.auth.updateUser(
               UserAttributes(
-                data: {
-                  ...currentUser.userMetadata ?? {},
-                  'current_role': role,
-                },
+                data: {...currentUser.userMetadata ?? {}, 'current_role': role},
               ),
             );
             debugPrint('📝 Updated user metadata with role: $role');
@@ -819,7 +818,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
           if (!isOAuth) {
             final isVerified = currentUser?.emailConfirmedAt != null;
             if (!isVerified) {
-              debugPrint('📧 Role-less email account, not verified → /verify-email');
+              debugPrint(
+                '📧 Role-less email account, not verified → /verify-email',
+              );
               context.go('/verify-email');
               return;
             }
@@ -1360,9 +1361,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
     final lastLogin = profile['lastLogin'] as String?;
     final roleColor = hasRole ? _getRoleColor(profileRole) : Colors.orange;
-    final roleIcon = hasRole ? _getRoleIcon(profileRole) : Icons.person_add_alt_1;
-    final roleDisplayName =
-        hasRole ? _getRoleDisplayName(profileRole) : 'Complete Registration';
+    final roleIcon = hasRole
+        ? _getRoleIcon(profileRole)
+        : Icons.person_add_alt_1;
+    final roleDisplayName = hasRole
+        ? _getRoleDisplayName(profileRole)
+        : 'Complete Registration';
     final providerColor = _getProviderColor(provider);
 
     final status = profile['status'] as String? ?? 'active';
@@ -1964,7 +1968,10 @@ class _ContinueScreenState extends State<ContinueScreen> {
       final Set<String> emailsToRemove = {};
       for (final uniqueId in _selectedProfiles) {
         final parts = uniqueId.split('-');
-        if (parts.isNotEmpty) emailsToRemove.add(parts[0]);
+        // අන්තිම කොටස් දෙක = index සහ role (role හිස් වෙන්නත් පුළුවන්)
+        if (parts.length >= 3) {
+          emailsToRemove.add(parts.sublist(0, parts.length - 2).join('-'));
+        }
       }
 
       for (final email in emailsToRemove) {

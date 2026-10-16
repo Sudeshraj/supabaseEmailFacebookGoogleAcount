@@ -551,21 +551,6 @@ class _SignInScreenState extends State<SignInScreen>
       );
 
       if (e.code == 'email_not_confirmed') {
-        final session = supabase.auth.currentSession;
-
-        await _saveOAuthProfile(
-          user: User(
-            id: '',
-            appMetadata: {},
-            userMetadata: {},
-            aud: '',
-            createdAt: DateTime.now().toIso8601String(),
-          ),
-          providerToSave: 'email',
-          rememberMe: _rememberMe,
-          refreshToken: session?.refreshToken,
-        );
-
         appState.emailVerifyerError();
         appState.refreshState();
         if (!mounted) return;

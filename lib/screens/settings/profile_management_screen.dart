@@ -130,11 +130,23 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
         final role = roleEntry['roles'] as Map?;
         if (role == null) continue;
 
+        // ✅ FIX: purge වෙලා 'deleted' වුණ roles card එකක් විදිහට පෙන්වන්න එපා
+        if ((roleEntry['status'] as String?) == 'deleted') continue;
+
         final roleName = role['name'] as String;
         String roleStatus = roleEntry['status'] as String? ?? 'active';
         final roleKey = 'profile_$roleName';
 
-        if (_isProfileLevelStatus) {
+        // ✅ FIX (MAIN BUG): කලින් මෙතන `if (_isProfileLevelStatus)`
+        // කියලා තිබුණා. handle_new_user trigger එකෙන් හැම user කෙනෙකුටම
+        // profile_status එකතු වෙන නිසා ඒක හැමවිටම true වෙලා, හැම role
+        // එකකම status එක account එකේ status එකෙන් override වුණා.
+        // දැන් override වෙන්නේ මුළු account එකම active නැති වෙලාවට විතරයි.
+        // නැත්නම් user_roles table එකේ ඒ role එකේ තමන්ගේම status එක පාවිච්චි වෙනවා.
+        final accountLevelNotActive =
+            _isProfileLevelStatus && profileLevelStatus != 'active';
+
+        if (accountLevelNotActive) {
           roleStatus = profileLevelStatus;
         }
 
@@ -164,7 +176,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
           }
         }
 
-        if (_isProfileLevelStatus &&
+        if (accountLevelNotActive &&
             profileLevelStatus == 'scheduled_for_deletion') {
           deletionDueDate = profileDeletionDueDate;
           gracePeriodDays = profileGracePeriodDays;
@@ -216,7 +228,12 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     try {
       debugPrint('📝 Updating role status: ${profile.role} -> $status');
 
-      if (profile.isProfileLevel) {
+      // ✅ FIX (MAIN BUG): කලින් `profile.isProfileLevel` (හැමවිටම true)
+      // නිසා හැම role action එකක්ම මුළු account එකටම යනවා වුණා.
+      // දැන් profile-level RPC එක පාවිච්චි වෙන්නේ මුළු account එකම
+      // inactive / scheduled_for_deletion නම් විතරයි (restore කරන්න).
+      // සාමාන්‍ය තත්ත්වයේදී update_role_status RPC එකෙන් ඒ role එකට විතරයි.
+      if (profile.accountLevelNotActive) {
         final success = await SessionManager.updateProfileLevelStatus(
           email: profile.email,
           status: status,
@@ -876,6 +893,9 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
     final isBlocked = profile.isBlocked;
     final isProfileLevel = profile.isProfileLevel;
 
+    // ✅ NEW: මුළු account එකම active නැත්නම් විතරයි true
+    final accountNotActive = profile.accountLevelNotActive;
+
     Color statusColor;
     String statusText;
     IconData statusIcon;
@@ -1049,8 +1069,8 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                               ],
                             ),
                           ),
-                          // Profile level badge
-                          if (isProfileLevel)
+                          // Profile level badge (මුළු account එකම active නැති විට පමණි)
+                          if (accountNotActive)
                             Container(
                               padding: const EdgeInsets.symmetric(
                                 horizontal: 4,
@@ -1117,7 +1137,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            isProfileLevel
+                            accountNotActive
                                 ? 'Complete profile scheduled for deletion'
                                 : 'Role scheduled for deletion',
                             style: TextStyle(
@@ -1166,7 +1186,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        isProfileLevel
+                        accountNotActive
                             ? 'Complete profile is inactive. You can reactivate it anytime.'
                             : 'This role is inactive. You can reactivate it anytime.',
                         style: TextStyle(
@@ -1244,7 +1264,8 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                   ),
 
                 if (isProfileLevel) ...[
-                  if (isActive && !isBlocked)
+                  // "Deactivate All" - account active නම් පෙන්වන්න
+                  if (isActive && !accountNotActive && !isBlocked)
                     _buildActionButton(
                       icon: Icons.pause_circle_filled,
                       label: 'Deactivate All',
@@ -1252,7 +1273,8 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
                       onPressed: () => _deactivateCompleteProfile(profile),
                     ),
 
-                  if ((isInactive || isScheduledForDeletion) && !isBlocked)
+                  // "Reactivate All" - මුළු account එකම inactive / scheduled නම් විතරයි
+                  if (accountNotActive && !isBlocked)
                     _buildActionButton(
                       icon: Icons.restore,
                       label: 'Reactivate All',
@@ -1263,7 +1285,7 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
               ],
             ),
 
-            if (isProfileLevel && !isScheduledForDeletion) ...[
+            if (isProfileLevel && !accountNotActive) ...[
               const SizedBox(height: 12),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -1401,7 +1423,6 @@ class _ProfileManagementScreenState extends State<ProfileManagementScreen> {
   Widget _buildContent() {
     return Column(
       children: [
-        // ✅ toList() remove කරන්න
         ..._profiles.map((profile) => _buildProfileCard(profile)),
         const SizedBox(height: 20),
       ],
@@ -1446,4 +1467,12 @@ class ProfileData {
     this.isProfileLevel = false,
     this.profileLevelStatus,
   });
+
+  /// ✅ NEW: මුළු account (profile_status) එකම inactive / scheduled_for_deletion
+  /// නම් විතරයි true. profile_status 'active' නම් false - එවිට role actions
+  /// ඒ role එකට විතරක් බලපානවා.
+  bool get accountLevelNotActive =>
+      isProfileLevel &&
+      profileLevelStatus != null &&
+      profileLevelStatus != 'active';
 }

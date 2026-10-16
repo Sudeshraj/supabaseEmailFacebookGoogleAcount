@@ -79,18 +79,18 @@ class SessionManager {
   }
 
   /// ✅ NEW: Persists the "quick-switch logout is in effect" flag to
-/// disk (not just in-memory AppState), so it survives a full app
-/// kill + restart. Without this, closing the app after a
-/// quick-switch logout and reopening it would let Supabase's own
-/// (never-revoked, by design) persisted session silently take over
-/// again and skip the Continue screen entirely.
-static Future<void> setPendingQuickLogout(bool value) async {
-  await _prefs.setBool(_pendingQuickLogoutKey, value);
-}
+  /// disk (not just in-memory AppState), so it survives a full app
+  /// kill + restart. Without this, closing the app after a
+  /// quick-switch logout and reopening it would let Supabase's own
+  /// (never-revoked, by design) persisted session silently take over
+  /// again and skip the Continue screen entirely.
+  static Future<void> setPendingQuickLogout(bool value) async {
+    await _prefs.setBool(_pendingQuickLogoutKey, value);
+  }
 
-static Future<bool> isPendingQuickLogout() async {
-  return _prefs.getBool(_pendingQuickLogoutKey) ?? false;
-}
+  static Future<bool> isPendingQuickLogout() async {
+    return _prefs.getBool(_pendingQuickLogoutKey) ?? false;
+  }
 
   // =====================================================
   // ✅ CONSENT MANAGEMENT FUNCTIONS
@@ -1211,24 +1211,6 @@ static Future<bool> isPendingQuickLogout() async {
               isInactive = true;
             }
           }
-
-          // If no profile level status, check role level
-          if (!isScheduledForDeletion && !isInactive) {
-            final rolesResponse = await supabase
-                .from('user_roles')
-                .select('status')
-                .eq('user_id', user.id);
-
-            for (var roleEntry in rolesResponse) {
-              final status = roleEntry['status'] as String? ?? 'active';
-              if (status == 'scheduled_for_deletion') {
-                isScheduledForDeletion = true;
-              }
-              if (status == 'inactive') {
-                isInactive = true;
-              }
-            }
-          }
         }
       }
 
@@ -1571,34 +1553,51 @@ static Future<bool> isPendingQuickLogout() async {
     required String status,
   }) async {
     try {
-      final availableProfiles = await getAvailableProfiles();
-      final updatedProfiles = availableProfiles.map((p) {
-        if (p['email'] == email && p['role'] == role) {
-          return {
-            ...p,
-            'status': status,
-            'is_active': status == 'active',
-            'is_scheduled_for_deletion': status == 'scheduled_for_deletion',
-            'status_updated_at': DateTime.now().toIso8601String(),
-          };
+      final userId = Supabase.instance.client.auth.currentUser?.id;
+      final rolesKey = '$email$_keyUserRoles';
+      final cachedRoles = List<String>.from(
+        _prefs.getStringList(rolesKey) ?? [],
+      );
+      final available = await getAvailableProfiles();
+
+      if (status == 'active') {
+        // role එක ආපහු cache + available list දෙකටම දාන්න
+        if (!cachedRoles.contains(role)) cachedRoles.add(role);
+
+        final idx = available.indexWhere(
+          (p) => p['email'] == email && p['role'] == role,
+        );
+        final entry = {
+          'id': userId,
+          'email': email,
+          'role': role,
+          'role_id': _getRoleIdFromName(role),
+          'status': 'active',
+          'is_active': true,
+        };
+        if (idx == -1) {
+          available.add(entry);
+        } else {
+          available[idx] = {...available[idx], ...entry};
         }
-        return p;
-      }).toList();
-
-      final filteredProfiles = updatedProfiles.where((p) {
-        final status = p['status'] as String? ?? 'active';
-        return status == 'active';
-      }).toList();
-
-      await saveAvailableProfiles(filteredProfiles);
-      debugPrint('✅ Local profile status updated: $role -> $status');
-
-      if (status == 'deleted') {
-        final rolesKey = '$email$_keyUserRoles';
-        final cachedRoles = _prefs.getStringList(rolesKey) ?? [];
-        final updatedRoles = cachedRoles.where((r) => r != role).toList();
-        await _prefs.setStringList(rolesKey, updatedRoles);
+      } else {
+        // inactive / scheduled_for_deletion / deleted -> දෙකෙන්ම අයින් කරන්න
+        cachedRoles.remove(role);
+        available.removeWhere((p) => p['email'] == email && p['role'] == role);
       }
+
+      await _prefs.setStringList(rolesKey, cachedRoles);
+      await saveAvailableProfiles(available);
+
+      // saved_profiles ඇතුළේ roles list එකත් sync කරන්න
+      final profiles = await getProfiles();
+      final pIdx = profiles.indexWhere((p) => p['email'] == email);
+      if (pIdx != -1) {
+        profiles[pIdx]['roles'] = cachedRoles;
+        await _prefs.setString(_keyProfiles, jsonEncode(profiles));
+      }
+
+      debugPrint('✅ Local role status updated: $role -> $status');
     } catch (e) {
       debugPrint('❌ Error updating local profile status: $e');
     }
@@ -1689,89 +1688,90 @@ static Future<bool> isPendingQuickLogout() async {
   /// No password is ever stored (only a revocable refresh token in
   /// encrypted secure storage), and a full, permanent, token-revoking
   /// logout is always available via logoutUser() (Settings screen).
-static Future<void> logoutForContinue() async {
-  try {
-    final supabase = Supabase.instance.client;
-    final user = supabase.auth.currentUser;
-    final email = await getCurrentUserEmail();
-    final rememberMe = await isRememberMeEnabled();
+  static Future<void> logoutForContinue() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      final email = await getCurrentUserEmail();
+      final rememberMe = await isRememberMeEnabled();
 
-    if (user != null && email != null && email == user.email) {
-      final refreshToken = supabase.auth.currentSession?.refreshToken;
+      if (user != null && email != null && email == user.email) {
+        final refreshToken = supabase.auth.currentSession?.refreshToken;
 
-      if (rememberMe && refreshToken != null) {
-        await saveUserProfile(
-          email: email,
-          userId: user.id,
-          name: user.userMetadata?['full_name'] ?? email.split('@').first,
-          rememberMe: rememberMe,
-          refreshToken: refreshToken,
-          provider: await _getUserProvider(email),
-        );
-        debugPrint('✅ Refresh token saved before quick-switch logout');
+        if (rememberMe && refreshToken != null) {
+          await saveUserProfile(
+            email: email,
+            userId: user.id,
+            name: user.userMetadata?['full_name'] ?? email.split('@').first,
+            rememberMe: rememberMe,
+            refreshToken: refreshToken,
+            provider: await _getUserProvider(email),
+          );
+          debugPrint('✅ Refresh token saved before quick-switch logout');
+        }
       }
+
+      // signOut() කිසිසේත් call කරන්නේ නෑ (existing fix - unchanged)
+
+      // ✅ NEW: persistent flag එක set කරනවා - app kill+restart
+      // එකකින්ම survive වෙන්න.
+      await setPendingQuickLogout(true);
+
+      await _prefs.remove(_keyCurrentRole);
+
+      if (email != null && rememberMe) {
+        await setCurrentUser(email);
+        await _prefs.setBool(_showContinueKey, true);
+      } else {
+        await _prefs.remove(_currentUserKey);
+        await clearContinueScreen();
+      }
+
+      debugPrint('✅ Quick-switch logout complete for: $email');
+    } catch (e) {
+      debugPrint('❌ Error during quick-switch logout: $e');
     }
-
-    // signOut() කිසිසේත් call කරන්නේ නෑ (existing fix - unchanged)
-
-    // ✅ NEW: persistent flag එක set කරනවා - app kill+restart
-    // එකකින්ම survive වෙන්න.
-    await setPendingQuickLogout(true);
-
-    await _prefs.remove(_keyCurrentRole);
-
-    if (email != null && rememberMe) {
-      await setCurrentUser(email);
-      await _prefs.setBool(_showContinueKey, true);
-    } else {
-      await _prefs.remove(_currentUserKey);
-      await clearContinueScreen();
-    }
-
-    debugPrint('✅ Quick-switch logout complete for: $email');
-  } catch (e) {
-    debugPrint('❌ Error during quick-switch logout: $e');
   }
-}
 
   /// ✅ Full, permanent logout (Settings screen). Actually revokes
   /// the refresh token server-side (default global scope) - this
   /// is the correct, secure behavior for an explicit "log out of
   /// this account" action.
-static Future<void> logoutUser() async {
-  try {
-    final supabase = Supabase.instance.client;
-    final user = supabase.auth.currentUser;
+  static Future<void> logoutUser() async {
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
 
-    if (user != null) {
-      await supabase
-          .from('profiles')
-          .update({
-            'last_logout': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', user.id);
+      if (user != null) {
+        await supabase
+            .from('profiles')
+            .update({
+              'last_logout': DateTime.now().toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
+            })
+            .eq('id', user.id);
+      }
+
+      await supabase.auth
+          .signOut(); // full logout - token DOES get revoked here
+
+      // ✅ NEW: full logout එකේදී flag එකෙන් prescribed state එකක්
+      // තියෙන්න අවශ්‍ය නෑ (token දැනටමත් revoked), ඒත් clean state
+      // එකක් ඉතුරු කරන්න clear කරනවා.
+      await setPendingQuickLogout(false);
+
+      final email = await getCurrentUserEmail();
+      if (email != null) {
+        await _prefs.remove(_keyCurrentRole);
+        await clearContinueScreen();
+      }
+
+      debugPrint('✅ User logged out successfully');
+    } catch (e) {
+      debugPrint('❌ Error during logout: $e');
+      rethrow;
     }
-
-    await supabase.auth.signOut(); // full logout - token DOES get revoked here
-
-    // ✅ NEW: full logout එකේදී flag එකෙන් prescribed state එකක්
-    // තියෙන්න අවශ්‍ය නෑ (token දැනටමත් revoked), ඒත් clean state
-    // එකක් ඉතුරු කරන්න clear කරනවා.
-    await setPendingQuickLogout(false);
-
-    final email = await getCurrentUserEmail();
-    if (email != null) {
-      await _prefs.remove(_keyCurrentRole);
-      await clearContinueScreen();
-    }
-
-    debugPrint('✅ User logged out successfully');
-  } catch (e) {
-    debugPrint('❌ Error during logout: $e');
-    rethrow;
   }
-}
 
   // =====================================================
   // ✅ CLEAR ALL
@@ -2999,15 +2999,14 @@ static Future<void> logoutUser() async {
     }
   }
 
-//subscription_provider sadaha
-static Future<void> saveCurrentSalonId(int salonId) async {
-  final prefs = await SharedPreferences.getInstance();
-  await prefs.setInt('current_salon_id', salonId);
-}
+  //subscription_provider sadaha
+  static Future<void> saveCurrentSalonId(int salonId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('current_salon_id', salonId);
+  }
 
-static Future<int?> getCurrentSalonId() async {
-  final prefs = await SharedPreferences.getInstance();
-  return prefs.getInt('current_salon_id');
-}
-
+  static Future<int?> getCurrentSalonId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('current_salon_id');
+  }
 }

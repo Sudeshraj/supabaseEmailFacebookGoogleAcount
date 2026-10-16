@@ -167,7 +167,7 @@ class AppState extends ChangeNotifier {
       _currentUser = value;
       notifyListeners();
     }
-  } 
+  }
 
   // ✅ NEW: Set pending deletion-restore state (does not touch DB)
   void _setPendingDeletionRestore({
@@ -535,10 +535,16 @@ class AppState extends ChangeNotifier {
     _setLoading(true);
     try {
       debugPrint('🔄 User confirmed reactivation for: $email');
-      await SessionManager.updateProfileLevelStatus(
+      final ok = await SessionManager.updateProfileLevelStatus(
         email: email,
         status: 'active',
       );
+      if (!ok) {
+        _setErrorMessage(
+          'Failed to reactivate your account. Please try again.',
+        );
+        return;
+      }
       _setPendingReactivation(false);
       await refreshState();
     } catch (e) {
@@ -589,96 +595,96 @@ class AppState extends ChangeNotifier {
   }
 
   /// Attempt auto-login
-Future<void> attemptAutoLogin() async {
-  try {
-    debugPrint('AppState: Attempting auto-login...');
+  Future<void> attemptAutoLogin() async {
+    try {
+      debugPrint('AppState: Attempting auto-login...');
 
-    // ═══════════════════════════════════════════════════════════
-    // 🔥 CRITICAL FIX: quick-switch logout flag එකම set වෙලා
-    // තියෙනවා නම්, auto-login attempt කරන්නම එපා - මෙතනින්ම
-    // return කරනවා.
-    //
-    // ඇයි මේක critical: Supabase client එකේ session එකම (quick
-    // logout එකේදී intentionally untouched තියෙන) තාම valid
-    // නිසා, _tryAutoLoginWithToken() එකේ "already has session"
-    // shortcut එකෙන්ම trivially "success" return වෙනවා - genuine
-    // login attempt එකක් නොකරම. ඒ "success" එකෙන්ම pendingQuickLogout
-    // flag එකම clear වෙලා, refreshState() -> _checkAuthenticationState()
-    // ආයෙත් run වෙලා, flag එකම false නිසා actual (still valid)
-    // session එකම කියෙව්වා - loggedIn=true - dashboard.
-    //
-    // මේකෙන් quick-switch logout එකේම entire purpose එකම (Continue
-    // screen එකේ user explicit තෝරාගැනීමක් කරන තුරු "logged out"
-    // විදිහට පෙනීම) සම්පූර්ණයෙන්ම undo වුනා.
-    //
-    // Fix: flag එකම set වෙලා තියෙනවා නම්, auto-login කිසිසේත්
-    // try කරන්නේ නෑ - flag එකම clear වෙන්නේ explicit user action
-    // එකකින් විතරයි (Continue screen profile tap, fresh sign-in).
-    // ═══════════════════════════════════════════════════════════
-    final isPendingQuickLogout = await SessionManager.isPendingQuickLogout();
-    if (isPendingQuickLogout) {
-      debugPrint(
-        'AppState: Skipping auto-login - quick-switch logout pending '
-        '(user must explicitly tap their profile on Continue screen)',
-      );
-      return;
-    }
-
-    final rememberMeEnabled = await SessionManager.isRememberMeEnabled();
-    if (!rememberMeEnabled) {
-      debugPrint('AppState: Auto-login disabled globally');
-      return;
-    }
-
-    final recentProfile = await SessionManager.getMostRecentProfile();
-    if (recentProfile == null || recentProfile.isEmpty) {
-      debugPrint('AppState: No recent profile found');
-      return;
-    }
-
-    final email = recentProfile['email'] as String?;
-    if (email == null || email.isEmpty) {
-      debugPrint('AppState: No email in recent profile');
-      return;
-    }
-
-    final termsAccepted = recentProfile['termsAcceptedAt'] != null;
-    final privacyAccepted = recentProfile['privacyAcceptedAt'] != null;
-    if (!termsAccepted || !privacyAccepted) {
-      debugPrint('AppState: User consent not recorded - requiring re-login');
-      return;
-    }
-
-    debugPrint('AppState: Attempting auto-login for $email');
-
-    final refreshToken = await SessionManager.getRefreshToken(email);
-    if (refreshToken == null || refreshToken.isEmpty) {
-      debugPrint('AppState: No refresh token available');
-      return;
-    }
-
-    bool success = false;
-
-    for (int attempt = 1; attempt <= 3; attempt++) {
-      debugPrint('   - Attempt $attempt of 3');
-      success = await _tryAutoLoginWithToken(refreshToken, email);
-
-      if (success) {
-        debugPrint('AppState: Auto-login successful for $email');
-        await refreshState();
+      // ═══════════════════════════════════════════════════════════
+      // 🔥 CRITICAL FIX: quick-switch logout flag එකම set වෙලා
+      // තියෙනවා නම්, auto-login attempt කරන්නම එපා - මෙතනින්ම
+      // return කරනවා.
+      //
+      // ඇයි මේක critical: Supabase client එකේ session එකම (quick
+      // logout එකේදී intentionally untouched තියෙන) තාම valid
+      // නිසා, _tryAutoLoginWithToken() එකේ "already has session"
+      // shortcut එකෙන්ම trivially "success" return වෙනවා - genuine
+      // login attempt එකක් නොකරම. ඒ "success" එකෙන්ම pendingQuickLogout
+      // flag එකම clear වෙලා, refreshState() -> _checkAuthenticationState()
+      // ආයෙත් run වෙලා, flag එකම false නිසා actual (still valid)
+      // session එකම කියෙව්වා - loggedIn=true - dashboard.
+      //
+      // මේකෙන් quick-switch logout එකේම entire purpose එකම (Continue
+      // screen එකේ user explicit තෝරාගැනීමක් කරන තුරු "logged out"
+      // විදිහට පෙනීම) සම්පූර්ණයෙන්ම undo වුනා.
+      //
+      // Fix: flag එකම set වෙලා තියෙනවා නම්, auto-login කිසිසේත්
+      // try කරන්නේ නෑ - flag එකම clear වෙන්නේ explicit user action
+      // එකකින් විතරයි (Continue screen profile tap, fresh sign-in).
+      // ═══════════════════════════════════════════════════════════
+      final isPendingQuickLogout = await SessionManager.isPendingQuickLogout();
+      if (isPendingQuickLogout) {
+        debugPrint(
+          'AppState: Skipping auto-login - quick-switch logout pending '
+          '(user must explicitly tap their profile on Continue screen)',
+        );
         return;
       }
 
-      if (attempt < 3) {
-        await Future.delayed(const Duration(milliseconds: 500));
+      final rememberMeEnabled = await SessionManager.isRememberMeEnabled();
+      if (!rememberMeEnabled) {
+        debugPrint('AppState: Auto-login disabled globally');
+        return;
       }
-    }
 
-    debugPrint('AppState: Auto-login failed after 3 attempts');
-  } catch (e) {
-    debugPrint('AppState: Error during auto-login: $e');
+      final recentProfile = await SessionManager.getMostRecentProfile();
+      if (recentProfile == null || recentProfile.isEmpty) {
+        debugPrint('AppState: No recent profile found');
+        return;
+      }
+
+      final email = recentProfile['email'] as String?;
+      if (email == null || email.isEmpty) {
+        debugPrint('AppState: No email in recent profile');
+        return;
+      }
+
+      final termsAccepted = recentProfile['termsAcceptedAt'] != null;
+      final privacyAccepted = recentProfile['privacyAcceptedAt'] != null;
+      if (!termsAccepted || !privacyAccepted) {
+        debugPrint('AppState: User consent not recorded - requiring re-login');
+        return;
+      }
+
+      debugPrint('AppState: Attempting auto-login for $email');
+
+      final refreshToken = await SessionManager.getRefreshToken(email);
+      if (refreshToken == null || refreshToken.isEmpty) {
+        debugPrint('AppState: No refresh token available');
+        return;
+      }
+
+      bool success = false;
+
+      for (int attempt = 1; attempt <= 3; attempt++) {
+        debugPrint('   - Attempt $attempt of 3');
+        success = await _tryAutoLoginWithToken(refreshToken, email);
+
+        if (success) {
+          debugPrint('AppState: Auto-login successful for $email');
+          await refreshState();
+          return;
+        }
+
+        if (attempt < 3) {
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+
+      debugPrint('AppState: Auto-login failed after 3 attempts');
+    } catch (e) {
+      debugPrint('AppState: Error during auto-login: $e');
+    }
   }
-}
 
   /// Update user profile after login
   Future<void> updateUserProfileAfterLogin({
@@ -728,48 +734,46 @@ Future<void> attemptAutoLogin() async {
   // PRIVATE METHODS
   // ====================
 
-Future<void> _checkAuthenticationState() async {
-  final supabase = Supabase.instance.client;
+  Future<void> _checkAuthenticationState() async {
+    final supabase = Supabase.instance.client;
 
-  // ═══════════════════════════════════════════════════════════
-  // 🔥 FIX: In-memory _pendingQuickLogout එකට වඩා, PERSISTENT
-  // (SharedPreferences-backed) flag එකම check කරනවා - මේකෙන්
-  // app fully kill+restart උනත් "quick-switch logout in effect"
-  // state එකම survive වෙනවා. Supabase client එකේම (never
-  // actually revoked) session එකම background timer/cold-start
-  // එකකදී silently "take over" වීම මෙතනින් නවතිනවා.
-  // ═══════════════════════════════════════════════════════════
-  final isPendingQuickLogout = await SessionManager.isPendingQuickLogout();
-  if (isPendingQuickLogout) {
-    _setLoggedIn(false);
-    _setEmailVerified(false);
-    // ✅ FIX: previously left _currentUser/_currentEmail at whatever
-    // they'd just been set to a moment earlier (by the fresh
-    // Supabase.instance.client.auth.currentUser fetch at the top of
-    // initializeApp()/refreshState()) — technically not "stale" data,
-    // but inconsistent with loggedIn=false. The underlying Supabase
-    // session is untouched by design during a quick-switch logout, so
-    // once the user explicitly picks a profile on the Continue screen
-    // the very next refresh cycle re-populates both from that session
-    // anyway — nulling them here is safe and keeps the exposed state
-    // internally consistent in the meantime.
-    _setCurrentUser(null);
-    _setCurrentEmail(null);
-    return;
+    // ═══════════════════════════════════════════════════════════
+    // 🔥 FIX: In-memory _pendingQuickLogout එකට වඩා, PERSISTENT
+    // (SharedPreferences-backed) flag එකම check කරනවා - මේකෙන්
+    // app fully kill+restart උනත් "quick-switch logout in effect"
+    // state එකම survive වෙනවා. Supabase client එකේම (never
+    // actually revoked) session එකම background timer/cold-start
+    // එකකදී silently "take over" වීම මෙතනින් නවතිනවා.
+    // ═══════════════════════════════════════════════════════════
+    final isPendingQuickLogout = await SessionManager.isPendingQuickLogout();
+    if (isPendingQuickLogout) {
+      _setLoggedIn(false);
+      _setEmailVerified(false);
+      // ✅ FIX: previously left _currentUser/_currentEmail at whatever
+      // they'd just been set to a moment earlier (by the fresh
+      // Supabase.instance.client.auth.currentUser fetch at the top of
+      // initializeApp()/refreshState()) — technically not "stale" data,
+      // but inconsistent with loggedIn=false. The underlying Supabase
+      // session is untouched by design during a quick-switch logout, so
+      // once the user explicitly picks a profile on the Continue screen
+      // the very next refresh cycle re-populates both from that session
+      // anyway — nulling them here is safe and keeps the exposed state
+      // internally consistent in the meantime.
+      _setCurrentUser(null);
+      _setCurrentEmail(null);
+      return;
+    }
+
+    final session = supabase.auth.currentSession;
+    final user = supabase.auth.currentUser;
+
+    _setLoggedIn(session != null);
+    _setEmailVerified(user?.emailConfirmedAt != null);
+
+    if (user?.email != null) {
+      _setCurrentEmail(user!.email);
+    }
   }
-
-  final session = supabase.auth.currentSession;
-  final user = supabase.auth.currentUser;
-
-  _setLoggedIn(session != null);
-  _setEmailVerified(user?.emailConfirmedAt != null);
-
-  if (user?.email != null) {
-    _setCurrentEmail(user!.email);
-  }
-}
-
-
 
   // 🔥 FIXED: Update user profile with multiple roles using user_roles table
   // ✅ SECURITY FIX: No longer silently auto-restores a

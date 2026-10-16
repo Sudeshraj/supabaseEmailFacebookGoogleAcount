@@ -774,17 +774,30 @@ GoRouter _createRouter() {
         return null;
       }
 
-      // ============================================
+      // ============================================================
       // 2B. PENDING DELETION-RESTORE / REACTIVATION
-      // ============================================
+      // ============================================================
       if (appState.loggedIn &&
-          (appState.pendingDeletionRestore || appState.pendingReactivation) &&
-          path != '/account-restore-pending' &&
-          path != '/clear-data') {
+          (appState.pendingDeletionRestore || appState.pendingReactivation)) {
+        // ✅ FIX: restore screen එකේ ඉන්නවා නම් එතනම තියන්න (null).
+        // කලින් මෙතනින් පහළට ගිහින් profileCompleted=false නිසා /reg එකට
+        // යවලා loop එකක් හැදුණා.
+        if (path == '/account-restore-pending' || path == '/clear-data') {
+          return null;
+        }
         debugPrint(
           '⏸️ Pending restore/reactivation confirmation → /account-restore-pending',
         );
         return '/account-restore-pending';
+      }
+
+      // ✅ NEW: pending නැති වුණාට පස්සේ (restore / reactivate / logout)
+      // ඒ screen එකේම හිර වෙන්නේ නැතුව ආපහු home එකට යවන්න.
+      if (path == '/account-restore-pending') {
+        debugPrint(
+          '✅ No pending restore - leaving /account-restore-pending → /',
+        );
+        return '/';
       }
 
       // ============================================
@@ -934,6 +947,9 @@ GoRouter _createRouter() {
       if (!appState.profileCompleted &&
           path != '/reg' &&
           path != '/settings/profiles') {
+        if (appState.roles.isEmpty && await _hasRecoverableRoles()) {
+          return '/settings/profiles';
+        }
         debugPrint('❌ Profile not completed → /reg');
         return '/reg';
       }
@@ -1623,15 +1639,12 @@ GoRouter _createRouter() {
         },
       ),
       GoRoute(
-  path: '/barber/customers',
-  builder: (context, state) {
-    final salonId = state.uri.queryParameters['salonId'];
-    return CustomerListScreen(
-      salonId: salonId,
-      role: 'barber',
-    );
-  },
-),
+        path: '/barber/customers',
+        builder: (context, state) {
+          final salonId = state.uri.queryParameters['salonId'];
+          return CustomerListScreen(salonId: salonId, role: 'barber');
+        },
+      ),
 
       // ============================================
       // subscription
@@ -1719,6 +1732,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     // the best-effort call made in main().
     WidgetsBinding.instance.addPostFrameCallback((_) {
       applySystemUIOverlayStyle(_resolveIsDark());
+      _onAppStateChanged();
     });
   }
 
@@ -1752,14 +1766,14 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   }
 
   void _onAppStateChanged() {
-    if (appState.pendingDeletionRestore && !_restoreDialogShowing) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showRestoreDialog();
-      });
-    } else if (appState.pendingReactivation && !_restoreDialogShowing) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _showReactivateDialog();
-      });
+    if (_restoreDialogShowing) return;
+
+    if (appState.pendingDeletionRestore) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _showRestoreDialog());
+    } else if (appState.pendingReactivation) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _showReactivateDialog(),
+      );
     }
   }
 
@@ -1810,8 +1824,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             TextButton(
               onPressed: () async {
                 Navigator.pop(context);
-                _restoreDialogShowing = false;
                 await appState.declineRestoreAndLogout();
+                _restoreDialogShowing = false;
                 if (navigatorKey.currentContext != null) {
                   router.go('/login');
                 }
@@ -1824,8 +1838,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             ElevatedButton(
               onPressed: () async {
                 Navigator.pop(context);
-                _restoreDialogShowing = false;
                 await appState.confirmRestoreScheduledProfile();
+                _restoreDialogShowing = false;
+                _onAppStateChanged();
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryColor,
@@ -1837,8 +1852,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ),
       ),
     );
-
-    _restoreDialogShowing = false;
   }
 
   // ============================================================
@@ -1890,8 +1903,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             TextButton(
               onPressed: () async {
                 Navigator.pop(context);
+                await appState.declineReactivationAndLogout(); // ✅
                 _restoreDialogShowing = false;
-                await appState.declineReactivationAndLogout();
                 if (navigatorKey.currentContext != null) {
                   router.go('/login');
                 }
@@ -1904,8 +1917,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             ElevatedButton(
               onPressed: () async {
                 Navigator.pop(context);
+                await appState.confirmReactivateProfile(); // ✅
                 _restoreDialogShowing = false;
-                await appState.confirmReactivateProfile();
+                _onAppStateChanged();
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: primaryColor,
@@ -1917,8 +1931,6 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         ),
       ),
     );
-
-    _restoreDialogShowing = false;
   }
 
   @override
