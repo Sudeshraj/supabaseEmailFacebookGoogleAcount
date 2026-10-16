@@ -1592,6 +1592,113 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     );
   }
 
+  // ============================================================
+  // ✅ SALON SELECTOR CHIP — Center chip below AppBar (in body top)
+  // ============================================================
+
+  /// Single salon: just show the name as text (no chip, no dropdown)
+  /// Multiple salons: show a dropdown chip centered
+  /// Long names: responsive with ellipsis
+  Widget _buildSalonSelectorChip() {
+    if (_assignedSalons.isEmpty) return const SizedBox.shrink();
+
+    final isDark = context.isDarkMode;
+    final hasMultipleSalons = _assignedSalons.length > 1;
+
+    // ✅ Single salon: just show name (no chip, no dropdown)
+    if (!hasMultipleSalons) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.store,
+              size: 16,
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                _selectedSalonName.isNotEmpty ? _selectedSalonName : 'Salon',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // ✅ Multiple salons: dropdown chip centered
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.7,
+          ),
+          child: GestureDetector(
+            onTap: _showSalonSelectorDialog,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 8,
+              ),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? AppTheme.primary.withValues(alpha: 0.15)
+                    : AppTheme.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: AppTheme.primary.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.store,
+                    size: 16,
+                    color: AppTheme.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      _selectedSalonName.isNotEmpty
+                          ? _selectedSalonName
+                          : 'Salon',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.arrow_drop_down,
+                    size: 20,
+                    color: AppTheme.primary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   // ==================== UI BUILDERS ====================
 
   Widget _buildQuickAction({
@@ -2025,114 +2132,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             iconSize: 28,
           ),
         ),
-        title: isWeb
-            ? null
-            : Text(
-                _selectedSalonName.isNotEmpty
-                    ? _selectedSalonName
-                    : 'Dashboard',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
-              ),
+        // ✅ Salon selector REMOVED from AppBar title — now shows nothing
+        title: null,
         actions: [
-          if (isWeb && _selectedSalonName.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: GestureDetector(
-                onTap: _assignedSalons.length > 1
-                    ? _showSalonSelectorDialog
-                    : null,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 200),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.store, size: 14, color: Colors.white),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            _selectedSalonName,
-                            maxLines: 1,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (_assignedSalons.length > 1)
-                          const Icon(
-                            Icons.arrow_drop_down,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          if (_assignedSalons.length > 1 && !isWeb && screenWidth >= 340)
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: GestureDetector(
-                onTap: _showSalonSelectorDialog,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(Icons.store, size: 12, color: Colors.white),
-                      const SizedBox(width: 4),
-                      ConstrainedBox(
-                        constraints: BoxConstraints(
-                          maxWidth: screenWidth * 0.25,
-                        ),
-                        child: Text(
-                          _selectedSalonName.isNotEmpty
-                              ? _selectedSalonName
-                              : 'Salon',
-                          maxLines: 1,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: Colors.white,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const Icon(
-                        Icons.arrow_drop_down,
-                        size: 14,
-                        color: Colors.white,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
+          // ✅ Salon selector chip REMOVED from AppBar actions (was web-only chip)
           Stack(
             clipBehavior: Clip.none,
             children: [
@@ -2243,6 +2246,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
     return Column(
       children: [
+        // ✅ Salon selector chip — CENTERED at top of body
+        if (_assignedSalons.isNotEmpty) _buildSalonSelectorChip(),
+
         if (_showPermissionCard && !_hasPermission)
           PermissionCard(
             onEnable: _enableNotifications,

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
+import 'package:flutter_application_1/services/currency_service.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
@@ -33,6 +34,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   final NotificationService _notificationService = NotificationService();
   final PermissionService _permissionService = PermissionService();
   final PermissionManager _permissionManager = PermissionManager();
+  final CurrencyService _currencyService = CurrencyService.instance;
   final supabase = Supabase.instance.client;
 
   bool _hasPermission = false;
@@ -56,6 +58,16 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   // ✅ NEW: Salon-specific loyalty summary
   int _loyaltySalonCount = 0;
+
+  // ✅ SALON CURRENCY (loaded from first followed salon, fallback LKR)
+  String _salonCurrencyCode = 'LKR';
+
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
+
+  // ✅ SALON TIMEZONE (for time conversions, fallback Asia/Colombo)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  String _salonTimezone = _kDefaultSalonTimezone;
 
   // VIP Bookings
   int _vipBookings = 0;
@@ -112,9 +124,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
-    _pulseAnim = Tween<double>(begin: 1.0, end: 1.04).animate(
-      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
-    );
+    _pulseAnim = Tween<double>(
+      begin: 1.0,
+      end: 1.04,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
     _initializeTimezone();
     _loadCustomerData();
     _checkCustomerStatus();
@@ -151,8 +164,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     super.dispose();
   }
 
+  // ✅ FIX: MediaQuery.sizeOf + called from didChangeDependencies only
   void _checkScreenSize() {
-    final size = MediaQuery.of(context).size;
+    final size = MediaQuery.sizeOf(context);
     final isLarge = size.width > 800 || size.height > 800;
     final isTablet = size.shortestSide >= 600;
     final isWeb = size.width > 800;
@@ -173,7 +187,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     try {
       final user = supabase.auth.currentUser;
       if (user == null) {
-        setState(() => _isActive = false);
+        if (mounted) setState(() => _isActive = false);
         return;
       }
 
@@ -184,6 +198,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           .eq('user_id', user.id)
           .eq('roles.name', 'customer')
           .maybeSingle();
+
+      if (!mounted) return;
 
       if (roleCheck == null || roleCheck['status'] != 'active') {
         setState(() => _isActive = false);
@@ -206,6 +222,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           .select('is_active, is_blocked')
           .eq('id', user.id)
           .maybeSingle();
+
+      if (!mounted) return;
 
       if (profileCheck != null) {
         if (profileCheck['is_blocked'] == true) {
@@ -240,10 +258,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         }
       }
 
-      setState(() => _isActive = true);
+      if (mounted) setState(() => _isActive = true);
     } catch (e) {
       debugPrint('❌ Error checking customer status: $e');
-      setState(() => _isActive = false);
+      if (mounted) setState(() => _isActive = false);
     } finally {
       if (mounted && _isCheckingStatus) {
         setState(() => _isCheckingStatus = false);
@@ -252,9 +270,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // PERMISSION CARD
+  // PERMISSION CARD — returns bool so callers can await properly
   // ============================================================
-  Future<void> _showPermissionCardContext({String? action}) async {
+  Future<bool> _showPermissionCardContext({String? action}) async {
     final shouldShow = await _permissionManager.shouldShowPermissionCard(
       screen: 'customer_dashboard',
       action: action,
@@ -265,6 +283,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         _showPermissionCard = shouldShow;
       });
     }
+    return shouldShow;
   }
 
   Future<void> _enableNotifications({String? action}) async {
@@ -371,13 +390,14 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       debugPrint('🎁 Building extra for offer: ${offer['title']}');
 
-      // 1. Load salon info
+      // 1. Load salon info (with timezone + currency)
       if (offerSalonId != null) {
         try {
           final salonResp = await supabase
               .from('salons')
               .select(
-                'id, name, address, logo_url, open_time, close_time, phone, currency_code',
+                'id, name, address, logo_url, open_time, close_time, phone, '
+                'currency_code, currency_symbol, timezone',
               )
               .eq('id', offerSalonId)
               .maybeSingle();
@@ -474,9 +494,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               'service_id': sid,
               'variant_id': variantId,
             });
-            debugPrint(
-              '🎯 Preselected (fallback): sid=$sid vid=$variantId',
-            );
+            debugPrint('🎯 Preselected (fallback): sid=$sid vid=$variantId');
           }
         }
       }
@@ -508,10 +526,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
   Future<void> _bookAppointment() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'booking');
+      if (shouldShow) return;
     }
-
+    if (!mounted) return;
     final result = await context.push('/customer/booking-flow');
     if (result == true && mounted) {
       debugPrint('✅ Returned from booking flow — refreshing dashboard');
@@ -524,10 +542,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
   Future<void> _createVipBooking() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'vip');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'vip');
+      if (shouldShow) return;
     }
-
+    if (!mounted) return;
     final result = await context.push('/customer/vip-booking');
     if (result == true && mounted) {
       debugPrint('✅ Returned from VIP booking — refreshing dashboard');
@@ -540,8 +558,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
   Future<void> _bookAppointmentWithOffer(Map<String, dynamic> offer) async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'booking');
+      if (shouldShow) return;
     }
 
     final extra = await _buildBookingExtraWithOffer(offer);
@@ -563,8 +581,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
   Future<void> _createVipBookingWithOffer(Map<String, dynamic> offer) async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'vip');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'vip');
+      if (shouldShow) return;
     }
 
     final extra = await _buildBookingExtraWithOffer(offer);
@@ -586,9 +604,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // ============================================================
   Future<void> _viewAllOffers() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'offer');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'offer');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     final result = await context.push('/customer/offers');
     if (result == true && mounted) {
       _loadDashboardData();
@@ -597,10 +616,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   Future<void> _viewNotifications() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'notification');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(
+        action: 'notification',
+      );
+      if (shouldShow) return;
     }
 
+    if (!mounted) return;
     final result = await context.push('/notifications?role=customer');
     await _refreshUnreadCount();
     if (result == true) {
@@ -725,7 +747,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           child: Center(
             child: Text(
               number,
-              style: TextStyle(
+              style: const TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
                 color: AppTheme.primary,
@@ -785,30 +807,27 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // TIMEZONE
+  // ✅ TIMEZONE — simplified, uses TimezoneService only
   // ============================================================
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
 
-    final prefs = await SharedPreferences.getInstance();
-    final savedTimezone = prefs.getString('cached_timezone');
-
-    if (savedTimezone != null && savedTimezone.isNotEmpty) {
-      await TimezoneService.setTimezone(savedTimezone);
-      debugPrint('✅ Using cached timezone: $savedTimezone');
-    } else {
-      final currentTimezone = TimezoneService.getCurrentTimezone();
-      await prefs.setString('cached_timezone', currentTimezone);
-      debugPrint('✅ Saved device timezone to cache: $currentTimezone');
+    // ✅ TimezoneService එකේ current timezone එක use කරන්න
+    final currentTimezone = TimezoneService.getCurrentTimezone();
+    if (currentTimezone.isEmpty) {
+      await TimezoneService.setTimezone(_kDefaultSalonTimezone);
     }
 
+    if (!mounted) return;
     setState(() {
       _isTimezoneLoaded = true;
     });
+
+    debugPrint('✅ User timezone: $currentTimezone');
   }
 
   // ============================================================
-  // ✅ LOAD DASHBOARD DATA (with salon-specific loyalty)
+  // ✅ LOAD DASHBOARD DATA (with salon-specific loyalty + salon currency + timezone)
   // ============================================================
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
@@ -829,6 +848,31 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       await _loadFollowedSalons(user.id);
 
+      // ✅ Load first salon's timezone + currency (from followed salons)
+      if (_followedSalons.isNotEmpty) {
+        final firstSalon = _followedSalons.first;
+        try {
+          final salonInfo = await supabase
+              .from('salons')
+              .select('timezone, currency_code')
+              .eq('id', firstSalon['id'])
+              .maybeSingle();
+
+          if (salonInfo != null) {
+            final tz = salonInfo['timezone'] as String?;
+            if (tz != null && tz.isNotEmpty) {
+              _salonTimezone = tz;
+            }
+            final curr = salonInfo['currency_code'] as String?;
+            if (curr != null && curr.isNotEmpty) {
+              _salonCurrencyCode = curr;
+            }
+          }
+        } catch (e) {
+          debugPrint('⚠️ Error loading salon info: $e');
+        }
+      }
+
       final appointments = await supabase
           .from('appointments')
           .select('''
@@ -848,6 +892,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             queue_token,
             barber_id,
             customer_id,
+            salon_id,
             appointment_services (
               id,
               service_id,
@@ -1240,13 +1285,16 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             final labelParts = <String>[];
             if (gender.isNotEmpty) labelParts.add(gender);
             if (age.isNotEmpty) labelParts.add(age);
-            final vLabel = labelParts.isEmpty ? 'Standard' : labelParts.join(' ');
+            final vLabel = labelParts.isEmpty
+                ? 'Standard'
+                : labelParts.join(' ');
             scopeParts.add('$serviceName · $vLabel');
           }
         }
 
-        offer['scope_summary'] =
-            scopeParts.isEmpty ? 'All services' : scopeParts.join(', ');
+        offer['scope_summary'] = scopeParts.isEmpty
+            ? 'All services'
+            : scopeParts.join(', ');
         offer['claim_status'] = claimStatus[offer['id'] as int];
         return offer;
       }).toList();
@@ -1268,6 +1316,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         'get_followed_salons_with_counts',
         params: {'p_customer_id': userId},
       );
+
+      if (!mounted) return;
 
       if (result != null && result.isNotEmpty) {
         final List<Map<String, dynamic>> salons = [];
@@ -1469,10 +1519,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         try {
           final loyaltyResult = await supabase.rpc(
             'get_customer_loyalty_for_salon',
-            params: {
-              'p_customer_id': user.id,
-              'p_salon_id': offerSalonId,
-            },
+            params: {'p_customer_id': user.id, 'p_salon_id': offerSalonId},
           );
 
           final userPoints = (loyaltyResult is Map)
@@ -1639,7 +1686,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     if (offer['discount_type'] == 'percentage') {
       return '${offer['discount_value']}% OFF';
     } else if (offer['discount_type'] == 'fixed') {
-      return 'Rs. ${offer['discount_value']} OFF';
+      return '$_salonCurrencySymbol${offer['discount_value']} OFF';
     } else {
       return 'FREE SERVICE';
     }
@@ -1744,25 +1791,39 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  String _convertUtcToLocalTime(String? utcTime, DateTime referenceDate) {
+  /// ✅ UTC → SALON local time
+  /// Uses fixed reference date for recurring times (schedules/breaks)
+  String _convertUtcToSalonTime(String? utcTime, DateTime referenceDate) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     try {
       String timeStr = utcTime;
       if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
-      return TimezoneService.utcToLocalTimeForDate(timeStr, referenceDate);
+
+      final tz = _salonTimezone.isNotEmpty
+          ? _salonTimezone
+          : _kDefaultSalonTimezone;
+
+      return TimezoneService.utcToLocalTimeForDateWithTimezone(
+        timeStr,
+        referenceDate,
+        tz,
+      );
     } catch (e) {
       debugPrint('Error converting time: $e');
       return utcTime.length > 5 ? utcTime.substring(0, 5) : utcTime;
     }
   }
 
+  /// ✅ Salon hours — uses SALON timezone with fixed reference date
   String _getFormattedSalonHours(Map<String, dynamic> salon) {
     final openTimeUtc = salon['open_time']?.toString() ?? '09:00:00';
     final closeTimeUtc = salon['close_time']?.toString() ?? '18:00:00';
-    final referenceDate = DateTime.now();
 
-    final openLocal = _convertUtcToLocalTime(openTimeUtc, referenceDate);
-    final closeLocal = _convertUtcToLocalTime(closeTimeUtc, referenceDate);
+    // ✅ Fixed reference date for recurring times (avoids DST surprises)
+    final referenceDate = DateTime(2024, 1, 1);
+
+    final openLocal = _convertUtcToSalonTime(openTimeUtc, referenceDate);
+    final closeLocal = _convertUtcToSalonTime(closeTimeUtc, referenceDate);
 
     return '$openLocal - $closeLocal';
   }
@@ -1779,6 +1840,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           .select('full_name, avatar_url')
           .eq('id', user.id)
           .maybeSingle();
+
+      if (!mounted) return;
 
       if (profile != null) {
         setState(() {
@@ -1832,11 +1895,16 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             phone,
             email,
             description,
+            currency_code,
+            currency_symbol,
+            timezone,
             is_active
           ''')
           .ilike('name', '%$query%')
           .eq('is_active', true)
           .limit(10);
+
+      if (!mounted) return;
 
       setState(() {
         _searchResults = List<Map<String, dynamic>>.from(results);
@@ -1850,14 +1918,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       }
     } catch (e) {
       debugPrint('Search error: $e');
-      setState(() => _isSearching = false);
+      if (mounted) setState(() => _isSearching = false);
     }
   }
 
   void _showSearchOverlay() {
     _removeSearchOverlay();
 
-    final box = _searchFieldKey.currentContext?.findRenderObject() as RenderBox?;
+    final box =
+        _searchFieldKey.currentContext?.findRenderObject() as RenderBox?;
     final fieldWidth =
         box?.size.width ?? (MediaQuery.of(context).size.width - 32);
 
@@ -1901,25 +1970,23 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         ),
                       )
                     : _searchResults.isEmpty
-                        ? Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Center(
-                              child: Text(
-                                'No salons found',
-                                style: TextStyle(
-                                  color: overlayContext.textColor,
-                                ),
-                              ),
-                            ),
-                          )
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            padding: EdgeInsets.zero,
-                            physics: const ClampingScrollPhysics(),
-                            itemCount: _searchResults.length,
-                            itemBuilder: (_, index) =>
-                                _buildSearchResultTile(_searchResults[index]),
+                    ? Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Center(
+                          child: Text(
+                            'No salons found',
+                            style: TextStyle(color: overlayContext.textColor),
                           ),
+                        ),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        padding: EdgeInsets.zero,
+                        physics: const ClampingScrollPhysics(),
+                        itemCount: _searchResults.length,
+                        itemBuilder: (_, index) =>
+                            _buildSearchResultTile(_searchResults[index]),
+                      ),
               ),
             ),
           ),
@@ -2069,10 +2136,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       _searchOverlay!.remove();
       _searchOverlay = null;
     }
-    setState(() {
-      _showSearchResults = false;
-      _searchResults = [];
-    });
+    if (mounted) {
+      setState(() {
+        _showSearchResults = false;
+        _searchResults = [];
+      });
+    }
   }
 
   void _removeSearchOverlay() {
@@ -2280,6 +2349,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   Widget _buildHorizontalSalonCard(Map<String, dynamic> salon) {
+    final isDark = context.isDarkMode;
     final hasLogo =
         salon['logo_url'] != null && salon['logo_url'].toString().isNotEmpty;
 
@@ -2289,7 +2359,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         width: _isTablet ? 200 : 160,
         margin: const EdgeInsets.only(right: 12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
           borderRadius: BorderRadius.circular(16),
           boxShadow: [
             BoxShadow(
@@ -2298,7 +2368,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               offset: const Offset(0, 2),
             ),
           ],
-          border: Border.all(color: Colors.grey[100]!),
+          border: Border.all(
+            color: isDark ? Colors.grey[700]! : Colors.grey[100]!,
+          ),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -2392,6 +2464,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                           style: TextStyle(
                             fontSize: _isTablet ? 16 : 14,
                             fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -2402,7 +2475,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                             Icon(
                               Icons.location_on,
                               size: 10,
-                              color: Colors.grey[400],
+                              color: isDark ? Colors.white60 : Colors.grey[400],
                             ),
                             const SizedBox(width: 2),
                             Expanded(
@@ -2410,7 +2483,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                                 salon['address'],
                                 style: TextStyle(
                                   fontSize: _isTablet ? 11 : 10,
-                                  color: Colors.grey[500],
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[500],
                                 ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
@@ -2476,6 +2551,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   Widget _buildFollowedSalonsSection() {
+    final isDark = context.isDarkMode;
+
     if (_isLoadingSalons) {
       return Container(
         height: _isTablet ? 250 : 210,
@@ -2498,9 +2575,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         decoration: BoxDecoration(
-          color: Colors.grey[50],
+          color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.grey[200]!),
+          border: Border.all(
+            color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+          ),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -2523,7 +2602,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               style: TextStyle(
                 fontSize: _isTablet ? 20 : 18,
                 fontWeight: FontWeight.bold,
-                color: Colors.grey[700],
+                color: isDark ? Colors.white : Colors.grey[700],
               ),
             ),
             const SizedBox(height: 8),
@@ -2531,7 +2610,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               'Follow your favorite salons to see them here',
               style: TextStyle(
                 fontSize: _isTablet ? 16 : 14,
-                color: Colors.grey[500],
+                color: isDark ? Colors.white60 : Colors.grey[500],
               ),
               textAlign: TextAlign.center,
             ),
@@ -2563,6 +2642,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 style: TextStyle(
                   fontSize: _isTablet ? 20 : 18,
                   fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
             ],
@@ -2818,7 +2898,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                       child: _buildActivityItem(
                         icon: Icons.currency_rupee,
                         label: 'Total Spent',
-                        value: 'Rs. $_totalSpent',
+                        value: _currencyService.format(
+                          price: _totalSpent,
+                          currencyCode: _salonCurrencyCode,
+                          withSymbol: true,
+                        ),
                         color: Colors.purple,
                       ),
                     ),
@@ -3090,8 +3174,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             if (scopeSummary.isNotEmpty) ...[
               const SizedBox(height: 8),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: color.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
@@ -3264,8 +3347,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   : SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed:
-                            buttonEnabled ? () => _applyOffer(offer) : null,
+                        onPressed: buttonEnabled
+                            ? () => _applyOffer(offer)
+                            : null,
                         icon: isClaiming
                             ? const SizedBox(
                                 width: 14,
@@ -3314,14 +3398,17 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   // ============================================================
   // MAIN BUILD METHOD
+  // ✅ FIX: _checkScreenSize removed from build (already in didChangeDependencies)
   // ============================================================
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final bool isWeb = screenWidth > 800;
 
-    _checkScreenSize();
+    // ❌ REMOVED: _checkScreenSize();
+    // Already called in didChangeDependencies() — calling it here
+    // would trigger setState() during build → rebuild loop.
 
     if (!_isTimezoneLoaded || _isCheckingStatus) {
       return Scaffold(

@@ -38,12 +38,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   final PermissionService _permissionService = PermissionService();
   final PermissionManager _permissionManager = PermissionManager();
 
-  // ==================== ✅ CURRENCY SERVICE ====================
+  // ==================== ✅ CURRENCY + TIMEZONE ====================
   final CurrencyService _currencyService = CurrencyService.instance;
   String _salonCurrencyCode = 'LKR';
+  String _salonCurrencySymbol = 'Rs.';
 
-  String get _salonCurrencySymbol =>
-      _currencyService.getSymbol(_salonCurrencyCode);
+  // ✅ SALON TIMEZONE (loaded from DB, for time conversions)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  String _salonTimezone = _kDefaultSalonTimezone;
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
@@ -140,14 +142,17 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     });
   }
 
+  // ✅ FIX: MediaQuery.sizeOf (only reacts to size changes)
   void _checkScreenSize() {
     if (!mounted) return;
-    final size = MediaQuery.of(context).size;
+    final size = MediaQuery.sizeOf(context);
     final isLarge = size.width > 800 || size.height > 800;
     final isTablet = size.shortestSide >= 600;
     final isWeb = size.width > 800;
 
-    if (_isLargeScreen != isLarge || _isTablet != isTablet || _isWeb != isWeb) {
+    if (_isLargeScreen != isLarge ||
+        _isTablet != isTablet ||
+        _isWeb != isWeb) {
       setState(() {
         _isLargeScreen = isLarge;
         _isTablet = isTablet;
@@ -197,6 +202,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .eq('role_id', 3)
           .maybeSingle();
 
+      if (!mounted) return;
+
       if (ownerCheck == null) {
         debugPrint('🔄 Creating owner role...');
         await supabase.from('user_roles').insert({
@@ -239,10 +246,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     try {
       await SessionManager.saveCurrentSalonId(salonId);
 
-      if (mounted) {
-        await context.read<SubscriptionProvider>().loadCapabilities(salonId);
-        debugPrint('✅ Subscription capabilities loaded for salon $salonId');
-      }
+      if (!mounted) return;
+
+      await context.read<SubscriptionProvider>().loadCapabilities(salonId);
+      debugPrint('✅ Subscription capabilities loaded for salon $salonId');
     } catch (e) {
       debugPrint('❌ Error loading subscription: $e');
     }
@@ -259,12 +266,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ SALON LIMIT CHECK (NEW)
+  // ✅ SALON LIMIT CHECK
   // ============================================================
 
-  /// Check if the owner is allowed to create another salon based on their
-  /// current subscription plan. Returns true if they can, false otherwise.
-  /// If they cannot, a dialog is shown automatically.
   Future<bool> _checkCanCreateSalon() async {
     try {
       final userId = supabase.auth.currentUser?.id;
@@ -294,12 +298,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       return canCreate;
     } catch (e) {
       debugPrint('❌ Error checking salon limit: $e');
-      // On error, allow the attempt - the DB trigger will enforce the limit
       return true;
     }
   }
 
-  /// Show "Salon Limit Reached" dialog with an upgrade CTA.
   void _showSalonLimitDialog({
     required int currentSalons,
     required int maxSalons,
@@ -463,11 +465,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         role: 'owner',
       );
 
-      if (mounted) {
-        setState(() {
-          _unreadNotificationCount = count;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _unreadNotificationCount = count;
+      });
       debugPrint('✅ Unread notifications (owner): $count');
     } catch (e) {
       debugPrint('❌ Error loading notification count: $e');
@@ -798,41 +799,105 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ SALON SELECTOR CHIP
+  // ✅ SALON SELECTOR — Center chip below AppBar (in body top)
   // ============================================================
 
+  /// Single salon: just show the name as text (no chip, no dropdown)
+  /// Multiple salons: show a dropdown chip centered
+  /// Long names: responsive with ellipsis
   Widget _buildSalonSelectorChip() {
     if (_ownerSalons.isEmpty) return const SizedBox.shrink();
 
-    return GestureDetector(
-      onTap: _showSalonSelectorDialog,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.2),
-          borderRadius: BorderRadius.circular(20),
-        ),
+    final isDark = context.isDarkMode;
+    final hasMultipleSalons = _ownerSalons.length > 1;
+
+    // ✅ Single salon: just show name (no chip, no dropdown)
+    if (!hasMultipleSalons) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.store, size: 14, color: Colors.white),
-            const SizedBox(width: 4),
+            Icon(
+              Icons.store,
+              size: 16,
+              color: isDark ? Colors.white60 : Colors.grey[600],
+            ),
+            const SizedBox(width: 6),
             Flexible(
               child: Text(
-                _selectedSalonName != null && _selectedSalonName!.isNotEmpty
-                    ? _selectedSalonName!
-                    : 'Salon',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w500,
-                ),
+                _selectedSalonName ?? 'Salon',
+                maxLines: 1,
                 overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
               ),
             ),
-            if (_ownerSalons.length > 1)
-              const Icon(Icons.arrow_drop_down, size: 16, color: Colors.white),
           ],
+        ),
+      );
+    }
+
+    // ✅ Multiple salons: dropdown chip centered
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.7,
+          ),
+          child: GestureDetector(
+            onTap: _showSalonSelectorDialog,
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 8,
+              ),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? AppTheme.primary.withValues(alpha: 0.15)
+                    : AppTheme.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: AppTheme.primary.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.store,
+                    size: 16,
+                    color: AppTheme.primary,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      _selectedSalonName ?? 'Salon',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.arrow_drop_down,
+                    size: 20,
+                    color: AppTheme.primary,
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -851,7 +916,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       builder: (context) => ConstrainedBox(
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.75,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.75,
         ),
         child: Padding(
           padding: const EdgeInsets.all(16),
@@ -943,10 +1008,10 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ PERMISSION METHODS
+  // ✅ PERMISSION METHODS — returns bool, awaited by callers
   // ============================================================
 
-  Future<void> _showPermissionCardContext({String? action}) async {
+  Future<bool> _showPermissionCardContext({String? action}) async {
     final shouldShow = await _permissionManager.shouldShowPermissionCard(
       screen: 'owner_dashboard',
       action: action,
@@ -957,6 +1022,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         _showPermissionCard = shouldShow;
       });
     }
+    return shouldShow;
   }
 
   Future<void> _enableNotifications({String? action}) async {
@@ -1214,7 +1280,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ NAVIGATION METHODS
+  // ✅ NAVIGATION METHODS — all now return Future<void> and await
+  //    permission context check properly (fixes critical bug #5)
   // ============================================================
 
   void _showNoSalonSelectedDialog() {
@@ -1355,11 +1422,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  void _viewBookings() {
+  // ✅ All navigation methods now properly await permission check
+  Future<void> _viewBookings() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'booking');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_selectedSalonId == null || _ownerSalons.isEmpty) {
       _showNoSalonSelectedDialog();
       return;
@@ -1367,11 +1436,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/appointments?salonId=$_selectedSalonId');
   }
 
-  void _navigateToOffers() {
+  Future<void> _navigateToOffers() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'offer');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'offer');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
@@ -1390,11 +1460,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/offers/$_selectedSalonId');
   }
 
-  void _navigateToAddBarber() {
+  Future<void> _navigateToAddBarber() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'barber');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'barber');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
@@ -1406,11 +1477,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/add-barber?salonId=$_selectedSalonId');
   }
 
-  void _navigateToAddService() async {
+  Future<void> _navigateToAddService() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'booking');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
@@ -1425,11 +1497,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     if (result == true && mounted) await _refreshAllData();
   }
 
-  void _navigateToBarberLeaves() {
+  Future<void> _navigateToBarberLeaves() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'barber');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'barber');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
@@ -1441,11 +1514,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/barber-leaves?salonId=$_selectedSalonId');
   }
 
-  void _navigateToBarberSchedule() {
+  Future<void> _navigateToBarberSchedule() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'barber');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'barber');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
@@ -1457,11 +1531,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/barber-schedule?salonId=$_selectedSalonId');
   }
 
-  void _navigateToBarberList() {
+  Future<void> _navigateToBarberList() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'barber');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'barber');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
@@ -1473,11 +1548,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/barbers?salonId=$_selectedSalonId');
   }
 
-  void _navigateToServiceList() {
+  Future<void> _navigateToServiceList() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'booking');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
@@ -1495,11 +1571,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  void _viewAllCustomers() {
+  Future<void> _viewAllCustomers() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'booking');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_selectedSalonId == null || _ownerSalons.isEmpty) {
       _showNoSalonSelectedDialog();
       return;
@@ -1514,11 +1591,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/customers?salonId=$_selectedSalonId');
   }
 
-  void _viewRevenue() {
+  Future<void> _viewRevenue() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'booking');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_selectedSalonId == null || _ownerSalons.isEmpty) {
       _showNoSalonSelectedDialog();
       return;
@@ -1533,11 +1611,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/revenue?salonId=$_selectedSalonId');
   }
 
-  void _viewSalonHolidays() {
+  Future<void> _viewSalonHolidays() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'booking');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'booking');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
@@ -1549,11 +1628,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/salon/holidays?salonId=$_selectedSalonId');
   }
 
-  void _viewReports() {
+  Future<void> _viewReports() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'report');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'report');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_selectedSalonId == null || _ownerSalons.isEmpty) {
       _showNoSalonSelectedDialog();
       return;
@@ -1568,11 +1648,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     context.push('/owner/reports?salonId=$_selectedSalonId');
   }
 
-  void _viewAnalytics() {
+  Future<void> _viewAnalytics() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'analytics');
-      if (_showPermissionCard) return;
+      final shouldShow = await _showPermissionCardContext(action: 'analytics');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     if (_selectedSalonId == null || _ownerSalons.isEmpty) {
       _showNoSalonSelectedDialog();
       return;
@@ -1604,11 +1685,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  void _viewNotifications() {
+  Future<void> _viewNotifications() async {
     if (!_hasPermission) {
-      _showPermissionCardContext(action: 'notification');
-      if (_showPermissionCard) return;
+      final shouldShow =
+          await _showPermissionCardContext(action: 'notification');
+      if (shouldShow) return;
     }
+    if (!mounted) return;
     context.push('/notifications?role=owner');
   }
 
@@ -1715,6 +1798,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .eq('id', currentUser.id)
           .maybeSingle();
 
+      if (!mounted) return;
+
       if (profileCheck != null) {
         if (profileCheck['is_blocked'] == true) {
           debugPrint('⚠️ User account is blocked');
@@ -1756,7 +1841,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .eq('id', currentUser.id)
           .maybeSingle();
 
-      if (profileResponse != null && mounted) {
+      if (!mounted) return;
+
+      if (profileResponse != null) {
         setState(() {
           _userName =
               profileResponse['full_name'] ??
@@ -1775,6 +1862,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
+  /// ✅ Load salons with timezone + currency
   Future<void> _loadOwnerSalons() async {
     try {
       final userId = supabase.auth.currentUser?.id;
@@ -1788,6 +1876,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             _hasSalon = false;
             _selectedSalonId = null;
             _selectedSalonName = null;
+            _salonCurrencyCode = 'LKR';
+            _salonCurrencySymbol = 'Rs.';
+            _salonTimezone = _kDefaultSalonTimezone;
           });
         }
         return;
@@ -1798,7 +1889,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       final response = await supabase
           .from('salons')
           .select(
-            'id, name, address, phone, email, description, is_active, created_at, updated_at, logo_url, cover_url, open_time, close_time, timezone, currency_code',
+            'id, name, address, phone, email, description, is_active, '
+            'created_at, updated_at, logo_url, cover_url, open_time, '
+            'close_time, timezone, currency_code, currency_symbol',
           )
           .eq('owner_id', userId)
           .eq('is_active', true)
@@ -1806,54 +1899,71 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       debugPrint('🔍 Found ${response.length} salons');
 
-      if (mounted) {
-        setState(() {
-          _ownerSalons = List<Map<String, dynamic>>.from(response);
+      if (!mounted) return;
 
-          if (_ownerSalons.isNotEmpty) {
-            _hasSalon = true;
+      setState(() {
+        _ownerSalons = List<Map<String, dynamic>>.from(response);
 
-            if (_selectedSalonId == null) {
-              final firstCreatedSalon = _ownerSalons.last;
-              _selectedSalonId = firstCreatedSalon['id'].toString();
-              _selectedSalonName =
-                  firstCreatedSalon['name']?.toString() ?? 'Salon';
-              _salonCurrencyCode =
-                  firstCreatedSalon['currency_code'] as String? ?? 'LKR';
+        if (_ownerSalons.isNotEmpty) {
+          _hasSalon = true;
 
-              debugPrint(
-                '✅ Selected first-created salon: $_selectedSalonName (ID: $_selectedSalonId, Currency: $_salonCurrencyCode)',
-              );
-            } else {
-              final selected = _ownerSalons.firstWhere(
-                (s) => s['id'].toString() == _selectedSalonId,
-                orElse: () => _ownerSalons.first,
-              );
+          if (_selectedSalonId == null) {
+            final firstCreatedSalon = _ownerSalons.last;
+            _selectedSalonId = firstCreatedSalon['id'].toString();
+            _selectedSalonName =
+                firstCreatedSalon['name']?.toString() ?? 'Salon';
 
-              if (selected['id'].toString() != _selectedSalonId) {
-                debugPrint(
-                  '⚠️ Previously selected salon not found — falling back to: ${selected['name']}',
-                );
-                _selectedSalonId = selected['id'].toString();
-              }
+            // ✅ Load timezone + currency from DB
+            _salonCurrencyCode =
+                firstCreatedSalon['currency_code'] as String? ?? 'LKR';
+            _salonCurrencySymbol =
+                firstCreatedSalon['currency_symbol'] as String? ??
+                    _currencyService.getSymbol(_salonCurrencyCode);
+            _salonTimezone =
+                firstCreatedSalon['timezone'] as String? ??
+                    _kDefaultSalonTimezone;
 
-              _selectedSalonName = selected['name']?.toString() ?? 'Salon';
-              _salonCurrencyCode =
-                  selected['currency_code'] as String? ?? 'LKR';
-
-              debugPrint(
-                '✅ Kept selected salon: $_selectedSalonName (ID: $_selectedSalonId, Currency: $_salonCurrencyCode)',
-              );
-            }
+            debugPrint(
+              '✅ Selected first-created salon: $_selectedSalonName '
+              '(ID: $_selectedSalonId, Currency: $_salonCurrencyCode, TZ: $_salonTimezone)',
+            );
           } else {
-            _hasSalon = false;
-            _selectedSalonId = null;
-            _selectedSalonName = null;
-            _salonCurrencyCode = 'LKR';
-            debugPrint('⚠️ No active salons found for this owner');
+            final selected = _ownerSalons.firstWhere(
+              (s) => s['id'].toString() == _selectedSalonId,
+              orElse: () => _ownerSalons.first,
+            );
+
+            if (selected['id'].toString() != _selectedSalonId) {
+              debugPrint(
+                '⚠️ Previously selected salon not found — falling back to: ${selected['name']}',
+              );
+              _selectedSalonId = selected['id'].toString();
+            }
+
+            _selectedSalonName = selected['name']?.toString() ?? 'Salon';
+            _salonCurrencyCode =
+                selected['currency_code'] as String? ?? 'LKR';
+            _salonCurrencySymbol =
+                selected['currency_symbol'] as String? ??
+                    _currencyService.getSymbol(_salonCurrencyCode);
+            _salonTimezone =
+                selected['timezone'] as String? ?? _kDefaultSalonTimezone;
+
+            debugPrint(
+              '✅ Kept selected salon: $_selectedSalonName '
+              '(ID: $_selectedSalonId, Currency: $_salonCurrencyCode, TZ: $_salonTimezone)',
+            );
           }
-        });
-      }
+        } else {
+          _hasSalon = false;
+          _selectedSalonId = null;
+          _selectedSalonName = null;
+          _salonCurrencyCode = 'LKR';
+          _salonCurrencySymbol = 'Rs.';
+          _salonTimezone = _kDefaultSalonTimezone;
+          debugPrint('⚠️ No active salons found for this owner');
+        }
+      });
     } catch (e) {
       debugPrint('❌ Error loading salons: $e');
       if (mounted) {
@@ -1863,6 +1973,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _selectedSalonId = null;
           _selectedSalonName = null;
           _salonCurrencyCode = 'LKR';
+          _salonCurrencySymbol = 'Rs.';
+          _salonTimezone = _kDefaultSalonTimezone;
         });
       }
     }
@@ -1916,6 +2028,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             .eq('salon_id', salonIdInt),
       ]);
 
+      if (!mounted) return;
+
       final todayAppointments = results[0] as List;
       final pendingBookings = results[1] as List;
       final activeBarbers = results[2] as List;
@@ -1933,6 +2047,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             .eq('role_id', 2)
             .eq('status', 'active');
 
+        if (!mounted) return;
         activeBarberCount = validBarbers.length;
       }
 
@@ -1947,16 +2062,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .where((a) => a['status'] == 'completed')
           .length;
 
-      if (mounted) {
-        setState(() {
-          _todayAppointments = todayAppointments.length;
-          _pendingBookings = pendingBookings.length;
-          _activeBarbers = activeBarberCount;
-          _totalCustomers = totalFollowers;
-          _totalRevenue = revenue;
-          _completedToday = completedToday;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _todayAppointments = todayAppointments.length;
+        _pendingBookings = pendingBookings.length;
+        _activeBarbers = activeBarberCount;
+        _totalCustomers = totalFollowers;
+        _totalRevenue = revenue;
+        _completedToday = completedToday;
+      });
     } catch (e) {
       debugPrint('❌ Dashboard stats error: $e');
       if (mounted) {
@@ -2038,17 +2152,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .limit(1);
       _hasHolidays = holidaysResponse.isNotEmpty;
 
-      if (mounted) {
-        setState(() {
-          _hasSalon = true;
-          _completedSteps =
-              (_hasSalon ? 1 : 0) +
-              (_hasServices ? 1 : 0) +
-              (_hasBarbers ? 1 : 0) +
-              (_hasBarberSchedule ? 1 : 0) +
-              (_hasHolidays ? 1 : 0);
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _hasSalon = true;
+        _completedSteps =
+            (_hasSalon ? 1 : 0) +
+            (_hasServices ? 1 : 0) +
+            (_hasBarbers ? 1 : 0) +
+            (_hasBarberSchedule ? 1 : 0) +
+            (_hasHolidays ? 1 : 0);
+      });
     } catch (e) {
       debugPrint('❌ Onboarding error: $e');
     }
@@ -2073,8 +2186,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       _selectedSalonName = selected['name']?.toString();
 
       if (selected.isNotEmpty) {
-        _salonCurrencyCode = selected['currency_code'] as String? ?? 'LKR';
-        debugPrint('✅ Salon switched → Currency: $_salonCurrencyCode');
+        _salonCurrencyCode =
+            selected['currency_code'] as String? ?? 'LKR';
+        _salonCurrencySymbol =
+            selected['currency_symbol'] as String? ??
+                _currencyService.getSymbol(_salonCurrencyCode);
+        _salonTimezone =
+            selected['timezone'] as String? ?? _kDefaultSalonTimezone;
+        debugPrint(
+          '✅ Salon switched → Currency: $_salonCurrencyCode, TZ: $_salonTimezone',
+        );
       }
     });
 
@@ -2236,7 +2357,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               value: '$_todayAppointments',
               icon: Icons.calendar_today,
               color: Colors.blue,
-              subtitle: '$_completedToday completed, $_pendingBookings pending',
+              subtitle:
+                  '$_completedToday completed, $_pendingBookings pending',
               onTap: _viewBookings,
             ),
             DashboardStatCard(
@@ -2335,11 +2457,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   // ============================================================
   // ✅ BUILD METHOD
+  // ✅ Salon selector REMOVED from AppBar (moved to body top)
   // ============================================================
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isWeb = screenWidth > 800;
     final isDark = context.isDarkMode;
 
@@ -2465,121 +2588,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             iconSize: 28,
           ),
         ),
-        title: isWeb
-            ? null
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Flexible(
-                    child: Text(
-                      _selectedSalonName != null &&
-                              _selectedSalonName!.isNotEmpty
-                          ? _selectedSalonName!
-                          : 'Dashboard',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
+        // ✅ Salon selector REMOVED from AppBar — moved to body top
+        title: null,
         actions: [
-          Flexible(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                const reservedForIconsAndAvatar = 180.0;
-                final availableForChip =
-                    constraints.maxWidth - reservedForIconsAndAvatar;
-
-                final showChip = isWeb &&
-                    _ownerSalons.isNotEmpty &&
-                    _selectedSalonName != null &&
-                    _selectedSalonName!.isNotEmpty &&
-                    availableForChip > 60;
-
-                return FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerRight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (showChip)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: availableForChip.clamp(60, 200),
-                            ),
-                            child: GestureDetector(
-                              onTap: _ownerSalons.length > 1
-                                  ? _showSalonSelectorDialog
-                                  : null,
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(20),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    const Icon(
-                                      Icons.store,
-                                      size: 14,
-                                      color: Colors.white,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Flexible(
-                                      child: Text(
-                                        _selectedSalonName!,
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    if (_ownerSalons.length > 1)
-                                      const Icon(
-                                        Icons.arrow_drop_down,
-                                        size: 16,
-                                        color: Colors.white,
-                                      ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (!isWeb && _ownerSalons.length > 1 && !showChip)
-                        Padding(
-                          padding: const EdgeInsets.only(right: 4),
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              maxWidth: (constraints.maxWidth - 180).clamp(
-                                40,
-                                140,
-                              ),
-                            ),
-                            child: _buildSalonSelectorChip(),
-                          ),
-                        ),
-                      _buildPlanBadge(),
-                      _buildNotificationIcon(),
-                      _buildProfileImage(),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
+          _buildPlanBadge(),
+          _buildNotificationIcon(),
+          _buildProfileImage(),
+          const SizedBox(width: 8),
         ],
       ),
       drawer: SideMenu(
@@ -2639,13 +2654,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   Widget _buildDashboardContent() {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isDesktop = screenWidth > 800;
     final isDark = context.isDarkMode;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // ✅ Salon selector chip — CENTERED at top of body
+        if (_ownerSalons.isNotEmpty) _buildSalonSelectorChip(),
+
         if (_showPermissionCard && !_hasPermission)
           PermissionCard(
             onEnable: () => _enableNotifications(action: null),
@@ -2736,14 +2754,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
 
     const accent = Colors.green;
-    final paper = isDark ? const Color(0xFF17201A) : const Color(0xFFF6FBF6);
+    final paper =
+        isDark ? const Color(0xFF17201A) : const Color(0xFFF6FBF6);
 
     final horizontalMargin = _isWeb ? 16.0 : 0.0;
     final horizontalPadding = _isWeb ? 20.0 : 10.0;
     final cornerRadius = _isWeb ? 20.0 : 0.0;
 
     return Container(
-      margin: EdgeInsets.symmetric(horizontal: horizontalMargin, vertical: 10),
+      margin:
+          EdgeInsets.symmetric(horizontal: horizontalMargin, vertical: 10),
       decoration: BoxDecoration(
         color: paper,
         borderRadius: BorderRadius.circular(cornerRadius),
@@ -3031,7 +3051,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 width: 38,
                 height: 38,
                 decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: isDark ? 0.2 : 0.1),
+                  color:
+                      AppTheme.primary.withValues(alpha: isDark ? 0.2 : 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(
@@ -3098,7 +3119,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 width: 28,
                 height: 28,
                 decoration: BoxDecoration(
-                  color: category.color.withValues(alpha: isDark ? 0.24 : 0.14),
+                  color:
+                      category.color.withValues(alpha: isDark ? 0.24 : 0.14),
                   borderRadius: BorderRadius.circular(9),
                 ),
                 child: Icon(category.icon, size: 15, color: category.color),
@@ -3127,7 +3149,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               if (columns < 1) columns = 1;
               if (columns > 6) columns = 6;
               const spacing = 10.0;
-              final tileWidth = (maxWidth - spacing * (columns - 1)) / columns;
+              final tileWidth =
+                  (maxWidth - spacing * (columns - 1)) / columns;
 
               return Wrap(
                 spacing: spacing,
@@ -3158,22 +3181,17 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ✅ NAVIGATION HELPERS
   // ============================================================
 
-  /// ✅ UPDATED: Check plan limit before navigating to create salon
-  void _navigateToCreateSalon() async {
-    // ✅ NEW: Check plan limit BEFORE opening the create screen
+  Future<void> _navigateToCreateSalon() async {
     final canCreate = await _checkCanCreateSalon();
     if (!mounted) return;
 
-    if (!canCreate) {
-      // Dialog is already shown by _checkCanCreateSalon
-      return;
-    }
+    if (!canCreate) return;
 
     final result = await context.push('/owner/salon/create');
     if (result == true && mounted) await _refreshAllData();
   }
 
-  void _navigateToEditSalon() async {
+  Future<void> _navigateToEditSalon() async {
     if (_ownerSalons.isEmpty) {
       _showCreateSalonFirstDialog();
       return;
@@ -3274,7 +3292,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     const green = Color(0xFF22C55E);
     final pct = _totalSteps == 0 ? 0.0 : _completedSteps / _totalSteps;
 
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isDesktop = screenWidth > 800;
     final isDark = context.isDarkMode;
 
@@ -3323,7 +3341,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
-                        color: isDark ? Colors.white : const Color(0xFF1A1A1A),
+                        color:
+                            isDark ? Colors.white : const Color(0xFF1A1A1A),
                       ),
                     ),
                     Text(
@@ -3332,8 +3351,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12,
-                        color:
-                            isDark ? Colors.white60 : const Color(0xFF9CA3AF),
+                        color: isDark
+                            ? Colors.white60
+                            : const Color(0xFF9CA3AF),
                       ),
                     ),
                   ],
@@ -3658,20 +3678,20 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   Widget _chip(String text, Color textColor, Color bgColor) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-    decoration: BoxDecoration(
-      color: bgColor,
-      borderRadius: BorderRadius.circular(99),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(
-        fontSize: 9,
-        fontWeight: FontWeight.w600,
-        color: textColor,
-      ),
-    ),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: bgColor,
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            fontSize: 9,
+            fontWeight: FontWeight.w600,
+            color: textColor,
+          ),
+        ),
+      );
 }
 
 // ============================================================
