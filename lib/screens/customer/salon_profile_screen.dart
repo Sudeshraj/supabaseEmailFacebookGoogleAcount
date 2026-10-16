@@ -3,8 +3,8 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/timezone_service.dart';
+import '../../services/currency_service.dart';
 import '../../extensions/context_extensions.dart';
 
 class SalonProfileScreen extends StatefulWidget {
@@ -32,7 +32,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   final Set<int> _claimingOfferIds = {};
 
   // ==================== TIMEZONE VARIABLES ====================
+  // ✅ SALON timezone (for all time display) — NOT user timezone!
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  String _salonTimezone = _kDefaultSalonTimezone;
+
+  // ✅ USER timezone (for reference only, if different)
   String _userTimezone = '';
+
+  // ✅ CURRENCY
+  String _salonCurrencyCode = 'LKR';
+
   bool _isTimezoneLoaded = false;
 
   String _openTimeLocal = '';
@@ -59,6 +68,26 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     {'icon': Icons.spa_outlined, 'name': 'spa_outlined'},
   ];
 
+  // ============================================================
+  // ✅ SALON "NOW" — consistent timezone reference
+  // ============================================================
+  DateTime get _salonNow {
+    final tz =
+        _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+    try {
+      return TimezoneService.getNowInTimezone(tz);
+    } catch (e) {
+      debugPrint('❌ Error getting salon now: $e');
+      return DateTime.now();
+    }
+  }
+
+  /// ✅ Check if user timezone differs from salon timezone
+  bool get _isDifferentTimezone {
+    if (_salonTimezone.isEmpty || _userTimezone.isEmpty) return false;
+    return _salonTimezone != _userTimezone;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -70,6 +99,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
   Future<void> _initialize() async {
     await _initializeTimezone();
+    await _loadSalonInfo(); // ✅ Load salon timezone + currency from DB
     await Future.wait([
       _loadUserStatus(),
       _loadSalonDetails(),
@@ -80,23 +110,77 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     await _loadSalonOffers();
   }
 
+  /// ✅ SIMPLIFIED: Load user timezone via TimezoneService
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
 
-    final prefs = await SharedPreferences.getInstance();
-    _userTimezone =
-        prefs.getString('cached_timezone') ??
-        TimezoneService.getCurrentTimezone();
-    await TimezoneService.setTimezone(_userTimezone);
-
-    _convertSalonHoursToLocal();
-
-    if (!mounted) return;
-    setState(() {
-      _isTimezoneLoaded = true;
-    });
+    // ✅ TimezoneService එකේ current timezone එක use කරන්න
+    _userTimezone = TimezoneService.getCurrentTimezone();
+    if (_userTimezone.isEmpty) {
+      _userTimezone = _kDefaultSalonTimezone;
+    }
 
     debugPrint('✅ User timezone: $_userTimezone');
+  }
+
+  /// ✅ Load salon timezone + currency from DB
+  Future<void> _loadSalonInfo() async {
+    // ✅ Defaults BEFORE query so they're never empty
+    _salonTimezone = _kDefaultSalonTimezone;
+    _salonCurrencyCode = 'LKR';
+
+    try {
+      final salonId = widget.salon['id'];
+      if (salonId == null) {
+        if (!mounted) return;
+        setState(() {
+          _isTimezoneLoaded = true;
+        });
+        _convertSalonHoursToLocal();
+        return;
+      }
+
+      final response = await supabase
+          .from('salons')
+          .select('timezone, currency_code')
+          .eq('id', salonId is int ? salonId : int.parse(salonId.toString()))
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      if (response != null) {
+        final tz = response['timezone'] as String?;
+        if (tz != null && tz.isNotEmpty) {
+          _salonTimezone = tz;
+        }
+
+        final currCode = response['currency_code'] as String?;
+        if (currCode != null && currCode.isNotEmpty) {
+          _salonCurrencyCode = currCode;
+        }
+      }
+
+      _convertSalonHoursToLocal();
+
+      if (!mounted) return;
+      setState(() {
+        _isTimezoneLoaded = true;
+      });
+
+      debugPrint(
+        '✅ Salon timezone: $_salonTimezone, Currency: $_salonCurrencyCode',
+      );
+    } catch (e) {
+      debugPrint('❌ Error loading salon info: $e');
+
+      // ✅ Fallbacks already set above
+      _convertSalonHoursToLocal();
+
+      if (!mounted) return;
+      setState(() {
+        _isTimezoneLoaded = true;
+      });
+    }
   }
 
   Future<void> _loadUserStatus() async {
@@ -173,14 +257,15 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ==================== TIMEZONE CONVERSION ====================
+  // ✅ All times use SALON timezone
 
   void _convertSalonHoursToLocal() {
     try {
       final openTimeUtc = widget.salon['open_time']?.toString() ?? '09:00:00';
       final closeTimeUtc = widget.salon['close_time']?.toString() ?? '18:00:00';
 
-      _openTimeLocal = _utcToLocalTimeString(openTimeUtc);
-      _closeTimeLocal = _utcToLocalTimeString(closeTimeUtc);
+      _openTimeLocal = _utcToSalonTimeString(openTimeUtc);
+      _closeTimeLocal = _utcToSalonTimeString(closeTimeUtc);
     } catch (e) {
       debugPrint('❌ Error converting hours: $e');
       _openTimeLocal = _formatTimeString(
@@ -192,12 +277,29 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  String _utcToLocalTimeString(String utcTime) {
+  /// ✅ UTC → SALON local time (reference date for recurring)
+  String _utcToSalonTimeString(String utcTime) {
     try {
-      return TimezoneService.utcToLocalTimeRecurring(utcTime);
+      final tz =
+          _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(utcTime, tz);
     } catch (e) {
-      debugPrint('Error converting UTC to local: $e');
+      debugPrint('Error converting UTC to salon time: $e');
       return _formatTimeString(utcTime);
+    }
+  }
+
+  /// ✅ UTC → USER local time (reference only, if different)
+  String _utcToUserTimeString(String utcTime) {
+    if (!_isDifferentTimezone) return '';
+    if (_userTimezone.isEmpty) return '';
+    try {
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
+        utcTime,
+        _userTimezone,
+      );
+    } catch (e) {
+      return '';
     }
   }
 
@@ -214,9 +316,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
+  /// ✅ Check if salon is open NOW — uses SALON timezone
   bool _isOpenNow() {
     try {
-      final now = DateTime.now();
+      // ✅ Use salon timezone
+      final now = _salonNow;
       final nowMinutes = now.hour * 60 + now.minute;
 
       TimeOfDay parseTime(String timeStr) {
@@ -244,6 +348,20 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       return true;
     }
   }
+
+  // ============================================================
+  // ✅ CURRENCY HELPERS
+  // ============================================================
+
+  String _formatPrice(dynamic price) {
+    return CurrencyService.instance.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
+
+  String get _salonCurrencySymbol =>
+      CurrencyService.instance.getSymbol(_salonCurrencyCode);
 
   // ==================== DATA LOADING ====================
 
@@ -413,7 +531,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             final labelParts = <String>[];
             if (gender.isNotEmpty) labelParts.add(gender);
             if (age.isNotEmpty) labelParts.add(age);
-            final vLabel = labelParts.isEmpty ? 'Standard' : labelParts.join(' ');
+            final vLabel =
+                labelParts.isEmpty ? 'Standard' : labelParts.join(' ');
             scopeParts.add('$serviceName · $vLabel');
           }
         }
@@ -669,7 +788,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ NEW: Salon-specific points check (client-side)
+      // ✅ Salon-specific points check (client-side)
       final pointsRequired =
           (offer['points_required'] as num?)?.toInt() ?? 0;
 
@@ -706,7 +825,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
       setState(() => _claimingOfferIds.add(offerId));
 
-      // ✅ Atomic RPC (handles points + used_count + validation, salon-specific)
+      // ✅ Atomic RPC (handles points + used_count + validation)
       final response = await supabase.rpc(
         'claim_offer',
         params: {'p_offer_id': offerId},
@@ -933,7 +1052,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     if (offer['discount_type'] == 'percentage') {
       return '${offer['discount_value']}% OFF';
     } else if (offer['discount_type'] == 'fixed') {
-      return 'Rs.${offer['discount_value']} OFF';
+      return '$_salonCurrencySymbol${offer['discount_value']} OFF';
     } else {
       return 'FREE';
     }
@@ -1363,11 +1482,27 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     Icon(Icons.access_time,
                         size: 16, color: context.secondaryTextColor),
                     const SizedBox(width: 6),
-                    Text(
-                      '$openTime - $closeTime',
-                      style: context.bodyMedium.copyWith(
-                        color: context.secondaryTextColor,
-                      ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$openTime - $closeTime',
+                          style: context.bodyMedium.copyWith(
+                            color: context.secondaryTextColor,
+                          ),
+                        ),
+                        // ✅ User timezone reference (only if different)
+                        if (_isDifferentTimezone)
+                          Text(
+                            'Your time: ${_utcToUserTimeString(widget.salon['open_time']?.toString() ?? '09:00:00')} - ${_utcToUserTimeString(widget.salon['close_time']?.toString() ?? '18:00:00')}',
+                            style: context.bodySmall.copyWith(
+                              color: context.isDarkMode
+                                  ? Colors.blue[300]
+                                  : Colors.blue[700],
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                      ],
                     ),
                   ],
                 ),
@@ -2187,7 +2322,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ============================================================
-  // SERVICE MENU — unchanged
+  // SERVICE MENU
   // ============================================================
 
   Widget _buildMenuTreeSection(bool isWeb) {
@@ -2689,7 +2824,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       const SizedBox(width: 8),
                       Text(
                         price != null
-                            ? 'Rs. ${price.toStringAsFixed(0)}'
+                            ? _formatPrice(price)
                             : '—',
                         style: context.bodyMedium.copyWith(
                           fontWeight: FontWeight.w700,

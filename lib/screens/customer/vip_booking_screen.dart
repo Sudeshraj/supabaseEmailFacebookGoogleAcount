@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/timezone_service.dart';
+import '../../services/currency_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
 
@@ -90,14 +91,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   double _originalTotalPrice = 0;
   double _finalTotalPrice = 0;
 
-  // Timezone
+  // ✅ Timezone (salon + user)
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
   String _userTimezone = '';
+  String _selectedSalonTimezone = _kDefaultSalonTimezone;
   String _lastTimezone = '';
   bool _isTimezoneLoaded = false;
 
-  // Responsive
-  bool _isLargeScreen = false;
-  bool _isTablet = false;
+  // ✅ Currency (salon)
+  String _salonCurrencyCode = 'LKR';
+  final CurrencyService _currencyService = CurrencyService.instance;
+
+  // ✅ Responsive
   bool _isWeb = false;
 
   final ScrollController _scrollController = ScrollController();
@@ -112,6 +117,68 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     const Color(0xFFFFF3E0),
     const Color(0xFFF3E5F5),
   ];
+
+  // ═══════════════════════════════════════════════════
+  // ✅ SALON "NOW" / "TODAY" (salon timezone reference)
+  // ═══════════════════════════════════════════════════
+  DateTime get _salonNow {
+    final tz = _selectedSalonTimezone.isNotEmpty
+        ? _selectedSalonTimezone
+        : _kDefaultSalonTimezone;
+    try {
+      return TimezoneService.getNowInTimezone(tz);
+    } catch (e) {
+      debugPrint('❌ Error getting salon now: $e');
+      return DateTime.now();
+    }
+  }
+
+  DateTime get _todayDate {
+    final now = _salonNow;
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  // ═══════════════════════════════════════════════════
+  // ✅ CURRENCY + TIMEZONE HELPERS
+  // ═══════════════════════════════════════════════════
+
+  /// ✅ Salon currency format
+  String _formatPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _salonCurrencyCode,
+    );
+  }
+
+  /// ✅ Salon timezone display (main)
+  String _getSalonTimezoneDisplay() {
+    final tz = _selectedSalonTimezone.isNotEmpty
+        ? _selectedSalonTimezone
+        : _kDefaultSalonTimezone;
+    return TimezoneService.getFullTimezoneDisplayFor(tz);
+  }
+
+  /// ✅ User timezone display
+  String _getUserTimezoneDisplay() {
+    if (_userTimezone.isEmpty) return '';
+    return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
+  }
+
+  /// ✅ User timezone ≠ salon timezone?
+  bool get _isDifferentTimezone {
+    if (_selectedSalonTimezone.isEmpty || _userTimezone.isEmpty) return false;
+    return _selectedSalonTimezone != _userTimezone;
+  }
+
+  /// ✅ DST check via TimezoneService (salon timezone)
+  bool _isDST() {
+    try {
+      final status = TimezoneService.getDSTStatus();
+      return status['isDST'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
 
   @override
   void initState() {
@@ -159,8 +226,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       }
     }
 
-    //   true  → Salon Profile path  → jump to Date step (2)
-    //   false → Dashboard offer path → stay on Service step (1)
     if (initial.containsKey('skip_to_date')) {
       _skipToDate = initial['skip_to_date'] == true;
     }
@@ -194,16 +259,13 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return normalized;
   }
 
+  /// ✅ MediaQuery.sizeOf (only reacts to size changes)
   void _checkScreenSize() {
-    final size = MediaQuery.of(context).size;
-    final isLarge = size.width > 800 || size.height > 800;
-    final isTablet = size.shortestSide >= 600;
+    final size = MediaQuery.sizeOf(context);
     final isWeb = size.width > 800;
 
-    if (_isLargeScreen != isLarge || _isTablet != isTablet || _isWeb != isWeb) {
+    if (_isWeb != isWeb) {
       setState(() {
-        _isLargeScreen = isLarge;
-        _isTablet = isTablet;
         _isWeb = isWeb;
       });
     }
@@ -310,7 +372,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'p_service_id': serviceId,
           'p_service_price': price,
           'p_customer_id': user?.id,
-          'p_variant_id': variantId, // variant-aware offers
+          'p_variant_id': variantId,
         },
       );
 
@@ -424,7 +486,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     final prefs = await SharedPreferences.getInstance();
     _userTimezone =
-        prefs.getString('cached_timezone') ??
+        prefs.getString(TimezoneService.kUserTimezone) ??
+        prefs.getString(TimezoneService.kCachedTimezone) ??
         TimezoneService.getCurrentTimezone();
     await TimezoneService.setTimezone(_userTimezone);
 
@@ -439,10 +502,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     await _initializeScreen();
   }
 
-  void _checkTimezoneChange() async {
+  Future<void> _checkTimezoneChange() async {
     final prefs = await SharedPreferences.getInstance();
     final currentTimezone =
-        prefs.getString('cached_timezone') ??
+        prefs.getString(TimezoneService.kUserTimezone) ??
+        prefs.getString(TimezoneService.kCachedTimezone) ??
         TimezoneService.getCurrentTimezone();
 
     if (_lastTimezone != currentTimezone && _lastTimezone.isNotEmpty) {
@@ -501,9 +565,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     final int startingStep;
     if (hasPreselected && _skipToDate) {
-      startingStep = 2; // Salon Profile → Date
+      startingStep = 2;
     } else {
-      startingStep = 1; // Dashboard offer / default → Service
+      startingStep = 1;
     }
 
     debugPrint(
@@ -517,10 +581,48 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _isInitialized = true;
     });
 
+    // ✅ Load salon settings (TZ + currency) FIRST
+    await _loadSalonSettings();
     await _loadSalonServices();
     await _applyPreselectedServices();
-
     await _loadHolidays();
+  }
+
+  /// ✅ Load salon timezone + currency (main settings)
+  Future<void> _loadSalonSettings() async {
+    if (_selectedSalon == null) return;
+
+    try {
+      final salonId = _selectedSalon!['id'] as int;
+      final response = await supabase
+          .from('salons')
+          .select('timezone, currency_code')
+          .eq('id', salonId)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      if (response != null) {
+        final tz = response['timezone'] as String?;
+        final curr = response['currency_code'] as String?;
+
+        setState(() {
+          if (tz != null && tz.isNotEmpty) {
+            _selectedSalonTimezone = tz;
+          }
+          if (curr != null && curr.isNotEmpty) {
+            _salonCurrencyCode = curr;
+          }
+        });
+
+        debugPrint(
+          '✅ [VIP] Salon settings loaded: TZ=$_selectedSalonTimezone, '
+          'Currency=$_salonCurrencyCode',
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ [VIP] Error loading salon settings: $e');
+    }
   }
 
   // ==================== HELPERS ====================
@@ -544,16 +646,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   String _getChildNameForBooking() =>
       _isSameAsCustomer ? '' : (_selectedChildName?.trim() ?? '');
-
-  bool _isDST() {
-    final timezone = _userTimezone;
-    if (!timezone.contains('America/') && !timezone.contains('Europe/')) {
-      return false;
-    }
-    final now = DateTime.now();
-    final month = now.month;
-    return month > 3 && month < 11;
-  }
 
   void _resetBooking() {
     setState(() {
@@ -596,6 +688,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _preselectedServicesApplied = false;
       _availableOffersPerService.clear();
       _serviceOffers.clear();
+      // ✅ Reset salon settings
+      _selectedSalonTimezone = _kDefaultSalonTimezone;
+      _salonCurrencyCode = 'LKR';
     });
   }
 
@@ -683,7 +778,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     });
   }
 
-  void _selectSalon(Map<String, dynamic> salon) {
+  Future<void> _selectSalon(Map<String, dynamic> salon) async {
     final normalized = Map<String, dynamic>.from(salon);
     final dynamic rawId = normalized['id'];
     final int salonId = rawId is int
@@ -707,7 +802,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _availableOffersPerService.clear();
       _serviceOffers.clear();
     });
-    _loadSalonServices();
+
+    // ✅ Load salon settings (timezone + currency) BEFORE services
+    await _loadSalonSettings();
+    await _loadSalonServices();
   }
 
   // ==================== STEP 1: SERVICE ====================
@@ -917,7 +1015,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         _servicesLoaded = true;
       });
 
-      // Load offers in the background so "offer available" badges show
       unawaited(_preloadVariantOffers(servicesList));
     } catch (e, stackTrace) {
       debugPrint('❌ [SERVICE LOAD ERROR] $e');
@@ -1000,7 +1097,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         _availableOffersPerService[key] = offers;
       });
 
-      // Auto-select claimed offer
       final claimedOffer = offers.firstWhere(
         (o) => o['is_claimed'] == true,
         orElse: () => <String, dynamic>{},
@@ -1092,7 +1188,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       await _toggleVariant(service, variant);
     }
 
-    // Backup auto-apply for any missed claimed offers
     await _autoApplyClaimedOffers();
   }
 
@@ -1158,7 +1253,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         }
       });
 
-      // Which weekdays have at least one working barber
       try {
         final schedules = await supabase
             .from('barber_schedules')
@@ -1183,11 +1277,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
   }
 
-  DateTime get _todayDate =>
-      DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day);
-
-  /// A day can be picked when it is not past, not a holiday and (if the
-  /// schedule is known) at least one barber works on that weekday.
+  /// ✅ A day can be picked when it is not past (SALON time), not a holiday
+  ///    and (if the schedule is known) at least one barber works that weekday.
   bool _isDaySelectable(DateTime date) {
     final d = DateTime(date.year, date.month, date.day);
     if (d.isBefore(_todayDate)) return false;
@@ -1204,8 +1295,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return null;
   }
 
-  /// Pre-selects today (or the next available day) so "Continue" works
-  /// without the user having to tap the date again.
   Future<void> _ensureDefaultDate() async {
     if (!mounted) return;
     if (_selectedDate != null && _isDaySelectable(_selectedDate!)) return;
@@ -1234,7 +1323,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           .eq('is_working', true);
       if (!mounted) return;
       if (_selectedDate != null && !DateUtils.isSameDay(_selectedDate, date)) {
-        return; // user already picked another date
+        return;
       }
       setState(() {
         _isCheckingDate = false;
@@ -1288,22 +1377,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
       final status = roleCheck['status'] as String? ?? 'active';
       if (status != 'active') {
-        String reason = 'Barber is ';
-        switch (status) {
-          case 'inactive':
-            reason += 'unavailable';
-            break;
-          case 'scheduled_for_deletion':
-            reason += 'unavailable';
-            break;
-          case 'deleted':
-            reason += 'unavailable';
-            break;
-          default:
-            reason += 'unavailable';
-        }
         result['is_available'] = false;
-        result['reason'] = reason;
+        result['reason'] = 'Currently unavailable';
         return result;
       }
 
@@ -1414,7 +1489,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'p_salon_id': _selectedSalon!['id'],
           'p_date': DateFormat(
             'yyyy-MM-dd',
-          ).format(_selectedDate ?? DateTime.now()),
+          ).format(_selectedDate ?? _todayDate),
         },
       );
 
@@ -1437,7 +1512,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         barberList[i]['id'] = barberList[i]['barber_id'];
       }
 
-      final dateToCheck = _selectedDate ?? DateTime.now();
+      final dateToCheck = _selectedDate ?? _todayDate;
 
       for (var i = 0; i < barberList.length; i++) {
         final barber = barberList[i];
@@ -1486,24 +1561,37 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     if (_selectedDate == null) return;
     final user = supabase.auth.currentUser;
     if (user == null) return;
+
     final childName = _isSameAsCustomer
         ? ''
         : (_selectedChildName?.trim() ?? '');
+
     if (!_isSameAsCustomer && childName.isEmpty) return;
+
     setState(() => _isCheckingDuplicate = true);
+
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-      final existing = await supabase
+
+      // ✅ Match both 'myself' and named child
+      final query = supabase
           .from('appointments')
           .select('id')
           .eq('customer_id', user.id)
           .eq('appointment_date', dateStr)
-          .eq('child_name', childName)
+          .eq('is_vip', true)
           .not('status', 'in', '("cancelled","no_show")');
+
+      final existing = childName.isEmpty
+          ? await query.or('child_name.is.null,child_name.eq.')
+          : await query.eq('child_name', childName);
+
       if (!mounted) return;
       setState(() {
         _duplicateError = existing.isNotEmpty
-            ? '⚠️ You already have a VIP booking for ${childName.isEmpty ? "yourself" : childName} on ${DateFormat('MMM dd').format(_selectedDate!)}.'
+            ? '⚠️ You already have a VIP booking for '
+                  '${childName.isEmpty ? "yourself" : childName} '
+                  'on ${DateFormat('MMM dd').format(_selectedDate!)}.'
             : null;
       });
     } catch (e) {
@@ -1626,7 +1714,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
       String workStartUTC =
           effectiveSchedule['work_start']?.toString() ?? '09:00';
-      String workEndUTC = effectiveSchedule['work_end']?.toString() ?? '18:00';
+      String workEndUTC =
+          effectiveSchedule['work_end']?.toString() ?? '18:00';
 
       if (workStartUTC.length > 5) workStartUTC = workStartUTC.substring(0, 5);
       if (workEndUTC.length > 5) workEndUTC = workEndUTC.substring(0, 5);
@@ -1644,8 +1733,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
       List<Map<String, dynamic>> breakRanges = [];
 
-      String? breakStartUTC = effectiveSchedule['lunch_break_start']
-          ?.toString();
+      String? breakStartUTC =
+          effectiveSchedule['lunch_break_start']?.toString();
       String? breakEndUTC = effectiveSchedule['lunch_break_end']?.toString();
       bool hasSpecialBreak = effectiveSchedule['has_special_break'] == true;
 
@@ -1783,10 +1872,16 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           breakRanges,
         );
 
-        final localSlotStart = TimezoneService.utcToLocalDateTimeForDate(
-          '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00',
+        // ✅ FIXED: Convert UTC to SALON timezone for slot display + past check
+        final utcStartStr =
+            '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00';
+
+        final localSlotStart = TimezoneService.utcToLocalDateTimeForDateWithTimezone(
+          utcStartStr,
           _selectedDate!,
+          _selectedSalonTimezone,
         );
+
         bool isPast = _isSlotInPast(localSlotStart, totalDuration);
 
         bool isAvailable =
@@ -1830,28 +1925,32 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           displayVipNumber = vipCountBefore + 1;
         }
 
-        final localStartDateTime = TimezoneService.utcToLocalDateTimeForDate(
-          '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00',
+        // ✅ FIXED: SALON timezone for local display times
+        final localStartDateTime =
+            TimezoneService.utcToLocalDateTimeForDateWithTimezone(
+          utcStartStr,
           _selectedDate!,
+          _selectedSalonTimezone,
         );
-        final localEndDateTime = TimezoneService.utcToLocalDateTimeForDate(
-          '${slotEndUTC.hour.toString().padLeft(2, '0')}:${slotEndUTC.minute.toString().padLeft(2, '0')}:00',
+
+        final utcEndStr =
+            '${slotEndUTC.hour.toString().padLeft(2, '0')}:${slotEndUTC.minute.toString().padLeft(2, '0')}:00';
+
+        final localEndDateTime =
+            TimezoneService.utcToLocalDateTimeForDateWithTimezone(
+          utcEndStr,
           _selectedDate!,
+          _selectedSalonTimezone,
         );
 
         final displayStartTime = _formatTimeWithAmPm(localStartDateTime);
         final displayEndTime = _formatTimeWithAmPm(localEndDateTime);
 
-        final utcStartTimeStr =
-            '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00';
-        final utcEndTimeStr =
-            '${slotEndUTC.hour.toString().padLeft(2, '0')}:${slotEndUTC.minute.toString().padLeft(2, '0')}:00';
-
         slots.add({
           'start_time_display': displayStartTime,
           'end_time_display': displayEndTime,
-          'utc_start_time': utcStartTimeStr,
-          'utc_end_time': utcEndTimeStr,
+          'utc_start_time': utcStartStr,
+          'utc_end_time': utcEndStr,
           'slot_number': slotNumber,
           'vip_number': displayVipNumber,
           'is_available': isAvailable,
@@ -2031,7 +2130,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         );
       }
 
-      // Per-service offer ids
       final offerIds = _selectedServices
           .map((s) => s['offer_id'] as int?)
           .toList();
@@ -2170,18 +2268,26 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return Icons.build;
   }
 
+  /// ✅ Salon opening hours — SALON timezone, NOT user timezone
   String _getSalonLocalTime(Map<String, dynamic> salon) {
     final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
     final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
-    final referenceDate = _selectedDate ?? DateTime.now();
+    final referenceDate = _selectedDate ?? _todayDate;
 
-    final openLocal = TimezoneService.utcToLocalTimeForDate(
+    // ✅ FIXED: use SALON timezone
+    final tz = _selectedSalonTimezone.isNotEmpty
+        ? _selectedSalonTimezone
+        : _kDefaultSalonTimezone;
+
+    final openLocal = TimezoneService.utcToLocalTimeForDateWithTimezone(
       openTimeUTC,
       referenceDate,
+      tz,
     );
-    final closeLocal = TimezoneService.utcToLocalTimeForDate(
+    final closeLocal = TimezoneService.utcToLocalTimeForDateWithTimezone(
       closeTimeUTC,
       referenceDate,
+      tz,
     );
 
     return '$openLocal - $closeLocal';
@@ -2212,7 +2318,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   // SHARED UI HELPERS
   // ============================================
 
-  /// Compact title shown at the top of a step: what the user must do here.
   Widget _buildStepTitle(
     bool isDark,
     IconData icon,
@@ -2262,7 +2367,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  /// Selected-date row used by Person & Time.
   Widget _buildSelectedDateRow(bool isDark) {
     if (_selectedDate == null) return const SizedBox.shrink();
     return Padding(
@@ -2286,7 +2390,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  /// Bottom bar: short Back button + Continue button (same height).
   Widget _buildBottomBar({
     required bool isDark,
     required bool enabled,
@@ -2364,16 +2467,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
 
-    // Window dragged to an unusably small width (web / dev-tools resize):
-    // draw nothing, otherwise AppBar and other rows throw overflow errors.
     if (screenWidth < 300) return const Scaffold(body: SizedBox.shrink());
 
     final isMobile = screenWidth < 600;
     final isDark = context.isDarkMode;
-
-    _checkScreenSize();
 
     if (!_isTimezoneLoaded) {
       return Scaffold(
@@ -2406,7 +2505,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       );
     }
 
-    // Smaller icons on phones so all 7 steps fit without scrolling
     final stepSize = isMobile ? 32.0 : 42.0;
     final iconSize = isMobile ? 16.0 : 20.0;
     final stepFontSize = isMobile ? 9.0 : 11.0;
@@ -2431,7 +2529,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
           onPressed: () {
-            // Natural step-by-step back: 6 → 5 → 4 → 3 → 2 → 1 → 0 → Close
             if (_currentStep > 0) {
               setState(() => _currentStep--);
             } else {
@@ -2456,8 +2553,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            // Window is being resized to an unusably small width: skip layout
-            // for a frame instead of throwing RenderFlex overflow errors.
             if (constraints.maxWidth < 300) return const SizedBox.shrink();
 
             final double safeHeight =
@@ -2531,9 +2626,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  /// Step indicator: connectors are Expanded so the whole row always fits the
-  /// screen width (no horizontal scrolling → the last "Confirm" icon is never
-  /// cut off on mobile).
   Widget _buildStepIndicatorRow(
     bool isMobile,
     double stepSize,
@@ -3135,7 +3227,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
                             child: Text(
-                              'You save Rs. ${_discountAmount.toStringAsFixed(0)}',
+                              'You save ${_formatPrice(_discountAmount)}',
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
@@ -3154,7 +3246,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     children: [
                       if (_discountAmount > 0)
                         Text(
-                          'Rs. ${_calculateTotalPrice().toStringAsFixed(0)}',
+                          _formatPrice(_calculateTotalPrice()),
                           style: TextStyle(
                             fontSize: 11,
                             decoration: TextDecoration.lineThrough,
@@ -3162,7 +3254,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           ),
                         ),
                       Text(
-                        'Rs. ${_getDisplayTotalPrice().toStringAsFixed(0)}',
+                        _formatPrice(_getDisplayTotalPrice()),
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -3368,7 +3460,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
   }
 
-  /// Groups services by category (ordered by display_order) → one tree.
   List<Map<String, dynamic>> _buildServiceTree() {
     final Map<String, Map<String, dynamic>> byCategory = {};
 
@@ -3401,7 +3492,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   Widget _buildServiceTreeList(List<Map<String, dynamic>> tree, bool isDark) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = MediaQuery.sizeOf(context).width < 600;
     final hPad = isMobile ? 10.0 : 16.0;
 
     return SingleChildScrollView(
@@ -3617,7 +3708,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  // Variant row (tree leaf) – checkbox select + per-variant offers
   Widget _buildVariantRow(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
@@ -3650,13 +3740,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     final greenColor = isDark ? Colors.green.shade300 : Colors.green.shade700;
 
-    // Offer info (read-only): applied offer, or "available" hint
     final bool hasClaimed = availableOffers.any((o) => o['is_claimed'] == true);
     Widget? offerChip;
     if (isSelected && hasOffer) {
       offerChip = _buildInfoChip(
         Icons.card_giftcard,
-        '${selectedOffer['title'] ?? 'Offer'} applied • save Rs. ${discount.toStringAsFixed(0)}',
+        '${selectedOffer['title'] ?? 'Offer'} applied • save ${_formatPrice(discount)}',
         Colors.green.shade600,
       );
     } else if (availableOffers.isNotEmpty) {
@@ -3785,7 +3874,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             children: [
                               if (hasOffer && isSelected)
                                 Text(
-                                  'Rs. ${price.toStringAsFixed(0)}',
+                                  _formatPrice(price),
                                   style: TextStyle(
                                     fontSize: 11,
                                     decoration: TextDecoration.lineThrough,
@@ -3795,7 +3884,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   ),
                                 ),
                               Text(
-                                'Rs. ${(hasOffer && isSelected ? finalPrice : price).toStringAsFixed(0)}',
+                                _formatPrice(
+                                  hasOffer && isSelected ? finalPrice : price,
+                                ),
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w700,
@@ -4012,7 +4103,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 ),
                               ),
                               Text(
-                                'Rs. ${_calculateTotalPrice().toStringAsFixed(2)}',
+                                _formatPrice(_calculateTotalPrice()),
                                 style: TextStyle(
                                   fontSize: 14,
                                   color: isDark ? Colors.white70 : Colors.grey,
@@ -4046,7 +4137,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 ],
                               ),
                               Text(
-                                '− Rs. ${_discountAmount.toStringAsFixed(2)}',
+                                '− ${_formatPrice(_discountAmount)}',
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w500,
@@ -4070,7 +4161,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               ),
                             ),
                             Text(
-                              'Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
+                              _formatPrice(_getDisplayTotalPrice()),
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
@@ -4178,7 +4269,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 children: [
                   if (discount > 0)
                     Text(
-                      'Rs. ${price.toStringAsFixed(2)}',
+                      _formatPrice(price),
                       style: TextStyle(
                         fontSize: 11,
                         decoration: TextDecoration.lineThrough,
@@ -4186,7 +4277,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ),
                     ),
                   Text(
-                    'Rs. ${finalPrice.toStringAsFixed(2)}',
+                    _formatPrice(finalPrice),
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
@@ -4242,7 +4333,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    '${offer['title']} — save Rs. ${discount.toStringAsFixed(2)}',
+                    '${offer['title']} — save ${_formatPrice(discount)}',
                     style: TextStyle(
                       fontSize: 11,
                       color: isDark
@@ -4265,11 +4356,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   Widget _buildDateSelectionStep() {
     final isDark = context.isDarkMode;
-    final today = DateTime(
-      DateTime.now().year,
-      DateTime.now().month,
-      DateTime.now().day,
-    );
+    final today = _todayDate; // ✅ SALON date
     final maxDate = today.add(const Duration(days: 30));
 
     final firstSelectable = _firstSelectableDate();
@@ -4313,7 +4400,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} • ${_calculateTotalDuration()} min • Rs. ${_getDisplayTotalPrice().toStringAsFixed(2)}',
+                    '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} • ${_calculateTotalDuration()} min • ${_formatPrice(_getDisplayTotalPrice())}',
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
@@ -4439,7 +4526,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       child: CalendarDatePicker(
                         key: ValueKey('cal_$_calendarVersion'),
                         initialDate: calendarInitial,
-                        firstDate: today,
+                        firstDate: today, // ✅ Salon today
                         lastDate: maxDate,
                         selectableDayPredicate: (date) =>
                             _isDaySelectable(date),
@@ -4649,7 +4736,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  /// Short, friendly explanation of the greyed-out days in the calendar.
   Widget _buildUnavailableDaysHint(
     bool isDark,
     DateTime today,
@@ -5070,7 +5156,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ---- centered header ----
                       Center(
                         child: Padding(
                           padding: const EdgeInsets.only(top: 10, bottom: 10),
@@ -5115,7 +5200,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         ),
                       ),
 
-                      // ---- tree: root node ----
                       Row(
                         children: [
                           Icon(
@@ -5428,60 +5512,102 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   // STEP 5: TIME SLOT SELECTION
   // ============================================
 
+  /// ✅ Timezone indicator: Salon time (main) + User reference
   Widget _buildTimezoneIndicator() {
     final isDark = context.isDarkMode;
+    final showUserTz = _isDifferentTimezone;
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
-        borderRadius: BorderRadius.circular(25),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
         ),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            TimezoneService.getCurrentFlag(),
-            style: const TextStyle(fontSize: 16),
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              TimezoneService.getTimezoneDisplayName(),
-              style: TextStyle(
-                fontSize: 13,
-                color: isDark ? Colors.white70 : Colors.grey[700],
-                fontWeight: FontWeight.w500,
+          // ✅ Salon timezone (MAIN)
+          Row(
+            children: [
+              const Icon(
+                Icons.store,
+                size: 14,
+                color: AppTheme.primary,
               ),
-            ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            '(${TimezoneService.getUtcOffsetString()})',
-            style: TextStyle(
-              fontSize: 11,
-              color: isDark ? Colors.white70 : Colors.grey[500],
-            ),
-          ),
-          if (_isDST()) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.amber.shade900 : Colors.amber.shade100,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                'DST',
-                style: TextStyle(
-                  fontSize: 9,
-                  color: isDark ? Colors.amber.shade300 : Colors.amber.shade800,
-                  fontWeight: FontWeight.bold,
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Salon times: ${_getSalonTimezoneDisplay()}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white70 : Colors.grey[700],
+                  ),
                 ),
+              ),
+              if (_isDST()) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.amber.shade900
+                        : Colors.amber.shade100,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'DST',
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: isDark
+                          ? Colors.amber.shade300
+                          : Colors.amber.shade800,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+
+          // ✅ User reference (only if different)
+          if (showUserTz) ...[
+            const SizedBox(height: 6),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.person,
+                    size: 12,
+                    color: Colors.orange[700],
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'You are in: ${_getUserTimezoneDisplay()}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.orange[700],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -5546,7 +5672,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             color: AppTheme.primary.withValues(alpha: 0.08),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(24),
-                              side: BorderSide(
+                              side: const BorderSide(
                                 color: AppTheme.primary,
                                 width: 2,
                               ),
@@ -5976,7 +6102,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     },
                     icon: const Icon(Icons.arrow_forward, size: 18),
                     label: Text(
-                      'Try ${DateFormat('MMM dd').format(_selectedDate != null ? _selectedDate!.add(const Duration(days: 1)) : DateTime.now())}',
+                      'Try ${DateFormat('MMM dd').format(_selectedDate != null ? _selectedDate!.add(const Duration(days: 1)) : _todayDate)}',
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primary,
@@ -6184,7 +6310,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   ),
                                   if (discount > 0)
                                     Text(
-                                      'Rs. ${price.toStringAsFixed(2)}',
+                                      _formatPrice(price),
                                       style: TextStyle(
                                         fontSize: 12,
                                         decoration: TextDecoration.lineThrough,
@@ -6195,7 +6321,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                     ),
                                   if (discount > 0) const SizedBox(width: 4),
                                   Text(
-                                    'Rs. ${finalPrice.toStringAsFixed(2)}',
+                                    _formatPrice(finalPrice),
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
@@ -6228,7 +6354,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                       const SizedBox(width: 4),
                                       Expanded(
                                         child: Text(
-                                          '🎁 ${offer['title']} — save Rs. ${discount.toStringAsFixed(2)}',
+                                          '🎁 ${offer['title']} — save ${_formatPrice(discount)}',
                                           style: TextStyle(
                                             fontSize: 11,
                                             color: isDark
@@ -6258,7 +6384,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             ),
                           ),
                           Text(
-                            'Rs. ${_originalTotalPrice.toStringAsFixed(2)}',
+                            _formatPrice(_originalTotalPrice),
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -6296,7 +6422,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 ],
                               ),
                               Text(
-                                '− Rs. ${_discountAmount.toStringAsFixed(2)}',
+                                '− ${_formatPrice(_discountAmount)}',
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
@@ -6322,7 +6448,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 _buildConfirmationTile(
                   Icons.attach_money,
                   'Estimated Amount',
-                  'Rs. ${totalPrice.toStringAsFixed(2)}',
+                  _formatPrice(totalPrice),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -6330,7 +6456,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         Padding(
                           padding: const EdgeInsets.only(bottom: 6),
                           child: Text(
-                            'Saved Rs. ${_discountAmount.toStringAsFixed(2)}',
+                            'Saved ${_formatPrice(_discountAmount)}',
                             style: TextStyle(
                               fontSize: 13,
                               color: isDark

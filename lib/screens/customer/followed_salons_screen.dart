@@ -7,7 +7,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/timezone_service.dart';
 
 class FollowedSalonsScreen extends StatefulWidget {
@@ -50,40 +49,39 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   }
 
   // ============================================
-  // ✅ TIMEZONE INITIALIZATION
+  // ✅ TIMEZONE INITIALIZATION (SIMPLIFIED)
   // ============================================
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
-
-    final prefs = await SharedPreferences.getInstance();
-    final userTimezone =
-        prefs.getString('cached_timezone') ??
-        TimezoneService.getCurrentTimezone();
-    await TimezoneService.setTimezone(userTimezone);
 
     if (!mounted) return;
     setState(() {
       _isTimezoneLoaded = true;
     });
 
-    debugPrint('✅ User timezone: $userTimezone');
+    debugPrint('✅ User timezone: ${TimezoneService.getCurrentTimezone()}');
 
     await _loadFollowedSalons();
   }
 
   // ============================================
-  // ✅ TIMEZONE HELPER
+  // ✅ TIMEZONE HELPER (SALON-SPECIFIC)
   // ============================================
-  String _utcToLocalTimeString(String? utcTime) {
+  /// ✅ UTC → Salon local time (using SALON timezone, NOT user TZ)
+  String _utcToSalonTime(String? utcTime, String salonTimezone) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     try {
       String timeStr = utcTime;
       if (timeStr.length == 5) {
         timeStr = '$timeStr:00';
       }
-      return TimezoneService.utcToLocalTime(timeStr, DateTime.now());
+      // ✅ Use salon timezone (reference date — recurring)
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
+        timeStr,
+        salonTimezone.isNotEmpty ? salonTimezone : 'Asia/Colombo',
+      );
     } catch (e) {
-      debugPrint('Error converting UTC to local: $e');
+      debugPrint('Error converting UTC to salon time: $e');
       return _formatTimeFallback(utcTime);
     }
   }
@@ -103,9 +101,11 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
 
   // ============================================================
   // LOAD FOLLOWED SALONS
+  // ✅ FIXED: mounted checks + null-safe parsing
   // ============================================================
   Future<void> _loadFollowedSalons() async {
     if (!_isTimezoneLoaded) return;
+    if (!mounted) return;
 
     setState(() {
       _isLoading = true;
@@ -115,6 +115,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) {
+        if (!mounted) return;
         setState(() {
           _errorMessage = 'Please login to view your followed salons';
           _isLoading = false;
@@ -154,6 +155,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
 
   // ============================================================
   // FILTER AND SEARCH
+  // ✅ FIXED: "Newest" sorting added
   // ============================================================
   List<Map<String, dynamic>> get _filteredSalons {
     var filtered = List<Map<String, dynamic>>.from(_followedSalons);
@@ -176,8 +178,18 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
         );
         break;
       case 'Newest':
+        // ✅ Sort by salon ID (higher ID = newer)
+        filtered.sort(
+          (a, b) => (b['id'] as int? ?? 0).compareTo(a['id'] as int? ?? 0),
+        );
         break;
       default:
+        // 'All' — sort alphabetically (default from RPC)
+        filtered.sort(
+          (a, b) => ((a['name'] as String?) ?? '')
+              .toLowerCase()
+              .compareTo(((b['name'] as String?) ?? '').toLowerCase()),
+        );
         break;
     }
 
@@ -186,6 +198,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
 
   // ============================================================
   // UNFOLLOW SALON
+  // ✅ FIXED: null-safe salonId
   // ============================================================
   Future<void> _unfollowSalon(int salonId, String salonName) async {
     final isDark = context.isDarkMode;
@@ -209,7 +222,9 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
             onPressed: () => Navigator.pop(context, false),
             child: Text(
               'Cancel',
-              style: TextStyle(color: isDark ? Colors.white60 : Colors.black87),
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.black87,
+              ),
             ),
           ),
           ElevatedButton(
@@ -276,7 +291,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isWeb = screenWidth > 800;
     final filteredSalons = _filteredSalons;
 
@@ -362,38 +377,42 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                 ),
               )
             : _errorMessage != null
-            ? Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.error_outline,
-                      size: 64,
-                      color: isDark ? Colors.white30 : Colors.grey[400],
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          size: 64,
+                          color: isDark ? Colors.white30 : Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Text(
+                            _errorMessage!,
+                            style: TextStyle(
+                              color:
+                                  isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        ElevatedButton(
+                          onPressed: _loadFollowedSalons,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Retry'),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    Text(
-                      _errorMessage!,
-                      style: TextStyle(
-                        color: isDark ? Colors.white60 : Colors.grey[600],
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton(
-                      onPressed: _loadFollowedSalons,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('Retry'),
-                    ),
-                  ],
-                ),
-              )
-            : isWeb
-            ? _buildWebLayout(filteredSalons)
-            : _buildMobileLayout(filteredSalons),
+                  )
+                : isWeb
+                    ? _buildWebLayout(filteredSalons)
+                    : _buildMobileLayout(filteredSalons),
       ),
     );
   }
@@ -549,8 +568,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
             horizontal: 12,
             vertical: 12,
           ),
-          filled: true,
-          fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          // ✅ FIXED: Removed `filled: true` + `fillColor` (outer container already has background)
         ),
       ),
     );
@@ -632,12 +650,16 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
           ),
           const Spacer(),
           if (_searchQuery.isNotEmpty)
-            Text(
-              'Showing results for "$_searchQuery"',
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.white70 : Colors.grey[500],
-                fontStyle: FontStyle.italic,
+            Flexible(
+              child: Text(
+                'Showing results for "$_searchQuery"',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.white70 : Colors.grey[500],
+                  fontStyle: FontStyle.italic,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ),
         ],
@@ -650,66 +672,79 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     final isDark = context.isDarkMode;
 
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.store_mall_directory,
-            size: 80,
-            color: isDark ? Colors.white70 : Colors.grey[300],
-          ),
-          const SizedBox(height: 16),
-          Text(
-            _searchQuery.isNotEmpty
-                ? 'No salons found matching "$_searchQuery"'
-                : 'You haven\'t followed any salons yet',
-            style: TextStyle(
-              fontSize: 16,
-              color: isDark ? Colors.white60 : Colors.grey[600],
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.store_mall_directory,
+              size: 80,
+              color: isDark ? Colors.white70 : Colors.grey[300],
             ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Follow salons to get updates and book appointments',
-            style: TextStyle(
-              fontSize: 14,
-              color: isDark ? Colors.white70 : Colors.grey[400],
-            ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () {
-              context.push('/customer/search-salons');
-            },
-            icon: const Icon(Icons.search),
-            label: const Text('Find Salons to Follow'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+            const SizedBox(height: 16),
+            Text(
+              _searchQuery.isNotEmpty
+                  ? 'No salons found matching "$_searchQuery"'
+                  : 'You haven\'t followed any salons yet',
+              style: TextStyle(
+                fontSize: 16,
+                color: isDark ? Colors.white60 : Colors.grey[600],
               ),
+              textAlign: TextAlign.center,
             ),
-          ),
-          if (_searchQuery.isNotEmpty)
-            TextButton(
+            const SizedBox(height: 8),
+            Text(
+              'Follow salons to get updates and book appointments',
+              style: TextStyle(
+                fontSize: 14,
+                color: isDark ? Colors.white70 : Colors.grey[400],
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
               onPressed: () {
-                setState(() {
-                  _searchQuery = '';
-                });
+                context.push('/customer/search-salons');
               },
-              child: Text(
-                'Clear Search',
-                style: TextStyle(color: AppTheme.primary),
+              icon: const Icon(Icons.search),
+              label: const Text('Find Salons to Follow'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
               ),
             ),
-        ],
+            if (_searchQuery.isNotEmpty)
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _searchQuery = '';
+                  });
+                },
+                child: const Text(
+                  'Clear Search',
+                  style: TextStyle(color: AppTheme.primary),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
   // ============================================================
   // ✅ SALON CARD
+  // ✅ FIXED: uses SALON timezone (not user TZ)
+  // ✅ FIXED: uses SALON currency
+  // ✅ FIXED: null-safe salonId
+  // ✅ FIXED: simplified Card (no Container)
   // ============================================================
   Widget _buildSalonCard(Map<String, dynamic> salon) {
     final isDark = context.isDarkMode;
@@ -718,12 +753,29 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     final logoUrl = salon['logo_url']?.toString();
     final followerCount = salon['follower_count'] as int? ?? 0;
     final bookingCount = salon['booking_count'] as int? ?? 0;
-    final salonId = salon['id'] as int? ?? 0;
 
-    final openTimeLocal = _utcToLocalTimeString(salon['open_time']?.toString());
-    final closeTimeLocal = _utcToLocalTimeString(
-      salon['close_time']?.toString(),
+    // ✅ Null-safe salonId
+    final salonId = salon['id'];
+    if (salonId is! int) {
+      return const SizedBox.shrink();
+    }
+
+    // ✅ Salon timezone (from RPC)
+    final salonTimezone = salon['timezone']?.toString() ?? 'Asia/Colombo';
+  
+
+    // ✅ Convert UTC → Salon local time (using SALON timezone)
+    final openTimeLocal = _utcToSalonTime(
+      salon['open_time']?.toString(),
+      salonTimezone,
     );
+    final closeTimeLocal = _utcToSalonTime(
+      salon['close_time']?.toString(),
+      salonTimezone,
+    );
+
+    // ✅ Timezone flag for display
+    final tzFlag = TimezoneService.getTimezoneFlagFor(salonTimezone);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -735,93 +787,93 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
             ? BorderSide(color: Colors.grey[700]!, width: 0.5)
             : BorderSide.none,
       ),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-        ),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 65,
-                    height: 65,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(16),
-                      image: logoUrl != null && logoUrl.isNotEmpty
-                          ? DecorationImage(
-                              image: CachedNetworkImageProvider(logoUrl),
-                              fit: BoxFit.cover,
-                            )
-                          : null,
-                    ),
-                    child: logoUrl == null || logoUrl.isEmpty
-                        ? Center(
-                            child: Text(
-                              name.substring(0, 1).toUpperCase(),
-                              style: const TextStyle(
-                                fontSize: 28,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.primary,
-                              ),
-                            ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  width: 65,
+                  height: 65,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(16),
+                    image: logoUrl != null && logoUrl.isNotEmpty
+                        ? DecorationImage(
+                            image: CachedNetworkImageProvider(logoUrl),
+                            fit: BoxFit.cover,
                           )
                         : null,
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          name,
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
+                  child: logoUrl == null || logoUrl.isEmpty
+                      ? Center(
+                          child: Text(
+                            name.isNotEmpty
+                                ? name.substring(0, 1).toUpperCase()
+                                : 'S',
+                            style: const TextStyle(
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primary,
+                            ),
                           ),
-                          overflow: TextOverflow.ellipsis,
+                        )
+                      : null,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
                         ),
-                        const SizedBox(height: 4),
-                        if (address.isNotEmpty)
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.location_on,
-                                size: 14,
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.grey[500],
-                              ),
-                              const SizedBox(width: 4),
-                              Expanded(
-                                child: Text(
-                                  address,
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.grey[600],
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                      const SizedBox(height: 4),
+                      if (address.isNotEmpty)
                         Row(
                           children: [
                             Icon(
-                              Icons.access_time,
+                              Icons.location_on,
                               size: 14,
-                              color: isDark ? Colors.white60 : Colors.grey[500],
+                              color:
+                                  isDark ? Colors.white60 : Colors.grey[500],
                             ),
                             const SizedBox(width: 4),
-                            Text(
+                            Expanded(
+                              child: Text(
+                                address,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.grey[600],
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      const SizedBox(height: 2),
+                      // ✅ Salon hours (using SALON timezone)
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.access_time,
+                            size: 14,
+                            color: isDark ? Colors.white60 : Colors.grey[500],
+                          ),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
                               '$openTimeLocal - $closeTimeLocal',
                               style: TextStyle(
                                 fontSize: 12,
@@ -829,40 +881,44 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                                     ? Colors.white70
                                     : Colors.grey[600],
                               ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              TimezoneService.getCurrentFlag(),
-                              style: const TextStyle(fontSize: 12),
+                          ),
+                          // ✅ Timezone flag
+                          Text(
+                            tzFlag,
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      // ✅ Followers + Bookings
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.people,
+                            size: 14,
+                            color: isDark ? Colors.white60 : Colors.grey[500],
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$followerCount followers',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color:
+                                  isDark ? Colors.white60 : Colors.grey[500],
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.people,
-                              size: 14,
-                              color: isDark ? Colors.white60 : Colors.grey[500],
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '$followerCount followers',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.grey[500],
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Icon(
-                              Icons.event_available,
-                              size: 14,
-                              color: isDark ? Colors.white60 : Colors.grey[500],
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
+                          ),
+                          const SizedBox(width: 12),
+                          Icon(
+                            Icons.event_available,
+                            size: 14,
+                            color: isDark ? Colors.white60 : Colors.grey[500],
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
                               '$bookingCount bookings',
                               style: TextStyle(
                                 fontSize: 11,
@@ -870,105 +926,104 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                                     ? Colors.white60
                                     : Colors.grey[500],
                               ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
                             ),
-                          ],
-                        ),
-                      ],
-                    ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
+          ),
 
-            Divider(
-              height: 1,
-              color: isDark ? Colors.grey[700] : Colors.grey[200],
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: () => _viewSalonDetails(salon),
-                      icon: const Icon(
-                        Icons.info_outline,
-                        size: 18,
+          Divider(
+            height: 1,
+            color: isDark ? Colors.grey[700] : Colors.grey[200],
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => _viewSalonDetails(salon),
+                    icon: const Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: AppTheme.primary,
+                    ),
+                    label: const Text(
+                      'Details',
+                      style: TextStyle(
+                        fontSize: 13,
                         color: AppTheme.primary,
                       ),
-                      label: const Text(
-                        'Details',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        foregroundColor: isDark
-                            ? Colors.white
-                            : AppTheme.primary,
-                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      foregroundColor:
+                          isDark ? Colors.white : AppTheme.primary,
                     ),
                   ),
-                  Container(
-                    width: 1,
-                    height: 25,
-                    color: isDark ? Colors.grey[700] : Colors.grey[200],
-                  ),
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: () => _bookAppointment(salon),
-                      icon: const Icon(
-                        Icons.calendar_today,
-                        size: 18,
-                        color: Colors.green,
-                      ),
-                      label: const Text(
-                        'Book',
-                        style: TextStyle(fontSize: 13, color: Colors.green),
-                      ),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        foregroundColor: Colors.green,
-                      ),
+                ),
+                Container(
+                  width: 1,
+                  height: 25,
+                  color: isDark ? Colors.grey[700] : Colors.grey[200],
+                ),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => _bookAppointment(salon),
+                    icon: const Icon(
+                      Icons.calendar_today,
+                      size: 18,
+                      color: Colors.green,
+                    ),
+                    label: const Text(
+                      'Book',
+                      style: TextStyle(fontSize: 13, color: Colors.green),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      foregroundColor: Colors.green,
                     ),
                   ),
-                  Container(
-                    width: 1,
-                    height: 25,
-                    color: isDark ? Colors.grey[700] : Colors.grey[200],
-                  ),
-                  Expanded(
-                    child: TextButton.icon(
-                      onPressed: () => _unfollowSalon(salonId, name),
-                      icon: Icon(
-                        Icons.star_border,
-                        size: 18,
-                        color: isDark ? Colors.orange.shade300 : Colors.orange,
-                      ),
-                      label: Text(
-                        'Unfollow',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: isDark
-                              ? Colors.orange.shade300
-                              : Colors.orange,
-                        ),
-                      ),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        foregroundColor: isDark
-                            ? Colors.orange.shade300
-                            : Colors.orange,
+                ),
+                Container(
+                  width: 1,
+                  height: 25,
+                  color: isDark ? Colors.grey[700] : Colors.grey[200],
+                ),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: () => _unfollowSalon(salonId, name),
+                    icon: Icon(
+                      Icons.star_border,
+                      size: 18,
+                      color: isDark ? Colors.orange.shade300 : Colors.orange,
+                    ),
+                    label: Text(
+                      'Unfollow',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color:
+                            isDark ? Colors.orange.shade300 : Colors.orange,
                       ),
                     ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      foregroundColor:
+                          isDark ? Colors.orange.shade300 : Colors.orange,
+                    ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

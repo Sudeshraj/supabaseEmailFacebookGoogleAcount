@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../theme/app_theme.dart';
 import '../../extensions/context_extensions.dart';
+import '../../services/timezone_service.dart';
+import '../../services/currency_service.dart';
 
 class LoyaltyScreen extends StatefulWidget {
   const LoyaltyScreen({super.key});
@@ -14,6 +17,7 @@ class LoyaltyScreen extends StatefulWidget {
 class _LoyaltyScreenState extends State<LoyaltyScreen>
     with SingleTickerProviderStateMixin {
   final supabase = Supabase.instance.client;
+  final CurrencyService _currencyService = CurrencyService.instance;
 
   bool _isLoading = true;
   bool _hasError = false;
@@ -23,10 +27,8 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   // ✅ SALON-SPECIFIC DATA (Option B)
   // ============================================
 
-  /// හැම salon එකකට වෙනම loyalty data
   List<Map<String, dynamic>> _salonLoyalties = [];
 
-  /// Global summary (හැම salon එකෙන්ම total)
   Map<String, dynamic> _globalSummary = {
     'total_current_points': 0,
     'total_lifetime_points': 0,
@@ -34,10 +36,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     'best_tier': 'Bronze',
   };
 
-  /// Selected salon for "My Tier" tab
   int? _selectedSalonId;
-
-  /// Selected salon filter for "History" tab (null = All)
   int? _historySalonFilter;
 
   List<Map<String, dynamic>> _transactions = [];
@@ -51,15 +50,54 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   bool _isTablet = false;
   bool _isWeb = false;
 
+  // ============================================
+  // ✅ SALON TIMEZONE / CURRENCY
+  // ============================================
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  String _salonTimezone = _kDefaultSalonTimezone;
+  String _userTimezone = '';
+  String _salonCurrencyCode = 'LKR';
+
+  bool _isTimezoneLoaded = false;
+
+  // ============================================
+  // ✅ CURRENCY HELPERS
+  // ============================================
+
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
+
+  bool get _isDifferentTimezone {
+    if (_salonTimezone.isEmpty || _userTimezone.isEmpty) return false;
+    return _salonTimezone != _userTimezone;
+  }
+
+  // ============================================
+  // INIT
+  // ============================================
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(_onTabChanged);
-    _loadLoyaltyData();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkScreenSize();
-    });
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await TimezoneService.initialize();
+
+    final prefs = await SharedPreferences.getInstance();
+    _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
+        TimezoneService.getCurrentTimezone();
+    if (_userTimezone.isEmpty) {
+      _userTimezone = _kDefaultSalonTimezone;
+    }
+
+    if (!mounted) return;
+    setState(() => _isTimezoneLoaded = true);
+
+    await _loadLoyaltyData();
   }
 
   @override
@@ -69,11 +107,13 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   }
 
   void _onTabChanged() {
-    if (mounted) setState(() {});
+    if (mounted && !_tabController.indexIsChanging) {
+      setState(() {});
+    }
   }
 
   void _checkScreenSize() {
-    final size = MediaQuery.of(context).size;
+    final size = MediaQuery.sizeOf(context);
     final isTablet = size.shortestSide >= 600;
     final isWeb = size.width > 800;
 
@@ -93,7 +133,64 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   }
 
   // ============================================
-  // ✅ SELECTED SALON LOYALTY (for "My Tier" tab)
+  // ✅ TIMEZONE HELPERS — Salon timezone
+  // ============================================
+
+
+  String _getSalonTimezoneDisplay() {
+    final tz =
+        _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+    return TimezoneService.getFullTimezoneDisplayFor(tz);
+  }
+
+  String _getUserTimezoneDisplay() {
+    if (_userTimezone.isEmpty) return '';
+    return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
+  }
+
+  /// ✅ Convert UTC timestamp to SALON local time
+  String _formatUtcToSalonTime(String? utcTime) {
+    if (utcTime == null || utcTime.isEmpty) return '';
+    try {
+      final dt = DateTime.parse(utcTime);
+      final tz =
+          _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+      final local = TimezoneService.utcToLocalDateTimeForDateWithTimezone(
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:00',
+        dt,
+        tz,
+      );
+      return DateFormat('MMM dd, yyyy • HH:mm').format(local);
+    } catch (e) {
+      debugPrint('❌ Error converting to salon time: $e');
+      try {
+        return DateFormat('MMM dd, yyyy • HH:mm')
+            .format(DateTime.parse(utcTime).toLocal());
+      } catch (_) {
+        return utcTime;
+      }
+    }
+  }
+
+  /// ✅ Convert UTC timestamp to USER local time (reference only)
+  String _formatUtcToUserTime(String? utcTime) {
+    if (utcTime == null || utcTime.isEmpty) return '';
+    if (!_isDifferentTimezone) return '';
+    try {
+      final dt = DateTime.parse(utcTime);
+      final local = TimezoneService.utcToLocalDateTimeForDateWithTimezone(
+        '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}:00',
+        dt,
+        _userTimezone,
+      );
+      return DateFormat('MMM dd, yyyy • HH:mm').format(local);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  // ============================================
+  // ✅ SELECTED SALON LOYALTY
   // ============================================
 
   Map<String, dynamic>? get _selectedSalonLoyalty {
@@ -111,8 +208,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
 
   int get _lifetimePoints =>
       (_selectedSalonLoyalty?['lifetime_points'] as num?)?.toInt() ?? 0;
-  String get _tier =>
-      _selectedSalonLoyalty?['tier']?.toString() ?? 'Bronze';
+  String get _tier => _selectedSalonLoyalty?['tier']?.toString() ?? 'Bronze';
   String get _selectedSalonName =>
       _selectedSalonLoyalty?['salon_name']?.toString() ?? 'Select a salon';
 
@@ -180,36 +276,96 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     switch (tier) {
       case 'Platinum':
         return [
-          {'icon': Icons.flash_on, 'text': 'Instant priority booking', 'color': AppTheme.platinum},
-          {'icon': Icons.percent, 'text': '20% off all services', 'color': AppTheme.success},
-          {'icon': Icons.card_giftcard, 'text': 'Free monthly premium service', 'color': AppTheme.warning},
-          {'icon': Icons.people, 'text': 'Exclusive VIP customer support', 'color': Colors.blue},
-          {'icon': Icons.event, 'text': 'Early access to new services', 'color': Colors.purple},
+          {
+            'icon': Icons.flash_on,
+            'text': 'Instant priority booking',
+            'color': AppTheme.platinum
+          },
+          {
+            'icon': Icons.percent,
+            'text': '20% off all services',
+            'color': AppTheme.success
+          },
+          {
+            'icon': Icons.card_giftcard,
+            'text': 'Free monthly premium service',
+            'color': AppTheme.warning
+          },
+          {
+            'icon': Icons.people,
+            'text': 'Exclusive VIP customer support',
+            'color': Colors.blue
+          },
+          {
+            'icon': Icons.event,
+            'text': 'Early access to new services',
+            'color': Colors.purple
+          },
         ];
       case 'Gold':
         return [
-          {'icon': Icons.flash_on, 'text': 'Priority booking', 'color': AppTheme.gold},
-          {'icon': Icons.percent, 'text': '15% off all services', 'color': AppTheme.success},
-          {'icon': Icons.card_giftcard, 'text': 'Monthly bonus points', 'color': AppTheme.warning},
-          {'icon': Icons.people, 'text': 'Dedicated customer support', 'color': Colors.blue},
+          {
+            'icon': Icons.flash_on,
+            'text': 'Priority booking',
+            'color': AppTheme.gold
+          },
+          {
+            'icon': Icons.percent,
+            'text': '15% off all services',
+            'color': AppTheme.success
+          },
+          {
+            'icon': Icons.card_giftcard,
+            'text': 'Monthly bonus points',
+            'color': AppTheme.warning
+          },
+          {
+            'icon': Icons.people,
+            'text': 'Dedicated customer support',
+            'color': Colors.blue
+          },
         ];
       case 'Silver':
         return [
-          {'icon': Icons.flash_on, 'text': 'Faster booking queue', 'color': AppTheme.silver},
-          {'icon': Icons.percent, 'text': '10% off all services', 'color': AppTheme.success},
-          {'icon': Icons.card_giftcard, 'text': 'Bonus points on reviews', 'color': AppTheme.warning},
+          {
+            'icon': Icons.flash_on,
+            'text': 'Faster booking queue',
+            'color': AppTheme.silver
+          },
+          {
+            'icon': Icons.percent,
+            'text': '10% off all services',
+            'color': AppTheme.success
+          },
+          {
+            'icon': Icons.card_giftcard,
+            'text': 'Bonus points on reviews',
+            'color': AppTheme.warning
+          },
         ];
       case 'Bronze':
       default:
         return [
-          {'icon': Icons.stars, 'text': 'Earn points on every booking', 'color': AppTheme.bronze},
-          {'icon': Icons.card_giftcard, 'text': 'Redeem points for discounts', 'color': AppTheme.success},
-          {'icon': Icons.emoji_events, 'text': 'Unlock badges as you earn', 'color': AppTheme.warning},
+          {
+            'icon': Icons.stars,
+            'text': 'Earn points on every booking',
+            'color': AppTheme.bronze
+          },
+          {
+            'icon': Icons.card_giftcard,
+            'text': 'Redeem points for discounts',
+            'color': AppTheme.success
+          },
+          {
+            'icon': Icons.emoji_events,
+            'text': 'Unlock badges as you earn',
+            'color': AppTheme.warning
+          },
         ];
     }
   }
 
-  List<Map<String, dynamic>> get _allTiers => [
+  late final List<Map<String, dynamic>> _allTiers = [
     {
       'name': 'Bronze',
       'emoji': '🥉',
@@ -244,7 +400,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     },
   ];
 
-
   int get _nextTierMinPoints {
     switch (_tier) {
       case 'Bronze':
@@ -275,6 +430,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
 
   // ============================================
   // ✅ LOAD DATA (Salon-Specific via RPC)
+  // ✅ Fixed: Future.wait with explicit <dynamic>
   // ============================================
 
   Future<void> _loadLoyaltyData() async {
@@ -298,52 +454,64 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
         return;
       }
 
-      // 1. ✅ Global summary (හැම salon එකෙන්ම total)
-      final globalSummary = await supabase.rpc(
+      // ✅ Individual Futures with explicit types (fixes inference error)
+      final Future<dynamic> globalSummaryFuture = supabase.rpc(
         'get_global_loyalty_summary',
         params: {'p_customer_id': user.id},
       );
 
-      // 2. ✅ All salon-specific loyalty rows
-      final salonLoyaltiesResult = await supabase.rpc(
+      final Future<dynamic> salonLoyaltiesFuture = supabase.rpc(
         'get_all_customer_loyalty',
         params: {'p_customer_id': user.id},
       );
 
-      // 3. ✅ All transactions (with salon info)
-      final transactions = await supabase.rpc(
+      final Future<dynamic> transactionsFuture = supabase.rpc(
         'get_all_loyalty_transactions',
-        params: {
-          'p_customer_id': user.id,
-          'p_limit': 100,
-        },
+        params: {'p_customer_id': user.id, 'p_limit': 100},
       );
 
-      // 4. Badges (platform-wide + salon-specific)
-      final allBadges = await supabase
+      final Future<List<Map<String, dynamic>>> badgesFuture = supabase
           .from('badges')
           .select()
           .eq('is_active', true)
           .order('points_required', ascending: true);
 
-      // 5. Earned badges
-      final earnedBadges = await supabase
+      final Future<List<Map<String, dynamic>>> earnedBadgesFuture = supabase
           .from('customer_badges')
           .select('badge_id, earned_at, salon_id')
           .eq('customer_id', user.id);
 
+      // ✅ Explicit <dynamic> fixes "Couldn't infer type parameter 'E'"
+      final results = await Future.wait<dynamic>([
+        globalSummaryFuture,
+        salonLoyaltiesFuture,
+        transactionsFuture,
+        badgesFuture,
+        earnedBadgesFuture,
+      ]);
+
       if (!mounted) return;
+
+      final globalSummary = results[0];
+      final salonLoyaltiesResult = results[1];
+      final transactions = results[2];
+      final allBadges = results[3] as List;
+      final earnedBadges = results[4] as List;
 
       final salonLoyalties = List<Map<String, dynamic>>.from(
         salonLoyaltiesResult is List ? salonLoyaltiesResult : [],
       );
 
-      // Auto-select first salon
-      if (_selectedSalonId == null && salonLoyalties.isNotEmpty) {
-        _selectedSalonId = salonLoyalties.first['salon_id'] as int?;
+      // ✅ Load salon timezone + currency from first salon
+      if (salonLoyalties.isNotEmpty) {
+        await _loadSalonInfo(salonLoyalties.first['salon_id'] as int?);
       }
 
       setState(() {
+        if (_selectedSalonId == null && salonLoyalties.isNotEmpty) {
+          _selectedSalonId = salonLoyalties.first['salon_id'] as int?;
+        }
+
         _globalSummary = globalSummary is Map
             ? Map<String, dynamic>.from(globalSummary)
             : {
@@ -369,6 +537,32 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
           _isLoading = false;
         });
       }
+    }
+  }
+
+  /// ✅ Load salon timezone + currency
+  Future<void> _loadSalonInfo(int? salonId) async {
+    if (salonId == null) return;
+
+    try {
+      final response = await supabase
+          .from('salons')
+          .select('timezone, currency_code')
+          .eq('id', salonId)
+          .maybeSingle();
+
+      if (response != null && mounted) {
+        final tz = response['timezone'] as String?;
+        if (tz != null && tz.isNotEmpty) {
+          _salonTimezone = tz;
+        }
+        final curr = response['currency_code'] as String?;
+        if (curr != null && curr.isNotEmpty) {
+          _salonCurrencyCode = curr;
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading salon info: $e');
     }
   }
 
@@ -458,7 +652,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   }
 
   // ============================================
-  // FILTERED TRANSACTIONS (History tab)
+  // FILTERED TRANSACTIONS
   // ============================================
 
   List<Map<String, dynamic>> get _filteredTransactions {
@@ -524,7 +718,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
             constraints: BoxConstraints(
               maxWidth: _isWeb ? 1000 : double.infinity,
             ),
-            child: _isLoading
+            child: !_isTimezoneLoaded || _isLoading
                 ? _buildLoadingState()
                 : _hasError
                     ? _buildErrorState()
@@ -661,7 +855,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   }
 
   // ============================================
-  // TAB 1: OVERVIEW (Global + Per-Salon)
+  // TAB 1: OVERVIEW
   // ============================================
 
   Widget _buildOverviewTab() {
@@ -674,6 +868,8 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _buildTimezoneInfoCard(),
+            const SizedBox(height: 16),
             _buildGlobalSummaryCard(),
             const SizedBox(height: 20),
             _buildSalonLoyaltySection(),
@@ -685,7 +881,99 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // ✅ Global Summary Card (හැම salon එකෙන්ම total)
+  // ✅ Timezone info card (salon main + user reference)
+  Widget _buildTimezoneInfoCard() {
+    final isDark = context.isDarkMode;
+    final showUserTz = _isDifferentTimezone;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[100],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.store,
+                size: 16,
+                color: isDark ? Colors.white60 : Colors.grey,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '⏰ Salon times: ${_getSalonTimezoneDisplay()}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white70 : Colors.grey[700],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (showUserTz) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.person,
+                    size: 14,
+                    color: Colors.orange[700],
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'You are in: ${_getUserTimezoneDisplay()}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange[700],
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Transaction times shown are for salon location',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontStyle: FontStyle.italic,
+                            color: isDark
+                                ? Colors.white60
+                                : Colors.grey[600],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ✅ Global Summary Card
   Widget _buildGlobalSummaryCard() {
     final isDark = context.isDarkMode;
     final textColor = context.textColor;
@@ -697,8 +985,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     final totalLifetime =
         (_globalSummary['total_lifetime_points'] as num?)?.toInt() ?? 0;
     final salonCount = (_globalSummary['salon_count'] as num?)?.toInt() ?? 0;
-    final bestTier =
-        _globalSummary['best_tier']?.toString() ?? 'Bronze';
+    final bestTier = _globalSummary['best_tier']?.toString() ?? 'Bronze';
 
     return Container(
       width: double.infinity,
@@ -764,8 +1051,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
             ],
           ),
           const SizedBox(height: 20),
-
-          // Total points
           Row(
             children: [
               Expanded(
@@ -867,7 +1152,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
               height: 20,
               decoration: BoxDecoration(
                 color: context.primaryColor,
-                borderRadius: BorderRadius.horizontal(
+                borderRadius: const BorderRadius.horizontal(
                   right: Radius.circular(4),
                 ),
               ),
@@ -896,7 +1181,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
           style: context.bodySmall.copyWith(color: secondaryTextColor),
         ),
         const SizedBox(height: 12),
-
         ..._salonLoyalties.map((loyalty) => _buildSalonLoyaltyCard(loyalty)),
       ],
     );
@@ -910,14 +1194,11 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     final salonId = loyalty['salon_id'] as int?;
     final salonName = loyalty['salon_name']?.toString() ?? 'Salon';
     final salonLogo = loyalty['salon_logo']?.toString();
-    final currentPoints =
-        (loyalty['current_points'] as num?)?.toInt() ?? 0;
-    final lifetimePoints =
-        (loyalty['lifetime_points'] as num?)?.toInt() ?? 0;
+    final currentPoints = (loyalty['current_points'] as num?)?.toInt() ?? 0;
+    final lifetimePoints = (loyalty['lifetime_points'] as num?)?.toInt() ?? 0;
     final tier = loyalty['tier']?.toString() ?? 'Bronze';
     final tierColor = _tierColor(tier);
 
-    // Calculate progress to next tier
     final nextTierPoints = tier == 'Bronze'
         ? 200
         : tier == 'Silver'
@@ -950,7 +1231,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
       ),
       child: InkWell(
         onTap: () {
-          // Switch to My Tier tab with this salon selected
           setState(() => _selectedSalonId = salonId);
           _tabController.animateTo(1);
         },
@@ -960,10 +1240,8 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Salon header
               Row(
                 children: [
-                  // Salon logo / initial
                   Container(
                     width: 44,
                     height: 44,
@@ -1026,7 +1304,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                       ],
                     ),
                   ),
-                  // Points badge
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -1058,10 +1335,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                   ),
                 ],
               ),
-
               const SizedBox(height: 12),
-
-              // Progress bar
               if (tier != 'Platinum') ...[
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
@@ -1070,8 +1344,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                     minHeight: 6,
                     backgroundColor:
                         isDark ? Colors.grey[800] : Colors.grey[200],
-                    valueColor:
-                        AlwaysStoppedAnimation<Color>(tierColor),
+                    valueColor: AlwaysStoppedAnimation<Color>(tierColor),
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -1126,8 +1399,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                   ),
                 ),
               ],
-
-              // Arrow to view tier details
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
@@ -1155,7 +1426,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // Earning guide
+  // ✅ Earning guide — with currency from salon
   Widget _buildEarningGuide() {
     final isDark = context.isDarkMode;
     final cardColor = context.cardColor;
@@ -1198,7 +1469,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
           _buildEarningRow(
             Icons.event_available,
             'Complete a booking',
-            'Earn 1 point per Rs. 10 spent',
+            'Earn 1 point per $_salonCurrencySymbol 10 spent',
             AppTheme.success,
           ),
           const SizedBox(height: 12),
@@ -1305,7 +1576,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // ✅ Salon Selector Dropdown
   Widget _buildSalonSelector() {
     final isDark = context.isDarkMode;
     final cardColor = context.cardColor;
@@ -1383,7 +1653,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // Current Tier Explanation (uses _selectedSalonLoyalty)
   Widget _buildCurrentTierExplanation() {
     final isDark = context.isDarkMode;
     final textColor = context.textColor;
@@ -1471,7 +1740,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // Your Benefits
   Widget _buildYourBenefits() {
     final isDark = context.isDarkMode;
     final cardColor = context.cardColor;
@@ -1555,7 +1823,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // Tiers Progress Tracker
   Widget _buildTiersProgressTracker() {
     final isDark = context.isDarkMode;
     final cardColor = context.cardColor;
@@ -1602,8 +1869,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
             final index = entry.key;
             final tier = entry.value;
             final isCurrent = tier['name'] == _tier;
-            final isUnlocked =
-                _lifetimePoints >= (tier['minPoints'] as int);
+            final isUnlocked = _lifetimePoints >= (tier['minPoints'] as int);
             final tierColor = tier['color'] as Color;
 
             return Column(
@@ -1734,7 +2000,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // How to Level Up
   Widget _buildHowToLevelUp() {
     final isDark = context.isDarkMode;
     final cardColor = context.cardColor;
@@ -1824,7 +2089,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
           _buildHowToRow(
             Icons.event_available,
             'Book Appointments',
-            'Earn 1 point for every Rs. 10 spent',
+            'Earn 1 point for every $_salonCurrencySymbol 10 spent',
             AppTheme.success,
           ),
           const SizedBox(height: 12),
@@ -1896,7 +2161,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   }
 
   // ============================================
-  // TAB 3: HISTORY (Salon Filter)
+  // TAB 3: HISTORY
   // ============================================
 
   Widget _buildHistoryTab() {
@@ -1972,7 +2237,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // ✅ History Salon Filter
   Widget _buildHistorySalonFilter() {
     final isDark = context.isDarkMode;
     final cardColor = context.cardColor;
@@ -2043,9 +2307,12 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     final points = (tx['points'] as num?)?.toInt() ?? 0;
     final description = tx['description']?.toString() ?? '';
     final salonName = tx['salon_name']?.toString();
-    final createdAt = tx['created_at'] != null
-        ? DateTime.tryParse(tx['created_at'].toString())
-        : null;
+    final createdAtRaw = tx['created_at']?.toString();
+
+    final salonTime =
+        createdAtRaw != null ? _formatUtcToSalonTime(createdAtRaw) : '';
+    final userTime =
+        createdAtRaw != null ? _formatUtcToUserTime(createdAtRaw) : '';
 
     final color = _txColor(type);
     final isPositive = points > 0;
@@ -2108,7 +2375,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                     ),
                   ],
                 ),
-                // ✅ Salon name badge
                 if (salonName != null && salonName.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Container(
@@ -2148,19 +2414,57 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                   const SizedBox(height: 4),
                   Text(
                     description,
-                    style: context.bodySmall.copyWith(color: secondaryTextColor),
+                    style:
+                        context.bodySmall.copyWith(color: secondaryTextColor),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ],
-                if (createdAt != null) ...[
+                if (salonTime.isNotEmpty) ...[
                   const SizedBox(height: 4),
-                  Text(
-                    DateFormat('MMM dd, yyyy • HH:mm').format(createdAt),
-                    style: context.bodySmall.copyWith(
-                      fontSize: 10,
-                      color: isDark ? Colors.white38 : Colors.grey[500],
-                    ),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.store_outlined,
+                        size: 10,
+                        color: isDark ? Colors.white54 : Colors.grey[600],
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        salonTime,
+                        style: context.bodySmall.copyWith(
+                          fontSize: 10,
+                          color: isDark ? Colors.white54 : Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                if (userTime.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.person_outline,
+                        size: 10,
+                        color:
+                            isDark ? Colors.blue[300] : Colors.blue[700],
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'Your time: $userTime',
+                          style: context.bodySmall.copyWith(
+                            fontSize: 10,
+                            fontStyle: FontStyle.italic,
+                            color: isDark
+                                ? Colors.blue[300]
+                                : Colors.blue[700],
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ],
@@ -2224,7 +2528,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Info Card
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -2254,7 +2557,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
               ),
             ),
             const SizedBox(height: 20),
-
             if (earned.isNotEmpty) ...[
               Row(
                 children: [
@@ -2276,7 +2578,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
               ...earned.map((b) => _buildBadgeCard(b, isEarned: true)),
               const SizedBox(height: 24),
             ],
-
             if (locked.isNotEmpty) ...[
               Row(
                 children: [
@@ -2315,7 +2616,8 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     final name = badge['name']?.toString() ?? 'Badge';
     final description = badge['description']?.toString() ?? '';
     final pointsRequired = (badge['points_required'] as num?)?.toInt() ?? 0;
-    final bookingsRequired = (badge['bookings_required'] as num?)?.toInt() ?? 0;
+    final bookingsRequired =
+        (badge['bookings_required'] as num?)?.toInt() ?? 0;
     final earnedAt = isEarned ? _getBadgeEarnedDate(badge['id']) : null;
 
     final cardColorValue = isEarned ? AppTheme.warning : Colors.grey;
@@ -2348,10 +2650,13 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
             width: 56,
             height: 56,
             decoration: BoxDecoration(
-              color: cardColorValue.withValues(alpha: isEarned ? 0.15 : 0.08),
+              color:
+                  cardColorValue.withValues(alpha: isEarned ? 0.15 : 0.08),
               shape: BoxShape.circle,
               border: Border.all(
-                color: cardColorValue.withValues(alpha: isEarned ? 0.5 : 0.2),
+                color: cardColorValue.withValues(
+                  alpha: isEarned ? 0.5 : 0.2,
+                ),
                 width: 2,
               ),
             ),
@@ -2386,7 +2691,8 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                           vertical: 2,
                         ),
                         decoration: BoxDecoration(
-                          color: AppTheme.warning.withValues(alpha: 0.15),
+                          color:
+                              AppTheme.warning.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: const Text(
@@ -2404,7 +2710,8 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                   const SizedBox(height: 4),
                   Text(
                     description,
-                    style: context.bodySmall.copyWith(color: secondaryTextColor),
+                    style:
+                        context.bodySmall.copyWith(color: secondaryTextColor),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),

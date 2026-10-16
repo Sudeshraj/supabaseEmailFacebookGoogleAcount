@@ -5,6 +5,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/services/timezone_service.dart';
+import 'package:flutter_application_1/services/currency_service.dart';
 
 class CustomerHistoryScreen extends StatefulWidget {
   const CustomerHistoryScreen({super.key});
@@ -16,6 +18,11 @@ class CustomerHistoryScreen extends StatefulWidget {
 class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     with SingleTickerProviderStateMixin {
   final supabase = Supabase.instance.client;
+  // ✅ Class-level private field — underscore OK
+  final CurrencyService _currencyService = CurrencyService.instance;
+
+  // ✅ Default salon timezone
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
 
   List<Map<String, dynamic>> _history = [];
   bool _isLoading = true;
@@ -36,8 +43,75 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   int _noShowCount = 0;
   int _totalSpent = 0;
 
+  // ✅ Salon timezone (for date/time conversions)
+  String _salonTimezone = _kDefaultSalonTimezone;
+
   // ✅ Web Scroll Controller
   final ScrollController _scrollController = ScrollController();
+
+  // ============================================================
+  // ✅ SALON "NOW" — consistent timezone reference
+  // ============================================================
+  DateTime get _salonNow {
+    final tz =
+        _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+    try {
+      return TimezoneService.getNowInTimezone(tz);
+    } catch (e) {
+      debugPrint('❌ Error getting salon now: $e');
+      return DateTime.now();
+    }
+  }
+
+  DateTime get _salonToday {
+    final now = _salonNow;
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  // ============================================================
+  // ✅ TIMEZONE HELPERS
+  // ============================================================
+
+  /// ✅ UTC → Salon local time (for display)
+  String _utcToSalonTime(
+    String utcTime, {
+    DateTime? appointmentDate,
+    String? overrideTimezone,
+  }) {
+    if (utcTime.isEmpty) return '--:--';
+    try {
+      final tz = (overrideTimezone != null && overrideTimezone.isNotEmpty)
+          ? overrideTimezone
+          : (_salonTimezone.isNotEmpty
+              ? _salonTimezone
+              : _kDefaultSalonTimezone);
+
+      if (appointmentDate != null) {
+        return TimezoneService.utcToLocalTimeForDateWithTimezone(
+          utcTime,
+          appointmentDate,
+          tz,
+        );
+      }
+      // Reference date fallback (avoids DST surprises)
+      return TimezoneService.utcToLocalTimeForDateWithTimezone(
+        utcTime,
+        DateTime(2024, 1, 1),
+        tz,
+      );
+    } catch (e) {
+      debugPrint('❌ Error converting UTC to salon time: $e');
+      return utcTime;
+    }
+  }
+
+  /// ✅ Currency format helper
+  String _formatPrice(dynamic price, String? currencyCode) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: currencyCode ?? 'LKR',
+    );
+  }
 
   @override
   void initState() {
@@ -58,7 +132,13 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     super.dispose();
   }
 
+  // ============================================================
+  // ✅ LOAD HISTORY
+  // ✅ mounted checks after every await
+  // ✅ salon timezone for date calculations
+  // ============================================================
   Future<void> _loadHistory() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -67,6 +147,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     try {
       final currentUser = supabase.auth.currentUser;
       if (currentUser == null) {
+        if (!mounted) return;
         setState(() {
           _errorMessage = 'Please login to view your history';
           _isLoading = false;
@@ -81,6 +162,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           .eq('name', 'customer')
           .single();
 
+      if (!mounted) return;
+
       final customerRoleId = roleResponse['id'];
 
       // ✅ Check if user has active customer role
@@ -91,6 +174,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           .eq('role_id', customerRoleId)
           .maybeSingle();
 
+      if (!mounted) return;
+
       if (roleCheck == null || roleCheck['status'] != 'active') {
         setState(() {
           _errorMessage = 'Your account is not active. Please contact support.';
@@ -99,31 +184,27 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
         return;
       }
 
-      // Build date filter
+      // ✅ Build date filter using SALON timezone
       String? startDate;
-      final now = DateTime.now();
+      final salonNow = _salonNow;
 
       switch (_selectedPeriod) {
         case 'This Month':
-          startDate = DateFormat(
-            'yyyy-MM-dd',
-          ).format(DateTime(now.year, now.month, 1));
+          startDate = DateFormat('yyyy-MM-dd')
+              .format(DateTime(salonNow.year, salonNow.month, 1));
           break;
         case 'Last 3 Months':
-          startDate = DateFormat(
-            'yyyy-MM-dd',
-          ).format(now.subtract(const Duration(days: 90)));
+          startDate = DateFormat('yyyy-MM-dd')
+              .format(salonNow.subtract(const Duration(days: 90)));
           break;
         case 'This Year':
-          startDate = DateFormat('yyyy-MM-dd').format(DateTime(now.year, 1, 1));
+          startDate =
+              DateFormat('yyyy-MM-dd').format(DateTime(salonNow.year, 1, 1));
           break;
         default:
           startDate = null;
       }
 
-      // ✅ FIX: appointments no longer has service_id / variant_id.
-      //    All per-service data lives in appointment_services. Read
-      //    appointments.price directly (server-synced total).
       var query = supabase
           .from('appointments')
           .select('''
@@ -147,7 +228,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               id,
               name,
               logo_url,
-              currency_code
+              currency_code,
+              timezone
             ),
             profiles!appointments_barber_id_fkey (
               full_name
@@ -173,6 +255,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
 
       final response = await query.order('appointment_date', ascending: false);
 
+      if (!mounted) return;
+
       final List<Map<String, dynamic>> historyList = [];
 
       int totalBookings = 0;
@@ -186,17 +270,25 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
         final barber = item['profiles'] as Map?;
 
         final status = item['status'] as String? ?? 'pending';
-        final date = item['appointment_date'] as String;
+        final dateStr = item['appointment_date'] as String;
 
-        // ✅ Read price from appointments.price (server-synced), fall back
-        // to summing appointment_services.final_price if null.
+        // ✅ Use salon-specific timezone if available
+        final salonTz = salon?['timezone']?.toString();
+        final effectiveTz = (salonTz != null && salonTz.isNotEmpty)
+            ? salonTz
+            : _salonTimezone;
+        if (effectiveTz.isNotEmpty && effectiveTz != _salonTimezone) {
+          // Update field for future conversions
+          _salonTimezone = effectiveTz;
+        }
+
+        // ✅ Read price from appointments.price (server-synced)
         double price = (item['price'] as num?)?.toDouble() ?? 0.0;
         final servicesList = (item['appointment_services'] as List?) ?? [];
         if (price <= 0 && servicesList.isNotEmpty) {
           price = servicesList.fold<double>(
             0.0,
-            (acc, s) =>
-                acc + ((s['final_price'] as num?)?.toDouble() ?? 0.0),
+            (acc, s) => acc + ((s['final_price'] as num?)?.toDouble() ?? 0.0),
           );
         }
 
@@ -216,6 +308,30 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           );
         }
 
+        // ✅ Parse date for TZ conversion
+        DateTime? aptDate;
+        try {
+          aptDate = DateTime.parse(dateStr);
+        } catch (_) {}
+
+        // ✅ Convert UTC → Salon local (use effectiveTz)
+        final localStart = _utcToSalonTime(
+          item['start_time'] as String? ?? '',
+          appointmentDate: aptDate,
+          overrideTimezone: effectiveTz,
+        );
+        final localEnd = _utcToSalonTime(
+          item['end_time'] as String? ?? '',
+          appointmentDate: aptDate,
+          overrideTimezone: effectiveTz,
+        );
+
+        // ✅ Currency code from salon
+        final currencyCode = salon?['currency_code']?.toString() ?? 'LKR';
+
+        // ✅ is_past based on SALON today
+        final isPast = aptDate != null && aptDate.isBefore(_salonToday);
+
         historyList.add({
           'id': item['id'],
           'booking_number': item['booking_number'],
@@ -223,11 +339,12 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           'services': servicesList,
           'salon_name': salon?['name']?.toString() ?? 'Unknown Salon',
           'salon_logo': salon?['logo_url']?.toString(),
-          'currency_code': salon?['currency_code']?.toString() ?? 'LKR',
+          'currency_code': currencyCode,
+          'salon_timezone': effectiveTz,
           'barber_name': barber?['full_name']?.toString() ?? 'Unknown Barber',
-          'appointment_date': date,
-          'start_time': item['start_time'],
-          'end_time': item['end_time'],
+          'appointment_date': dateStr,
+          'start_time': localStart,
+          'end_time': localEnd,
           'status': status,
           'price': price,
           'original_price': item['original_price'],
@@ -238,8 +355,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           'cancel_reason': item['cancel_reason'],
           'created_at': item['created_at'],
           'updated_at': item['updated_at'],
-          'display_date': _formatDisplayDate(date),
-          'is_past': DateTime.parse(date).isBefore(DateTime.now()),
+          'display_date': _formatDisplayDate(dateStr),
+          'is_past': isPast,
         });
 
         totalBookings++;
@@ -258,6 +375,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _history = historyList;
         _totalBookings = totalBookings;
@@ -271,6 +389,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
       debugPrint('✅ Loaded ${historyList.length} history records');
     } catch (e) {
       debugPrint('❌ Error loading history: $e');
+      if (!mounted) return;
       setState(() {
         _errorMessage = 'Error loading history: ${e.toString()}';
         _isLoading = false;
@@ -279,20 +398,20 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // FORMAT DATE
+  // ✅ FORMAT DISPLAY DATE — uses SALON today
   // ============================================================
   String _formatDisplayDate(String dateStr) {
     try {
       final date = DateTime.parse(dateStr);
-      final now = DateTime.now();
+      final salonToday = _salonToday; // ✅ Salon TZ
 
-      if (date.year == now.year &&
-          date.month == now.month &&
-          date.day == now.day) {
+      if (date.year == salonToday.year &&
+          date.month == salonToday.month &&
+          date.day == salonToday.day) {
         return 'Today';
       }
 
-      final yesterday = now.subtract(const Duration(days: 1));
+      final yesterday = salonToday.subtract(const Duration(days: 1));
       if (date.year == yesterday.year &&
           date.month == yesterday.month &&
           date.day == yesterday.day) {
@@ -361,13 +480,13 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isWeb = screenWidth > 800;
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
-        title: Text(
+        title: const Text(
           'My History',
           style: TextStyle(
             fontSize: 18,
@@ -411,41 +530,41 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               ),
             )
           : _errorMessage != null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.error_outline,
-                    size: 64,
-                    color: isDark ? Colors.white70 : Colors.grey[400],
-                  ),
-                  const SizedBox(height: 16),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(
-                      _errorMessage!,
-                      style: TextStyle(
-                        color: isDark ? Colors.white60 : Colors.grey[600],
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        size: 64,
+                        color: isDark ? Colors.white70 : Colors.grey[400],
                       ),
-                      textAlign: TextAlign.center,
-                    ),
+                      const SizedBox(height: 16),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          _errorMessage!,
+                          style: TextStyle(
+                            color: isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton(
+                        onPressed: _loadHistory,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Retry'),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _loadHistory,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppTheme.primary,
-                      foregroundColor: Colors.white,
-                    ),
-                    child: const Text('Retry'),
-                  ),
-                ],
-              ),
-            )
-          : isWeb
-          ? _buildWebLayout()
-          : _buildMobileLayout(),
+                )
+              : isWeb
+                  ? _buildWebLayout()
+                  : _buildMobileLayout(),
     );
   }
 
@@ -615,8 +734,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                               color: isSelected
                                   ? Colors.white
                                   : (isDark
-                                        ? Colors.white70
-                                        : Colors.grey[700]),
+                                      ? Colors.white70
+                                      : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -669,8 +788,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                               color: isSelected
                                   ? Colors.white
                                   : (isDark
-                                        ? Colors.white70
-                                        : Colors.grey[700]),
+                                      ? Colors.white70
+                                      : Colors.grey[700]),
                             ),
                           ),
                           selected: isSelected,
@@ -702,7 +821,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // BUILD HISTORY CARD
+  // ✅ BUILD HISTORY CARD — uses salon currency
   // ============================================================
   Widget _buildHistoryCard(Map<String, dynamic> booking) {
     final isDark = context.isDarkMode;
@@ -741,6 +860,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     final price = booking['price'] as double? ?? 0;
     final duration = booking['duration'] as int? ?? 30;
     final bookingNumber = booking['booking_number']?.toString() ?? '';
+    final currencyCode = booking['currency_code']?.toString() ?? 'LKR';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -820,7 +940,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                               salonName.isNotEmpty
                                   ? salonName[0].toUpperCase()
                                   : 'S',
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.bold,
                                 color: AppTheme.primary,
@@ -905,8 +1025,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          'Rs. ${price.toStringAsFixed(0)}',
-                          style: TextStyle(
+                          _formatPrice(price, currencyCode), // ✅ Salon currency
+                          style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                             color: Colors.green,
@@ -932,7 +1052,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                         const SizedBox(width: 4),
                         Text(
                           '$duration min',
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                             color: Colors.blue,
@@ -960,10 +1080,15 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // BUILD STATS TAB
+  // ✅ BUILD STATS TAB — uses salon currency
   // ============================================================
   Widget _buildStatsTab() {
     final isDark = context.isDarkMode;
+
+    // ✅ Determine display currency code (first history item's salon)
+    final displayCurrencyCode = _history.isNotEmpty
+        ? (_history.first['currency_code']?.toString() ?? 'LKR')
+        : 'LKR';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -983,7 +1108,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               Expanded(
                 child: _buildStatCard(
                   title: 'Total Spent',
-                  value: 'Rs. $_totalSpent',
+                  value: _formatPrice(_totalSpent, displayCurrencyCode), // ✅
                   icon: Icons.attach_money,
                   color: Colors.green,
                 ),
@@ -1185,12 +1310,15 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           children: [
             Icon(icon, color: color, size: 28),
             const SizedBox(height: 8),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: color,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
               ),
             ),
             const SizedBox(height: 4),
@@ -1283,6 +1411,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               fontSize: 16,
               color: isDark ? Colors.white60 : Colors.grey[600],
             ),
+            textAlign: TextAlign.center,
           ),
           const SizedBox(height: 8),
           Text(
@@ -1299,7 +1428,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                   _searchQuery = '';
                 });
               },
-              child: Text(
+              child: const Text(
                 'Clear Search',
                 style: TextStyle(color: AppTheme.primary),
               ),
@@ -1311,7 +1440,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
 }
 
 // ============================================================
-// BOOKING DETAILS SHEET
+// BOOKING DETAILS SHEET — uses salon currency
+// ✅ FIXED: no leading underscore for local variable
 // ============================================================
 class _BookingDetailsSheet extends StatelessWidget {
   final Map<String, dynamic> booking;
@@ -1321,6 +1451,10 @@ class _BookingDetailsSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
+
+    // ✅ FIXED: no leading underscore for local variable
+    final currencyService = CurrencyService.instance;
+
     final serviceName = booking['service_name']?.toString() ?? 'Unknown';
     final salonName = booking['salon_name']?.toString() ?? 'Unknown';
     final barberName = booking['barber_name']?.toString() ?? 'Unknown';
@@ -1337,6 +1471,15 @@ class _BookingDetailsSheet extends StatelessWidget {
     final discountAmount =
         (booking['discount_amount'] as num?)?.toDouble() ?? 0;
     final services = (booking['services'] as List?) ?? [];
+    final currencyCode = booking['currency_code']?.toString() ?? 'LKR';
+
+    // ✅ Currency format helper (uses local currencyService)
+    String formatPrice(dynamic value) {
+      return currencyService.format(
+        price: value,
+        currencyCode: currencyCode,
+      );
+    }
 
     Color statusColor;
     String statusLabel;
@@ -1407,7 +1550,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                               salonName.isNotEmpty
                                   ? salonName[0].toUpperCase()
                                   : 'S',
-                              style: TextStyle(
+                              style: const TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
                                 color: AppTheme.primary,
@@ -1603,7 +1746,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                                 children: [
                                   if (sDiscount > 0)
                                     Text(
-                                      'Rs. ${sOriginal.toStringAsFixed(0)}',
+                                      formatPrice(sOriginal),
                                       style: TextStyle(
                                         fontSize: 10,
                                         decoration:
@@ -1614,15 +1757,17 @@ class _BookingDetailsSheet extends StatelessWidget {
                                       ),
                                     ),
                                   Text(
-                                    'Rs. ${(sDiscount > 0 ? sFinal : sOriginal).toStringAsFixed(0)}',
+                                    formatPrice(
+                                      sDiscount > 0 ? sFinal : sOriginal,
+                                    ),
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
                                       color: sDiscount > 0
                                           ? Colors.green
                                           : (isDark
-                                                ? Colors.white70
-                                                : Colors.black87),
+                                              ? Colors.white70
+                                              : Colors.black87),
                                     ),
                                   ),
                                 ],
@@ -1638,7 +1783,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                         context,
                         icon: Icons.local_offer,
                         label: 'Discount',
-                        value: '- Rs. ${discountAmount.toStringAsFixed(0)}',
+                        value: '- ${formatPrice(discountAmount)}',
                         valueColor: Colors.green,
                       ),
 
@@ -1648,7 +1793,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                         icon: Icons.add_circle,
                         label: 'Extra Charge',
                         value:
-                            '+ Rs. ${extraCharge.toStringAsFixed(0)}${extraNote != null && extraNote.isNotEmpty ? ' ($extraNote)' : ''}',
+                            '+ ${formatPrice(extraCharge)}${extraNote != null && extraNote.isNotEmpty ? ' ($extraNote)' : ''}',
                         valueColor: Colors.orange,
                       ),
 
@@ -1656,7 +1801,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                       context,
                       icon: Icons.attach_money,
                       label: 'Total Price',
-                      value: 'Rs. ${price.toStringAsFixed(0)}',
+                      value: formatPrice(price),
                       valueColor: Colors.green,
                     ),
 

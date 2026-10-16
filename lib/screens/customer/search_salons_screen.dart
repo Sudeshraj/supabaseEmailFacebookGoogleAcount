@@ -1,5 +1,4 @@
 // screens/customer/search_salons_screen.dart
-// Search salons screen with suggestions, search results, and navigation
 
 import 'dart:async';
 
@@ -7,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 
@@ -19,6 +19,10 @@ class SearchSalonsScreen extends StatefulWidget {
 
 class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   final supabase = Supabase.instance.client;
+
+  // ✅ SharedPreferences key for recent searches
+  static const String _kRecentSearchesKey = 'recent_salon_searches';
+  static const int _kMaxRecentSearches = 10;
 
   // Search state
   String _searchQuery = '';
@@ -43,11 +47,19 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   // Debounce timer
   Timer? _debounceTimer;
 
+  // ✅ Race condition protection — latest request ID
+  int _searchRequestId = 0;
+  int _suggestionRequestId = 0;
+
   @override
   void initState() {
     super.initState();
-    _loadRecentSearches();
-    _loadRecentSalons();
+    _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _loadRecentSearches();
+    await _loadRecentSalons();
   }
 
   @override
@@ -60,45 +72,69 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   }
 
   // ============================================================
-  // LOAD RECENT SEARCHES
+  // ✅ LOAD RECENT SEARCHES (from SharedPreferences)
   // ============================================================
   Future<void> _loadRecentSearches() async {
-    setState(() {
-      _recentSearches = _recentSearches;
-    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getStringList(_kRecentSearchesKey) ?? [];
+
+      if (!mounted) return;
+      setState(() {
+        _recentSearches = saved;
+      });
+
+      debugPrint('✅ Loaded ${saved.length} recent searches');
+    } catch (e) {
+      debugPrint('❌ Error loading recent searches: $e');
+    }
   }
 
   // ============================================================
-  // LOAD RECENT SALONS (For suggestions)
+  // ✅ SAVE RECENT SEARCHES (to SharedPreferences)
+  // ============================================================
+  Future<void> _saveRecentSearches() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_kRecentSearchesKey, _recentSearches);
+    } catch (e) {
+      debugPrint('❌ Error saving recent searches: $e');
+    }
+  }
+
+  // ============================================================
+  // ✅ LOAD RECENT SALONS (For suggestions)
   // ============================================================
   Future<void> _loadRecentSalons() async {
     try {
       final response = await supabase
           .from('salons')
-          .select('id, name, logo_url, address, currency_code, currency_symbol')
+          .select('id, name, logo_url, address')
           .eq('is_active', true)
           .order('created_at', ascending: false)
           .limit(10);
 
+      if (!mounted) return;
       setState(() {
         _recentSalons = List<Map<String, dynamic>>.from(response);
         _suggestions = List<Map<String, dynamic>>.from(response);
       });
     } catch (e) {
-      debugPrint('Error loading recent salons: $e');
+      debugPrint('❌ Error loading recent salons: $e');
     }
   }
 
   // ============================================================
-  // SEARCH SALONS
-  // ✅ FIX: N+1 query problem — instead of a separate count query per
-  //    salon (which meant 20 salons = 20 extra queries), fetch every
-  //    salon at once and count followers in ONE additional aggregate
-  //    query. Salon_followers is a small lookup table so this is much
-  //    faster than looping.
+  // ✅ SEARCH SALONS
+  //  - Race condition protection via request ID
+  //  - Mounted checks after every await
+  //  - Single query for follower counts (no N+1)
   // ============================================================
-  Future<void> _searchSalons(String query) async {
-    if (query.isEmpty) {
+  Future<void> _searchSalons(String query, {bool addToRecent = false}) async {
+    final trimmedQuery = query.trim();
+
+    if (trimmedQuery.isEmpty) {
+      if (!mounted) return;
       setState(() {
         _searchResults = [];
         _isSearching = false;
@@ -107,6 +143,10 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
       return;
     }
 
+    // ✅ Increment request ID
+    final requestId = ++_searchRequestId;
+
+    if (!mounted) return;
     setState(() {
       _isSearching = true;
       _isLoading = true;
@@ -126,15 +166,20 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
             phone,
             email,
             description,
-            is_active,
             currency_code,
             currency_symbol,
             created_at
           ''')
           .eq('is_active', true)
-          .ilike('name', '%$query%')
+          .ilike('name', '%$trimmedQuery%')
           .order('name')
           .limit(20);
+
+      // ✅ Check if this is still the latest request
+      if (!mounted || requestId != _searchRequestId) {
+        debugPrint('⚠️ Stale search response ignored');
+        return;
+      }
 
       final results = List<Map<String, dynamic>>.from(response);
 
@@ -147,6 +192,9 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
             .select('salon_id')
             .inFilter('salon_id', salonIds);
 
+        // ✅ Check if still latest
+        if (!mounted || requestId != _searchRequestId) return;
+
         // Build a count map
         final Map<int, int> followerCounts = {};
         for (final row in followerRows) {
@@ -157,9 +205,12 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
 
         for (var salon in results) {
           final sid = salon['id'] as int?;
-          salon['follower_count'] = sid != null ? (followerCounts[sid] ?? 0) : 0;
+          salon['follower_count'] =
+              sid != null ? (followerCounts[sid] ?? 0) : 0;
         }
       }
+
+      if (!mounted || requestId != _searchRequestId) return;
 
       setState(() {
         _searchResults = results;
@@ -167,11 +218,15 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
         _isSearching = false;
       });
 
-      if (results.isNotEmpty) {
-        _addRecentSearch(query);
+      // ✅ Only add to recent when explicitly requested
+      if (addToRecent && results.isNotEmpty) {
+        await _addRecentSearch(trimmedQuery);
       }
     } catch (e) {
-      debugPrint('Error searching salons: $e');
+      debugPrint('❌ Error searching salons: $e');
+
+      if (!mounted || requestId != _searchRequestId) return;
+
       setState(() {
         _isLoading = false;
         _isSearching = false;
@@ -180,102 +235,164 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   }
 
   // ============================================================
-  // ADD RECENT SEARCH
+  // ✅ ADD RECENT SEARCH (persisted to SharedPreferences)
   // ============================================================
-  void _addRecentSearch(String query) {
+  Future<void> _addRecentSearch(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return;
+
+    if (!mounted) return;
     setState(() {
-      _recentSearches.remove(query);
-      _recentSearches.insert(0, query);
-      if (_recentSearches.length > 10) {
-        _recentSearches = _recentSearches.sublist(0, 10);
+      _recentSearches.remove(trimmed);
+      _recentSearches.insert(0, trimmed);
+      if (_recentSearches.length > _kMaxRecentSearches) {
+        _recentSearches =
+            _recentSearches.sublist(0, _kMaxRecentSearches);
       }
     });
+
+    await _saveRecentSearches();
   }
 
   // ============================================================
-  // CLEAR RECENT SEARCHES
+  // ✅ CLEAR RECENT SEARCHES
   // ============================================================
-  void _clearRecentSearches() {
+  Future<void> _clearRecentSearches() async {
+    if (!mounted) return;
     setState(() {
       _recentSearches.clear();
     });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kRecentSearchesKey);
+    } catch (e) {
+      debugPrint('❌ Error clearing recent searches: $e');
+    }
   }
 
   // ============================================================
-  // GET SUGGESTIONS
+  // ✅ GET SUGGESTIONS (race-safe)
   // ============================================================
   Future<void> _getSuggestions(String query) async {
-    if (query.isEmpty) {
+    final trimmedQuery = query.trim();
+
+    if (trimmedQuery.isEmpty) {
+      if (!mounted) return;
       setState(() {
         _suggestions = _recentSalons;
       });
       return;
     }
 
+    final requestId = ++_suggestionRequestId;
+
     try {
       final response = await supabase
           .from('salons')
-          .select('id, name, logo_url, address, currency_code, currency_symbol')
+          .select('id, name, logo_url, address')
           .eq('is_active', true)
-          .ilike('name', '%$query%')
+          .ilike('name', '%$trimmedQuery%')
           .order('name')
           .limit(5);
+
+      if (!mounted || requestId != _suggestionRequestId) return;
 
       setState(() {
         _suggestions = List<Map<String, dynamic>>.from(response);
       });
     } catch (e) {
-      debugPrint('Error getting suggestions: $e');
+      debugPrint('❌ Error getting suggestions: $e');
     }
   }
 
   // ============================================================
-  // NAVIGATE TO SALON PROFILE
+  // NAVIGATION
   // ============================================================
   void _navigateToSalonProfile(Map<String, dynamic> salon) {
     context.push('/customer/salon-profile', extra: salon);
   }
 
-  // ============================================================
-  // NAVIGATE TO BOOKING
-  // ============================================================
   void _navigateToBooking(Map<String, dynamic> salon) {
     context.push('/customer/booking-flow', extra: salon);
   }
 
   // ============================================================
-  // CLEAR SEARCH
+  // ✅ CLEAR SEARCH
   // ============================================================
   void _clearSearch() {
+    if (!mounted) return;
     setState(() {
       _searchQuery = '';
       _searchController.clear();
       _searchResults = [];
       _isSearching = false;
+      _isLoading = false;
+      // ✅ Reset suggestions to recent salons
+      _suggestions = _recentSalons;
     });
     _searchFocusNode.unfocus();
   }
 
   // ============================================================
-  // ON SEARCH CHANGED (with debounce)
+  // ✅ ON SEARCH CHANGED (debounced, race-safe)
   // ============================================================
   void _onSearchChanged(String value) {
+    if (!mounted) return;
     setState(() {
       _searchQuery = value;
     });
 
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 500), () {
+      if (!mounted) return;
       _searchSalons(value);
     });
 
-    if (value.isNotEmpty) {
+    if (value.trim().isNotEmpty) {
       _getSuggestions(value);
     } else {
+      if (!mounted) return;
       setState(() {
         _suggestions = _recentSalons;
       });
     }
+  }
+
+  // ============================================================
+  // ✅ ON SEARCH SUBMITTED (persist recent + search immediately)
+  // ============================================================
+  void _onSearchSubmitted(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return;
+
+    _debounceTimer?.cancel();
+    _searchSalons(trimmed, addToRecent: true);
+    _searchFocusNode.unfocus();
+  }
+
+  // ============================================================
+  // ✅ ON SUGGESTION TAP (persist recent)
+  // ============================================================
+  void _onSuggestionTap(Map<String, dynamic> salon) {
+    final name = salon['name']?.toString() ?? '';
+    if (name.isNotEmpty) {
+      _addRecentSearch(name);
+    }
+    _navigateToSalonProfile(salon);
+  }
+
+  // ============================================================
+  // ✅ ON RECENT SEARCH TAP
+  // ============================================================
+  void _onRecentSearchTap(String query) {
+    if (!mounted) return;
+    setState(() {
+      _searchQuery = query;
+      _searchController.text = query;
+    });
+    _searchSalons(query, addToRecent: true);
+    _searchFocusNode.unfocus();
   }
 
   // ============================================================
@@ -285,15 +402,14 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
-    final screenWidth = MediaQuery.of(context).size.width;
+    final screenWidth = MediaQuery.sizeOf(context).width;
     final isWeb = screenWidth > 800;
 
     return Scaffold(
-      backgroundColor: isDark
-          ? const Color(0xFF121212)
-          : const Color(0xFFF8F9FA),
+      backgroundColor:
+          isDark ? const Color(0xFF121212) : const Color(0xFFF8F9FA),
       appBar: AppBar(
-        title: Text(
+        title: const Text(
           'Find Salons',
           style: TextStyle(
             fontSize: 18,
@@ -310,7 +426,9 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
           onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
+      body: SafeArea(
+        child: isWeb ? _buildWebLayout() : _buildMobileLayout(),
+      ),
     );
   }
 
@@ -322,23 +440,28 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
       child: Container(
         constraints: const BoxConstraints(maxWidth: 1200),
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF121212) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.05),
-              blurRadius: 20,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
         child: Column(
           children: [
             _buildSearchBar(),
             const SizedBox(height: 16),
             Expanded(
-              child: _isSearching ? _buildSearchResults() : _buildSuggestions(),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF121212) : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black
+                          .withValues(alpha: isDark ? 0.3 : 0.05),
+                      blurRadius: 20,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: _isSearching
+                    ? _buildSearchResults()
+                    : _buildSuggestions(),
+              ),
             ),
           ],
         ),
@@ -352,7 +475,9 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
       children: [
         _buildSearchBar(),
         Expanded(
-          child: _isSearching ? _buildSearchResults() : _buildSuggestions(),
+          child: _isSearching
+              ? _buildSearchResults()
+              : _buildSuggestions(),
         ),
       ],
     );
@@ -361,7 +486,7 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   // ✅ SEARCH BAR
   Widget _buildSearchBar() {
     final isDark = context.isDarkMode;
-    final isWeb = MediaQuery.of(context).size.width > 800;
+    final isWeb = MediaQuery.sizeOf(context).width > 800;
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -394,6 +519,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                 controller: _searchController,
                 focusNode: _searchFocusNode,
                 onChanged: _onSearchChanged,
+                onSubmitted: _onSearchSubmitted,
+                textInputAction: TextInputAction.search,
                 style: TextStyle(
                   color: isDark ? Colors.white : Colors.black87,
                   fontSize: isWeb ? 16 : 14,
@@ -405,7 +532,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                     fontSize: isWeb ? 15 : 13,
                   ),
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  contentPadding:
+                      const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
             ),
@@ -420,12 +548,15 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                 splashRadius: 20,
               ),
             if (_isLoading)
-              const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppTheme.primary,
+              const Padding(
+                padding: EdgeInsets.only(right: 12),
+                child: SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.primary,
+                  ),
                 ),
               ),
           ],
@@ -437,7 +568,7 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   // ✅ SUGGESTIONS
   Widget _buildSuggestions() {
     final isDark = context.isDarkMode;
-    final isWeb = MediaQuery.of(context).size.width > 800;
+    final isWeb = MediaQuery.sizeOf(context).width > 800;
 
     if (_searchQuery.isNotEmpty && _suggestions.isEmpty) {
       return Center(
@@ -480,7 +611,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
           child: Row(
             children: [
               Text(
@@ -496,7 +628,10 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                 onPressed: _clearRecentSearches,
                 child: Text(
                   'Clear',
-                  style: TextStyle(fontSize: 12, color: AppTheme.primary),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.primary,
+                  ),
                 ),
               ),
             ],
@@ -507,23 +642,21 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
           runSpacing: 8,
           children: _recentSearches.map((query) {
             return GestureDetector(
-              onTap: () {
-                setState(() {
-                  _searchQuery = query;
-                  _searchController.text = query;
-                });
-                _searchSalons(query);
-              },
+              onTap: () => _onRecentSearchTap(query),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+                  color: isDark
+                      ? const Color(0xFF2A2A2A)
+                      : Colors.grey[100],
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                    color: isDark
+                        ? Colors.grey[700]!
+                        : Colors.grey[300]!,
                   ),
                 ),
                 child: Row(
@@ -532,14 +665,17 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                     Icon(
                       Icons.history,
                       size: 14,
-                      color: isDark ? Colors.white70 : Colors.grey[500],
+                      color:
+                          isDark ? Colors.white70 : Colors.grey[500],
                     ),
                     const SizedBox(width: 4),
                     Text(
                       query,
                       style: TextStyle(
                         fontSize: 12,
-                        color: isDark ? Colors.white70 : Colors.black87,
+                        color: isDark
+                            ? Colors.white70
+                            : Colors.black87,
                       ),
                     ),
                   ],
@@ -563,7 +699,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
           child: Text(
             _searchQuery.isNotEmpty ? 'Suggestions' : 'Recent Salons',
             style: TextStyle(
@@ -585,10 +722,14 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
     final address = salon['address']?.toString() ?? '';
     final logoUrl = salon['logo_url']?.toString();
 
+    // ✅ Safe initial
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+
     return GestureDetector(
-      onTap: () => _navigateToSalonProfile(salon),
+      onTap: () => _onSuggestionTap(salon),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         margin: const EdgeInsets.only(bottom: 4),
         decoration: BoxDecoration(
           color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
@@ -607,7 +748,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                 borderRadius: BorderRadius.circular(12),
                 image: logoUrl != null && logoUrl.isNotEmpty
                     ? DecorationImage(
-                        image: CachedNetworkImageProvider(logoUrl),
+                        image:
+                            CachedNetworkImageProvider(logoUrl),
                         fit: BoxFit.cover,
                       )
                     : null,
@@ -615,8 +757,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
               child: logoUrl == null || logoUrl.isEmpty
                   ? Center(
                       child: Text(
-                        name.substring(0, 1).toUpperCase(),
-                        style: TextStyle(
+                        initial,
+                        style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                           color: AppTheme.primary,
@@ -645,7 +787,9 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                       address,
                       style: TextStyle(
                         fontSize: 12,
-                        color: isDark ? Colors.white60 : Colors.grey[600],
+                        color: isDark
+                            ? Colors.white60
+                            : Colors.grey[600],
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -667,7 +811,7 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
   // ✅ SEARCH RESULTS
   Widget _buildSearchResults() {
     final isDark = context.isDarkMode;
-    final isWeb = MediaQuery.of(context).size.width > 800;
+    final isWeb = MediaQuery.sizeOf(context).width > 800;
 
     if (_isLoading) {
       return const Center(
@@ -684,31 +828,35 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
 
     if (_searchResults.isEmpty) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.search_off,
-              size: 64,
-              color: isDark ? Colors.white70 : Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No salons found for "$_searchQuery"',
-              style: TextStyle(
-                fontSize: 16,
-                color: isDark ? Colors.white60 : Colors.grey[600],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Try adjusting your search',
-              style: TextStyle(
-                fontSize: 14,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.search_off,
+                size: 64,
                 color: isDark ? Colors.white70 : Colors.grey[400],
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              Text(
+                'No salons found for "$_searchQuery"',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Try adjusting your search',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: isDark ? Colors.white70 : Colors.grey[400],
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -717,7 +865,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
         ? GridView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.all(8),
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+            gridDelegate:
+                const SliverGridDelegateWithMaxCrossAxisExtent(
               maxCrossAxisExtent: 350,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
@@ -748,7 +897,16 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
     final coverUrl = salon['cover_url']?.toString();
     final description = salon['description']?.toString() ?? '';
     final followerCount = salon['follower_count'] as int? ?? 0;
-    final isWeb = MediaQuery.of(context).size.width > 800;
+    final isWeb = MediaQuery.sizeOf(context).width > 800;
+
+    // ✅ Safe initials
+    final singleInitial =
+        name.isNotEmpty ? name[0].toUpperCase() : '?';
+    final doubleInitial = name.length >= 2
+        ? name.substring(0, 2).toUpperCase()
+        : name.isNotEmpty
+            ? name.toUpperCase()
+            : '??';
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -774,7 +932,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
               ),
               image: coverUrl != null && coverUrl.isNotEmpty
                   ? DecorationImage(
-                      image: CachedNetworkImageProvider(coverUrl),
+                      image:
+                          CachedNetworkImageProvider(coverUrl),
                       fit: BoxFit.cover,
                     )
                   : null,
@@ -789,7 +948,7 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                         shape: BoxShape.circle,
                       ),
                       child: Text(
-                        name.substring(0, 2).toUpperCase(),
+                        doubleInitial,
                         style: TextStyle(
                           fontSize: 28,
                           fontWeight: FontWeight.bold,
@@ -817,12 +976,15 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                       color: AppTheme.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isDark ? Colors.grey[700]! : Colors.white,
+                        color: isDark
+                            ? Colors.grey[700]!
+                            : Colors.white,
                         width: 2,
                       ),
                       image: logoUrl != null && logoUrl.isNotEmpty
                           ? DecorationImage(
-                              image: CachedNetworkImageProvider(logoUrl),
+                              image: CachedNetworkImageProvider(
+                                  logoUrl),
                               fit: BoxFit.cover,
                             )
                           : null,
@@ -830,8 +992,8 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                     child: logoUrl == null || logoUrl.isEmpty
                         ? Center(
                             child: Text(
-                              name.substring(0, 1).toUpperCase(),
-                              style: TextStyle(
+                              singleInitial,
+                              style: const TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
                                 color: AppTheme.primary,
@@ -847,13 +1009,16 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       GestureDetector(
-                        onTap: () => _navigateToSalonProfile(salon),
+                        onTap: () =>
+                            _navigateToSalonProfile(salon),
                         child: Text(
                           name,
                           style: TextStyle(
                             fontSize: 17,
                             fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
+                            color: isDark
+                                ? Colors.white
+                                : Colors.black87,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -864,7 +1029,9 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                           address,
                           style: TextStyle(
                             fontSize: 12,
-                            color: isDark ? Colors.white60 : Colors.grey[600],
+                            color: isDark
+                                ? Colors.white60
+                                : Colors.grey[600],
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -874,7 +1041,9 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                           description,
                           style: TextStyle(
                             fontSize: 12,
-                            color: isDark ? Colors.white70 : Colors.grey[500],
+                            color: isDark
+                                ? Colors.white70
+                                : Colors.grey[500],
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -885,14 +1054,18 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                           Icon(
                             Icons.people,
                             size: 14,
-                            color: isDark ? Colors.white70 : Colors.grey[500],
+                            color: isDark
+                                ? Colors.white70
+                                : Colors.grey[500],
                           ),
                           const SizedBox(width: 4),
                           Text(
                             '$followerCount followers',
                             style: TextStyle(
                               fontSize: 11,
-                              color: isDark ? Colors.white70 : Colors.grey[500],
+                              color: isDark
+                                  ? Colors.white70
+                                  : Colors.grey[500],
                             ),
                           ),
                         ],
@@ -910,27 +1083,40 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
             color: isDark ? Colors.grey[700] : Colors.grey[200],
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
               children: [
                 Expanded(
                   child: TextButton.icon(
-                    onPressed: () => _navigateToSalonProfile(salon),
-                    icon: Icon(Icons.store, size: 18, color: AppTheme.primary),
-                    label: Text(
+                    onPressed: () =>
+                        _navigateToSalonProfile(salon),
+                    icon: const Icon(
+                      Icons.store,
+                      size: 18,
+                      color: AppTheme.primary,
+                    ),
+                    label: const Text(
                       'Profile',
-                      style: TextStyle(fontSize: 13, color: AppTheme.primary),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppTheme.primary,
+                      ),
                     ),
                     style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      foregroundColor: isDark ? Colors.white : AppTheme.primary,
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 8),
+                      foregroundColor: isDark
+                          ? Colors.white
+                          : AppTheme.primary,
                     ),
                   ),
                 ),
                 Container(
                   width: 1,
                   height: 25,
-                  color: isDark ? Colors.grey[700] : Colors.grey[200],
+                  color:
+                      isDark ? Colors.grey[700] : Colors.grey[200],
                 ),
                 Expanded(
                   child: TextButton.icon(
@@ -940,12 +1126,16 @@ class _SearchSalonsScreenState extends State<SearchSalonsScreen> {
                       size: 18,
                       color: Colors.green,
                     ),
-                    label: Text(
+                    label: const Text(
                       'Book Now',
-                      style: TextStyle(fontSize: 13, color: Colors.green),
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.green,
+                      ),
                     ),
                     style: TextButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      padding:
+                          const EdgeInsets.symmetric(vertical: 8),
                       foregroundColor: Colors.green,
                     ),
                   ),
