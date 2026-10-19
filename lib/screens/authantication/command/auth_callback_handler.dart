@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/main.dart' show appState;
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:go_router/go_router.dart';
@@ -22,7 +23,7 @@ class AuthCallbackHandlerScreen extends StatefulWidget {
   // silently no-op'd there every time.
   // ============================================================
   final String? preProcessedStatus; // 'success' | 'error' | 'none' | null
-  final String? preProcessedType;   // 'signup' | 'recovery' | 'magiclink' | ...
+  final String? preProcessedType; // 'signup' | 'recovery' | 'magiclink' | ...
   final String? preProcessedUserId;
   final String? preProcessedEmail;
 
@@ -88,7 +89,10 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       // widget.error/errorCode/errorDescription, so checking these
       // here covers both cases.
       if (widget.error != null || widget.errorCode != null) {
-        _handleAuthError(widget.error ?? widget.errorDescription, widget.errorCode);
+        _handleAuthError(
+          widget.error ?? widget.errorDescription,
+          widget.errorCode,
+        );
         return;
       }
 
@@ -106,7 +110,9 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
             final refreshed = await supabase.auth.refreshSession();
             user = refreshed.user;
           } catch (e) {
-            debugPrint('⚠️ Could not refresh session after pre-processed success: $e');
+            debugPrint(
+              '⚠️ Could not refresh session after pre-processed success: $e',
+            );
           }
         }
 
@@ -159,13 +165,34 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
       await _saveProfileAfterOAuthCallback(user);
     }
 
+    // ============================================================
+    // ✅ NEW: navigate කරන්න කලින් appState එක අලුත් වෙනකම් බලන් ඉන්න.
+    // main.dart එකේ _establishSessionFromUri() එකෙන් call කරපු
+    // refreshState() එක await කරලා නෑ, ඒ නිසා router එක
+    // pendingDeletionRestore flag එක දැනගන්න කලින් '/' එකට යන්න
+    // පුළුවන්. refreshState() දැන් serialize වෙලා තියෙන නිසා
+    // (AppState._refreshChain), අපේ call එක ඒ call එක ඉවර වුණාට
+    // පස්සේ run වෙනවා, ඒ නිසා මෙතන ඉඳලා state එක නිවැරදියි.
+    // ============================================================
+    try {
+      await appState.refreshState();
+    } catch (e) {
+      debugPrint('⚠️ refreshState failed in auth callback: $e');
+    }
+    if (!mounted) return;
+
+    // ✅ Delete කරන්න schedule කරපු / deactivate කරපු account එකක් නම්
+    // කෙලින්ම restore screen එකට යවන්න.
+    if (appState.pendingDeletionRestore || appState.pendingReactivation) {
+      debugPrint('⏸️ Pending restore/reactivation → /account-restore-pending');
+      context.go('/account-restore-pending');
+      return;
+    }
+
     await Future.delayed(const Duration(seconds: 1));
 
     if (!mounted) return;
-    context.go(
-      '/',
-      extra: {'showMessage': true, 'message': 'Welcome back!'},
-    );
+    context.go('/', extra: {'showMessage': true, 'message': 'Welcome back!'});
   }
 
   Future<void> _saveProfileAfterOAuthCallback(User user) async {
@@ -225,7 +252,9 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
           rememberMe = existingProfile['rememberMe'] as bool? ?? true;
         }
       } catch (e) {
-        debugPrint('⚠️ Error checking existing profile, defaulting rememberMe=true: $e');
+        debugPrint(
+          '⚠️ Error checking existing profile, defaulting rememberMe=true: $e',
+        );
       }
 
       await SessionManager.saveUserProfile(
@@ -491,7 +520,14 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         if (errorCode == 'otp_expired' || error == 'access_denied') {
           // context.go('/verify-invalid');
         } else {
-          context.go('/login', extra: {'error': message});
+          // ✅ FIX: the /login route reads `showMessage` + `message`
+          // from `extra`, NOT an `error` key — so the old
+          // `extra: {'error': message}` was silently ignored and the
+          // login screen never showed why the user was sent back.
+          context.go(
+            '/login',
+            extra: {'showMessage': true, 'message': message},
+          );
         }
       }
     });
@@ -563,21 +599,14 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: statusBgColor,
-                    border: Border.all(
-                      color: statusColor,
-                      width: 2,
-                    ),
+                    border: Border.all(color: statusColor, width: 2),
                   ),
                   child: _processing
                       ? CircularProgressIndicator(
                           color: primaryColor,
                           strokeWidth: 3,
                         )
-                      : Icon(
-                          statusIcon!,
-                          color: statusColor,
-                          size: 40,
-                        ),
+                      : Icon(statusIcon!, color: statusColor, size: 40),
                 ),
 
                 const SizedBox(height: 24),
@@ -597,10 +626,7 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
                 if (_processing)
                   Text(
                     'Please wait...',
-                    style: TextStyle(
-                      color: secondaryTextColor,
-                      fontSize: 14,
-                    ),
+                    style: TextStyle(color: secondaryTextColor, fontSize: 14),
                   ),
 
                 if (_hasError && !_processing)
