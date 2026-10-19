@@ -13,7 +13,7 @@ class CurrencySettingsService {
 
   static const List<String> supportedCurrencies = [
     'LKR', 'USD', 'INR', 'GBP', 'EUR',
-    'AUD', 'AED', 'CAD', 'JPY', 'SGD', 'MYR',
+    'AUD', 'AED', 'CAD', 'JPY', 'SGD', 'MYR','NZD',
   ];
 
   /// Get current user's preferred currency

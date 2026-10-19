@@ -53,6 +53,7 @@ class AuthService {
     if (tz.startsWith('Europe/London')) return 'GBP';
     if (tz.startsWith('Europe/')) return 'EUR';
     if (tz.startsWith('Australia/')) return 'AUD';
+    if (tz.startsWith('Pacific/Auckland')) return 'NZD';
     if (tz.startsWith('Pacific/Auckland')) return 'AUD';
     if (tz.startsWith('America/Toronto') ||
         tz.startsWith('America/Vancouver')) {
@@ -911,6 +912,7 @@ class AuthService {
           rememberMe: true,
           refreshToken: null,
           marketingConsent: false,
+          deviceTimezone: TimezoneService.getCurrentTimezone(),
         );
       }
 
