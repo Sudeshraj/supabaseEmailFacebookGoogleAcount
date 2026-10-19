@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../services/timezone_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
@@ -32,6 +31,15 @@ const List<Map<String, dynamic>> _kDays = [
   {'id': 6, 'name': 'Saturday'},
   {'id': 7, 'name': 'Sunday'},
 ];
+
+/// ✅ Default salon timezone (DB default — NOT user timezone!)
+const String _kDefaultSalonTimezone = 'Asia/Colombo';
+
+/// ✅ Safe fallback for salon open time
+const TimeOfDay _kDefaultOpenTime = TimeOfDay(hour: 9, minute: 0);
+
+/// ✅ Safe fallback for salon close time
+const TimeOfDay _kDefaultCloseTime = TimeOfDay(hour: 18, minute: 0);
 
 String _initialOf(dynamic name) {
   final s = (name ?? '').toString().trim();
@@ -62,9 +70,6 @@ class BarberScheduleScreen extends StatefulWidget {
 }
 
 class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
-  // ✅ Default salon timezone (DB default — NOT user timezone!)
-  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
-
   final supabase = Supabase.instance.client;
 
   bool _isLoading = true;
@@ -77,7 +82,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   Map<String, List<Map<String, dynamic>>> _groupedSpecialSchedules = {};
   Map<String, List<Map<String, dynamic>>> _groupedSpecialBreaks = {};
 
-  // Bumped whenever data changes so the mobile bottom sheet can refresh itself
   final ValueNotifier<int> _dataVersion = ValueNotifier<int>(0);
 
   // ============================================
@@ -86,7 +90,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   String _salonTimezone = _kDefaultSalonTimezone;
   String _userTimezone = '';
 
-  // Salon default times (Salon timezone එකේ - NOT user timezone)
   TimeOfDay? _salonOpenTime;
   TimeOfDay? _salonCloseTime;
 
@@ -95,21 +98,22 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   // ============================================
   bool _isWeb = false;
   bool _isDark = false;
+  bool _isMobile = false;
+  bool _isNarrowMobile = false;
 
-  // Days of week mapping
   final Map<int, String> _dayNames = _kDayNames;
 
-  // Break types
   final List<Map<String, dynamic>> _breakTypes = [
     {'id': 'lunch', 'name': '🍽️ Lunch Break', 'icon': Icons.lunch_dining},
     {'id': 'tea', 'name': '☕ Tea Break', 'icon': Icons.coffee},
     {'id': 'custom', 'name': '📝 Custom Break', 'icon': Icons.free_breakfast},
   ];
 
-  // ============================================
-  // SCROLL CONTROLLER FOR WEB
-  // ============================================
   final ScrollController _scrollController = ScrollController();
+
+  String get _effectiveSalonTimezone {
+    return _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+  }
 
   @override
   void initState() {
@@ -124,7 +128,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _isWeb = context.isWeb;
+    final size = MediaQuery.sizeOf(context);
+    _isWeb = size.width > 800;
+    _isMobile = size.width < 600;
+    _isNarrowMobile = size.width < 400;
     _isDark = context.isDarkMode;
   }
 
@@ -141,17 +148,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   Future<void> _initializeTimezones() async {
     await TimezoneService.initialize();
 
-    final prefs = await SharedPreferences.getInstance();
-
-    // ✅ User timezone - Local storage → Device (fallback)
-    _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
-        TimezoneService.getCurrentTimezone();
+    _userTimezone = TimezoneService.getCurrentTimezone();
 
     if (_userTimezone.isEmpty) {
       _userTimezone = _kDefaultSalonTimezone;
     }
 
     debugPrint('✅ User timezone: $_userTimezone');
+    debugPrint('✅ User timezone display: ${_getUserTimezoneDisplay()}');
 
     await _loadData();
   }
@@ -160,50 +164,39 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   // ✅ TIMEZONE CONVERSION HELPERS
   // ============================================
 
-  /// Format UTC time to LOCAL time (using SALON timezone)
   String _formatUtcToLocalTime(String? utcTime) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
 
-    // ✅ Salon timezone use කරන්න (fallback: salon default, NOT user)
-    final tz = _salonTimezone.isNotEmpty
-        ? _salonTimezone
-        : _kDefaultSalonTimezone;
-
     try {
-      return TimezoneService.utcToLocalTimeRecurringWithTimezone(utcTime, tz);
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
+        utcTime,
+        _effectiveSalonTimezone,
+      );
     } catch (e) {
       debugPrint('❌ Error in _formatUtcToLocalTime: $e');
       return '--:--';
     }
   }
 
-  /// Convert UTC time to salon timezone TimeOfDay
   TimeOfDay _utcToLocalTimeOfDay(String utcTime) {
-    final tz = _salonTimezone.isNotEmpty
-        ? _salonTimezone
-        : _kDefaultSalonTimezone;
-    return TimezoneService.utcToTimeOfDayWithTimezone(utcTime, tz);
+    return TimezoneService.utcToTimeOfDayWithTimezone(
+      utcTime,
+      _effectiveSalonTimezone,
+    );
   }
 
-  /// Get salon timezone display (flag + name + offset)
   String _getSalonTimezoneDisplay() {
-    final tz = _salonTimezone.isNotEmpty
-        ? _salonTimezone
-        : _kDefaultSalonTimezone;
-    return TimezoneService.getFullTimezoneDisplayFor(tz);
+    return TimezoneService.getFullTimezoneDisplayFor(_effectiveSalonTimezone);
   }
 
-  /// Get user timezone display (flag + name + offset)
   String _getUserTimezoneDisplay() {
     if (_userTimezone.isEmpty) return '';
     return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
   }
 
-  /// Check if salon timezone and user timezone are the same
   bool get _isSameTimezone {
-    return _salonTimezone.isEmpty || _userTimezone.isEmpty
-        ? true
-        : _salonTimezone == _userTimezone;
+    if (_salonTimezone.isEmpty || _userTimezone.isEmpty) return true;
+    return _salonTimezone == _userTimezone;
   }
 
   // ============================================
@@ -216,7 +209,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     try {
       return TimezoneService.convertTimeOfDayBetweenTimezones(
         salonTime,
-        fromTimezone: _salonTimezone,
+        fromTimezone: _effectiveSalonTimezone,
         toTimezone: _userTimezone,
       );
     } catch (e) {
@@ -225,7 +218,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     }
   }
 
-  /// Format a TimeOfDay for display (e.g., "9:30 AM")
   String _formatTimeOfDay(TimeOfDay time) {
     final hour =
         time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
@@ -234,9 +226,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return '$hour:$minute $period';
   }
 
-  /// Format UTC time → User timezone (for reference only)
   String _formatUtcToUserTime(String? utcTime) {
-    if (utcTime == null || utcTime.isEmpty) return '--:--';
+    if (utcTime == null || utcTime.isEmpty) return '';
     if (_isSameTimezone) return '';
     if (_userTimezone.isEmpty) return '';
 
@@ -275,16 +266,28 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   // LOAD DATA
   // ============================================
 
-  /// ✅ FIX: Salon default fallback always set (NOT user timezone)
+  void _resetAllData() {
+    _barbers = [];
+    _schedules = [];
+    _specialSchedules = [];
+    _specialBreaks = [];
+    _groupedSchedules = {};
+    _groupedBreaks = {};
+    _groupedSpecialSchedules = {};
+    _groupedSpecialBreaks = {};
+  }
+
+  /// ✅ FIXED: Preserve previous timezone on error (don't reset to default)
   Future<void> _loadSalonTimes() async {
     if (widget.salonId == null) {
-      // ✅ Salon default fallback
       _salonTimezone = _kDefaultSalonTimezone;
       return;
     }
 
-    // ✅ Salon default BEFORE the query so it's never empty
-    _salonTimezone = _kDefaultSalonTimezone;
+    // ✅ Preserve previous TZ — used as fallback if query fails or TZ column is null
+    final previousTimezone = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
 
     try {
       final salonIdInt = int.parse(widget.salonId!);
@@ -295,10 +298,15 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
           .maybeSingle();
 
       if (salonResponse != null) {
-        // ✅ Safe cast + fallback
         final dbTimezone = salonResponse['timezone'] as String?;
         if (dbTimezone != null && dbTimezone.isNotEmpty) {
           _salonTimezone = dbTimezone;
+        } else {
+          // Row exists but TZ column null → keep previous value
+          _salonTimezone = previousTimezone;
+          debugPrint(
+            '⚠️ Salon TZ null → kept previous: $_salonTimezone',
+          );
         }
 
         final openTimeStr = salonResponse['open_time'] as String?;
@@ -310,11 +318,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         if (closeTimeStr != null && closeTimeStr.isNotEmpty) {
           _salonCloseTime = _utcToLocalTimeOfDay(closeTimeStr);
         }
+      } else {
+        // Salon row not found → keep previous
+        _salonTimezone = previousTimezone;
       }
     } catch (e) {
       debugPrint('Error loading salon times: $e');
-      // ✅ Salon default fallback on error
-      _salonTimezone = _kDefaultSalonTimezone;
+      // ✅ Keep previous TZ on network error (don't fall back to default)
+      _salonTimezone = previousTimezone;
     }
   }
 
@@ -322,8 +333,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     if (widget.salonId == null) {
       if (!mounted) return;
       setState(() {
-        _barbers = [];
-        _schedules = [];
+        _resetAllData();
         _isLoading = false;
       });
       return;
@@ -359,8 +369,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       if (salonBarbersResponse.isEmpty) {
         if (!mounted) return;
         setState(() {
-          _barbers = [];
-          _schedules = [];
+          _resetAllData();
           _isLoading = false;
         });
         return;
@@ -552,14 +561,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   // ==================== GENERIC DIALOG / DELETE HELPERS ====================
 
   Future<void> _showDialogAndRefresh({
-    required Widget dialog,
+    required Widget Function(bool isDark) dialogBuilder,
     required String barberId,
     required String successMessage,
   }) async {
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => dialog,
+      builder: (dialogContext) => dialogBuilder(_isDark),
     );
 
     if (result != null && result['success'] == true && mounted) {
@@ -571,7 +580,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   Future<bool?> _confirmDelete(String title, String message) {
     return showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
@@ -584,7 +593,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.pop(dialogContext, false),
             child: Text(
               'Cancel',
               style: TextStyle(
@@ -593,7 +602,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             ),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.pop(dialogContext, true),
             style: TextButton.styleFrom(
               foregroundColor: _isDark ? Colors.red[300] : Colors.red,
             ),
@@ -617,7 +626,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     try {
       await supabase.from(table).delete().eq('id', item['id']);
       if (!mounted) return;
-      await _updateBarberData(item['barber_id']);
+
+      final barberId = item['barber_id'] as String?;
+      if (barberId != null && barberId.isNotEmpty) {
+        await _updateBarberData(barberId);
+      } else {
+        await _loadData();
+      }
       if (mounted) _showSnack(doneMessage, Colors.orange);
     } catch (e) {
       debugPrint('Error deleting from $table: $e');
@@ -631,14 +646,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return _showDialogAndRefresh(
       barberId: barberId,
       successMessage: 'Schedule added successfully',
-      dialog: _AddScheduleDialog(
+      dialogBuilder: (isDark) => _AddScheduleDialog(
         barberId: barberId,
         salonId: widget.salonId!,
-        salonTimezone: _salonTimezone,
+        salonTimezone: _effectiveSalonTimezone,
         existingSchedules: _groupedSchedules[barberId] ?? [],
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
-        isDark: _isDark,
+        isDark: isDark,
       ),
     );
   }
@@ -647,15 +662,15 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return _showDialogAndRefresh(
       barberId: barberId,
       successMessage: 'Break added successfully',
-      dialog: _AddBreakDialog(
+      dialogBuilder: (isDark) => _AddBreakDialog(
         barberId: barberId,
         salonId: widget.salonId!,
-        salonTimezone: _salonTimezone,
+        salonTimezone: _effectiveSalonTimezone,
         existingBreaks: _groupedBreaks[barberId] ?? [],
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
-        isDark: _isDark,
+        isDark: isDark,
       ),
     );
   }
@@ -664,12 +679,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return _showDialogAndRefresh(
       barberId: schedule['barber_id'],
       successMessage: 'Schedule updated successfully',
-      dialog: _EditScheduleDialog(
+      dialogBuilder: (isDark) => _EditScheduleDialog(
         schedule: schedule,
-        salonTimezone: _salonTimezone,
+        salonTimezone: _effectiveSalonTimezone,
+        userTimezone: _userTimezone,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
-        isDark: _isDark,
+        isDark: isDark,
       ),
     );
   }
@@ -678,13 +694,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return _showDialogAndRefresh(
       barberId: breakItem['barber_id'],
       successMessage: 'Break updated successfully',
-      dialog: _EditBreakDialog(
+      dialogBuilder: (isDark) => _EditBreakDialog(
         breakItem: breakItem,
-        salonTimezone: _salonTimezone,
+        salonTimezone: _effectiveSalonTimezone,
+        userTimezone: _userTimezone,
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
-        isDark: _isDark,
+        isDark: isDark,
       ),
     );
   }
@@ -701,6 +718,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         if (scheduleIndex != -1) {
           _groupedSchedules[barberId]![scheduleIndex]['is_working'] = newStatus;
         }
+      }
+
+      final idx = _schedules.indexWhere((s) => s['id'] == schedule['id']);
+      if (idx != -1) {
+        _schedules[idx]['is_working'] = newStatus;
       }
     });
     _dataVersion.value++;
@@ -750,13 +772,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return _showDialogAndRefresh(
       barberId: barberId,
       successMessage: 'Special schedule added successfully',
-      dialog: _AddSpecialScheduleDialog(
+      dialogBuilder: (isDark) => _AddSpecialScheduleDialog(
         barberId: barberId,
         salonId: widget.salonId!,
-        salonTimezone: _salonTimezone,
+        salonTimezone: _effectiveSalonTimezone,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
-        isDark: _isDark,
+        isDark: isDark,
       ),
     );
   }
@@ -765,14 +787,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return _showDialogAndRefresh(
       barberId: barberId,
       successMessage: 'Special break added successfully',
-      dialog: _AddSpecialBreakDialog(
+      dialogBuilder: (isDark) => _AddSpecialBreakDialog(
         barberId: barberId,
         salonId: widget.salonId!,
-        salonTimezone: _salonTimezone,
+        salonTimezone: _effectiveSalonTimezone,
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
-        isDark: _isDark,
+        isDark: isDark,
       ),
     );
   }
@@ -781,12 +803,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return _showDialogAndRefresh(
       barberId: schedule['barber_id'],
       successMessage: 'Special schedule updated successfully',
-      dialog: _EditSpecialScheduleDialog(
+      dialogBuilder: (isDark) => _EditSpecialScheduleDialog(
         schedule: schedule,
-        salonTimezone: _salonTimezone,
+        salonTimezone: _effectiveSalonTimezone,
+        userTimezone: _userTimezone,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
-        isDark: _isDark,
+        isDark: isDark,
       ),
     );
   }
@@ -795,13 +818,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     return _showDialogAndRefresh(
       barberId: breakItem['barber_id'],
       successMessage: 'Special break updated successfully',
-      dialog: _EditSpecialBreakDialog(
+      dialogBuilder: (isDark) => _EditSpecialBreakDialog(
         breakItem: breakItem,
-        salonTimezone: _salonTimezone,
+        salonTimezone: _effectiveSalonTimezone,
+        userTimezone: _userTimezone,
         breakTypes: _breakTypes,
         defaultOpenTime: _salonOpenTime,
         defaultCloseTime: _salonCloseTime,
-        isDark: _isDark,
+        isDark: isDark,
       ),
     );
   }
@@ -834,9 +858,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
   @override
   Widget build(BuildContext context) {
-    _isWeb = context.isWeb;
-    _isDark = context.isDarkMode;
-    final screenWidth = MediaQuery.of(context).size.width;
     final double padding = _isWeb ? 24.0 : 0.0;
 
     return Scaffold(
@@ -884,7 +905,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               ? _buildEmptyState(padding)
               : SafeArea(
                   child: _isWeb
-                      ? _buildWebView(padding, screenWidth)
+                      ? _buildWebView(padding)
                       : _buildMobileView(),
                 ),
     );
@@ -959,7 +980,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ✅ Salon timezone (main display)
             Row(
               children: [
                 const Icon(
@@ -981,7 +1001,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
               ],
             ),
 
-            // ✅ User timezone (only if DIFFERENT from salon)
             if (!isSame) ...[
               const SizedBox(height: 8),
               Container(
@@ -1032,7 +1051,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                 ),
               ),
 
-              // ✅ Salon hours converted to user's time
               if (_salonOpenTime != null && _salonCloseTime != null) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -1073,7 +1091,11 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     );
   }
 
-  Widget _buildWebView(double padding, double screenWidth) {
+  Widget _buildWebView(double padding) {
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final crossAxisCount =
+        screenWidth > 1200 ? 3 : (screenWidth > 700 ? 2 : 1);
+
     return SingleChildScrollView(
       controller: _scrollController,
       padding: EdgeInsets.all(padding),
@@ -1131,8 +1153,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount:
-                  screenWidth > 1200 ? 3 : (screenWidth > 700 ? 2 : 1),
+              crossAxisCount: crossAxisCount,
               mainAxisExtent: 420,
               crossAxisSpacing: 16,
               mainAxisSpacing: 16,
@@ -1443,7 +1464,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     final isWorking = schedule['is_working'] ?? true;
     final reason = schedule['reason'] ?? 'Special day';
 
-    // ✅ User time reference
     final userStartTime = _formatUtcToUserTime(schedule['start_time']);
     final userEndTime = _formatUtcToUserTime(schedule['end_time']);
 
@@ -1549,7 +1569,6 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       orElse: () => _breakTypes.last,
     );
 
-    // ✅ User time reference
     final userStartTime = _formatUtcToUserTime(breakItem['start_time']);
     final userEndTime = _formatUtcToUserTime(breakItem['end_time']);
 
@@ -1635,10 +1654,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     final startTime = _formatTime(schedule['start_time']);
     final endTime = _formatTime(schedule['end_time']);
     final isWorking = schedule['is_working'] ?? true;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 600;
+    final isMobile = _isMobile;
 
-    // ✅ User time reference
     final userStartTime = _formatUtcToUserTime(schedule['start_time']);
     final userEndTime = _formatUtcToUserTime(schedule['end_time']);
     final hasUserTime = userStartTime.isNotEmpty && userEndTime.isNotEmpty;
@@ -1758,10 +1775,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
       (b) => b['id'] == breakType,
       orElse: () => _breakTypes.last,
     );
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 600;
+    final isMobile = _isMobile;
 
-    // ✅ User time reference
     final userStartTime = _formatUtcToUserTime(breakItem['start_time']);
     final userEndTime = _formatUtcToUserTime(breakItem['end_time']);
     final hasUserTime = userStartTime.isNotEmpty && userEndTime.isNotEmpty;
@@ -1856,10 +1871,9 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
   }
 
   Widget _buildMobileBarberCard(Map<String, dynamic> barber) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final fontSize = screenWidth < 400
-        ? 16.0
-        : (screenWidth < 600 ? 18.0 : 20.0);
+    final fontSize = _isNarrowMobile ? 16.0 : 18.0;
+    final avatarRadius = _isNarrowMobile ? 40.0 : 50.0;
+    final verticalPadding = _isNarrowMobile ? 30.0 : 40.0;
 
     return Card(
       margin: EdgeInsets.zero,
@@ -1869,14 +1883,14 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         onTap: () => _showBarberScheduleDialog(barber),
         child: Container(
           width: double.infinity,
-          padding: EdgeInsets.symmetric(vertical: screenWidth < 400 ? 30 : 40),
+          padding: EdgeInsets.symmetric(vertical: verticalPadding),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               _buildAvatar(
                 barber,
-                radius: screenWidth < 400 ? 40 : 50,
+                radius: avatarRadius,
                 fontSize: fontSize + 8,
               ),
               const SizedBox(height: 20),
@@ -1925,10 +1939,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
         minChildSize: 0.5,
         maxChildSize: 0.95,
         expand: false,
-        builder: (context, scrollController) {
+        builder: (sheetInnerContext, scrollController) {
           return ValueListenableBuilder<int>(
             valueListenable: _dataVersion,
-            builder: (context, version, child) {
+            builder: (valueContext, version, child) {
+              // ✅ Use sheet's own context for theme (avoids stale outer state)
+              final isDark = valueContext.isDarkMode;
+
               final schedules = _groupedSchedules[barber['id']] ?? [];
               final breaks = _groupedBreaks[barber['id']] ?? [];
               final specialSchedules =
@@ -1937,7 +1954,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
 
               return Container(
                 decoration: BoxDecoration(
-                  color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                  color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
                   borderRadius: const BorderRadius.vertical(
                     top: Radius.circular(20),
                   ),
@@ -1949,8 +1966,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                       decoration: BoxDecoration(
                         border: Border(
                           bottom: BorderSide(
-                            color:
-                                _isDark ? Colors.white12 : Colors.grey[200]!,
+                            color: isDark ? Colors.white12 : Colors.grey[200]!,
                             width: 0.5,
                           ),
                         ),
@@ -1970,7 +1986,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 16,
-                                    color: _isDark
+                                    color: isDark
                                         ? Colors.white
                                         : Colors.black87,
                                   ),
@@ -1979,7 +1995,7 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                                   '${schedules.where((s) => s['is_working'] == true).length} Working / ${schedules.length} Regular',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: _isDark
+                                    color: isDark
                                         ? Colors.white60
                                         : Colors.grey[600],
                                   ),
@@ -1990,9 +2006,10 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                           IconButton(
                             icon: Icon(
                               Icons.close,
-                              color: _isDark ? Colors.white : Colors.grey,
+                              color: isDark ? Colors.white : Colors.grey,
                             ),
-                            onPressed: () => Navigator.pop(context),
+                            onPressed: () =>
+                                Navigator.pop(sheetInnerContext),
                           ),
                         ],
                       ),
@@ -2011,24 +2028,28 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                                 Icons.event_busy,
                                 Colors.teal,
                                 () => _addSpecialBreak(barber['id']),
+                                isDark,
                               ),
                               _buildActionChip(
                                 'Special Schedule',
                                 Icons.event,
                                 Colors.purple,
                                 () => _addSpecialSchedule(barber['id']),
+                                isDark,
                               ),
                               _buildActionChip(
                                 'Break',
                                 Icons.free_breakfast,
                                 Colors.orange,
                                 () => _addBreak(barber['id']),
+                                isDark,
                               ),
                               _buildActionChip(
                                 'Schedule',
                                 Icons.add,
                                 Colors.green,
                                 () => _addSchedule(barber['id']),
+                                isDark,
                               ),
                             ],
                           ),
@@ -2090,9 +2111,8 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
                                 child: Text(
                                   'No schedules yet',
                                   style: TextStyle(
-                                    color: _isDark
-                                        ? Colors.white54
-                                        : Colors.grey,
+                                    color:
+                                        isDark ? Colors.white54 : Colors.grey,
                                   ),
                                 ),
                               ),
@@ -2115,12 +2135,13 @@ class _BarberScheduleScreenState extends State<BarberScheduleScreen> {
     IconData icon,
     Color color,
     VoidCallback onPressed,
+    bool isDark,
   ) {
     return ActionChip(
       avatar: Icon(icon, size: 18, color: color),
       label: Text(
         label,
-        style: TextStyle(color: _isDark ? Colors.white : Colors.black87),
+        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
       ),
       onPressed: onPressed,
       backgroundColor: color.withValues(alpha: 0.1),
@@ -2137,25 +2158,29 @@ class _DialogShell extends StatelessWidget {
   final bool isDark;
   final String title;
   final List<Widget> children;
+  // ✅ NEW: optional timezone hint (shown under title)
+  final String? timezoneHint;
 
   const _DialogShell({
     required this.isDark,
     required this.title,
     required this.children,
+    this.timezoneHint,
   });
 
   @override
   Widget build(BuildContext context) {
     final bool isWeb = context.isWeb;
+    final size = MediaQuery.sizeOf(context);
 
     return Dialog(
       backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
       child: Container(
-        width: isWeb ? 500 : MediaQuery.of(context).size.width * 0.92,
+        width: isWeb ? 500 : size.width * 0.92,
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.8,
+          maxHeight: size.height * 0.8,
         ),
         padding: EdgeInsets.all(isWeb ? 24 : 16),
         child: SingleChildScrollView(
@@ -2171,6 +2196,29 @@ class _DialogShell extends StatelessWidget {
                   color: isDark ? Colors.white : Colors.black87,
                 ),
               ),
+              if (timezoneHint != null) ...[
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Icon(
+                      Icons.public,
+                      size: 12,
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        timezoneHint!,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 20),
               ...children,
             ],
@@ -2625,8 +2673,8 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
   final supabase = Supabase.instance.client;
 
   int? _selectedDay;
-  TimeOfDay? _startTime;
-  TimeOfDay? _endTime;
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
   bool _isWorking = true;
   bool _isLoading = false;
 
@@ -2651,8 +2699,8 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
   @override
   void initState() {
     super.initState();
-    _startTime = widget.defaultOpenTime;
-    _endTime = widget.defaultCloseTime;
+    _startTime = widget.defaultOpenTime ?? _kDefaultOpenTime;
+    _endTime = widget.defaultCloseTime ?? _kDefaultCloseTime;
   }
 
   @override
@@ -2660,6 +2708,8 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
     return _DialogShell(
       isDark: widget.isDark,
       title: 'Add Schedule',
+      timezoneHint:
+          'All times in salon timezone (${TimezoneService.getTimezoneNameFor(widget.salonTimezone)})',
       children: [
         _DialogLabel('Select Day', isDark: widget.isDark),
         _DayChips(
@@ -2702,10 +2752,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
           isDark: widget.isDark,
           confirmLabel: 'Add Schedule',
           isLoading: _isLoading,
-          onConfirm: (_selectedDay != null &&
-                  _startTime != null &&
-                  _endTime != null &&
-                  !_isLoading)
+          onConfirm: (_selectedDay != null && !_isLoading)
               ? _saveSchedule
               : null,
         ),
@@ -2714,7 +2761,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
   }
 
   Future<void> _saveSchedule() async {
-    if (!_isEndAfterStart(_startTime!, _endTime!)) {
+    if (!_isEndAfterStart(_startTime, _endTime)) {
       _showDialogError(
           context, widget.isDark, 'End time must be after start time');
       return;
@@ -2723,8 +2770,8 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
     setState(() => _isLoading = true);
     try {
       final salonIdInt = int.parse(widget.salonId);
-      final startTimeString = _localTimeToUtc(_startTime!);
-      final endTimeString = _localTimeToUtc(_endTime!);
+      final startTimeString = _localTimeToUtc(_startTime);
+      final endTimeString = _localTimeToUtc(_endTime);
 
       await supabase.from('barber_schedules').insert({
         'barber_id': widget.barberId,
@@ -2749,6 +2796,7 @@ class _AddScheduleDialogState extends State<_AddScheduleDialog> {
 class _EditScheduleDialog extends StatefulWidget {
   final Map<String, dynamic> schedule;
   final String salonTimezone;
+  final String userTimezone; // ✅ NEW: for "Your time" reference
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
   final bool isDark;
@@ -2756,6 +2804,7 @@ class _EditScheduleDialog extends StatefulWidget {
   const _EditScheduleDialog({
     required this.schedule,
     required this.salonTimezone,
+    required this.userTimezone,
     this.defaultOpenTime,
     this.defaultCloseTime,
     required this.isDark,
@@ -2771,6 +2820,13 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
   late bool _isWorking;
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
+
+  bool get _isSameTimezone {
+    if (widget.salonTimezone.isEmpty || widget.userTimezone.isEmpty) {
+      return true;
+    }
+    return widget.salonTimezone == widget.userTimezone;
+  }
 
   @override
   void initState() {
@@ -2793,6 +2849,14 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
     );
   }
 
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour =
+        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
   @override
   Widget build(BuildContext context) {
     final dayName = _kDayNames[widget.schedule['day_of_week']] ?? 'Unknown';
@@ -2800,6 +2864,8 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
     return _DialogShell(
       isDark: widget.isDark,
       title: 'Edit Schedule - $dayName',
+      timezoneHint:
+          'All times in salon timezone (${TimezoneService.getTimezoneNameFor(widget.salonTimezone)})',
       children: [
         _TimeRangeRow(
           startTime: _startTime,
@@ -2808,6 +2874,38 @@ class _EditScheduleDialogState extends State<_EditScheduleDialog> {
           onEndSelected: (t) => setState(() => _endTime = t),
           isDark: widget.isDark,
         ),
+        // ✅ NEW: "Your time" reference line
+        if (!_isSameTimezone) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.blue.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.swap_horiz,
+                  size: 14,
+                  color: widget.isDark ? Colors.blue[300] : Colors.blue[700],
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Your time: ${_formatTimeOfDay(TimezoneService.convertTimeOfDayBetweenTimezones(_startTime, fromTimezone: widget.salonTimezone, toTimezone: widget.userTimezone))} - ${_formatTimeOfDay(TimezoneService.convertTimeOfDayBetweenTimezones(_endTime, fromTimezone: widget.salonTimezone, toTimezone: widget.userTimezone))}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color:
+                          widget.isDark ? Colors.blue[300] : Colors.blue[700],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         _WorkingSwitchCard(
           isWorking: _isWorking,
@@ -2890,8 +2988,8 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
   final supabase = Supabase.instance.client;
 
   int? _selectedDay;
-  TimeOfDay? _startTime;
-  TimeOfDay? _endTime;
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
   String _selectedBreakType = 'lunch';
   bool _isLoading = false;
 
@@ -2916,14 +3014,16 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
   @override
   void initState() {
     super.initState();
-    _startTime = widget.defaultOpenTime;
-    _endTime = widget.defaultCloseTime;
-    if (_startTime != null && _endTime != null) {
-      final lunchHour = _startTime!.hour + 4;
-      if (lunchHour + 1 <= _endTime!.hour && lunchHour < 23) {
-        _startTime = TimeOfDay(hour: lunchHour, minute: 0);
-        _endTime = TimeOfDay(hour: lunchHour + 1, minute: 0);
-      }
+    final defaultOpen = widget.defaultOpenTime ?? _kDefaultOpenTime;
+    final defaultClose = widget.defaultCloseTime ?? _kDefaultCloseTime;
+
+    final lunchHour = defaultOpen.hour + 4;
+    if (lunchHour + 1 <= defaultClose.hour && lunchHour < 23) {
+      _startTime = TimeOfDay(hour: lunchHour, minute: 0);
+      _endTime = TimeOfDay(hour: lunchHour + 1, minute: 0);
+    } else {
+      _startTime = defaultOpen;
+      _endTime = defaultClose;
     }
   }
 
@@ -2932,6 +3032,8 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
     return _DialogShell(
       isDark: widget.isDark,
       title: 'Add Break',
+      timezoneHint:
+          'All times in salon timezone (${TimezoneService.getTimezoneNameFor(widget.salonTimezone)})',
       children: [
         _DialogLabel('Break Type', isDark: widget.isDark),
         _BreakTypeChips(
@@ -2972,10 +3074,7 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
           isDark: widget.isDark,
           confirmLabel: 'Add Break',
           isLoading: _isLoading,
-          onConfirm: (_selectedDay != null &&
-                  _startTime != null &&
-                  _endTime != null &&
-                  !_isLoading)
+          onConfirm: (_selectedDay != null && !_isLoading)
               ? _saveBreak
               : null,
         ),
@@ -2984,7 +3083,7 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
   }
 
   Future<void> _saveBreak() async {
-    if (!_isEndAfterStart(_startTime!, _endTime!)) {
+    if (!_isEndAfterStart(_startTime, _endTime)) {
       _showDialogError(
           context, widget.isDark, 'End time must be after start time');
       return;
@@ -2993,8 +3092,8 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
     setState(() => _isLoading = true);
     try {
       final salonIdInt = int.parse(widget.salonId);
-      final startTimeString = _localTimeToUtc(_startTime!);
-      final endTimeString = _localTimeToUtc(_endTime!);
+      final startTimeString = _localTimeToUtc(_startTime);
+      final endTimeString = _localTimeToUtc(_endTime);
 
       await supabase.from('barber_breaks').insert({
         'barber_id': widget.barberId,
@@ -3019,6 +3118,7 @@ class _AddBreakDialogState extends State<_AddBreakDialog> {
 class _EditBreakDialog extends StatefulWidget {
   final Map<String, dynamic> breakItem;
   final String salonTimezone;
+  final String userTimezone;
   final List<Map<String, dynamic>> breakTypes;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
@@ -3027,6 +3127,7 @@ class _EditBreakDialog extends StatefulWidget {
   const _EditBreakDialog({
     required this.breakItem,
     required this.salonTimezone,
+    required this.userTimezone,
     required this.breakTypes,
     this.defaultOpenTime,
     this.defaultCloseTime,
@@ -3043,6 +3144,13 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
   late String _selectedBreakType;
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
+
+  bool get _isSameTimezone {
+    if (widget.salonTimezone.isEmpty || widget.userTimezone.isEmpty) {
+      return true;
+    }
+    return widget.salonTimezone == widget.userTimezone;
+  }
 
   @override
   void initState() {
@@ -3065,6 +3173,14 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
     );
   }
 
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour =
+        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
   @override
   Widget build(BuildContext context) {
     final dayName = _kDayNames[widget.breakItem['day_of_week']] ?? 'Unknown';
@@ -3072,6 +3188,8 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
     return _DialogShell(
       isDark: widget.isDark,
       title: 'Edit Break - $dayName',
+      timezoneHint:
+          'All times in salon timezone (${TimezoneService.getTimezoneNameFor(widget.salonTimezone)})',
       children: [
         _DialogLabel('Break Type', isDark: widget.isDark),
         _BreakTypeChips(
@@ -3088,6 +3206,37 @@ class _EditBreakDialogState extends State<_EditBreakDialog> {
           onEndSelected: (t) => setState(() => _endTime = t),
           isDark: widget.isDark,
         ),
+        if (!_isSameTimezone) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.blue.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.swap_horiz,
+                  size: 14,
+                  color: widget.isDark ? Colors.blue[300] : Colors.blue[700],
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Your time: ${_formatTimeOfDay(TimezoneService.convertTimeOfDayBetweenTimezones(_startTime, fromTimezone: widget.salonTimezone, toTimezone: widget.userTimezone))} - ${_formatTimeOfDay(TimezoneService.convertTimeOfDayBetweenTimezones(_endTime, fromTimezone: widget.salonTimezone, toTimezone: widget.userTimezone))}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color:
+                          widget.isDark ? Colors.blue[300] : Colors.blue[700],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
         _DialogActions(
           isDark: widget.isDark,
@@ -3157,8 +3306,8 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
   final supabase = Supabase.instance.client;
 
   DateTime? _selectedDate;
-  TimeOfDay? _startTime;
-  TimeOfDay? _endTime;
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
   bool _isWorking = true;
   final TextEditingController _reasonController = TextEditingController();
   bool _isLoading = false;
@@ -3166,8 +3315,8 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
   @override
   void initState() {
     super.initState();
-    _startTime = widget.defaultOpenTime;
-    _endTime = widget.defaultCloseTime;
+    _startTime = widget.defaultOpenTime ?? _kDefaultOpenTime;
+    _endTime = widget.defaultCloseTime ?? _kDefaultCloseTime;
   }
 
   @override
@@ -3188,6 +3337,8 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
     return _DialogShell(
       isDark: widget.isDark,
       title: 'Add Special Schedule',
+      timezoneHint:
+          'All times in salon timezone (${TimezoneService.getTimezoneNameFor(widget.salonTimezone)})',
       children: [
         _DialogLabel('Select Date', isDark: widget.isDark),
         _DateField(
@@ -3221,10 +3372,7 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
           isDark: widget.isDark,
           confirmLabel: 'Add Special Schedule',
           isLoading: _isLoading,
-          onConfirm: (_selectedDate != null &&
-                  _startTime != null &&
-                  _endTime != null &&
-                  !_isLoading)
+          onConfirm: (_selectedDate != null && !_isLoading)
               ? _saveSpecialSchedule
               : null,
         ),
@@ -3233,7 +3381,7 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
   }
 
   Future<void> _saveSpecialSchedule() async {
-    if (!_isEndAfterStart(_startTime!, _endTime!)) {
+    if (!_isEndAfterStart(_startTime, _endTime)) {
       _showDialogError(
           context, widget.isDark, 'End time must be after start time');
       return;
@@ -3242,8 +3390,8 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
     setState(() => _isLoading = true);
     try {
       final salonIdInt = int.parse(widget.salonId);
-      final startTimeString = _localTimeToUtc(_startTime!);
-      final endTimeString = _localTimeToUtc(_endTime!);
+      final startTimeString = _localTimeToUtc(_startTime);
+      final endTimeString = _localTimeToUtc(_endTime);
 
       await supabase.from('barber_special_schedules').insert({
         'barber_id': widget.barberId,
@@ -3271,6 +3419,7 @@ class _AddSpecialScheduleDialogState extends State<_AddSpecialScheduleDialog> {
 class _EditSpecialScheduleDialog extends StatefulWidget {
   final Map<String, dynamic> schedule;
   final String salonTimezone;
+  final String userTimezone;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
   final bool isDark;
@@ -3278,6 +3427,7 @@ class _EditSpecialScheduleDialog extends StatefulWidget {
   const _EditSpecialScheduleDialog({
     required this.schedule,
     required this.salonTimezone,
+    required this.userTimezone,
     this.defaultOpenTime,
     this.defaultCloseTime,
     required this.isDark,
@@ -3296,6 +3446,13 @@ class _EditSpecialScheduleDialogState
   final TextEditingController _reasonController = TextEditingController();
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
+
+  bool get _isSameTimezone {
+    if (widget.salonTimezone.isEmpty || widget.userTimezone.isEmpty) {
+      return true;
+    }
+    return widget.salonTimezone == widget.userTimezone;
+  }
 
   @override
   void initState() {
@@ -3325,6 +3482,14 @@ class _EditSpecialScheduleDialogState
     );
   }
 
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour =
+        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
   @override
   Widget build(BuildContext context) {
     final date = DateTime.parse(widget.schedule['schedule_date']);
@@ -3332,6 +3497,8 @@ class _EditSpecialScheduleDialogState
     return _DialogShell(
       isDark: widget.isDark,
       title: 'Edit Special Schedule - ${DateFormat('yyyy-MM-dd').format(date)}',
+      timezoneHint:
+          'All times in salon timezone (${TimezoneService.getTimezoneNameFor(widget.salonTimezone)})',
       children: [
         _TimeRangeRow(
           startTime: _startTime,
@@ -3340,6 +3507,37 @@ class _EditSpecialScheduleDialogState
           onEndSelected: (t) => setState(() => _endTime = t),
           isDark: widget.isDark,
         ),
+        if (!_isSameTimezone) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.blue.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.swap_horiz,
+                  size: 14,
+                  color: widget.isDark ? Colors.blue[300] : Colors.blue[700],
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Your time: ${_formatTimeOfDay(TimezoneService.convertTimeOfDayBetweenTimezones(_startTime, fromTimezone: widget.salonTimezone, toTimezone: widget.userTimezone))} - ${_formatTimeOfDay(TimezoneService.convertTimeOfDayBetweenTimezones(_endTime, fromTimezone: widget.salonTimezone, toTimezone: widget.userTimezone))}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color:
+                          widget.isDark ? Colors.blue[300] : Colors.blue[700],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
         _ReasonField(
           controller: _reasonController,
@@ -3426,22 +3624,24 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
   final supabase = Supabase.instance.client;
 
   DateTime? _selectedDate;
-  TimeOfDay? _startTime;
-  TimeOfDay? _endTime;
+  late TimeOfDay _startTime;
+  late TimeOfDay _endTime;
   String _selectedBreakType = 'lunch';
   bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _startTime = widget.defaultOpenTime;
-    _endTime = widget.defaultCloseTime;
-    if (_startTime != null && _endTime != null) {
-      final lunchHour = _startTime!.hour + 4;
-      if (lunchHour + 1 <= _endTime!.hour && lunchHour < 23) {
-        _startTime = TimeOfDay(hour: lunchHour, minute: 0);
-        _endTime = TimeOfDay(hour: lunchHour + 1, minute: 0);
-      }
+    final defaultOpen = widget.defaultOpenTime ?? _kDefaultOpenTime;
+    final defaultClose = widget.defaultCloseTime ?? _kDefaultCloseTime;
+
+    final lunchHour = defaultOpen.hour + 4;
+    if (lunchHour + 1 <= defaultClose.hour && lunchHour < 23) {
+      _startTime = TimeOfDay(hour: lunchHour, minute: 0);
+      _endTime = TimeOfDay(hour: lunchHour + 1, minute: 0);
+    } else {
+      _startTime = defaultOpen;
+      _endTime = defaultClose;
     }
   }
 
@@ -3457,6 +3657,8 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
     return _DialogShell(
       isDark: widget.isDark,
       title: 'Add Special Break',
+      timezoneHint:
+          'All times in salon timezone (${TimezoneService.getTimezoneNameFor(widget.salonTimezone)})',
       children: [
         _DialogLabel('Select Date', isDark: widget.isDark),
         _DateField(
@@ -3485,10 +3687,7 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
           isDark: widget.isDark,
           confirmLabel: 'Add Special Break',
           isLoading: _isLoading,
-          onConfirm: (_selectedDate != null &&
-                  _startTime != null &&
-                  _endTime != null &&
-                  !_isLoading)
+          onConfirm: (_selectedDate != null && !_isLoading)
               ? _saveSpecialBreak
               : null,
         ),
@@ -3497,7 +3696,7 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
   }
 
   Future<void> _saveSpecialBreak() async {
-    if (!_isEndAfterStart(_startTime!, _endTime!)) {
+    if (!_isEndAfterStart(_startTime, _endTime)) {
       _showDialogError(
           context, widget.isDark, 'End time must be after start time');
       return;
@@ -3506,8 +3705,8 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
     setState(() => _isLoading = true);
     try {
       final salonIdInt = int.parse(widget.salonId);
-      final startTimeString = _localTimeToUtc(_startTime!);
-      final endTimeString = _localTimeToUtc(_endTime!);
+      final startTimeString = _localTimeToUtc(_startTime);
+      final endTimeString = _localTimeToUtc(_endTime);
 
       await supabase.from('barber_special_breaks').insert({
         'barber_id': widget.barberId,
@@ -3532,6 +3731,7 @@ class _AddSpecialBreakDialogState extends State<_AddSpecialBreakDialog> {
 class _EditSpecialBreakDialog extends StatefulWidget {
   final Map<String, dynamic> breakItem;
   final String salonTimezone;
+  final String userTimezone;
   final List<Map<String, dynamic>> breakTypes;
   final TimeOfDay? defaultOpenTime;
   final TimeOfDay? defaultCloseTime;
@@ -3540,6 +3740,7 @@ class _EditSpecialBreakDialog extends StatefulWidget {
   const _EditSpecialBreakDialog({
     required this.breakItem,
     required this.salonTimezone,
+    required this.userTimezone,
     required this.breakTypes,
     this.defaultOpenTime,
     this.defaultCloseTime,
@@ -3557,6 +3758,13 @@ class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
   late String _selectedBreakType;
   bool _isLoading = false;
   final supabase = Supabase.instance.client;
+
+  bool get _isSameTimezone {
+    if (widget.salonTimezone.isEmpty || widget.userTimezone.isEmpty) {
+      return true;
+    }
+    return widget.salonTimezone == widget.userTimezone;
+  }
 
   @override
   void initState() {
@@ -3579,6 +3787,14 @@ class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
     );
   }
 
+  String _formatTimeOfDay(TimeOfDay time) {
+    final hour =
+        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour:$minute $period';
+  }
+
   @override
   Widget build(BuildContext context) {
     final date = DateTime.parse(widget.breakItem['break_date']);
@@ -3586,6 +3802,8 @@ class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
     return _DialogShell(
       isDark: widget.isDark,
       title: 'Edit Special Break - ${DateFormat('yyyy-MM-dd').format(date)}',
+      timezoneHint:
+          'All times in salon timezone (${TimezoneService.getTimezoneNameFor(widget.salonTimezone)})',
       children: [
         _DialogLabel('Break Type', isDark: widget.isDark),
         _BreakTypeChips(
@@ -3602,6 +3820,37 @@ class _EditSpecialBreakDialogState extends State<_EditSpecialBreakDialog> {
           onEndSelected: (t) => setState(() => _endTime = t),
           isDark: widget.isDark,
         ),
+        if (!_isSameTimezone) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.blue.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.swap_horiz,
+                  size: 14,
+                  color: widget.isDark ? Colors.blue[300] : Colors.blue[700],
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Your time: ${_formatTimeOfDay(TimezoneService.convertTimeOfDayBetweenTimezones(_startTime, fromTimezone: widget.salonTimezone, toTimezone: widget.userTimezone))} - ${_formatTimeOfDay(TimezoneService.convertTimeOfDayBetweenTimezones(_endTime, fromTimezone: widget.salonTimezone, toTimezone: widget.userTimezone))}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                      color:
+                          widget.isDark ? Colors.blue[300] : Colors.blue[700],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
         _DialogActions(
           isDark: widget.isDark,
@@ -3697,7 +3946,7 @@ class _TimePickerFieldState extends State<_TimePickerField> {
           onTap: () async {
             final result = await showDialog<TimeOfDay>(
               context: context,
-              builder: (context) => _EnhancedTimePicker(
+              builder: (dialogContext) => _EnhancedTimePicker(
                 initialTime: _selectedTime,
                 isDark: widget.isDark,
               ),
@@ -3840,7 +4089,8 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final size = MediaQuery.sizeOf(context);
+    final isMobile = size.width < 600;
 
     return Dialog(
       backgroundColor: widget.isDark ? const Color(0xFF1E1E1E) : Colors.white,
@@ -3848,7 +4098,7 @@ class _EnhancedTimePickerState extends State<_EnhancedTimePicker> {
       child: Container(
         width: isMobile ? double.infinity : 320,
         constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.9,
+          maxHeight: size.height * 0.9,
         ),
         padding: const EdgeInsets.all(20),
         child: SingleChildScrollView(

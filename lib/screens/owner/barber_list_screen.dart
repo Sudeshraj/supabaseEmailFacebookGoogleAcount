@@ -19,15 +19,23 @@ class _BarberListScreenState extends State<BarberListScreen> {
 
   bool _isLoading = true;
   String? _selectedFilter = 'all';
-  List<Map<String, dynamic>> _barbers = [];
+
+  // ✅ Two separate lists: all barbers (for stats) + filtered (for display)
+  List<Map<String, dynamic>> _allBarbers = [];
+  List<Map<String, dynamic>> _filteredBarbers = [];
 
   final ScrollController _scrollController = ScrollController();
+
+  // ✅ NEW: Dynamic barber role id (loaded once, cached)
+  int? _barberRoleId;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _loadRoleIds();
+      if (mounted) await _loadData();
     });
   }
 
@@ -35,6 +43,27 @@ class _BarberListScreenState extends State<BarberListScreen> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // ============================================================
+  // ✅ NEW: Load role ids once (barber = ?)
+  // ============================================================
+  Future<void> _loadRoleIds() async {
+    try {
+      final roles = await supabase.from('roles').select('id, name');
+      for (var r in roles) {
+        if (r['name'] == 'barber') {
+          _barberRoleId = r['id'] as int;
+          break;
+        }
+      }
+      // Safe fallback (matches seed order in migration)
+      _barberRoleId ??= 2;
+      debugPrint('✅ Barber role id: $_barberRoleId');
+    } catch (e) {
+      debugPrint('❌ Error loading role ids: $e');
+      _barberRoleId = 2;
+    }
   }
 
   // ============================================================
@@ -52,13 +81,56 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
+  // ✅ STATUS MAPPING (NEW: single source of truth)
+  // ============================================================
+  /// Map raw (salon_barbers.status, user_roles.status, profile flags)
+  /// into a stable, filterable status.
+  String _resolveStatus({
+    required String salonBarberStatus,
+    required String roleStatus,
+    required bool isProfileActive,
+    required bool isProfileBlocked,
+  }) {
+    // 1. Blocked wins (support-level)
+    if (isProfileBlocked) return 'blocked';
+
+    // 2. Role status: map unknown values → known filterable values
+    //    scheduled_for_deletion → inactive (barber still visible, not bookable)
+    String status = salonBarberStatus;
+    switch (roleStatus) {
+      case 'active':
+        break;
+      case 'inactive':
+      case 'deleted':
+        status = roleStatus;
+        break;
+      case 'scheduled_for_deletion':
+        // Treat as inactive for UI/filter purposes
+        if (status == 'active') status = 'inactive';
+        break;
+      default:
+        // Unknown role status → keep salon status (defensive)
+        break;
+    }
+
+    // 3. Profile inactive → inactive (only if currently 'active')
+    if (!isProfileActive && status == 'active') {
+      status = 'inactive';
+    }
+
+    return status;
+  }
+
+  // ============================================================
   // ✅ LOAD DATA
   // ============================================================
   Future<void> _loadData() async {
+    // Guard: no salon id
     if (widget.salonId == null) {
       if (mounted) {
         setState(() {
-          _barbers = [];
+          _allBarbers = [];
+          _filteredBarbers = [];
           _isLoading = false;
         });
       }
@@ -69,11 +141,17 @@ class _BarberListScreenState extends State<BarberListScreen> {
     if (salonIdInt == null) {
       if (mounted) {
         setState(() {
-          _barbers = [];
+          _allBarbers = [];
+          _filteredBarbers = [];
           _isLoading = false;
         });
       }
       return;
+    }
+
+    // ✅ Ensure role id is loaded (safety net for refresh button)
+    if (_barberRoleId == null) {
+      await _loadRoleIds();
     }
 
     if (mounted) setState(() => _isLoading = true);
@@ -88,7 +166,8 @@ class _BarberListScreenState extends State<BarberListScreen> {
       if (salonBarbersResponse.isEmpty) {
         if (mounted) {
           setState(() {
-            _barbers = [];
+            _allBarbers = [];
+            _filteredBarbers = [];
             _isLoading = false;
           });
         }
@@ -110,7 +189,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
           .from('user_roles')
           .select('user_id, status, role_id')
           .inFilter('user_id', barberIds)
-          .eq('role_id', 2);
+          .eq('role_id', _barberRoleId!);
 
       final Map<String, Map<String, dynamic>> profileMap = {};
       for (var profile in profilesResponse) {
@@ -146,7 +225,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
             countBySalonBarberId[sb['id']] ?? 0;
       }
 
-      List<Map<String, dynamic>> combinedList = [];
+      final List<Map<String, dynamic>> combinedList = [];
 
       for (var sb in salonBarbersResponse) {
         final barberId = sb['barber_id'] as String;
@@ -155,13 +234,13 @@ class _BarberListScreenState extends State<BarberListScreen> {
         final isProfileActive = profile['is_active'] ?? true;
         final isProfileBlocked = profile['is_blocked'] ?? false;
 
-        String actualStatus = sb['status'] ?? 'active';
-        if (roleStatus != 'active') actualStatus = roleStatus;
-        if (isProfileBlocked) {
-          actualStatus = 'blocked';
-        } else if (!isProfileActive && actualStatus == 'active') {
-          actualStatus = 'inactive';
-        }
+        // ✅ Use centralized status resolver
+        final actualStatus = _resolveStatus(
+          salonBarberStatus: sb['status'] ?? 'active',
+          roleStatus: roleStatus,
+          isProfileActive: isProfileActive,
+          isProfileBlocked: isProfileBlocked,
+        );
 
         combinedList.add({
           'id': barberId,
@@ -177,15 +256,13 @@ class _BarberListScreenState extends State<BarberListScreen> {
         });
       }
 
-      final filteredList = _selectedFilter == 'all' || _selectedFilter == null
-          ? combinedList
-          : combinedList
-                .where((b) => b['status'] == _selectedFilter)
-                .toList();
+      // ✅ Apply filter
+      final filteredList = _applyFilterToList(combinedList, _selectedFilter);
 
       if (mounted) {
         setState(() {
-          _barbers = filteredList;
+          _allBarbers = combinedList; // ✅ All (for stats)
+          _filteredBarbers = filteredList; // ✅ Filtered (for display)
         });
       }
     } catch (e) {
@@ -197,17 +274,69 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   // ============================================================
+  // ✅ FILTER HELPER (pure function)
+  // ============================================================
+  List<Map<String, dynamic>> _applyFilterToList(
+    List<Map<String, dynamic>> source,
+    String? filter,
+  ) {
+    if (filter == 'all' || filter == null) return source;
+    return source.where((b) => b['status'] == filter).toList();
+  }
+
+  // ============================================================
+  // ✅ APPLY FILTER (without reloading from server)
+  // ============================================================
+  void _applyFilter() {
+    setState(() {
+      _filteredBarbers = _applyFilterToList(_allBarbers, _selectedFilter);
+    });
+  }
+
+  // ============================================================
+  // ✅ LOCAL UPDATE HELPER (avoid full reload)
+  // ============================================================
+  void _updateLocalBarberStatus(int salonBarberId, String newStatus) {
+    if (!mounted) return;
+
+    setState(() {
+      final idx = _allBarbers.indexWhere(
+        (b) => b['salon_barber_id'] == salonBarberId,
+      );
+      if (idx != -1) {
+        _allBarbers[idx]['status'] = newStatus;
+      }
+      // ✅ Apply filter in same setState (no double rebuild)
+      _filteredBarbers = _applyFilterToList(_allBarbers, _selectedFilter);
+    });
+  }
+
+  // ============================================================
   // ✅ BARBER ACTIONS
   // ============================================================
 
-  /// ✅ FIX: Checks `is_blocked` BEFORE activating
+  /// ✅ Activate barber (blocked check: client-side fast, server-side safe)
   Future<void> _activateBarber(
     int salonBarberId,
     String barberName,
     String barberId,
   ) async {
     try {
-      // ✅ Blocked check
+      // ✅ Fast client-side check (uses cached data, no round trip)
+      final cached = _allBarbers.firstWhere(
+        (b) => b['salon_barber_id'] == salonBarberId,
+        orElse: () => <String, dynamic>{},
+      );
+      if (cached['status'] == 'blocked') {
+        if (mounted) {
+          context.showErrorSnackBar(
+            '⚠️ Cannot activate $barberName — account is blocked by support.',
+          );
+        }
+        return;
+      }
+
+      // ✅ Server-side safety check (in case block happened mid-session)
       final profileCheck = await supabase
           .from('profiles')
           .select('is_blocked')
@@ -235,9 +364,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
             'updated_at': DateTime.now().toIso8601String(),
           })
           .eq('user_id', barberId)
-          .eq('role_id', 2);
+          .eq('role_id', _barberRoleId!);
 
-      await _loadData();
+      _updateLocalBarberStatus(salonBarberId, 'active');
       if (mounted) context.showSuccessSnackBar('✅ $barberName activated');
     } catch (e) {
       debugPrint('❌ Error: $e');
@@ -271,9 +400,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('user_id', barberId)
-            .eq('role_id', 2);
+            .eq('role_id', _barberRoleId!);
 
-        await _loadData();
+        _updateLocalBarberStatus(salonBarberId, 'inactive');
         if (mounted) context.showWarningSnackBar('⏸️ $barberName deactivated');
       } catch (e) {
         debugPrint('❌ Error: $e');
@@ -309,9 +438,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('user_id', barberId)
-            .eq('role_id', 2);
+            .eq('role_id', _barberRoleId!);
 
-        await _loadData();
+        _updateLocalBarberStatus(salonBarberId, 'deleted');
         if (mounted) context.showErrorSnackBar('🗑️ $barberName deleted');
       } catch (e) {
         debugPrint('❌ Error: $e');
@@ -320,14 +449,28 @@ class _BarberListScreenState extends State<BarberListScreen> {
     }
   }
 
-  /// ✅ FIX: Checks `is_blocked` BEFORE restoring
+  /// ✅ Restore barber to inactive (blocked check first)
   Future<void> _restoreBarber(
     int salonBarberId,
     String barberName,
     String barberId,
   ) async {
     try {
-      // ✅ Blocked check
+      // ✅ Fast client-side check
+      final cached = _allBarbers.firstWhere(
+        (b) => b['salon_barber_id'] == salonBarberId,
+        orElse: () => <String, dynamic>{},
+      );
+      if (cached['status'] == 'blocked') {
+        if (mounted) {
+          context.showErrorSnackBar(
+            '⚠️ Cannot restore $barberName — account is blocked by support.',
+          );
+        }
+        return;
+      }
+
+      // ✅ Server-side safety check
       final profileCheck = await supabase
           .from('profiles')
           .select('is_blocked')
@@ -367,9 +510,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('user_id', barberId)
-            .eq('role_id', 2);
+            .eq('role_id', _barberRoleId!);
 
-        await _loadData();
+        _updateLocalBarberStatus(salonBarberId, 'inactive');
         if (mounted) context.showSnackBar('🔄 $barberName restored');
       } catch (e) {
         debugPrint('❌ Error: $e');
@@ -451,18 +594,8 @@ class _BarberListScreenState extends State<BarberListScreen> {
     try {
       final date = DateTime.parse(dateStr);
       const months = [
-        'Jan',
-        'Feb',
-        'Mar',
-        'Apr',
-        'May',
-        'Jun',
-        'Jul',
-        'Aug',
-        'Sep',
-        'Oct',
-        'Nov',
-        'Dec',
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
       ];
       return '${months[date.month - 1]} ${date.day}, ${date.year}';
     } catch (e) {
@@ -484,7 +617,14 @@ class _BarberListScreenState extends State<BarberListScreen> {
       case 'blocked':
         return 'Blocked';
       default:
-        return status;
+        // ✅ Safe fallback (shouldn't hit anymore with _resolveStatus)
+        return status
+            .replaceAll('_', ' ')
+            .split(' ')
+            .map((w) => w.isEmpty
+                ? w
+                : '${w[0].toUpperCase()}${w.substring(1)}')
+            .join(' ');
     }
   }
 
@@ -567,7 +707,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
       body: SafeArea(
         child: _isLoading
             ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
-            : _barbers.isEmpty
+            : _allBarbers.isEmpty
                 ? _buildEmptyState()
                 : isWeb
                     ? _buildDesktopView()
@@ -652,12 +792,13 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ✅ DESKTOP VIEW
   // ============================================================
   Widget _buildDesktopView() {
-    final activeCount = _barbers.where((b) => b['status'] == 'active').length;
-    final inactiveCount = _barbers
-        .where((b) => b['status'] == 'inactive')
-        .length;
-    final deletedCount = _barbers.where((b) => b['status'] == 'deleted').length;
-    final blockedCount = _barbers.where((b) => b['status'] == 'blocked').length;
+    final activeCount = _allBarbers.where((b) => b['status'] == 'active').length;
+    final inactiveCount =
+        _allBarbers.where((b) => b['status'] == 'inactive').length;
+    final deletedCount =
+        _allBarbers.where((b) => b['status'] == 'deleted').length;
+    final blockedCount =
+        _allBarbers.where((b) => b['status'] == 'blocked').length;
 
     return Center(
       child: Container(
@@ -676,48 +817,55 @@ class _BarberListScreenState extends State<BarberListScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // ✅ Stats Cards
                 Row(
                   children: [
-                    _buildStatCard(
-                      'Total Barbers',
-                      _barbers.length.toString(),
-                      Icons.people,
-                      Colors.blue,
+                    Expanded(
+                      child: _buildStatCard(
+                        'Total Barbers',
+                        _allBarbers.length.toString(),
+                        Icons.people,
+                        Colors.blue,
+                      ),
                     ),
                     const SizedBox(width: 16),
-                    _buildStatCard(
-                      'Active',
-                      activeCount.toString(),
-                      Icons.check_circle,
-                      AppTheme.success,
+                    Expanded(
+                      child: _buildStatCard(
+                        'Active',
+                        activeCount.toString(),
+                        Icons.check_circle,
+                        AppTheme.success,
+                      ),
                     ),
                     const SizedBox(width: 16),
-                    _buildStatCard(
-                      'Inactive',
-                      inactiveCount.toString(),
-                      Icons.pause_circle,
-                      AppTheme.warning,
+                    Expanded(
+                      child: _buildStatCard(
+                        'Inactive',
+                        inactiveCount.toString(),
+                        Icons.pause_circle,
+                        AppTheme.warning,
+                      ),
                     ),
                     const SizedBox(width: 16),
-                    _buildStatCard(
-                      'Deleted',
-                      deletedCount.toString(),
-                      Icons.delete,
-                      AppTheme.error,
+                    Expanded(
+                      child: _buildStatCard(
+                        'Deleted',
+                        deletedCount.toString(),
+                        Icons.delete,
+                        AppTheme.error,
+                      ),
                     ),
                     const SizedBox(width: 16),
-                    _buildStatCard(
-                      'Blocked',
-                      blockedCount.toString(),
-                      Icons.block,
-                      Colors.purple,
+                    Expanded(
+                      child: _buildStatCard(
+                        'Blocked',
+                        blockedCount.toString(),
+                        Icons.block,
+                        Colors.purple,
+                      ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 32),
-
-                // ✅ Section Title
                 Row(
                   children: [
                     Container(
@@ -748,7 +896,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        '${_barbers.length}',
+                        '${_filteredBarbers.length}',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
@@ -759,8 +907,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   ],
                 ),
                 const SizedBox(height: 16),
-
-                // ✅ Table Header
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 20,
@@ -854,11 +1000,47 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
-
-                // ✅ Table Rows
-                ..._barbers.asMap().entries.map(
-                      (entry) => _buildDesktopBarberRow(entry.value, entry.key),
+                if (_filteredBarbers.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Center(
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.filter_alt_off,
+                            size: 48,
+                            color: context.secondaryTextColor,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'No barbers match this filter',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: context.secondaryTextColor,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              setState(() => _selectedFilter = 'all');
+                              _applyFilter();
+                            },
+                            icon: const Icon(Icons.clear, size: 18),
+                            label: const Text('Clear Filter'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.primary,
+                              side: BorderSide(color: AppTheme.primary),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
+                  )
+                else
+                  ..._filteredBarbers.asMap().entries.map(
+                        (entry) =>
+                            _buildDesktopBarberRow(entry.value, entry.key),
+                      ),
               ],
             ),
           ),
@@ -894,7 +1076,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
       ),
       child: Row(
         children: [
-          // ✅ Barber info
           Expanded(
             flex: 4,
             child: Row(
@@ -972,8 +1153,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
               ],
             ),
           ),
-
-          // ✅ Contact
           Expanded(
             flex: 3,
             child: Text(
@@ -988,8 +1167,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
               ),
             ),
           ),
-
-          // ✅ Joined date
           Expanded(
             flex: 2,
             child: Text(
@@ -999,8 +1176,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
               style: TextStyle(fontSize: 13, color: context.textColor),
             ),
           ),
-
-          // ✅ Service count
           Expanded(
             flex: 2,
             child: Center(
@@ -1026,8 +1201,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
               ),
             ),
           ),
-
-          // ✅ Status
           Expanded(
             flex: 2,
             child: Center(
@@ -1065,8 +1238,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
               ),
             ),
           ),
-
-          // ✅ Actions
           Expanded(
             flex: 4,
             child: Wrap(
@@ -1173,17 +1344,14 @@ class _BarberListScreenState extends State<BarberListScreen> {
     required String tooltip,
     required VoidCallback onTap,
   }) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 2),
-      child: IconButton(
-        icon: Icon(icon, size: 20),
-        color: color,
-        onPressed: onTap,
-        tooltip: tooltip,
-        splashRadius: 20,
-        padding: const EdgeInsets.all(8),
-        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-      ),
+    return IconButton(
+      icon: Icon(icon, size: 20),
+      color: color,
+      onPressed: onTap,
+      tooltip: tooltip,
+      splashRadius: 20,
+      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 8),
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
     );
   }
 
@@ -1207,19 +1375,21 @@ class _BarberListScreenState extends State<BarberListScreen> {
         return SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.all(pagePadding),
-          child: Wrap(
-            spacing: spacing,
-            runSpacing: 4,
-            crossAxisAlignment: WrapCrossAlignment.start,
-            children: _barbers
-                .map(
-                  (barber) => SizedBox(
-                    width: cardWidth,
-                    child: _buildBarberCard(barber),
-                  ),
-                )
-                .toList(),
-          ),
+          child: _filteredBarbers.isEmpty
+              ? _buildEmptyFilterState()
+              : Wrap(
+                  spacing: spacing,
+                  runSpacing: 16,
+                  crossAxisAlignment: WrapCrossAlignment.start,
+                  children: _filteredBarbers
+                      .map(
+                        (barber) => SizedBox(
+                          width: cardWidth,
+                          child: _buildBarberCard(barber),
+                        ),
+                      )
+                      .toList(),
+                ),
         );
       },
     );
@@ -1229,13 +1399,70 @@ class _BarberListScreenState extends State<BarberListScreen> {
   // ✅ MOBILE VIEW
   // ============================================================
   Widget _buildMobileView() {
+    if (_filteredBarbers.isEmpty) {
+      return SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: _buildEmptyFilterState(),
+      );
+    }
+
     return ListView.builder(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
-      itemCount: _barbers.length,
+      itemCount: _filteredBarbers.length,
       itemBuilder: (context, index) {
-        return _buildBarberCard(_barbers[index]);
+        return _buildBarberCard(_filteredBarbers[index]);
       },
+    );
+  }
+
+  Widget _buildEmptyFilterState() {
+    return Padding(
+      padding: const EdgeInsets.all(48),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.filter_alt_off,
+              size: 64,
+              color: context.secondaryTextColor,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No barbers match this filter',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: context.textColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Try a different filter or clear it',
+              style: TextStyle(
+                fontSize: 13,
+                color: context.secondaryTextColor,
+              ),
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _selectedFilter = 'all';
+                });
+                _applyFilter();
+              },
+              icon: const Icon(Icons.clear, size: 18),
+              label: const Text('Clear Filter'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.primary,
+                side: BorderSide(color: AppTheme.primary),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1272,7 +1499,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // ✅ Header
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Row(
@@ -1365,10 +1591,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                       ],
                     ),
                   ),
-
                   Divider(height: 1, color: context.dividerColor),
-
-                  // ✅ Info Row
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 16,
@@ -1428,10 +1651,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                       ],
                     ),
                   ),
-
                   Divider(height: 1, color: context.dividerColor),
-
-                  // ✅ Action Buttons
                   Padding(
                     padding: const EdgeInsets.all(12),
                     child: Wrap(
@@ -1550,7 +1770,6 @@ class _BarberListScreenState extends State<BarberListScreen> {
     );
   }
 
-  /// ✅ FIX: dark mode consistency
   Widget _buildStatusChip(Color color, IconData icon, String text) {
     final isDark = context.isDarkMode;
     return Container(
@@ -1558,9 +1777,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
       decoration: BoxDecoration(
         color: color.withValues(alpha: isDark ? 0.15 : 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: color.withValues(alpha: isDark ? 0.3 : 0.3),
-        ),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1587,9 +1804,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
       decoration: BoxDecoration(
         color: Colors.blue.withValues(alpha: isDark ? 0.15 : 0.1),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.blue.withValues(alpha: isDark ? 0.3 : 0.3),
-        ),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
       ),
       child: Text(
         '$count services',
@@ -1608,6 +1823,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
     required Color color,
     required VoidCallback onTap,
   }) {
+    final isDark = context.isDarkMode;
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1616,10 +1832,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-            color: color.withValues(alpha: context.isDarkMode ? 0.15 : 0.1),
+            color: color.withValues(alpha: isDark ? 0.15 : 0.1),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: color.withValues(alpha: context.isDarkMode ? 0.3 : 0.2),
+              color: color.withValues(alpha: isDark ? 0.3 : 0.2),
             ),
           ),
           child: Row(
@@ -1648,58 +1864,56 @@ class _BarberListScreenState extends State<BarberListScreen> {
     IconData icon,
     Color color,
   ) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: context.cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withValues(alpha: 0.2)),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: context.cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
             ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    value,
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: color,
-                    ),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: color,
                   ),
-                  Text(
-                    label,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: context.secondaryTextColor,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: context.secondaryTextColor,
                   ),
-                ],
-              ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1713,10 +1927,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
     showDialog(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) {
+        builder: (innerContext, setDialogState) {
           return AlertDialog(
             scrollable: true,
-            backgroundColor: context.cardColor,
+            backgroundColor: dialogContext.cardColor,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -1729,7 +1943,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                     'Filter Barbers',
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: context.textColor,
+                      color: dialogContext.textColor,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
@@ -1740,6 +1954,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 _buildFilterOption(
+                  dialogContext: dialogContext,
                   title: 'All Barbers',
                   value: 'all',
                   currentFilter: tempFilter,
@@ -1748,6 +1963,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   onTap: () => setDialogState(() => tempFilter = 'all'),
                 ),
                 _buildFilterOption(
+                  dialogContext: dialogContext,
                   title: 'Active Only',
                   value: 'active',
                   currentFilter: tempFilter,
@@ -1756,6 +1972,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   onTap: () => setDialogState(() => tempFilter = 'active'),
                 ),
                 _buildFilterOption(
+                  dialogContext: dialogContext,
                   title: 'Inactive Only',
                   value: 'inactive',
                   currentFilter: tempFilter,
@@ -1764,6 +1981,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   onTap: () => setDialogState(() => tempFilter = 'inactive'),
                 ),
                 _buildFilterOption(
+                  dialogContext: dialogContext,
                   title: 'Deleted Only',
                   value: 'deleted',
                   currentFilter: tempFilter,
@@ -1772,6 +1990,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   onTap: () => setDialogState(() => tempFilter = 'deleted'),
                 ),
                 _buildFilterOption(
+                  dialogContext: dialogContext,
                   title: 'Blocked Only',
                   value: 'blocked',
                   currentFilter: tempFilter,
@@ -1786,16 +2005,18 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 onPressed: () => Navigator.pop(dialogContext),
                 child: Text(
                   'Cancel',
-                  style: TextStyle(color: context.secondaryTextColor),
+                  style: TextStyle(color: dialogContext.secondaryTextColor),
                 ),
               ),
               ElevatedButton(
                 onPressed: () {
+                  // ✅ Single setState: update filter + apply (no double rebuild)
                   setState(() {
                     _selectedFilter = tempFilter;
+                    _filteredBarbers =
+                        _applyFilterToList(_allBarbers, tempFilter);
                   });
                   Navigator.pop(dialogContext);
-                  _loadData();
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primary,
@@ -1814,6 +2035,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
   }
 
   Widget _buildFilterOption({
+    required BuildContext dialogContext,
     required String title,
     required String value,
     required String currentFilter,
@@ -1861,7 +2083,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                     fontWeight: isSelected
                         ? FontWeight.w600
                         : FontWeight.normal,
-                    color: context.textColor,
+                    color: dialogContext.textColor,
                   ),
                 ),
               ),
@@ -1870,7 +2092,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
               else
                 Icon(
                   Icons.circle_outlined,
-                  color: context.secondaryTextColor,
+                  color: dialogContext.secondaryTextColor,
                   size: 20,
                 ),
             ],
