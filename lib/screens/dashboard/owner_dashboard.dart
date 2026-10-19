@@ -6,6 +6,7 @@ import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/currency_service.dart';
+import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/service_menu_editor.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
@@ -13,6 +14,7 @@ import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
@@ -41,11 +43,18 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ==================== ✅ CURRENCY + TIMEZONE ====================
   final CurrencyService _currencyService = CurrencyService.instance;
   String _salonCurrencyCode = 'LKR';
-  String _salonCurrencySymbol = 'Rs.';
 
   // ✅ SALON TIMEZONE (loaded from DB, for time conversions)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
   String _salonTimezone = _kDefaultSalonTimezone;
+
+  // ✅ Cached "today" per timezone (perf)
+  String? _cachedSalonToday;
+  String? _cachedTimezoneForToday;
+
+  // ==================== ✅ ROLE IDS (dynamic, loaded once) ====================
+  int? _ownerRoleId;
+  int? _barberRoleId;
 
   late AnimationController _pulseCtrl;
   late Animation<double> _pulseAnim;
@@ -55,6 +64,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   bool _isLoading = true;
   bool _isSwitchingSalon = false;
 
+  /// ✅ Operation token to avoid stale salon-switch races
+  int _switchOperationToken = 0;
+
   bool _isActive = true;
   bool _isCheckingStatus = true;
 
@@ -62,7 +74,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   int _completedToday = 0;
   int _pendingBookings = 0;
   int _todayAppointments = 0;
-  int _totalRevenue = 0;
+  double _totalRevenue = 0.0;
   int _totalCustomers = 0;
   int _activeBarbers = 0;
 
@@ -79,12 +91,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // Notification count
   int _unreadNotificationCount = 0;
 
-  // ✅ Responsive screen variables
+  // Responsive
   bool _isLargeScreen = false;
   bool _isTablet = false;
   bool _isWeb = false;
 
-  // Onboarding steps
+  // Onboarding
   int _completedSteps = 0;
   final int _totalSteps = 5;
   bool _hasSalon = false;
@@ -104,6 +116,37 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   int _serviceMenuVersion = 0;
 
   // ============================================================
+  // ✅ SALON TIMEZONE HELPERS
+  // ============================================================
+
+  DateTime get _salonNow {
+    final tz =
+        _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+    try {
+      return TimezoneService.getNowInTimezone(tz);
+    } catch (e) {
+      debugPrint('❌ Error getting salon now: $e');
+      return DateTime.now();
+    }
+  }
+
+  /// ✅ Cached per-timezone for perf
+  String get _salonTodayString {
+    if (_cachedTimezoneForToday == _salonTimezone &&
+        _cachedSalonToday != null) {
+      return _cachedSalonToday!;
+    }
+    try {
+      _cachedSalonToday = DateFormat('yyyy-MM-dd').format(_salonNow);
+      _cachedTimezoneForToday = _salonTimezone;
+      return _cachedSalonToday!;
+    } catch (e) {
+      debugPrint('❌ Error formatting salon today: $e');
+      return DateTime.now().toIso8601String().split('T')[0];
+    }
+  }
+
+  // ============================================================
   // ✅ CURRENCY HELPERS
   // ============================================================
 
@@ -113,6 +156,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       currencyCode: _salonCurrencyCode,
     );
   }
+
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
 
   @override
   void initState() {
@@ -142,7 +188,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     });
   }
 
-  // ✅ FIX: MediaQuery.sizeOf (only reacts to size changes)
   void _checkScreenSize() {
     if (!mounted) return;
     final size = MediaQuery.sizeOf(context);
@@ -180,9 +225,30 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   Future<void> _initializeAndLoad() async {
+    await TimezoneService.initialize();
+    await _loadRoleIds();       // ✅ Load role ids first
     await _ensureOwnerRole();
     if (!mounted) return;
     await _loadAllData();
+  }
+
+  // ============================================================
+  // ✅ LOAD ROLE IDS (dynamic — no hardcoded 2/3)
+  // ============================================================
+  Future<void> _loadRoleIds() async {
+    try {
+      final roles = await supabase.from('roles').select('id, name');
+      for (var r in roles) {
+        if (r['name'] == 'owner') _ownerRoleId = r['id'] as int;
+        if (r['name'] == 'barber') _barberRoleId = r['id'] as int;
+      }
+    } catch (e) {
+      debugPrint('⚠️ Failed to load role ids: $e');
+    }
+    // Safe fallbacks for legacy migrations (seed order: customer=1, barber=2, owner=3)
+    _ownerRoleId ??= 3;
+    _barberRoleId ??= 2;
+    debugPrint('✅ Role ids → owner: $_ownerRoleId, barber: $_barberRoleId');
   }
 
   Future<void> _ensureOwnerRole() async {
@@ -193,13 +259,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         return;
       }
 
-      debugPrint('🔍 Ensuring owner role for user: $userId');
+      final ownerRoleId = _ownerRoleId ?? 3;
+      debugPrint('🔍 Ensuring owner role for user: $userId (role: $ownerRoleId)');
 
       final ownerCheck = await supabase
           .from('user_roles')
           .select('id, status')
           .eq('user_id', userId)
-          .eq('role_id', 3)
+          .eq('role_id', ownerRoleId)
           .maybeSingle();
 
       if (!mounted) return;
@@ -208,7 +275,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         debugPrint('🔄 Creating owner role...');
         await supabase.from('user_roles').insert({
           'user_id': userId,
-          'role_id': 3,
+          'role_id': ownerRoleId,
           'status': 'active',
         });
         debugPrint('✅ Owner role created');
@@ -221,7 +288,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
               'updated_at': DateTime.now().toIso8601String(),
             })
             .eq('user_id', userId)
-            .eq('role_id', 3);
+            .eq('role_id', ownerRoleId);
         debugPrint('✅ Owner role activated');
       } else {
         debugPrint('✅ Owner role already active');
@@ -266,7 +333,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ SALON LIMIT CHECK
+  // ✅ SALON LIMIT CHECK (returns false on error)
   // ============================================================
 
   Future<bool> _checkCanCreateSalon() async {
@@ -298,7 +365,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       return canCreate;
     } catch (e) {
       debugPrint('❌ Error checking salon limit: $e');
-      return true;
+      // ✅ Safer: block creation if we can't verify
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not verify salon limit. Please try again.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return false;
     }
   }
 
@@ -475,10 +551,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
-  // ============================================================
-  // ✅ NOTIFICATION ICON WITH BADGE
-  // ============================================================
-
   Widget _buildNotificationIcon() {
     return Stack(
       clipBehavior: Clip.none,
@@ -520,10 +592,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       ],
     );
   }
-
-  // ============================================================
-  // ✅ PLAN BADGE
-  // ============================================================
 
   Widget _buildPlanBadge() {
     return Consumer<SubscriptionProvider>(
@@ -799,19 +867,15 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ SALON SELECTOR — Center chip below AppBar (in body top)
+  // ✅ SALON SELECTOR CHIP
   // ============================================================
 
-  /// Single salon: just show the name as text (no chip, no dropdown)
-  /// Multiple salons: show a dropdown chip centered
-  /// Long names: responsive with ellipsis
   Widget _buildSalonSelectorChip() {
     if (_ownerSalons.isEmpty) return const SizedBox.shrink();
 
     final isDark = context.isDarkMode;
     final hasMultipleSalons = _ownerSalons.length > 1;
 
-    // ✅ Single salon: just show name (no chip, no dropdown)
     if (!hasMultipleSalons) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -843,7 +907,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       );
     }
 
-    // ✅ Multiple salons: dropdown chip centered
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Center(
@@ -1008,7 +1071,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ PERMISSION METHODS — returns bool, awaited by callers
+  // ✅ PERMISSION METHODS
   // ============================================================
 
   Future<bool> _showPermissionCardContext({String? action}) async {
@@ -1280,8 +1343,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ NAVIGATION METHODS — all now return Future<void> and await
-  //    permission context check properly (fixes critical bug #5)
+  // ✅ NAVIGATION METHODS
   // ============================================================
 
   void _showNoSalonSelectedDialog() {
@@ -1422,7 +1484,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
-  // ✅ All navigation methods now properly await permission check
   Future<void> _viewBookings() async {
     if (!_hasPermission) {
       final shouldShow = await _showPermissionCardContext(action: 'booking');
@@ -1724,7 +1785,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             _pendingBookings = 0;
             _activeBarbers = 0;
             _totalCustomers = 0;
-            _totalRevenue = 0;
+            _totalRevenue = 0.0;
             _completedToday = 0;
           });
         }
@@ -1855,6 +1916,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       }
     } catch (e) {
       debugPrint('Error loading user profile: $e');
+      // ✅ Keep current _isActive on error
     } finally {
       if (mounted && _isCheckingStatus) {
         setState(() => _isCheckingStatus = false);
@@ -1862,7 +1924,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
-  /// ✅ Load salons with timezone + currency
+  /// ✅ Load salons with timezone + currency (preserves data on transient error)
   Future<void> _loadOwnerSalons() async {
     try {
       final userId = supabase.auth.currentUser?.id;
@@ -1877,7 +1939,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             _selectedSalonId = null;
             _selectedSalonName = null;
             _salonCurrencyCode = 'LKR';
-            _salonCurrencySymbol = 'Rs.';
             _salonTimezone = _kDefaultSalonTimezone;
           });
         }
@@ -1891,7 +1952,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .select(
             'id, name, address, phone, email, description, is_active, '
             'created_at, updated_at, logo_url, cover_url, open_time, '
-            'close_time, timezone, currency_code, currency_symbol',
+            'close_time, timezone, currency_code',
           )
           .eq('owner_id', userId)
           .eq('is_active', true)
@@ -1913,15 +1974,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             _selectedSalonName =
                 firstCreatedSalon['name']?.toString() ?? 'Salon';
 
-            // ✅ Load timezone + currency from DB
             _salonCurrencyCode =
                 firstCreatedSalon['currency_code'] as String? ?? 'LKR';
-            _salonCurrencySymbol =
-                firstCreatedSalon['currency_symbol'] as String? ??
-                    _currencyService.getSymbol(_salonCurrencyCode);
             _salonTimezone =
                 firstCreatedSalon['timezone'] as String? ??
                     _kDefaultSalonTimezone;
+            _cachedTimezoneForToday = null; // invalidate cache
 
             debugPrint(
               '✅ Selected first-created salon: $_selectedSalonName '
@@ -1943,11 +2001,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             _selectedSalonName = selected['name']?.toString() ?? 'Salon';
             _salonCurrencyCode =
                 selected['currency_code'] as String? ?? 'LKR';
-            _salonCurrencySymbol =
-                selected['currency_symbol'] as String? ??
-                    _currencyService.getSymbol(_salonCurrencyCode);
             _salonTimezone =
                 selected['timezone'] as String? ?? _kDefaultSalonTimezone;
+            _cachedTimezoneForToday = null;
 
             debugPrint(
               '✅ Kept selected salon: $_selectedSalonName '
@@ -1959,23 +2015,33 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _selectedSalonId = null;
           _selectedSalonName = null;
           _salonCurrencyCode = 'LKR';
-          _salonCurrencySymbol = 'Rs.';
           _salonTimezone = _kDefaultSalonTimezone;
+          _cachedTimezoneForToday = null;
           debugPrint('⚠️ No active salons found for this owner');
         }
       });
     } catch (e) {
       debugPrint('❌ Error loading salons: $e');
-      if (mounted) {
+      if (!mounted) return;
+
+      // ✅ Preserve previous data on error (only clear on first load failure)
+      if (_ownerSalons.isEmpty) {
         setState(() {
-          _ownerSalons = [];
           _hasSalon = false;
           _selectedSalonId = null;
           _selectedSalonName = null;
           _salonCurrencyCode = 'LKR';
-          _salonCurrencySymbol = 'Rs.';
           _salonTimezone = _kDefaultSalonTimezone;
         });
+      } else {
+        // Keep previous data, just show error
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to refresh salons. Showing cached data.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 2),
+          ),
+        );
       }
     }
   }
@@ -1991,7 +2057,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _pendingBookings = 0;
           _activeBarbers = 0;
           _totalCustomers = 0;
-          _totalRevenue = 0;
+          _totalRevenue = 0.0;
           _completedToday = 0;
         });
       }
@@ -1999,8 +2065,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
 
     try {
-      final today = DateTime.now().toIso8601String().split('T')[0];
+      // ✅ Salon timezone date
+      final today = _salonTodayString;
       final salonIdInt = int.parse(_selectedSalonId!);
+
+      debugPrint(
+        '📊 Stats: salonId=$salonIdInt, today=$today '
+        '(salon TZ: $_salonTimezone)',
+      );
 
       final results = await Future.wait([
         supabase
@@ -2036,7 +2108,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       final followers = results[3] as List;
 
       int activeBarberCount = 0;
-      if (activeBarbers.isNotEmpty) {
+      if (activeBarbers.isNotEmpty && _barberRoleId != null) {
         final barberIds =
             activeBarbers.map((b) => b['barber_id'] as String).toList();
 
@@ -2044,7 +2116,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             .from('user_roles')
             .select('user_id')
             .inFilter('user_id', barberIds)
-            .eq('role_id', 2)
+            .eq('role_id', _barberRoleId!)   // ✅ dynamic
             .eq('status', 'active');
 
         if (!mounted) return;
@@ -2053,10 +2125,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       final totalFollowers = followers.length;
 
-      final revenue = todayAppointments.fold<int>(
-        0,
-        (sum, item) => sum + ((item['price'] as num?)?.toInt() ?? 0),
-      );
+      // ✅ Revenue only from COMPLETED appointments (preserve decimals)
+      final revenue = todayAppointments
+          .where((a) => a['status'] == 'completed')
+          .fold<double>(
+            0.0,
+            (sum, item) =>
+                sum + ((item['price'] as num?)?.toDouble() ?? 0.0),
+          );
 
       final completedToday = todayAppointments
           .where((a) => a['status'] == 'completed')
@@ -2079,7 +2155,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           _pendingBookings = 0;
           _activeBarbers = 0;
           _totalCustomers = 0;
-          _totalRevenue = 0;
+          _totalRevenue = 0.0;
           _completedToday = 0;
         });
       }
@@ -2119,14 +2195,14 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           .eq('status', 'active');
 
       bool hasActiveBarbers = false;
-      if (barbers.isNotEmpty) {
+      if (barbers.isNotEmpty && _barberRoleId != null) {
         final barberIds = barbers.map((b) => b['barber_id'] as String).toList();
 
         final validBarbers = await supabase
             .from('user_roles')
             .select('user_id')
             .inFilter('user_id', barberIds)
-            .eq('role_id', 2)
+            .eq('role_id', _barberRoleId!)   // ✅ dynamic
             .eq('status', 'active')
             .limit(1);
 
@@ -2173,8 +2249,11 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     await _checkOnboardingStatus();
   }
 
+  /// ✅ Race-safe salon switch (operation token)
   Future<void> _switchSalon(String salonId) async {
     if (_isSwitchingSalon || salonId == _selectedSalonId) return;
+
+    final token = ++_switchOperationToken;
 
     setState(() {
       _isSwitchingSalon = true;
@@ -2188,11 +2267,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       if (selected.isNotEmpty) {
         _salonCurrencyCode =
             selected['currency_code'] as String? ?? 'LKR';
-        _salonCurrencySymbol =
-            selected['currency_symbol'] as String? ??
-                _currencyService.getSymbol(_salonCurrencyCode);
         _salonTimezone =
             selected['timezone'] as String? ?? _kDefaultSalonTimezone;
+        _cachedTimezoneForToday = null; // invalidate
         debugPrint(
           '✅ Salon switched → Currency: $_salonCurrencyCode, TZ: $_salonTimezone',
         );
@@ -2201,13 +2278,24 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
     try {
       await Future.wait([_loadDashboardStats(), _checkOnboardingStatus()]);
+      if (!mounted || token != _switchOperationToken) {
+        debugPrint('⚠️ Stale salon switch ignored');
+        return;
+      }
+
       await _loadNotificationCount();
+      if (token != _switchOperationToken) return;
+
       await _loadSubscription();
+      if (token != _switchOperationToken) return;
+
       debugPrint('✅ Subscription reloaded after salon switch');
     } catch (e) {
       debugPrint('Error switching salon: $e');
     } finally {
-      if (mounted) setState(() => _isSwitchingSalon = false);
+      if (mounted && token == _switchOperationToken) {
+        setState(() => _isSwitchingSalon = false);
+      }
     }
   }
 
@@ -2457,7 +2545,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   // ============================================================
   // ✅ BUILD METHOD
-  // ✅ Salon selector REMOVED from AppBar (moved to body top)
   // ============================================================
 
   @override
@@ -2588,7 +2675,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             iconSize: 28,
           ),
         ),
-        // ✅ Salon selector REMOVED from AppBar — moved to body top
         title: null,
         actions: [
           _buildPlanBadge(),
@@ -2661,7 +2747,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // ✅ Salon selector chip — CENTERED at top of body
         if (_ownerSalons.isNotEmpty) _buildSalonSelectorChip(),
 
         if (_showPermissionCard && !_hasPermission)
@@ -3288,7 +3373,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     final nextIdx = steps.indexWhere(
       (s) => !(s['isCompleted'] as bool) && !(s['locked'] as bool? ?? false),
     );
-    const pink = AppTheme.primary;
+    const primary = AppTheme.primary;
     const green = Color(0xFF22C55E);
     final pct = _totalSteps == 0 ? 0.0 : _completedSteps / _totalSteps;
 
@@ -3320,7 +3405,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  color: pink,
+                  color: primary,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Icon(
@@ -3368,7 +3453,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                 decoration: BoxDecoration(
                   color: pct == 1.0
                       ? green.withValues(alpha: 0.12)
-                      : pink.withValues(alpha: 0.1),
+                      : primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -3376,7 +3461,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: pct == 1.0 ? green : pink,
+                    color: pct == 1.0 ? green : primary,
                   ),
                 ),
               ),
@@ -3401,7 +3486,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                   child: Container(
                     height: 7,
                     decoration: BoxDecoration(
-                      color: value >= 1.0 ? green : pink,
+                      color: value >= 1.0 ? green : primary,
                       borderRadius: BorderRadius.circular(99),
                     ),
                   ),
@@ -3473,7 +3558,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                     width: 6,
                     height: 6,
                     decoration: const BoxDecoration(
-                      color: pink,
+                      color: primary,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -3483,7 +3568,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
                       'Up next:  ${steps[nextIdx]['label'] as String}',
                       style: const TextStyle(
                         fontSize: 12,
-                        color: pink,
+                        color: primary,
                         fontWeight: FontWeight.w500,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -3553,12 +3638,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     required double cardWidth,
     VoidCallback? onTap,
   }) {
-    const pink = AppTheme.primary;
+    const primary = AppTheme.primary;
     const green = Color(0xFF22C55E);
     final Color circleBg = isCompleted
         ? green
         : isActive
-            ? pink
+            ? primary
             : const Color(0xFFE5E7EB);
     final Color labelColor = isCompleted
         ? const Color(0xFF15803D)
@@ -3579,18 +3664,18 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         color: isCompleted
             ? green.withValues(alpha: 0.06)
             : isNext
-                ? pink.withValues(alpha: 0.07)
+                ? primary.withValues(alpha: 0.07)
                 : isActive
-                    ? pink.withValues(alpha: 0.04)
+                    ? primary.withValues(alpha: 0.04)
                     : const Color(0xFFFAFAFA),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isCompleted
               ? green.withValues(alpha: 0.4)
               : isNext
-                  ? pink.withValues(alpha: 0.65)
+                  ? primary.withValues(alpha: 0.65)
                   : isActive
-                      ? pink.withValues(alpha: 0.3)
+                      ? primary.withValues(alpha: 0.3)
                       : const Color(0xFFEEEEEE),
           width: isNext
               ? 1.8

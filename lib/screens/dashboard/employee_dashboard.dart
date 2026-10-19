@@ -43,10 +43,22 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   String get _salonCurrencySymbol =>
       _currencyService.getSymbol(_salonCurrencyCode);
 
-  /// ✅ LKR වගේ රටවලට icon එක වෙනුවට "Rs." text එක පෙන්නන්න
-  /// USD, EUR වගේ රටවලට icon එක පෙන්නන්න
+  /// ✅ FIXED: Explicit list — currencies with no matching Material icon
+  /// Everything else uses the icon from CurrencyInfo.
+  static const Set<String> _kTextIconCurrencies = {
+    'LKR',
+    'INR',
+    'PKR',
+    'BDT',
+    'NPR',
+    'AED',
+    'MYR',
+    'THB',
+    'CHF',
+  };
+
   bool get _useCurrencyText =>
-      _salonCurrencyCode == 'LKR' || _salonCurrencyCode == 'INR';
+      _kTextIconCurrencies.contains(_salonCurrencyCode.toUpperCase());
 
   bool _hasPermission = false;
   bool _showPermissionCard = false;
@@ -90,9 +102,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   bool _isTablet = false;
   bool _isWeb = false;
 
-  // Timezone variables (user timezone — only for reference)
-  String _userTimezone = '';
-  String _lastTimezone = '';
+  // ✅ Timezone init flag (no user TZ tracking needed — dashboard uses salon TZ)
   bool _isTimezoneLoaded = false;
 
   // Web Scroll Controller
@@ -135,9 +145,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     _initialize();
   }
 
+  /// ✅ try-catch around Future.wait
   Future<void> _initialize() async {
-    // ✅ Parallel — independent
-    await Future.wait([_initializeTimezone(), _checkEmployeeStatus()]);
+    try {
+      await Future.wait([_initializeTimezone(), _checkEmployeeStatus()]);
+    } catch (e) {
+      debugPrint('❌ Init error (non-critical): $e');
+    }
 
     if (_isActive) {
       await _loadAssignedSalons();
@@ -155,11 +169,14 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     if (route is PageRoute) {
       routeObserver.subscribe(this, route);
     }
-    _checkScreenSize();
-    _checkTimezoneChange();
+    // ✅ FIX: Defer setState to next frame (avoid setState-during-build)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _checkScreenSize();
+    });
   }
 
   void _checkScreenSize() {
+    if (!mounted) return;
     final size = MediaQuery.sizeOf(context);
     final isLarge = size.width > 800;
     final isTablet = size.shortestSide >= 600;
@@ -184,41 +201,23 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   @override
   void didPopNext() {
     debugPrint('🔄 Returning to EmployeeDashboard - Auto refresh');
-    _loadData();
+    // ✅ FIX: Silent refresh (no loading spinner flash)
+    _loadData(showLoading: false);
   }
 
   // ==================== TIMEZONE INITIALIZATION ====================
 
+  /// ✅ FIXED: Removed unused user-timezone tracking.
+  /// Dashboard uses SALON timezone only (design: salon = SSOT).
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
-
-    _userTimezone = TimezoneService.getCurrentTimezone();
-    if (_userTimezone.isEmpty) {
-      _userTimezone = 'Asia/Colombo';
-    }
-
-    _lastTimezone = _userTimezone;
 
     if (!mounted) return;
     setState(() {
       _isTimezoneLoaded = true;
     });
 
-    debugPrint('✅ User timezone: $_userTimezone');
-  }
-
-  Future<void> _checkTimezoneChange() async {
-    if (!_isTimezoneLoaded) return;
-
-    final currentTimezone = TimezoneService.getCurrentTimezone();
-
-    if (_lastTimezone != currentTimezone && _lastTimezone.isNotEmpty) {
-      if (!mounted) return;
-      setState(() {
-        _userTimezone = currentTimezone;
-        _lastTimezone = currentTimezone;
-      });
-    }
+    debugPrint('✅ Timezone service initialized');
   }
 
   // ==================== UTC TO LOCAL CONVERSION ====================
@@ -289,7 +288,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     }
   }
 
-  /// ✅ Use salon timezone for month name
   String _getMonthName() {
     const months = [
       'January',
@@ -686,6 +684,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // ==================== LOAD ASSIGNED SALONS ====================
 
+  /// ✅ FIXED: All state updates happen inside ONE setState at the end
   Future<void> _loadAssignedSalons() async {
     try {
       final response = await supabase
@@ -733,51 +732,72 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             'barber_salon_id': item['id'],
           };
           salons.add(salon);
+        }
+      }
 
-          if (_selectedSalonId == null && salonData['is_active'] == true) {
-            _selectedSalonId = salonData['id'].toString();
-            _selectedSalonName = salonData['name'] ?? '';
-            _salonCurrencyCode = salonData['currency_code'] as String? ?? 'LKR';
-            final tz = salonData['timezone'] as String?;
-            if (tz != null && tz.isNotEmpty) {
-              _salonTimezone = tz;
-            }
+      // ✅ Compute new local values BEFORE setState
+      String? newSelectedSalonId = _selectedSalonId;
+      String newSelectedSalonName = _selectedSalonName;
+      String newCurrencyCode = _salonCurrencyCode;
+      String newTimezone = _salonTimezone;
+
+      // Validate previously selected salon still exists
+      if (newSelectedSalonId != null) {
+        final stillExists = salons.any((s) => s['id'] == newSelectedSalonId);
+        if (!stillExists) {
+          debugPrint(
+            '⚠️ Previously selected salon no longer available — resetting',
+          );
+          newSelectedSalonId = null;
+          newSelectedSalonName = '';
+        }
+      }
+
+      if (newSelectedSalonId == null && salons.isNotEmpty) {
+        // Pick default
+        final firstActive = salons.firstWhere(
+          (s) => s['is_active'] == true,
+          orElse: () => salons.first,
+        );
+        newSelectedSalonId = firstActive['id'] as String;
+        newSelectedSalonName = firstActive['name']?.toString() ?? '';
+        newCurrencyCode = firstActive['currency_code'] as String? ?? 'LKR';
+        final tz = firstActive['timezone'] as String?;
+        if (tz != null && tz.isNotEmpty) {
+          newTimezone = tz;
+        }
+      } else if (newSelectedSalonId != null) {
+        // Refresh selected salon's info
+        final selected = salons.firstWhere(
+          (s) => s['id'] == newSelectedSalonId,
+          orElse: () => {},
+        );
+        if (selected.isNotEmpty) {
+          newSelectedSalonName = selected['name']?.toString() ?? '';
+          newCurrencyCode = selected['currency_code'] as String? ?? 'LKR';
+          final tz = selected['timezone'] as String?;
+          if (tz != null && tz.isNotEmpty) {
+            newTimezone = tz;
           }
         }
       }
 
-      if (_selectedSalonId != null) {
-        await SessionManager.saveSalonId(_selectedSalonId!);
+      // Save to session
+      if (newSelectedSalonId != null) {
+        await SessionManager.saveSalonId(newSelectedSalonId);
       }
-      if (_selectedSalonName.isNotEmpty) {
-        await SessionManager.saveSalonName(_selectedSalonName);
+      if (newSelectedSalonName.isNotEmpty) {
+        await SessionManager.saveSalonName(newSelectedSalonName);
       }
 
       if (!mounted) return;
+      // ✅ FIX: ONE setState with ALL state changes
       setState(() {
         _assignedSalons = salons;
-        if (_selectedSalonId == null && salons.isNotEmpty) {
-          _selectedSalonId = salons[0]['id'] as String;
-          _selectedSalonName = salons[0]['name'] ?? '';
-          _salonCurrencyCode = salons[0]['currency_code'] as String? ?? 'LKR';
-          final tz = salons[0]['timezone'] as String?;
-          if (tz != null && tz.isNotEmpty) {
-            _salonTimezone = tz;
-          }
-        } else if (salons.isNotEmpty) {
-          final selected = salons.firstWhere(
-            (s) => s['id'] == _selectedSalonId,
-            orElse: () => {},
-          );
-          _selectedSalonName = selected['name'] ?? '';
-          if (selected.isNotEmpty) {
-            _salonCurrencyCode = selected['currency_code'] as String? ?? 'LKR';
-            final tz = selected['timezone'] as String?;
-            if (tz != null && tz.isNotEmpty) {
-              _salonTimezone = tz;
-            }
-          }
-        }
+        _selectedSalonId = newSelectedSalonId;
+        _selectedSalonName = newSelectedSalonName;
+        _salonCurrencyCode = newCurrencyCode;
+        _salonTimezone = newTimezone;
       });
     } catch (e) {
       debugPrint('❌ Error loading assigned salons: $e');
@@ -795,7 +815,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         (s) => s['id'] == salonId,
         orElse: () => {},
       );
-      _selectedSalonName = selected['name'] ?? '';
+      _selectedSalonName = selected['name']?.toString() ?? '';
 
       if (selected.isNotEmpty) {
         _salonCurrencyCode = selected['currency_code'] as String? ?? 'LKR';
@@ -837,30 +857,40 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // ==================== LOAD DASHBOARD DATA ====================
 
-  Future<void> _loadData() async {
+  /// ✅ FIXED: `showLoading` param — silent refresh on didPopNext
+  Future<void> _loadData({bool showLoading = true}) async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    if (showLoading) setState(() => _isLoading = true);
 
     try {
-      _hasPermission = await _notificationService.hasPermission();
+      final hasPermission = await _notificationService.hasPermission();
+      if (!mounted) return;
 
-      if (!_hasPermission) {
-        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
+      setState(() {
+        _hasPermission = hasPermission;
+      });
+
+      if (!hasPermission) {
+        final shouldShow = await _permissionManager.shouldShowPermissionCard(
           screen: 'employee_dashboard',
           action: null,
         );
+        if (!mounted) return;
 
-        if (UniversalPlatform.isWeb && _showPermissionCard) {
+        if (UniversalPlatform.isWeb && shouldShow) {
           final status = await _notificationService.getWebPermissionStatus();
+          if (!mounted) return;
           if (status == 'denied') {
-            _showPermissionCard = false;
-            if (mounted) {
-              _showWebPermissionHelp();
-            }
+            setState(() => _showPermissionCard = false);
+            _showWebPermissionHelp();
+          } else {
+            setState(() => _showPermissionCard = shouldShow);
           }
+        } else {
+          setState(() => _showPermissionCard = shouldShow);
         }
       } else {
-        _showPermissionCard = false;
+        setState(() => _showPermissionCard = false);
       }
 
       if (_employeeId.isNotEmpty) {
@@ -869,13 +899,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         await _loadNotificationCount();
       }
 
-      if (mounted) {
+      if (mounted && showLoading) {
         setState(() => _isLoading = false);
       }
     } catch (e) {
       debugPrint('❌ Error loading employee data: $e');
       if (mounted) {
-        setState(() => _isLoading = false);
+        if (showLoading) setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error loading data: $e'),
@@ -888,6 +918,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // =====================================================
   // LOAD APPOINTMENTS
+  // ✅ FIXED: On-time % uses `delay_minutes` (was completion %)
   // =====================================================
   Future<void> _loadAppointments() async {
     try {
@@ -922,6 +953,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             appointment_date,
             start_time,
             end_time,
+            actual_start_time,
+            actual_end_time,
+            delay_minutes,
             status,
             price,
             original_price,
@@ -971,7 +1005,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       int todayCompleted = 0;
       int todayNoShow = 0;
       int todayEarnings = 0;
-      int totalAppointmentsToday = 0;
+      int onTimeCount = 0;
 
       for (var apt in response) {
         final customer = apt['profiles'] as Map?;
@@ -1021,11 +1055,17 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
         if (isToday) {
           todayTotal++;
-          totalAppointmentsToday++;
 
           if (status == 'completed') {
             todayCompleted++;
             todayEarnings += price.toInt();
+
+            // ✅ FIX: On-time = delay <= 10 minutes
+            //    delay_minutes computed by `adjust_queue_on_appointment_end()`.
+            final delay = (apt['delay_minutes'] as num?)?.toInt() ?? 0;
+            if (delay <= 10) {
+              onTimeCount++;
+            }
           } else if (status == 'no_show') {
             todayNoShow++;
           }
@@ -1052,10 +1092,10 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
         });
       }
 
+      // ✅ FIXED: On-time % = on-time count / completed count
       int onTimePercentage = 0;
-      if (totalAppointmentsToday > 0) {
-        onTimePercentage = ((todayCompleted / totalAppointmentsToday) * 100)
-            .round();
+      if (todayCompleted > 0) {
+        onTimePercentage = ((onTimeCount / todayCompleted) * 100).round();
       }
 
       if (!mounted) return;
@@ -1082,7 +1122,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   // =====================================================
-  // LOAD STATISTICS
+  // ✅ LOAD STATISTICS
   // =====================================================
   Future<void> _loadStatistics() async {
     try {
@@ -1100,6 +1140,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       final salonIdInt = int.parse(salonId);
 
+      // ===== Total unique customers =====
       final customersResponse = await supabase
           .from('appointments')
           .select('customer_id')
@@ -1115,6 +1156,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           .toSet()
           .length;
 
+      // ===== Monthly earnings =====
       final salonToday = _salonToday;
       final firstDayOfMonth = DateTime(salonToday.year, salonToday.month, 1);
       final firstDayStr = DateFormat('yyyy-MM-dd').format(firstDayOfMonth);
@@ -1124,7 +1166,12 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       final monthlyResponse = await supabase
           .from('appointments')
-          .select('price')
+          .select('''
+            price,
+            appointment_services (
+              final_price
+            )
+          ''')
           .eq('barber_id', _employeeId)
           .eq('status', 'completed')
           .eq('salon_id', salonIdInt)
@@ -1135,9 +1182,18 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
       int monthlyTotal = 0;
       for (var apt in monthlyResponse) {
-        monthlyTotal += (apt['price'] as num?)?.toInt() ?? 0;
+        double price = (apt['price'] as num?)?.toDouble() ?? 0.0;
+        if (price <= 0) {
+          final servicesList = (apt['appointment_services'] as List?) ?? [];
+          price = servicesList.fold<double>(
+            0.0,
+            (acc, s) => acc + ((s['final_price'] as num?)?.toDouble() ?? 0.0),
+          );
+        }
+        monthlyTotal += price.toInt();
       }
 
+      // ===== Rating =====
       final reviewsResponse = await supabase
           .from('reviews')
           .select('overall_rating')
@@ -1180,7 +1236,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       FirebaseMessaging.onMessage.listen((RemoteMessage message) {
         if (message.data['type'] == 'new_booking_assigned') {
           _showNewAssignmentAlert(message);
-          _loadData();
+          _loadData(showLoading: false);
         } else if (message.data['type'] == 'booking_reminder') {
           _showReminderAlert(message);
         }
@@ -1478,6 +1534,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     }
   }
 
+  /// ✅ Redundant refresh removed (didPopNext already handles it)
   Future<void> _viewNotifications() async {
     if (!_hasPermission) {
       final shouldShow = await _showPermissionCardContext(
@@ -1486,7 +1543,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       if (shouldShow) return;
     }
     if (!mounted) return;
-    context.push('/notifications?role=barber');
+
+    await context.push('/notifications?role=barber');
+    // didPopNext fires on return — no explicit count refresh needed here
   }
 
   void _viewBookingDetails(String customerName) {
@@ -1596,9 +1655,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   // ✅ SALON SELECTOR CHIP — Center chip below AppBar (in body top)
   // ============================================================
 
-  /// Single salon: just show the name as text (no chip, no dropdown)
-  /// Multiple salons: show a dropdown chip centered
-  /// Long names: responsive with ellipsis
   Widget _buildSalonSelectorChip() {
     if (_assignedSalons.isEmpty) return const SizedBox.shrink();
 
@@ -1664,7 +1720,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.store,
                     size: 16,
                     color: AppTheme.primary,
@@ -1677,7 +1733,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                           : 'Salon',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                         color: AppTheme.primary,
@@ -1685,7 +1741,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                     ),
                   ),
                   const SizedBox(width: 4),
-                  Icon(
+                  const Icon(
                     Icons.arrow_drop_down,
                     size: 20,
                     color: AppTheme.primary,
@@ -1892,10 +1948,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   }
 
   // =====================================================
-  // ✅ FIX: Stats cards
-  //   - LKR/INR → "Rs."/"₹" text icon එක විදිහට
-  //   - USD/EUR/etc → Icon එක
-  //   - Value එකේ currency symbol නැහැ (withSymbol: false)
+  // ✅ Stats cards
   // =====================================================
   Widget _buildStatsSection() {
     final todaysCard = DashboardStatCard(
@@ -1907,13 +1960,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       onTap: _viewMySchedule,
     );
 
-    // ✅ FIX: Earnings card — LKR/INR සඳහා text, වෙනත් සඳහා icon
     final earningsCard = DashboardStatCard(
       title: 'Earnings',
       value: _formatPrice(_todayEarnings, withSymbol: false),
-      // ✅ LKR/INR → null (text පෙන්නන්න), වෙනත් → icon
-      icon: _useCurrencyText ? null : _currencyService.getIcon(_salonCurrencyCode),
-      // ✅ LKR/INR → "Rs."/"₹" text, වෙනත් → null (icon පෙන්නන්න)
+      // ✅ FIXED: explicit list → icon or text
+      icon: _useCurrencyText
+          ? null
+          : _currencyService.getIcon(_salonCurrencyCode),
       iconText: _useCurrencyText ? _salonCurrencySymbol : null,
       color: Colors.green,
       subtitle:
@@ -2132,10 +2185,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             iconSize: 28,
           ),
         ),
-        // ✅ Salon selector REMOVED from AppBar title — now shows nothing
         title: null,
         actions: [
-          // ✅ Salon selector chip REMOVED from AppBar actions (was web-only chip)
           Stack(
             clipBehavior: Clip.none,
             children: [
