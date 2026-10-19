@@ -54,8 +54,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _currentTheme = themeMode == 'light'
           ? ThemeMode.light
           : themeMode == 'dark'
-              ? ThemeMode.dark
-              : ThemeMode.system;
+          ? ThemeMode.dark
+          : ThemeMode.system;
     });
   }
 
@@ -81,6 +81,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _openCurrencySettings() async {
+    final changed = await context.push<bool>('/settings/currency');
+
+    if (!mounted) return;
+
+if (changed == true) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text('💱 Currency updated successfully'),
+      backgroundColor: Colors.green,
+      behavior: SnackBarBehavior.floating,
+      duration: Duration(seconds: 2),
+    ),
+  );
+}
   }
 
   @override
@@ -109,10 +126,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           },
           tooltip: 'Menu',
         ),
-        title: const Text(
-          'Settings',
-          style: TextStyle(color: Colors.white),
-        ),
+        title: const Text('Settings', style: TextStyle(color: Colors.white)),
         backgroundColor: context.primaryColor,
         foregroundColor: Colors.white,
         elevation: 0,
@@ -126,9 +140,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       body: _isLoading
           ? Center(
-              child: CircularProgressIndicator(
-                color: context.primaryColor,
-              ),
+              child: CircularProgressIndicator(color: context.primaryColor),
             )
           : Center(
               child: Container(
@@ -150,9 +162,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       decoration: BoxDecoration(
                         color: context.cardColor,
                         borderRadius: BorderRadius.circular(isTablet ? 20 : 16),
-                        border: Border.all(
-                          color: context.dividerColor,
-                        ),
+                        border: Border.all(color: context.dividerColor),
                         boxShadow: [
                           BoxShadow(
                             color: Colors.black.withValues(alpha: 0.05),
@@ -170,7 +180,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 padding: EdgeInsets.all(isTablet ? 12 : 10),
                                 decoration: BoxDecoration(
                                   color: Colors.purple.withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(isTablet ? 14 : 12),
+                                  borderRadius: BorderRadius.circular(
+                                    isTablet ? 14 : 12,
+                                  ),
                                 ),
                                 child: Icon(
                                   Icons.palette_outlined,
@@ -221,7 +233,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         icon: Icons.brightness_auto,
                                         label: 'System',
                                         mode: ThemeMode.system,
-                                        isSelected: _currentTheme == ThemeMode.system,
+                                        isSelected:
+                                            _currentTheme == ThemeMode.system,
                                         isTablet: isTablet,
                                       ),
                                     ),
@@ -231,7 +244,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         icon: Icons.brightness_5,
                                         label: 'Light',
                                         mode: ThemeMode.light,
-                                        isSelected: _currentTheme == ThemeMode.light,
+                                        isSelected:
+                                            _currentTheme == ThemeMode.light,
                                         isTablet: isTablet,
                                       ),
                                     ),
@@ -241,7 +255,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                         icon: Icons.brightness_2,
                                         label: 'Dark',
                                         mode: ThemeMode.dark,
-                                        isSelected: _currentTheme == ThemeMode.dark,
+                                        isSelected:
+                                            _currentTheme == ThemeMode.dark,
                                         isTablet: isTablet,
                                       ),
                                     ),
@@ -254,7 +269,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       icon: Icons.brightness_auto,
                                       label: 'System',
                                       mode: ThemeMode.system,
-                                      isSelected: _currentTheme == ThemeMode.system,
+                                      isSelected:
+                                          _currentTheme == ThemeMode.system,
                                       isTablet: false,
                                     ),
                                     const SizedBox(height: 8),
@@ -262,7 +278,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       icon: Icons.brightness_5,
                                       label: 'Light',
                                       mode: ThemeMode.light,
-                                      isSelected: _currentTheme == ThemeMode.light,
+                                      isSelected:
+                                          _currentTheme == ThemeMode.light,
                                       isTablet: false,
                                     ),
                                     const SizedBox(height: 8),
@@ -270,7 +287,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                       icon: Icons.brightness_2,
                                       label: 'Dark',
                                       mode: ThemeMode.dark,
-                                      isSelected: _currentTheme == ThemeMode.dark,
+                                      isSelected:
+                                          _currentTheme == ThemeMode.dark,
                                       isTablet: false,
                                     ),
                                   ],
@@ -280,10 +298,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
 
                     const SizedBox(height: 16),
-                    Divider(
-                      color: context.dividerColor,
-                      height: 1,
-                    ),
+                    Divider(color: context.dividerColor, height: 1),
                     const SizedBox(height: 8),
 
                     // ============================================================
@@ -295,16 +310,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       icon: Icons.people_outline,
                       iconColor: context.primaryColor,
                       title: 'Manage Profiles',
-                      subtitle: 'Switch between your owner, barber, or customer roles',
+                      subtitle:
+                          'Switch between your owner, barber, or customer roles',
                       onTap: () => context.push('/settings/profiles'),
                       isTablet: isTablet,
                     ),
 
                     const SizedBox(height: 8),
-                    Divider(
-                      color: context.dividerColor,
-                      height: 1,
-                    ),
+                    Divider(color: context.dividerColor, height: 1),
                     const SizedBox(height: 8),
 
                     // ============================================================
@@ -353,10 +366,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
 
                     const SizedBox(height: 8),
-                    Divider(
-                      color: context.dividerColor,
-                      height: 1,
-                    ),
+                    Divider(color: context.dividerColor, height: 1),
                     const SizedBox(height: 8),
 
                     // ============================================================
@@ -377,6 +387,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
 
                     _buildSettingsTile(
+                      icon: Icons.currency_exchange,
+                      iconColor: Colors.teal,
+                      title: 'Preferred Currency',
+                      subtitle: 'See prices in your currency',
+                      onTap: _openCurrencySettings,
+                      isTablet: isTablet,
+                    ),
+
+                    _buildSettingsTile(
                       icon: Icons.language_outlined,
                       iconColor: Colors.purple,
                       title: 'Language',
@@ -386,10 +405,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
 
                     const SizedBox(height: 8),
-                    Divider(
-                      color: context.dividerColor,
-                      height: 1,
-                    ),
+                    Divider(color: context.dividerColor, height: 1),
                     const SizedBox(height: 8),
 
                     // ============================================================
@@ -447,11 +463,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             color: iconColor.withValues(alpha: 0.1),
             shape: BoxShape.circle,
           ),
-          child: Icon(
-            icon,
-            color: iconColor,
-            size: isTablet ? 24 : 22,
-          ),
+          child: Icon(icon, color: iconColor, size: isTablet ? 24 : 22),
         ),
         title: Text(
           title,
@@ -473,10 +485,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             if (badge != null)
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 2,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.green.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
@@ -547,8 +556,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         decoration: BoxDecoration(
           color: isSelected
               ? (isDark
-                  ? Colors.white.withValues(alpha: 0.1)
-                  : const Color(0xFFFF6B8B).withValues(alpha: 0.1))
+                    ? Colors.white.withValues(alpha: 0.1)
+                    : const Color(0xFFFF6B8B).withValues(alpha: 0.1))
               : Colors.transparent,
           borderRadius: BorderRadius.circular(isTablet ? 14 : 12),
           border: Border.all(

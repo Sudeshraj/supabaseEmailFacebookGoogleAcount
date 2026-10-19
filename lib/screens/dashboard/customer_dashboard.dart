@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/observers/route_observers.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/currency_service.dart';
+import 'package:flutter_application_1/services/currency_settings_service.dart'; // ✅ NEW
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
@@ -26,7 +28,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     with
         WidgetsBindingObserver,
         AutomaticKeepAliveClientMixin,
-        SingleTickerProviderStateMixin {
+        SingleTickerProviderStateMixin,
+        RouteAware {
   @override
   bool get wantKeepAlive => true;
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -35,6 +38,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   final PermissionService _permissionService = PermissionService();
   final PermissionManager _permissionManager = PermissionManager();
   final CurrencyService _currencyService = CurrencyService.instance;
+  final CurrencySettingsService _currencySettings =
+      CurrencySettingsService.instance; // ✅ NEW
   final supabase = Supabase.instance.client;
 
   bool _hasPermission = false;
@@ -53,21 +58,19 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   int pendingBookings = 0;
   int _completedBookings = 0;
   int _cancelledBookings = 0;
-  int _totalSpent = 0;
+  double _totalSpent = 0.0; // ✅ double
   int _loyaltyPoints = 0;
 
-  // ✅ NEW: Salon-specific loyalty summary
+  // ✅ Salon-specific loyalty summary
   int _loyaltySalonCount = 0;
 
-  // ✅ SALON CURRENCY (loaded from first followed salon, fallback LKR)
-  String _salonCurrencyCode = 'LKR';
+  // ✅ USER timezone + currency
+  static const String _kDefaultTimezone = 'Asia/Colombo';
+  String _userTimezone = _kDefaultTimezone;
+  String _userCurrencyCode = 'LKR';
 
-  String get _salonCurrencySymbol =>
-      _currencyService.getSymbol(_salonCurrencyCode);
-
-  // ✅ SALON TIMEZONE (for time conversions, fallback Asia/Colombo)
-  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
-  String _salonTimezone = _kDefaultSalonTimezone;
+  String get _userCurrencySymbol =>
+      _currencyService.getSymbol(_userCurrencyCode);
 
   // VIP Bookings
   int _vipBookings = 0;
@@ -79,7 +82,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   // Special Offers
   List<Map<String, dynamic>> _offers = [];
 
-  // ✅ Track claim state per offer (for spinner)
   final Set<int> _claimingOfferIds = {};
 
   // Followed Salons
@@ -104,7 +106,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   final LayerLink _searchLayerLink = LayerLink();
   final GlobalKey _searchFieldKey = GlobalKey();
 
-  // ✨ Pulse animation for offers that are not applied yet
+  // Pulse animation
   late final AnimationController _pulseCtrl;
   late final Animation<double> _pulseAnim;
 
@@ -113,7 +115,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   bool _isTablet = false;
   bool _isWeb = false;
 
-  // Scroll Controller for web
   final ScrollController _scrollController = ScrollController();
 
   @override
@@ -128,19 +129,30 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       begin: 1.0,
       end: 1.04,
     ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
-    _initializeTimezone();
-    _loadCustomerData();
-    _checkCustomerStatus();
-    _loadDashboardData();
+
+    _initializeAsync();
+
     _setupNotificationListeners();
     _searchController.addListener(_onSearchTextChanged);
     debugPrint('🔄 CustomerDashboard initState completed');
   }
 
+  Future<void> _initializeAsync() async {
+    await _initializeTimezoneAndCurrency();
+    await _loadCustomerData();
+    await _loadDashboardData();
+  }
+
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _checkScreenSize();
+        final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      dashboardRouteObserver.subscribe(this, route);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _checkScreenSize();
+    });
   }
 
   @override
@@ -155,6 +167,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   @override
   void dispose() {
+     dashboardRouteObserver.unsubscribe(this);
     _pulseCtrl.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -164,14 +177,21 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     super.dispose();
   }
 
-  // ✅ FIX: MediaQuery.sizeOf + called from didChangeDependencies only
+  @override
+  void didPopNext() {
+    if (mounted) _loadDashboardData();
+  }
+
   void _checkScreenSize() {
+    if (!mounted) return;
     final size = MediaQuery.sizeOf(context);
     final isLarge = size.width > 800 || size.height > 800;
     final isTablet = size.shortestSide >= 600;
     final isWeb = size.width > 800;
 
-    if (_isLargeScreen != isLarge || _isTablet != isTablet || _isWeb != isWeb) {
+    if (_isLargeScreen != isLarge ||
+        _isTablet != isTablet ||
+        _isWeb != isWeb) {
       setState(() {
         _isLargeScreen = isLarge;
         _isTablet = isTablet;
@@ -181,7 +201,40 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // CHECK CUSTOMER STATUS (role by name, no hardcoded role_id)
+  // ✅ FIX #3: Timezone + Currency (currency from DB)
+  // ============================================================
+  Future<void> _initializeTimezoneAndCurrency() async {
+    await TimezoneService.initialize();
+
+    final currentTimezone = TimezoneService.getCurrentTimezone();
+    if (currentTimezone.isEmpty) {
+      await TimezoneService.setTimezone(_kDefaultTimezone);
+      _userTimezone = _kDefaultTimezone;
+    } else {
+      _userTimezone = currentTimezone;
+    }
+
+    // ✅ Load currency from DB (profiles.preferred_currency)
+    try {
+      _userCurrencyCode = await _currencySettings.getUserCurrency();
+    } catch (e) {
+      debugPrint('⚠️ Failed to load user currency: $e');
+      _userCurrencyCode =
+          TimezoneService.getCurrencyForTimezone(_userTimezone);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isTimezoneLoaded = true;
+    });
+
+    debugPrint(
+      '✅ Dashboard initialized: TZ=$_userTimezone, Currency=$_userCurrencyCode',
+    );
+  }
+
+  // ============================================================
+  // CHECK CUSTOMER STATUS
   // ============================================================
   Future<void> _checkCustomerStatus() async {
     try {
@@ -191,7 +244,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // ✅ Role check by name
       final roleCheck = await supabase
           .from('user_roles')
           .select('status, roles!inner(name)')
@@ -270,7 +322,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // PERMISSION CARD — returns bool so callers can await properly
+  // PERMISSION CARD
   // ============================================================
   Future<bool> _showPermissionCardContext({String? action}) async {
     final shouldShow = await _permissionManager.shouldShowPermissionCard(
@@ -374,8 +426,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ SHARED HELPER — Build extra payload for a SPECIFIC offer
-  //    Now variant-aware: uses offer_services to pick variant
+  // ✅ Build extra payload for a SPECIFIC offer
   // ============================================================
   Future<Map<String, dynamic>> _buildBookingExtraWithOffer(
     Map<String, dynamic> offer,
@@ -390,7 +441,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       debugPrint('🎁 Building extra for offer: ${offer['title']}');
 
-      // 1. Load salon info (with timezone + currency)
       if (offerSalonId != null) {
         try {
           final salonResp = await supabase
@@ -411,7 +461,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         }
       }
 
-      // 2. ✅ Load offer's applicable services + variants (variant-aware)
       List<Map<String, dynamic>> offerServiceRows = [];
       try {
         final offerServicesResp = await supabase
@@ -430,79 +479,60 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       }
 
       if (offerServiceRows.isNotEmpty) {
-        // ✅ Prefer variant-level rows (more specific)
         final variantRows = offerServiceRows
-            .where((r) => r['variant_id'] != null)
+            .where((r) => r['variant_id'] != null && r['service_id'] != null)
             .toList();
 
         if (variantRows.isNotEmpty) {
-          final first = variantRows.first;
-          preselectedServices.add({
-            'service_id': first['service_id'],
-            'variant_id': first['variant_id'],
-          });
+          for (final row in variantRows) {
+            preselectedServices.add({
+              'service_id': row['service_id'],
+              'variant_id': row['variant_id'],
+            });
+          }
           debugPrint(
-            '🎯 Preselected (variant-level): sid=${first['service_id']} vid=${first['variant_id']}',
+            '🎯 Preselected (variant-level): ${variantRows.length} services',
           );
         } else {
-          // Service-level → pick first active variant
-          final serviceRow = offerServiceRows.first;
-          final sid = serviceRow['service_id'] as int?;
-          if (sid != null) {
-            final variantsResp = await supabase
-                .from('service_variants')
-                .select('id')
-                .eq('service_id', sid)
-                .eq('is_active', true)
-                .order('id', ascending: true)
-                .limit(1);
+          final serviceRows = offerServiceRows
+              .where((r) => r['service_id'] != null)
+              .toList();
 
-            if (variantsResp.isNotEmpty) {
-              final variantId = variantsResp.first['id'] as int;
-              preselectedServices.add({
-                'service_id': sid,
-                'variant_id': variantId,
-              });
-              debugPrint(
-                '🎯 Preselected (service-level→first variant): sid=$sid vid=$variantId',
-              );
+          for (final row in serviceRows) {
+            final sid = row['service_id'] as int;
+            try {
+              final variantsResp = await supabase
+                  .from('service_variants')
+                  .select('id')
+                  .eq('service_id', sid)
+                  .eq('is_active', true)
+                  .order('id', ascending: true)
+                  .limit(1);
+
+              if (variantsResp.isNotEmpty) {
+                preselectedServices.add({
+                  'service_id': sid,
+                  'variant_id': variantsResp.first['id'] as int,
+                });
+              }
+            } catch (e) {
+              debugPrint('⚠️ Failed to load variant for service $sid: $e');
             }
           }
+          debugPrint(
+            '🎯 Preselected (service-level → first variant): '
+            '${preselectedServices.length} services',
+          );
         }
-      } else if (offerSalonId != null) {
-        // Fallback: offer has no offer_services rows → all services
-        final allServicesResp = await supabase
-            .from('services')
-            .select('id')
-            .eq('salon_id', offerSalonId)
-            .eq('is_active', true)
-            .limit(1);
-
-        if (allServicesResp.isNotEmpty) {
-          final sid = allServicesResp.first['id'] as int;
-          final variantsResp = await supabase
-              .from('service_variants')
-              .select('id')
-              .eq('service_id', sid)
-              .eq('is_active', true)
-              .order('id', ascending: true)
-              .limit(1);
-
-          if (variantsResp.isNotEmpty) {
-            final variantId = variantsResp.first['id'] as int;
-            preselectedServices.add({
-              'service_id': sid,
-              'variant_id': variantId,
-            });
-            debugPrint('🎯 Preselected (fallback): sid=$sid vid=$variantId');
-          }
-        }
+      } else {
+        debugPrint(
+          '🎯 Offer applies to all services — user will pick at booking flow',
+        );
       }
     } catch (e) {
       debugPrint('⚠️ Error building booking extra: $e');
     }
 
-    // Build extra payload
     if (offerSalon != null) {
       final salonWithExtras = Map<String, dynamic>.from(offerSalon);
       if (preselectedServices.isNotEmpty) {
@@ -522,7 +552,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // TOP BUTTON: Book Now
+  // BOOKING NAVIGATION
   // ============================================================
   Future<void> _bookAppointment() async {
     if (!_hasPermission) {
@@ -537,9 +567,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ============================================================
-  // TOP BUTTON: VIP Booking
-  // ============================================================
   Future<void> _createVipBooking() async {
     if (!_hasPermission) {
       final shouldShow = await _showPermissionCardContext(action: 'vip');
@@ -553,9 +580,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ============================================================
-  // OFFER CARD BUTTON: Book Now (with this specific offer)
-  // ============================================================
   Future<void> _bookAppointmentWithOffer(Map<String, dynamic> offer) async {
     if (!_hasPermission) {
       final shouldShow = await _showPermissionCardContext(action: 'booking');
@@ -576,9 +600,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ============================================================
-  // OFFER CARD BUTTON: VIP Booking (with this specific offer)
-  // ============================================================
   Future<void> _createVipBookingWithOffer(Map<String, dynamic> offer) async {
     if (!_hasPermission) {
       final shouldShow = await _showPermissionCardContext(action: 'vip');
@@ -599,9 +620,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  // ============================================================
-  // VIEW ALL OFFERS
-  // ============================================================
   Future<void> _viewAllOffers() async {
     if (!_hasPermission) {
       final shouldShow = await _showPermissionCardContext(action: 'offer');
@@ -807,27 +825,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ TIMEZONE — simplified, uses TimezoneService only
-  // ============================================================
-  Future<void> _initializeTimezone() async {
-    await TimezoneService.initialize();
-
-    // ✅ TimezoneService එකේ current timezone එක use කරන්න
-    final currentTimezone = TimezoneService.getCurrentTimezone();
-    if (currentTimezone.isEmpty) {
-      await TimezoneService.setTimezone(_kDefaultSalonTimezone);
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _isTimezoneLoaded = true;
-    });
-
-    debugPrint('✅ User timezone: $currentTimezone');
-  }
-
-  // ============================================================
-  // ✅ LOAD DASHBOARD DATA (with salon-specific loyalty + salon currency + timezone)
+  // ✅ FIX #4, #5, #6: Load Dashboard (refresh currency + correct conversion + skip null)
   // ============================================================
   Future<void> _loadDashboardData() async {
     if (!mounted) return;
@@ -840,6 +838,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
+      // ✅ FIX #4: Refresh currency from DB
+      try {
+        _userCurrencyCode = await _currencySettings.getUserCurrency();
+      } catch (e) {
+        debugPrint('⚠️ Failed to refresh currency: $e');
+      }
+
       await _checkCustomerStatus();
       if (!_isActive) {
         if (mounted) setState(() => _isLoading = false);
@@ -847,31 +852,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       }
 
       await _loadFollowedSalons(user.id);
-
-      // ✅ Load first salon's timezone + currency (from followed salons)
-      if (_followedSalons.isNotEmpty) {
-        final firstSalon = _followedSalons.first;
-        try {
-          final salonInfo = await supabase
-              .from('salons')
-              .select('timezone, currency_code')
-              .eq('id', firstSalon['id'])
-              .maybeSingle();
-
-          if (salonInfo != null) {
-            final tz = salonInfo['timezone'] as String?;
-            if (tz != null && tz.isNotEmpty) {
-              _salonTimezone = tz;
-            }
-            final curr = salonInfo['currency_code'] as String?;
-            if (curr != null && curr.isNotEmpty) {
-              _salonCurrencyCode = curr;
-            }
-          }
-        } catch (e) {
-          debugPrint('⚠️ Error loading salon info: $e');
-        }
-      }
 
       final appointments = await supabase
           .from('appointments')
@@ -888,6 +868,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
             original_price,
             discount_amount,
             extra_charge,
+            currency_code,
+            exchange_rate_at_booking,
             queue_number,
             queue_token,
             barber_id,
@@ -940,7 +922,26 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         if (status == 'pending') pending++;
         if (status == 'completed') {
           completed++;
-          totalSpent += price;
+
+          // ✅ FIX #5 & #6: correct conversion + skip on null
+          final aptCurrency = apt['currency_code'] as String?;
+          final exchangeRate =
+              (apt['exchange_rate_at_booking'] as num?)?.toDouble();
+
+          if (aptCurrency == null || aptCurrency == _userCurrencyCode) {
+            // Same currency — direct
+            totalSpent += price;
+          } else if (exchangeRate != null && exchangeRate > 0) {
+            // ✅ rate = 1 salon_currency = N user_currency
+            // Example: 1 LKR = 0.0030 USD → 15000 LKR × 0.0030 = $45
+            totalSpent += price * exchangeRate;
+          } else {
+            // ✅ Old booking without rate — skip
+            debugPrint(
+              '⚠️ Booking ${apt['id']} skipped: '
+              '$aptCurrency → $_userCurrencyCode, no rate',
+            );
+          }
         }
         if (status == 'cancelled') cancelled++;
 
@@ -953,7 +954,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       final favoriteBarbers = await _getFavoriteBarbers(user.id);
       final offers = await _loadOffersFromDatabase();
 
-      // ✅ NEW: Load salon-specific loyalty summary via RPC
       int loyaltyPoints = 0;
       int loyaltySalonCount = 0;
 
@@ -971,47 +971,54 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         }
       } catch (e) {
         debugPrint('⚠️ Failed to load loyalty summary: $e');
-        // Fallback — old logic (only if RPC fails)
         loyaltyPoints = (totalSpent / 10).round();
       }
 
       await _loadUnreadCount();
 
-      if (mounted) {
-        setState(() {
-          _upcomingBookings = upcoming;
-          pendingBookings = pending;
-          _completedBookings = completed;
-          _cancelledBookings = cancelled;
-          _vipBookings = vip;
-          _pendingVipBookings = pendingVip;
-          _totalSpent = totalSpent.toInt();
-          _loyaltyPoints = loyaltyPoints;
-          _loyaltySalonCount = loyaltySalonCount;
-          _favoriteBarbers = favoriteBarbers;
-          _offers = offers;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _upcomingBookings = upcoming;
+        pendingBookings = pending;
+        _completedBookings = completed;
+        _cancelledBookings = cancelled;
+        _vipBookings = vip;
+        _pendingVipBookings = pendingVip;
+        _totalSpent = totalSpent;
+        _loyaltyPoints = loyaltyPoints;
+        _loyaltySalonCount = loyaltySalonCount;
+        _favoriteBarbers = favoriteBarbers;
+        _offers = offers;
+      });
 
-      _hasPermission = await _notificationService.hasPermission();
+      final hasPermission = await _notificationService.hasPermission();
+      if (!mounted) return;
 
-      if (!_hasPermission) {
-        _showPermissionCard = await _permissionManager.shouldShowPermissionCard(
+      setState(() {
+        _hasPermission = hasPermission;
+      });
+
+      if (!hasPermission) {
+        final shouldShow = await _permissionManager.shouldShowPermissionCard(
           screen: 'customer_dashboard',
           action: null,
         );
+        if (!mounted) return;
 
-        if (UniversalPlatform.isWeb && _showPermissionCard) {
+        if (UniversalPlatform.isWeb && shouldShow) {
           final status = await _notificationService.getWebPermissionStatus();
+          if (!mounted) return;
           if (status == 'denied') {
-            _showPermissionCard = false;
-            if (mounted) {
-              _showWebPermissionHelp();
-            }
+            setState(() => _showPermissionCard = false);
+            _showWebPermissionHelp();
+          } else {
+            setState(() => _showPermissionCard = shouldShow);
           }
+        } else {
+          setState(() => _showPermissionCard = shouldShow);
         }
       } else {
-        _showPermissionCard = false;
+        setState(() => _showPermissionCard = false);
       }
 
       debugPrint(
@@ -1025,6 +1032,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
+  // ============================================================
+  // ✅ Batch query for favorite barbers
+  // ============================================================
   Future<List<Map<String, dynamic>>> _getFavoriteBarbers(
     String customerId,
   ) async {
@@ -1063,24 +1073,36 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       List<Map<String, dynamic>> barbers = barberCount.values.toList();
       barbers.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
 
-      for (var barber in barbers.take(5)) {
-        final reviewsResult = await supabase
-            .from('reviews')
-            .select('overall_rating')
-            .eq('barber_id', barber['id']);
+      final topBarbers = barbers.take(5).toList();
+      if (topBarbers.isEmpty) return [];
 
-        double avgRating = 0;
-        if (reviewsResult.isNotEmpty) {
-          double total = 0;
-          for (var review in reviewsResult) {
-            total += (review['overall_rating'] as num?)?.toDouble() ?? 0;
-          }
-          avgRating = total / reviewsResult.length;
-        }
-        barber['rating'] = avgRating > 0 ? avgRating : 4.5;
+      final barberIds = topBarbers.map((b) => b['id'] as String).toList();
+
+      final reviewsResult = await supabase
+          .from('reviews')
+          .select('barber_id, overall_rating')
+          .inFilter('barber_id', barberIds)
+          .limit(500);
+
+      final Map<String, List<double>> ratingsByBarber = {};
+      for (var review in reviewsResult) {
+        final bid = review['barber_id'] as String?;
+        if (bid == null) continue;
+        final rating = (review['overall_rating'] as num?)?.toDouble() ?? 0;
+        ratingsByBarber.putIfAbsent(bid, () => []).add(rating);
       }
 
-      return barbers.take(5).toList();
+      for (var barber in topBarbers) {
+        final ratings = ratingsByBarber[barber['id']] ?? [];
+        if (ratings.isEmpty) {
+          barber['rating'] = 4.5;
+        } else {
+          final avg = ratings.reduce((a, b) => a + b) / ratings.length;
+          barber['rating'] = avg;
+        }
+      }
+
+      return topBarbers;
     } catch (e) {
       debugPrint('❌ Error getting favorite barbers: $e');
       return [];
@@ -1148,7 +1170,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ LOAD OFFERS (variant-aware + claim status)
+  // ✅ LOAD OFFERS
   // ============================================================
   Future<List<Map<String, dynamic>>> _loadOffersFromDatabase() async {
     try {
@@ -1191,7 +1213,9 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               id,
               name,
               logo_url,
-              address
+              address,
+              currency_code,
+              currency_symbol
             ),
             offer_services (
               service_id,
@@ -1209,7 +1233,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
       if (result.isEmpty) return [];
 
-      // ✅ Load claims for this customer
       final offerIds = result.map<int>((o) => o['id'] as int).toList();
       Map<int, String> claimStatus = {};
       try {
@@ -1226,7 +1249,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         debugPrint('Error loading claims: $e');
       }
 
-      // ✅ Load gender/age lookups for variant labels
       final genderIds = <int>{};
       final ageIds = <int>{};
       for (final o in result) {
@@ -1264,7 +1286,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         }
       }
 
-      // ✅ Build variant/scope summary for each offer
       final enriched = result.map<Map<String, dynamic>>((o) {
         final offer = Map<String, dynamic>.from(o);
         final svcList = (offer['offer_services'] as List? ?? []);
@@ -1414,7 +1435,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ APPLY OFFER — Atomic via claim_offer RPC (salon-specific)
+  // ✅ APPLY OFFER
   // ============================================================
   void _showSnackBar(String message, Color color) {
     if (!mounted) return;
@@ -1431,7 +1452,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   Future<void> _applyOffer(Map<String, dynamic> offer) async {
     final offerId = offer['id'] as int;
 
-    // ✅ Prevent double-tap
     if (_claimingOfferIds.contains(offerId)) return;
 
     try {
@@ -1444,7 +1464,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // ✅ Role check by name
       final customerCheck = await supabase
           .from('user_roles')
           .select('status, roles!inner(name)')
@@ -1496,7 +1515,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // ✅ Already claimed/used guard
       final claimStatus = offer['claim_status'];
       if (claimStatus == 'active') {
         if (mounted) {
@@ -1511,7 +1529,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         return;
       }
 
-      // ✅ NEW: Salon-specific points check
       final pointsRequired = (offer['points_required'] as num?)?.toInt() ?? 0;
       final offerSalonId = offer['salon_id'] as int?;
 
@@ -1537,7 +1554,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           }
         } catch (e) {
           debugPrint('⚠️ Error checking salon loyalty: $e');
-          // Fall through — server will validate anyway
         }
       }
 
@@ -1648,10 +1664,8 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       if (!mounted) return;
       if (confirmed != true) return;
 
-      // ✅ Set claiming state
       setState(() => _claimingOfferIds.add(offerId));
 
-      // ✅ Atomic RPC — salon-specific points
       final response = await supabase.rpc(
         'claim_offer',
         params: {'p_offer_id': offerId},
@@ -1683,10 +1697,18 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   String _getDiscountText(Map<String, dynamic> offer) {
+    final salonData = offer['salons'] as Map?;
+    final offerCurrencyCode = salonData?['currency_code']?.toString();
+
+    final offerSymbol =
+        (offerCurrencyCode != null && offerCurrencyCode.isNotEmpty)
+        ? _currencyService.getSymbol(offerCurrencyCode)
+        : _userCurrencySymbol;
+
     if (offer['discount_type'] == 'percentage') {
       return '${offer['discount_value']}% OFF';
     } else if (offer['discount_type'] == 'fixed') {
-      return '$_salonCurrencySymbol${offer['discount_value']} OFF';
+      return '$offerSymbol${offer['discount_value']} OFF';
     } else {
       return 'FREE SERVICE';
     }
@@ -1763,7 +1785,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       );
 
       return !validFromUtcMidnight.isAfter(todayUtcMidnight) &&
-          validToUtcMidnight.isAfter(todayUtcMidnight);
+          !validToUtcMidnight.isBefore(todayUtcMidnight);
     } catch (e) {
       debugPrint('Error checking offer active: $e');
       return false;
@@ -1791,22 +1813,16 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  /// ✅ UTC → SALON local time
-  /// Uses fixed reference date for recurring times (schedules/breaks)
-  String _convertUtcToSalonTime(String? utcTime, DateTime referenceDate) {
+  String _convertUtcToUserTime(String? utcTime, DateTime referenceDate) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     try {
       String timeStr = utcTime;
       if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
 
-      final tz = _salonTimezone.isNotEmpty
-          ? _salonTimezone
-          : _kDefaultSalonTimezone;
-
       return TimezoneService.utcToLocalTimeForDateWithTimezone(
         timeStr,
         referenceDate,
-        tz,
+        _userTimezone,
       );
     } catch (e) {
       debugPrint('Error converting time: $e');
@@ -1814,16 +1830,15 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  /// ✅ Salon hours — uses SALON timezone with fixed reference date
+  // ✅ Option B: used in _buildSearchResultTile
   String _getFormattedSalonHours(Map<String, dynamic> salon) {
     final openTimeUtc = salon['open_time']?.toString() ?? '09:00:00';
     final closeTimeUtc = salon['close_time']?.toString() ?? '18:00:00';
 
-    // ✅ Fixed reference date for recurring times (avoids DST surprises)
     final referenceDate = DateTime(2024, 1, 1);
 
-    final openLocal = _convertUtcToSalonTime(openTimeUtc, referenceDate);
-    final closeLocal = _convertUtcToSalonTime(closeTimeUtc, referenceDate);
+    final openLocal = _convertUtcToUserTime(openTimeUtc, referenceDate);
+    final closeLocal = _convertUtcToUserTime(closeTimeUtc, referenceDate);
 
     return '$openLocal - $closeLocal';
   }
@@ -1997,6 +2012,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     Overlay.of(context).insert(_searchOverlay!);
   }
 
+  // ✅ Option B: _getFormattedSalonHours used here
   Widget _buildSearchResultTile(Map<String, dynamic> salon) {
     return InkWell(
       onTap: () {
@@ -2027,7 +2043,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         errorBuilder: (context, error, stackTrace) => Center(
                           child: Text(
                             salon['name']?.substring(0, 1) ?? 'S',
-                            style: TextStyle(
+                            style: const TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
                               color: AppTheme.primary,
@@ -2039,7 +2055,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   : Center(
                       child: Text(
                         salon['name']?.substring(0, 1) ?? 'S',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
                           color: AppTheme.primary,
@@ -2074,6 +2090,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                       overflow: TextOverflow.ellipsis,
                     ),
                   const SizedBox(height: 2),
+                  // ✅ Option B: use _getFormattedSalonHours
                   Row(
                     children: [
                       Icon(
@@ -2105,15 +2122,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Row(
+              child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
-                    Icons.chevron_right,
-                    size: 14,
-                    color: AppTheme.primary,
-                  ),
-                  const SizedBox(width: 2),
+                  Icon(Icons.chevron_right, size: 14, color: AppTheme.primary),
+                  SizedBox(width: 2),
                   Text(
                     'View',
                     style: TextStyle(
@@ -2230,7 +2243,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               '$_vipBookings',
               Icons.star,
               Colors.amber,
-              _viewMyBookings,
+              _viewVipBookings,
             ),
             _buildStatCard(
               'Points',
@@ -2734,7 +2747,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   Widget _buildProfilePhoto() {
     final hasImage = _customerImage != null && _customerImage!.isNotEmpty;
-    final isDark = context.isDarkMode;
 
     return GestureDetector(
       onTap: _navigateToProfile,
@@ -2754,10 +2766,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   _customerName.isNotEmpty
                       ? _customerName[0].toUpperCase()
                       : 'U',
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.white,
+                    color: Colors.white,
                   ),
                 )
               : null,
@@ -2766,6 +2778,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     );
   }
 
+  // ✅ FIX #7: Activity Summary — tablet has Total Spent
   Widget _buildActivitySummaryCard() {
     final isDark = context.isDarkMode;
 
@@ -2847,11 +2860,16 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                   value: '$_vipBookings',
                   color: Colors.amber,
                 ),
+                // ✅ FIX #7: Total Spent in tablet view
                 _buildActivityItem(
-                  icon: Icons.calendar_today,
-                  label: 'Upcoming',
-                  value: '$_upcomingBookings',
-                  color: Colors.orange,
+                  icon: Icons.currency_rupee,
+                  label: 'Total Spent',
+                  value: _currencyService.format(
+                    price: _totalSpent,
+                    currencyCode: _userCurrencyCode,
+                    withSymbol: true,
+                  ),
+                  color: Colors.purple,
                 ),
               ],
             )
@@ -2900,7 +2918,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                         label: 'Total Spent',
                         value: _currencyService.format(
                           price: _totalSpent,
-                          currencyCode: _salonCurrencyCode,
+                          currencyCode: _userCurrencyCode,
                           withSymbol: true,
                         ),
                         color: Colors.purple,
@@ -2964,8 +2982,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // ✅ OFFER CARD — same design as Salon Profile offer card
-  //    Variant-aware scope chip + claim state handling
+  // ✅ OFFER CARD
   // ============================================================
   Widget _buildFacebookStyleOfferPost(
     Map<String, dynamic> offer,
@@ -2984,7 +3001,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     final description = (offer['description'] as String?) ?? '';
     final scopeSummary = offer['scope_summary']?.toString() ?? '';
 
-    // image_url holds an emoji in this app; ignore real URLs
     final rawIcon = (offer['image_url'] as String?) ?? '';
     final emoji = (rawIcon.isNotEmpty && !rawIcon.startsWith('http'))
         ? rawIcon
@@ -2997,7 +3013,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
     final secondaryColor = isDark ? Colors.white60 : Colors.grey[600];
 
-    // ✅ Button state
     final String buttonLabel;
     final bool buttonEnabled;
     if (isUsed) {
@@ -3050,7 +3065,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ───── HEADER ─────
             Row(
               children: [
                 Container(
@@ -3158,8 +3172,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 ),
               ],
             ),
-
-            // ───── DESCRIPTION ─────
             if (description.isNotEmpty) ...[
               const SizedBox(height: 12),
               Text(
@@ -3169,8 +3181,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 style: TextStyle(fontSize: 12, color: secondaryColor),
               ),
             ],
-
-            // ───── SCOPE SUMMARY (variant-aware) ─────
             if (scopeSummary.isNotEmpty) ...[
               const SizedBox(height: 8),
               Container(
@@ -3199,10 +3209,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
                 ),
               ),
             ],
-
             const SizedBox(height: 12),
-
-            // ───── META ─────
             Row(
               children: [
                 if (points > 0)
@@ -3267,8 +3274,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
               ],
             ),
             const SizedBox(height: 10),
-
-            // ───── ACTIONS ─────
             SizedBox(
               height: 36,
               child: isClaimed || isUsed
@@ -3389,7 +3394,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       ),
     );
 
-    // ✨ Pulse only the offers that are NOT applied yet AND not expired
     if (!isClaimed && !isUsed && !isExpired && !isClaiming) {
       return ScaleTransition(scale: _pulseAnim, child: card);
     }
@@ -3397,18 +3401,13 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   // ============================================================
-  // MAIN BUILD METHOD
-  // ✅ FIX: _checkScreenSize removed from build (already in didChangeDependencies)
+  // MAIN BUILD
   // ============================================================
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final screenWidth = MediaQuery.sizeOf(context).width;
     final bool isWeb = screenWidth > 800;
-
-    // ❌ REMOVED: _checkScreenSize();
-    // Already called in didChangeDependencies() — calling it here
-    // would trigger setState() during build → rebuild loop.
 
     if (!_isTimezoneLoaded || _isCheckingStatus) {
       return Scaffold(
@@ -3546,82 +3545,86 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     return Center(
       child: Container(
         constraints: const BoxConstraints(maxWidth: 1200),
-        child: Scrollbar(
-          controller: _scrollController,
-          thumbVisibility: true,
-          trackVisibility: true,
-          thickness: 8.0,
-          radius: const Radius.circular(10),
-          scrollbarOrientation: ScrollbarOrientation.right,
-          child: RefreshIndicator(
-            onRefresh: _loadDashboardData,
-            color: AppTheme.primary,
-            child: SingleChildScrollView(
-              controller: _scrollController,
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                children: [
-                  Container(
-                    margin: const EdgeInsets.only(bottom: 20),
-                    child: CompositedTransformTarget(
-                      link: _searchLayerLink,
-                      child: Container(
-                        key: _searchFieldKey,
-                        decoration: BoxDecoration(
-                          color: context.isDarkMode
-                              ? Colors.white.withValues(alpha: 0.08)
-                              : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(30),
-                          border: Border.all(color: context.dividerColor),
-                        ),
-                        child: TextField(
-                          controller: _searchController,
-                          focusNode: _searchFocusNode,
-                          style: TextStyle(color: context.textColor),
-                          decoration: InputDecoration(
-                            hintText: '🔍 Search for salons...',
-                            hintStyle: TextStyle(
-                              color: context.secondaryTextColor,
-                            ),
-                            prefixIcon: Icon(
-                              Icons.search,
-                              color: context.secondaryTextColor,
-                            ),
-                            suffixIcon: _searchController.text.isNotEmpty
-                                ? GestureDetector(
-                                    onTap: () {
-                                      _searchController.clear();
-                                      _hideSearchResults();
-                                    },
-                                    child: Icon(
-                                      Icons.close,
-                                      color: context.secondaryTextColor,
-                                    ),
-                                  )
-                                : null,
-                            border: InputBorder.none,
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: 14,
-                              horizontal: 8,
+        child: _isLoading && _followedSalons.isEmpty && _offers.isEmpty
+            ? const Center(
+                child: CircularProgressIndicator(color: AppTheme.primary),
+              )
+            : Scrollbar(
+                controller: _scrollController,
+                thumbVisibility: true,
+                trackVisibility: true,
+                thickness: 8.0,
+                radius: const Radius.circular(10),
+                scrollbarOrientation: ScrollbarOrientation.right,
+                child: RefreshIndicator(
+                  onRefresh: _loadDashboardData,
+                  color: AppTheme.primary,
+                  child: SingleChildScrollView(
+                    controller: _scrollController,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      children: [
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 20),
+                          child: CompositedTransformTarget(
+                            link: _searchLayerLink,
+                            child: Container(
+                              key: _searchFieldKey,
+                              decoration: BoxDecoration(
+                                color: context.isDarkMode
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(30),
+                                border: Border.all(color: context.dividerColor),
+                              ),
+                              child: TextField(
+                                controller: _searchController,
+                                focusNode: _searchFocusNode,
+                                style: TextStyle(color: context.textColor),
+                                decoration: InputDecoration(
+                                  hintText: '🔍 Search for salons...',
+                                  hintStyle: TextStyle(
+                                    color: context.secondaryTextColor,
+                                  ),
+                                  prefixIcon: Icon(
+                                    Icons.search,
+                                    color: context.secondaryTextColor,
+                                  ),
+                                  suffixIcon: _searchController.text.isNotEmpty
+                                      ? GestureDetector(
+                                          onTap: () {
+                                            _searchController.clear();
+                                            _hideSearchResults();
+                                          },
+                                          child: Icon(
+                                            Icons.close,
+                                            color: context.secondaryTextColor,
+                                          ),
+                                        )
+                                      : null,
+                                  border: InputBorder.none,
+                                  contentPadding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                    horizontal: 8,
+                                  ),
+                                ),
+                                onTap: () {
+                                  if (_searchController.text.isNotEmpty &&
+                                      _searchResults.isNotEmpty) {
+                                    _showSearchOverlay();
+                                  }
+                                },
+                              ),
                             ),
                           ),
-                          onTap: () {
-                            if (_searchController.text.isNotEmpty &&
-                                _searchResults.isNotEmpty) {
-                              _showSearchOverlay();
-                            }
-                          },
                         ),
-                      ),
+                        _buildDashboardContent(),
+                      ],
                     ),
                   ),
-                  _buildDashboardContent(),
-                ],
+                ),
               ),
-            ),
-          ),
-        ),
       ),
     );
   }
@@ -3706,6 +3709,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   Widget _buildDashboardContent() {
     final isDark = context.isDarkMode;
+
     return Column(
       children: [
         if (_showPermissionCard && !_hasPermission)

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/config/environment_manager.dart';
+import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/main.dart';
@@ -29,6 +30,38 @@ class AuthService {
   final EnvironmentManager _env = EnvironmentManager();
   final SupabaseClient _supabase = Supabase.instance.client;
   static const _tag = 'AuthService';
+
+  // ============================================================
+  // ✅ NEW: timezone → currency helper
+  // ------------------------------------------------------------
+  // The DB `handle_new_user` trigger sets `preferred_currency`
+  // based on `raw_user_meta_data->>'timezone'` which we pass in
+  // signUp(). This helper is a client-side fallback for the case
+  // where the trigger hasn't fired yet or fired incorrectly — we
+  // can still write the correct value in `_createInitialProfile`.
+  // ============================================================
+  String _getCurrencyForTimezone(String tz) {
+    if (tz.isEmpty) return 'LKR';
+    if (tz.startsWith('Asia/Colombo')) return 'LKR';
+    if (tz.startsWith('Asia/Kolkata') || tz.startsWith('Asia/Calcutta')) {
+      return 'INR';
+    }
+    if (tz.startsWith('Asia/Dubai')) return 'AED';
+    if (tz.startsWith('Asia/Singapore')) return 'SGD';
+    if (tz.startsWith('Asia/Kuala_Lumpur')) return 'MYR';
+    if (tz.startsWith('Asia/Tokyo')) return 'JPY';
+    if (tz.startsWith('Europe/London')) return 'GBP';
+    if (tz.startsWith('Europe/')) return 'EUR';
+    if (tz.startsWith('Australia/')) return 'AUD';
+    if (tz.startsWith('Pacific/Auckland')) return 'AUD';
+    if (tz.startsWith('America/Toronto') ||
+        tz.startsWith('America/Vancouver')) {
+      return 'CAD';
+    }
+    if (tz.startsWith('Canada/')) return 'CAD';
+    if (tz.startsWith('America/') || tz.startsWith('US/')) return 'USD';
+    return 'LKR';
+  }
 
   // =========================================================================================
   // REGISTER NEW USER
@@ -68,6 +101,22 @@ class AuthService {
       overlayShown = true;
 
       final now = DateTime.now().toIso8601String();
+
+      // ✅ NEW: Capture device timezone BEFORE signup
+      //    This is critical for timezone-based currency defaults in the
+      //    handle_new_user DB trigger. Without it, every user gets 'LKR'.
+      String deviceTimezone;
+      try {
+        await TimezoneService.initialize();
+        deviceTimezone = TimezoneService.getCurrentTimezone();
+        if (deviceTimezone.isEmpty) {
+          deviceTimezone = 'Asia/Colombo';
+        }
+        debugPrint('🌍 Captured device timezone: $deviceTimezone');
+      } catch (e) {
+        debugPrint('⚠️ Failed to capture timezone: $e');
+        deviceTimezone = 'Asia/Colombo';
+      }
 
       // ============================================================
       // ❌ REMOVED: the old code called signInWithPassword() FIRST
@@ -110,6 +159,7 @@ class AuthService {
           'role_id': null,
           'profile_status': 'active',
           'profile_created': false,
+          'timezone': deviceTimezone,
         },
       ).timeout(
         const Duration(seconds: 20),
@@ -126,7 +176,9 @@ class AuthService {
       // ✅ Check if user already exists (identities empty)
       if (user?.identities?.isEmpty ?? true) {
         LoadingOverlay.hide();
-        if (!context.mounted) return const RegisterResult(RegisterStatus.userExists);
+        if (!context.mounted) {
+          return const RegisterResult(RegisterStatus.userExists);
+        }
         await _handleExistingUser(context, email);
         return const RegisterResult(RegisterStatus.userExists);
       }
@@ -138,9 +190,11 @@ class AuthService {
 
       debugPrint('✅ User created: ${user.id}');
       debugPrint('📝 Initial metadata: ${user.userMetadata}');
-      if (!context.mounted) return const RegisterResult(RegisterStatus.success);
+      if (!context.mounted) {
+        return const RegisterResult(RegisterStatus.success);
+      }
 
-      // ✅ Create initial profile with default status
+      // ✅ Create initial profile with timezone-derived currency
       await _createInitialProfile(
         context: context,
         user: user,
@@ -148,12 +202,15 @@ class AuthService {
         rememberMe: rememberMe,
         refreshToken: response.session?.refreshToken,
         marketingConsent: marketingConsent,
+        deviceTimezone: deviceTimezone, // ✅ NEW
       );
 
       // ✅ Navigate to verify email
       LoadingOverlay.hide();
 
-      if (!context.mounted) return const RegisterResult(RegisterStatus.success);
+      if (!context.mounted) {
+        return const RegisterResult(RegisterStatus.success);
+      }
 
       // ============================================================
       // ✅ FIX: _handleSuccessfulRegistration() used to be "fire and
@@ -295,6 +352,9 @@ class AuthService {
   // If for some reason the row genuinely isn't there yet (e.g.
   // trigger not yet applied), this fails silently and login-time
   // profile checks will create it as a fallback.
+  // ------------------------------------------------------------
+  // ✅ NEW: `deviceTimezone` parameter + `preferred_currency`
+  // update as a client-side fallback for the DB trigger.
   // ============================================================
   Future<void> _createInitialProfile({
     required BuildContext context,
@@ -303,17 +363,33 @@ class AuthService {
     required bool rememberMe,
     String? refreshToken,
     required bool marketingConsent,
+    String? deviceTimezone, // ✅ NEW
   }) async {
     try {
       debugPrint('📝 Updating initial profile for user: ${user.id}');
 
-      // ✅ Row already exists (created by the auth.users trigger) —
-      // just update it, don't insert.
-      await _supabase.from('profiles').update({
+      // ✅ Compute currency from device timezone (fallback safety net)
+      final currency = (deviceTimezone != null && deviceTimezone.isNotEmpty)
+          ? _getCurrencyForTimezone(deviceTimezone)
+          : null;
+
+      // ✅ Build update map
+      final updateData = <String, dynamic>{
         'email': email,
         'full_name': email.split('@').first,
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', user.id);
+      };
+
+      // ✅ Only set preferred_currency if we have a value
+      if (currency != null) {
+        updateData['preferred_currency'] = currency;
+        debugPrint(
+          '💱 Setting preferred_currency: $currency (from $deviceTimezone)',
+        );
+      }
+
+      // ✅ Row already exists (created by auth.users trigger) — update it
+      await _supabase.from('profiles').update(updateData).eq('id', user.id);
 
       debugPrint('✅ Initial profile updated for user: ${user.id}');
 
@@ -337,6 +413,7 @@ class AuthService {
             ...?user.userMetadata,
             'profile_created': true,
             'profile_status': 'active',
+            'preferred_currency': ?currency,
           },
         ),
       );
@@ -407,36 +484,10 @@ class AuthService {
       // ✅ Navigate to verify email
       if (context.mounted) {
         context.go('/verify-email');
-
-        // Show success message
-        // WidgetsBinding.instance.addPostFrameCallback((_) {
-        //   if (context.mounted) {
-        //     ScaffoldMessenger.of(context).showSnackBar(
-        //       SnackBar(
-        //         content: Text(
-        //           rememberMe
-        //               ? 'Account created! Check your email for verification.'
-        //               : 'Account created! Please verify your email.',
-        //         ),
-        //         duration: const Duration(seconds: 4),
-        //         backgroundColor: Colors.green,
-        //         action: SnackBarAction(
-        //           label: 'OK',
-        //           textColor: Colors.white,
-        //           onPressed: () {
-        //             ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        //           },
-        //         ),
-        //       ),
-        //     );
-        //   }
-        // });
-
         return true; // ✅ navigation happened
       }
 
-      // context wasn't mounted — nothing we can do, treat as failure
-      // so the caller resets its loading state instead of hanging.
+      // context wasn't mounted — treat as failure so caller resets loading
       return false;
     } catch (e) {
       developer.log('❌ Error in registration handler: $e', name: _tag);
@@ -448,7 +499,7 @@ class AuthService {
           isError: true,
         );
       }
-      return false; // ✅ navigation did NOT happen — caller must reset loading state
+      return false; // ✅ navigation did NOT happen
     }
   }
 
@@ -1087,8 +1138,6 @@ class AuthService {
   bool _isValidPassword(String password) {
     return password.trim().length >= 6;
   }
-
-
 
   Future<void> _handleAuthException(
     BuildContext context,

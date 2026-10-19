@@ -7,6 +7,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:app_links/app_links.dart';
 import 'package:flutter_application_1/alertBox/account_restore_pending_screen.dart';
 import 'package:flutter_application_1/firebase_options.dart';
+import 'package:flutter_application_1/observers/route_observers.dart';
+import 'package:flutter_application_1/screens/settings/currency_settings_screen.dart';
 import 'package:flutter_application_1/screens/subscription/providers/subscription_provider.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
@@ -725,7 +727,10 @@ GoRouter _createRouter() {
     refreshListenable: appState,
     initialLocation: '/',
     debugLogDiagnostics: kDebugMode,
-    observers: [if (kDebugMode) MyRouteObserver()],
+    observers: [
+      if (kDebugMode) MyRouteObserver(),
+      dashboardRouteObserver, 
+    ],
     redirect: (context, state) async {
       final path = state.matchedLocation;
       final queryParams = state.uri.queryParameters;
@@ -1304,7 +1309,10 @@ GoRouter _createRouter() {
         path: '/settings/delete-account',
         builder: (context, state) => const DeleteAccountScreen(),
       ),
-
+      GoRoute(
+        path: '/settings/currency',
+        builder: (context, state) => const CurrencySettingsScreen(),
+      ),
       // ============================================
       // OWNER ROUTES
       // ============================================
