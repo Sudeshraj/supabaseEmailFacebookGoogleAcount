@@ -33,7 +33,9 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   // ============================================
   // ✅ TIMEZONE
   // ============================================
+  static const String _kDefaultSalonTimezone = 'Asia/Colombo';
   bool _isTimezoneLoaded = false;
+  String _userTimezone = '';
 
   @override
   void initState() {
@@ -49,46 +51,95 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
   }
 
   // ============================================
-  // ✅ TIMEZONE INITIALIZATION (SIMPLIFIED)
+  // ✅ TIMEZONE INITIALIZATION
   // ============================================
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
+
+    // ✅ Capture user timezone
+    _userTimezone = TimezoneService.getCurrentTimezone();
+    if (_userTimezone.isEmpty) {
+      _userTimezone = _kDefaultSalonTimezone;
+    }
 
     if (!mounted) return;
     setState(() {
       _isTimezoneLoaded = true;
     });
 
-    debugPrint('✅ User timezone: ${TimezoneService.getCurrentTimezone()}');
+    debugPrint('✅ User timezone: $_userTimezone');
 
     await _loadFollowedSalons();
   }
 
   // ============================================
-  // ✅ TIMEZONE HELPER (SALON-SPECIFIC)
+  // ✅ TIMEZONE HELPERS (SALON-SPECIFIC)
   // ============================================
+
+  /// ✅ Normalize UTC time string to HH:mm:ss format
+  String _normalizeUtcTime(String? utcTime) {
+    if (utcTime == null || utcTime.isEmpty) return '';
+    try {
+      final parts = utcTime.split(':');
+      if (parts.length < 2) return utcTime;
+      final hour = parts[0].padLeft(2, '0');
+      final minute = parts[1].padLeft(2, '0');
+      final second = parts.length > 2 ? parts[2].padLeft(2, '0') : '00';
+      return '$hour:$minute:$second';
+    } catch (e) {
+      return utcTime;
+    }
+  }
+
   /// ✅ UTC → Salon local time (using SALON timezone, NOT user TZ)
   String _utcToSalonTime(String? utcTime, String salonTimezone) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
+
+    final tz = salonTimezone.isNotEmpty
+        ? salonTimezone
+        : _kDefaultSalonTimezone;
+
     try {
-      String timeStr = utcTime;
-      if (timeStr.length == 5) {
-        timeStr = '$timeStr:00';
-      }
-      // ✅ Use salon timezone (reference date — recurring)
+      // ✅ Normalize to HH:mm:ss
+      final normalized = _normalizeUtcTime(utcTime);
+      if (normalized.isEmpty) return '--:--';
+
       return TimezoneService.utcToLocalTimeRecurringWithTimezone(
-        timeStr,
-        salonTimezone.isNotEmpty ? salonTimezone : 'Asia/Colombo',
+        normalized,
+        tz,
       );
     } catch (e) {
-      debugPrint('Error converting UTC to salon time: $e');
+      debugPrint('❌ Error converting UTC to salon time: $e');
       return _formatTimeFallback(utcTime);
     }
   }
 
+  /// ✅ UTC → User local time (reference only)
+  String _utcToUserTime(String? utcTime, String salonTimezone) {
+    if (utcTime == null || utcTime.isEmpty) return '';
+    if (_userTimezone.isEmpty) return '';
+    if (_userTimezone == salonTimezone) return '';
+
+    try {
+      final normalized = _normalizeUtcTime(utcTime);
+      if (normalized.isEmpty) return '';
+
+      return TimezoneService.utcToLocalTimeRecurringWithTimezone(
+        normalized,
+        _userTimezone,
+      );
+    } catch (e) {
+      debugPrint('❌ Error converting UTC to user time: $e');
+      return '';
+    }
+  }
+
+  /// ✅ Fallback for time formatting errors
   String _formatTimeFallback(String timeStr) {
     try {
       final parts = timeStr.split(':');
+      if (parts.length < 2) return timeStr;
+
       final hour = int.parse(parts[0]);
       final minute = int.parse(parts[1]);
       final period = hour >= 12 ? 'PM' : 'AM';
@@ -99,9 +150,17 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
     }
   }
 
+  /// ✅ Check if user timezone differs from salon timezone
+  bool _isDifferentTimezone(String salonTimezone) {
+    if (_userTimezone.isEmpty) return false;
+    final tz = salonTimezone.isNotEmpty
+        ? salonTimezone
+        : _kDefaultSalonTimezone;
+    return _userTimezone != tz;
+  }
+
   // ============================================================
   // LOAD FOLLOWED SALONS
-  // ✅ FIXED: mounted checks + null-safe parsing
   // ============================================================
   Future<void> _loadFollowedSalons() async {
     if (!_isTimezoneLoaded) return;
@@ -155,7 +214,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
 
   // ============================================================
   // FILTER AND SEARCH
-  // ✅ FIXED: "Newest" sorting added
   // ============================================================
   List<Map<String, dynamic>> get _filteredSalons {
     var filtered = List<Map<String, dynamic>>.from(_followedSalons);
@@ -178,13 +236,11 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
         );
         break;
       case 'Newest':
-        // ✅ Sort by salon ID (higher ID = newer)
         filtered.sort(
           (a, b) => (b['id'] as int? ?? 0).compareTo(a['id'] as int? ?? 0),
         );
         break;
       default:
-        // 'All' — sort alphabetically (default from RPC)
         filtered.sort(
           (a, b) => ((a['name'] as String?) ?? '')
               .toLowerCase()
@@ -198,7 +254,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
 
   // ============================================================
   // UNFOLLOW SALON
-  // ✅ FIXED: null-safe salonId
   // ============================================================
   Future<void> _unfollowSalon(int salonId, String salonName) async {
     final isDark = context.isDarkMode;
@@ -356,6 +411,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loadFollowedSalons,
+            tooltip: 'Refresh',
           ),
         ],
       ),
@@ -377,42 +433,46 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                 ),
               )
             : _errorMessage != null
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error_outline,
-                          size: 64,
-                          color: isDark ? Colors.white30 : Colors.grey[400],
-                        ),
-                        const SizedBox(height: 16),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 24),
-                          child: Text(
-                            _errorMessage!,
-                            style: TextStyle(
-                              color:
-                                  isDark ? Colors.white60 : Colors.grey[600],
-                            ),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        ElevatedButton(
-                          onPressed: _loadFollowedSalons,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primary,
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  )
+                ? _buildErrorState(isDark)
                 : isWeb
                     ? _buildWebLayout(filteredSalons)
                     : _buildMobileLayout(filteredSalons),
+      ),
+    );
+  }
+
+  // ✅ ERROR STATE
+  Widget _buildErrorState(bool isDark) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.error_outline,
+            size: 64,
+            color: isDark ? Colors.white30 : Colors.grey[400],
+          ),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Text(
+              _errorMessage!,
+              style: TextStyle(
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: _loadFollowedSalons,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }
@@ -568,7 +628,6 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
             horizontal: 12,
             vertical: 12,
           ),
-          // ✅ FIXED: Removed `filled: true` + `fillColor` (outer container already has background)
         ),
       ),
     );
@@ -741,10 +800,9 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
 
   // ============================================================
   // ✅ SALON CARD
-  // ✅ FIXED: uses SALON timezone (not user TZ)
-  // ✅ FIXED: uses SALON currency
-  // ✅ FIXED: null-safe salonId
-  // ✅ FIXED: simplified Card (no Container)
+  // ✅ Salon timezone for hours
+  // ✅ User timezone reference
+  // ✅ Timezone name display
   // ============================================================
   Widget _buildSalonCard(Map<String, dynamic> salon) {
     final isDark = context.isDarkMode;
@@ -760,21 +818,34 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
       return const SizedBox.shrink();
     }
 
-    // ✅ Salon timezone (from RPC)
-    final salonTimezone = salon['timezone']?.toString() ?? 'Asia/Colombo';
-  
+    // ✅ Salon timezone
+    final salonTimezoneRaw = salon['timezone']?.toString();
+    final salonTimezone = (salonTimezoneRaw != null &&
+            salonTimezoneRaw.isNotEmpty)
+        ? salonTimezoneRaw
+        : _kDefaultSalonTimezone;
 
-    // ✅ Convert UTC → Salon local time (using SALON timezone)
-    final openTimeLocal = _utcToSalonTime(
+    // ✅ Convert UTC → Salon local time
+    final openTimeSalon = _utcToSalonTime(
       salon['open_time']?.toString(),
       salonTimezone,
     );
-    final closeTimeLocal = _utcToSalonTime(
+    final closeTimeSalon = _utcToSalonTime(
       salon['close_time']?.toString(),
       salonTimezone,
     );
 
-    // ✅ Timezone flag for display
+    // ✅ Convert UTC → User local time (reference)
+    final showUserTime = _isDifferentTimezone(salonTimezone);
+    final openTimeUser = showUserTime
+        ? _utcToUserTime(salon['open_time']?.toString(), salonTimezone)
+        : '';
+    final closeTimeUser = showUserTime
+        ? _utcToUserTime(salon['close_time']?.toString(), salonTimezone)
+        : '';
+    final hasUserTime = openTimeUser.isNotEmpty && closeTimeUser.isNotEmpty;
+
+    // ✅ Timezone flag
     final tzFlag = TimezoneService.getTimezoneFlagFor(salonTimezone);
 
     return Card(
@@ -862,8 +933,9 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                             ),
                           ],
                         ),
-                      const SizedBox(height: 2),
-                      // ✅ Salon hours (using SALON timezone)
+                      const SizedBox(height: 4),
+
+                      // ✅ Salon hours (salon timezone) + flag
                       Row(
                         children: [
                           Icon(
@@ -874,7 +946,7 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              '$openTimeLocal - $closeTimeLocal',
+                              '$openTimeSalon - $closeTimeSalon',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: isDark
@@ -892,6 +964,38 @@ class _FollowedSalonsScreenState extends State<FollowedSalonsScreen> {
                           ),
                         ],
                       ),
+
+                      // ✅ User time reference (if different)
+                      if (hasUserTime) ...[
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.person_outline,
+                              size: 11,
+                              color: isDark
+                                  ? Colors.blue[300]
+                                  : Colors.blue[700],
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                'Your time: $openTimeUser - $closeTimeUser',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontStyle: FontStyle.italic,
+                                  color: isDark
+                                      ? Colors.blue[300]
+                                      : Colors.blue[700],
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                                maxLines: 1,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+
                       const SizedBox(height: 4),
                       // ✅ Followers + Bookings
                       Row(

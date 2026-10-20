@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../theme/app_theme.dart';
 import '../../extensions/context_extensions.dart';
 import '../../services/currency_service.dart';
+import '../../services/currency_settings_service.dart'; // ✅ NEW
 import '../../services/timezone_service.dart';
 
 class OffersScreen extends StatefulWidget {
@@ -16,14 +17,22 @@ class OffersScreen extends StatefulWidget {
 class _OffersScreenState extends State<OffersScreen> {
   final supabase = Supabase.instance.client;
   final CurrencyService _currencyService = CurrencyService.instance;
+  final CurrencySettingsService _currencySettings =
+      CurrencySettingsService.instance; // ✅ NEW
 
   List<Map<String, dynamic>> _offers = [];
   bool _isLoading = true;
   bool _hasError = false;
   String _errorMessage = '';
 
-  // ✅ Default salon timezone
+  // ✅ Default salon timezone + currency
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  static const String _kDefaultCurrency = 'LKR'; // ✅ NEW
+
+  // ✅ NEW: User currency + per-salon exchange rates cache
+  String _userCurrencyCode = _kDefaultCurrency;
+  // Key: salonId, Value: exchange rate (salon → user)
+  final Map<int, double?> _salonExchangeRates = {};
 
   // Filter and sort state
   String _selectedFilter = 'all';
@@ -49,7 +58,6 @@ class _OffersScreenState extends State<OffersScreen> {
 
   // ============================================
   // ✅ HELPER: Get salon timezone
-  // ✅ FIX: Cast to Map<String, dynamic>?
   // ============================================
   String _getSalonTimezone(Map<String, dynamic>? salon) {
     final tz = salon?['timezone'] as String?;
@@ -58,11 +66,45 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   // ============================================
+  // ✅ HELPER: Get salon currency code
+  // ============================================
+  String _getSalonCurrencyCode(Map<String, dynamic>? salon) {
+    final code = salon?['currency_code'] as String?;
+    if (code != null && code.isNotEmpty) return code;
+    return _kDefaultCurrency;
+  }
+
+  // ============================================
   // ✅ HELPER: Currency symbol from salon code
   // ============================================
   String _getSalonCurrencySymbol(Map<String, dynamic>? salon) {
-    final code = salon?['currency_code'] as String? ?? 'LKR';
+    final code = _getSalonCurrencyCode(salon);
     return _currencyService.getSymbol(code);
+  }
+
+
+  // ✅ NEW: Format user approx amount
+  String _formatUserPrice(dynamic amount) {
+    return _currencyService.format(
+      price: amount,
+      currencyCode: _userCurrencyCode,
+    );
+  }
+
+  // ✅ NEW: Get cached exchange rate for salon
+  double? _getExchangeRateForSalon(Map<String, dynamic>? salon) {
+    final salonId = salon?['id'] as int?;
+    if (salonId == null) return null;
+    return _salonExchangeRates[salonId];
+  }
+
+  // ✅ NEW: Check if approx display needed
+  bool _shouldShowApprox(Map<String, dynamic>? salon) {
+    final rate = _getExchangeRateForSalon(salon);
+    final salonCurrency = _getSalonCurrencyCode(salon);
+    return rate != null &&
+        rate > 0 &&
+        _userCurrencyCode != salonCurrency;
   }
 
   // ============================================
@@ -71,7 +113,50 @@ class _OffersScreenState extends State<OffersScreen> {
 
   Future<void> _initialize() async {
     await TimezoneService.initialize();
+
+    // ✅ NEW: Load user's preferred currency
+    try {
+      _userCurrencyCode = await _currencySettings.getUserCurrency();
+      debugPrint('✅ User currency loaded: $_userCurrencyCode');
+    } catch (e) {
+      debugPrint('⚠️ Failed to load user currency: $e');
+      _userCurrencyCode = _kDefaultCurrency;
+    }
+
     await _loadOffers();
+  }
+
+  // ============================================
+  // ✅ NEW: Load exchange rate for a specific salon
+  // ============================================
+  Future<double?> _loadExchangeRateForSalon(int salonId, String salonCurrency) async {
+    // Same currency → rate = 1.0
+    if (salonCurrency == _userCurrencyCode) {
+      _salonExchangeRates[salonId] = 1.0;
+      return 1.0;
+    }
+
+    // Check cache
+    if (_salonExchangeRates.containsKey(salonId)) {
+      return _salonExchangeRates[salonId];
+    }
+
+    try {
+      final rate = await _currencySettings.getExchangeRate(
+        fromCurrency: salonCurrency,
+        toCurrency: _userCurrencyCode,
+      );
+      _salonExchangeRates[salonId] = rate;
+      debugPrint(
+        '✅ Exchange rate for salon $salonId: 1 $salonCurrency = '
+        '${rate?.toStringAsFixed(6) ?? "?"} $_userCurrencyCode',
+      );
+      return rate;
+    } catch (e) {
+      debugPrint('⚠️ Failed to load rate for salon $salonId: $e');
+      _salonExchangeRates[salonId] = null;
+      return null;
+    }
   }
 
   // ============================================
@@ -135,6 +220,13 @@ class _OffersScreenState extends State<OffersScreen> {
     });
 
     try {
+      // ✅ Refresh user currency (in case changed from settings)
+      try {
+        _userCurrencyCode = await _currencySettings.getUserCurrency();
+      } catch (e) {
+        debugPrint('⚠️ Failed to refresh user currency: $e');
+      }
+
       final user = supabase.auth.currentUser;
       if (user == null) {
         if (!mounted) return;
@@ -245,6 +337,24 @@ class _OffersScreenState extends State<OffersScreen> {
         return;
       }
 
+      // ✅ NEW: Load exchange rates for all unique salons
+      final uniqueSalons = <int, String>{};
+      for (final o in result) {
+        final salon = o['salons'] as Map<String, dynamic>?;
+        final salonId = salon?['id'] as int?;
+        final salonCurrency = _getSalonCurrencyCode(salon);
+        if (salonId != null) {
+          uniqueSalons[salonId] = salonCurrency;
+        }
+      }
+
+      // Load rates in parallel
+      await Future.wait(
+        uniqueSalons.entries.map((e) => _loadExchangeRateForSalon(e.key, e.value)),
+      );
+
+      if (!mounted) return;
+
       // ✅ Load customer claims
       final offerIds = result.map<int>((o) => o['id'] as int).toList();
       Map<int, String> claimStatus = {};
@@ -332,14 +442,19 @@ class _OffersScreenState extends State<OffersScreen> {
           }
         }
 
-        // ✅ FIX: Cast to Map<String, dynamic>?
         final salon = offer['salons'] as Map<String, dynamic>?;
         final salonTz = _getSalonTimezone(salon);
+        final salonId = salon?['id'] as int?;
 
         offer['scope_summary'] =
             scopeParts.isEmpty ? 'All services' : scopeParts.join(', ');
         offer['claim_status'] = claimStatus[offer['id'] as int];
         offer['_salon_timezone'] = salonTz;
+
+        // ✅ NEW: Attach cached exchange rate
+        if (salonId != null) {
+          offer['_exchange_rate'] = _salonExchangeRates[salonId];
+        }
 
         // ✅ Precompute days_left using SALON timezone
         offer['_days_left'] = _getDaysLeft(
@@ -452,8 +567,6 @@ class _OffersScreenState extends State<OffersScreen> {
     }
   }
 
-  // ❌ REMOVED: _isOfferActive (unused — replaced by _isOfferActiveWithTimezone)
-
   // ============================================
   // ✅ FILTERED AND SORTED OFFERS
   // ============================================
@@ -522,10 +635,26 @@ class _OffersScreenState extends State<OffersScreen> {
       // ✅ Use salon currency symbol
       final salon = offer['salons'] as Map<String, dynamic>?;
       final symbol = _getSalonCurrencySymbol(salon);
-      return '$symbol ${offer['discount_value']} OFF';
+      final value = (offer['discount_value'] as num?)?.toDouble() ?? 0;
+      return '$symbol ${value.toStringAsFixed(2)} OFF';
     } else {
       return 'FREE SERVICE';
     }
+  }
+
+  // ✅ NEW: Approx user currency for fixed discount
+  String? _getDiscountUserApprox(Map<String, dynamic> offer) {
+    if (offer['discount_type'] != 'fixed') return null;
+
+    final salon = offer['salons'] as Map<String, dynamic>?;
+    if (!_shouldShowApprox(salon)) return null;
+
+    final rate = _getExchangeRateForSalon(salon);
+    if (rate == null || rate <= 0) return null;
+
+    final value = (offer['discount_value'] as num?)?.toDouble() ?? 0;
+    final userAmount = value * rate;
+    return _formatUserPrice(userAmount);
   }
 
   String _getDiscountIcon(String? discountType) {
@@ -680,7 +809,10 @@ class _OffersScreenState extends State<OffersScreen> {
 
       if (!mounted) return;
 
-      // Confirm dialog
+      // ✅ UPDATED: Confirm dialog with user approx
+      final salon = offer['salons'] as Map<String, dynamic>?;
+      final userApprox = _getDiscountUserApprox(offer);
+
       final confirmed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -726,15 +858,29 @@ class _OffersScreenState extends State<OffersScreen> {
                         .withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Center(
-                    child: Text(
-                      _getDiscountText(offer),
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: _getDiscountColor(offer['discount_type']),
+                  child: Column(
+                    children: [
+                      Text(
+                        _getDiscountText(offer),
+                        style: TextStyle(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: _getDiscountColor(offer['discount_type']),
+                        ),
                       ),
-                    ),
+                      // ✅ NEW: user approx in dialog
+                      if (userApprox != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '≈ $userApprox in your currency',
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontStyle: FontStyle.italic,
+                            color: context.secondaryTextColor,
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 if ((offer['scope_summary'] ?? '').toString().isNotEmpty) ...[
@@ -769,6 +915,35 @@ class _OffersScreenState extends State<OffersScreen> {
                     ],
                   ),
                 ],
+                // ✅ NEW: Payment note
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 14,
+                        color: context.secondaryTextColor,
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Payment charged in ${_getSalonCurrencyCode(salon)}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontStyle: FontStyle.italic,
+                            color: context.secondaryTextColor,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
@@ -850,7 +1025,6 @@ class _OffersScreenState extends State<OffersScreen> {
 
   // ============================================
   // NAVIGATION METHODS
-  // ✅ FIX: Cast to Map<String, dynamic>?
   // ============================================
 
   void _navigateToSalonProfile(Map<String, dynamic>? salonData) {
@@ -867,7 +1041,6 @@ class _OffersScreenState extends State<OffersScreen> {
 
   // ============================================
   // ✅ OFFER CARD
-  // ✅ FIX: Cast to Map<String, dynamic>?
   // ============================================
 
   Widget _buildOfferCard(
@@ -875,7 +1048,6 @@ class _OffersScreenState extends State<OffersScreen> {
     required bool isMobile,
   }) {
     final isDark = context.isDarkMode;
-    // ✅ FIX: Cast to Map<String, dynamic>?
     final salonData = offer['salons'] as Map<String, dynamic>?;
     final salonName = salonData?['name']?.toString() ?? 'Salon';
     final salonLogo = salonData?['logo_url']?.toString();
@@ -894,6 +1066,7 @@ class _OffersScreenState extends State<OffersScreen> {
     final discountColor = _getDiscountColor(offer['discount_type']);
     final discountIcon = _getDiscountIcon(offer['discount_type']);
     final discountText = _getDiscountText(offer);
+    final discountUserApprox = _getDiscountUserApprox(offer); // ✅ NEW
     final scopeSummary = offer['scope_summary']?.toString() ?? '';
 
     String statusText = '';
@@ -1095,7 +1268,7 @@ class _OffersScreenState extends State<OffersScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Discount chip
+                // ✅ UPDATED: Discount chip with user approx
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
@@ -1118,13 +1291,29 @@ class _OffersScreenState extends State<OffersScreen> {
                         style: const TextStyle(fontSize: 16),
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        discountText,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            discountText,
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                          // ✅ NEW: approx in chip
+                          if (discountUserApprox != null)
+                            Text(
+                              '≈ $discountUserApprox',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontStyle: FontStyle.italic,
+                                color: Colors.white.withValues(alpha: 0.9),
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),

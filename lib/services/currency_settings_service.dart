@@ -3,7 +3,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'currency_service.dart';
 import 'timezone_service.dart';
 
-/// ✅ Manages user's preferred currency (source of truth: profiles.preferred_currency)
 class CurrencySettingsService {
   CurrencySettingsService._();
   static final CurrencySettingsService instance = CurrencySettingsService._();
@@ -13,10 +12,10 @@ class CurrencySettingsService {
 
   static const List<String> supportedCurrencies = [
     'LKR', 'USD', 'INR', 'GBP', 'EUR',
-    'AUD', 'AED', 'CAD', 'JPY', 'SGD', 'MYR','NZD',
+    'AUD', 'AED', 'CAD', 'JPY', 'SGD', 'MYR',
+    'NZD',
   ];
 
-  /// Get current user's preferred currency
   Future<String> getUserCurrency() async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -32,7 +31,6 @@ class CurrencySettingsService {
       if (dbCurrency != null && dbCurrency.isNotEmpty) {
         return dbCurrency;
       }
-
       return _defaultCurrencyFromTimezone();
     } catch (e) {
       debugPrint('❌ getUserCurrency: $e');
@@ -40,7 +38,6 @@ class CurrencySettingsService {
     }
   }
 
-  /// Update user's preferred currency
   Future<bool> updateUserCurrency(String currency) async {
     try {
       final userId = _supabase.auth.currentUser?.id;
@@ -73,4 +70,27 @@ class CurrencySettingsService {
 
   String getSymbol(String currency) =>
       _currencyService.getSymbol(currency);
+
+  // ✅ NEW: Get exchange rate for display
+  Future<double?> getExchangeRate({
+    required String fromCurrency,
+    required String toCurrency,
+  }) async {
+    if (fromCurrency == toCurrency) return 1.0;
+    try {
+      final result = await _supabase.rpc(
+        'get_exchange_rate',
+        params: {
+          'p_from_currency': fromCurrency,
+          'p_to_currency': toCurrency,
+        },
+      );
+      if (result == null) return null;
+      final rate = (result as num).toDouble();
+      return rate > 0 ? rate : null;
+    } catch (e) {
+      debugPrint('❌ getExchangeRate: $e');
+      return null;
+    }
+  }
 }

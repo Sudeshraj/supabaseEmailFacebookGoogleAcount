@@ -3,6 +3,7 @@ import 'package:flutter_application_1/screens/customer/booking_flow_screen.dart'
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/services/currency_service.dart';
+import 'package:flutter_application_1/services/currency_settings_service.dart'; // ✅ NEW
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../services/timezone_service.dart';
@@ -20,6 +21,8 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     with SingleTickerProviderStateMixin {
   final supabase = Supabase.instance.client;
   final CurrencyService _currencyService = CurrencyService.instance;
+  final CurrencySettingsService _currencySettings =
+      CurrencySettingsService.instance; // ✅ NEW
 
   List<Map<String, dynamic>> _allBookings = [];
   List<Map<String, dynamic>> _filteredBookings = [];
@@ -45,8 +48,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
   // ✅ Default salon timezone (salon DB default)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  static const String _kDefaultCurrency = 'LKR'; // ✅ NEW
   String salonTimezone = _kDefaultSalonTimezone;
   String _userTimezone = '';
+  String _userCurrencyCode = _kDefaultCurrency; // ✅ NEW
 
   DateTime _selectedDate = DateTime.now();
 
@@ -86,6 +91,38 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     return _currencyService.getSymbol(code ?? 'LKR');
   }
 
+  /// ✅ NEW: Format salon price in salon currency
+  String _formatSalonPrice(dynamic price, String? salonCurrency) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: salonCurrency ?? _kDefaultCurrency,
+    );
+  }
+
+  /// ✅ NEW: Format user price (approximation)
+  String _formatUserPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _userCurrencyCode,
+    );
+  }
+
+  /// ✅ NEW: Convert salon price to user currency using locked rate
+  double? _convertToUser({
+    required dynamic salonPrice,
+    required String? salonCurrency,
+    required dynamic exchangeRate,
+  }) {
+    if (salonCurrency == null) return null;
+    if (salonCurrency == _userCurrencyCode) return null; // same currency — no approx needed
+
+    final rate = (exchangeRate as num?)?.toDouble();
+    if (rate == null || rate <= 0) return null;
+
+    final price = (salonPrice as num?)?.toDouble() ?? 0.0;
+    return price * rate;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -100,6 +137,15 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     _userTimezone = TimezoneService.getCurrentTimezone();
     if (_userTimezone.isEmpty) {
       _userTimezone = _kDefaultSalonTimezone;
+    }
+
+    // ✅ NEW: Load user preferred currency (non-blocking fallback)
+    try {
+      _userCurrencyCode = await _currencySettings.getUserCurrency();
+      debugPrint('✅ User currency loaded: $_userCurrencyCode');
+    } catch (e) {
+      debugPrint('⚠️ Failed to load user currency: $e');
+      _userCurrencyCode = _kDefaultCurrency;
     }
 
     // ✅ Set selectedDate based on salon timezone
@@ -130,6 +176,13 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
       _error = null;
     });
 
+    // ✅ NEW: Refresh user currency from DB on each load
+    try {
+      _userCurrencyCode = await _currencySettings.getUserCurrency();
+    } catch (e) {
+      debugPrint('⚠️ Failed to refresh currency: $e');
+    }
+
     await Future.wait([_loadBookings(), _loadOverflowNotifications()]);
 
     if (!mounted) return;
@@ -142,6 +195,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   // ✅ Null-safe date parsing
   // ✅ Salon timezone for times
   // ✅ Mounted checks between awaits
+  // ✅ NEW: Load exchange_rate_at_booking for locked rate
   // =====================================================
   Future<void> _loadBookings() async {
     try {
@@ -202,6 +256,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             extra_charge,
             extra_charge_note,
             currency_code,
+            exchange_rate_at_booking,
             queue_number,
             regular_queue_number,
             vip_queue_number,
@@ -353,6 +408,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           }
         }
 
+        // ✅ NEW: Extract exchange rate (locked at booking time)
+        final exchangeRate =
+            (booking['exchange_rate_at_booking'] as num?)?.toDouble();
+
         processedBookings.add({
           ...booking,
           'local_start_time': localStartTime,
@@ -365,6 +424,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
           'currency_code':
               salon?['currency_code'] ?? booking['currency_code'] ?? 'LKR',
           'currency_symbol': salon?['currency_symbol'],
+          'exchange_rate_at_booking': exchangeRate, // ✅ NEW
           'barber_name': barber?['full_name'] ?? 'Barber',
           'services': services,
           'service_name': serviceName,
@@ -488,6 +548,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
               child_name,
               travel_time_minutes,
               currency_code,
+              exchange_rate_at_booking,
               salons!inner (
                 id,
                 name,
@@ -597,6 +658,8 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             'currency_code':
                 salon?['currency_code'] ?? apt['currency_code'] ?? 'LKR',
             'currency_symbol': salon?['currency_symbol'],
+            'exchange_rate_at_booking':
+                (apt['exchange_rate_at_booking'] as num?)?.toDouble(), // ✅ NEW
             'service_name': serviceName,
             'barber_name': barber?['full_name'] ?? 'Barber',
           },
@@ -926,12 +989,22 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   // =====================================================
   // CANCEL BOOKING
   // ✅ Track by ID (not shared flag)
+  // ✅ NEW: dual currency in cancel dialog
   // =====================================================
   Future<void> _cancelBooking(Map<String, dynamic> booking) async {
     final isDark = context.isDarkMode;
     final bookingId = booking['id'] as int;
     final hasOverflow = _overflowNotifications.any(
       (n) => n['appointment']['id'] == bookingId,
+    );
+
+    final salonCurrency = booking['currency_code'] as String?;
+    final exchangeRate = booking['exchange_rate_at_booking'] as num?;
+    final totalPrice = (booking['price'] as num?)?.toDouble() ?? 0.0;
+    final userAmount = _convertToUser(
+      salonPrice: totalPrice,
+      salonCurrency: salonCurrency,
+      exchangeRate: exchangeRate,
     );
 
     final confirmed = await showDialog<bool>(
@@ -1032,6 +1105,49 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         ),
                       ],
                     ),
+                    // ✅ NEW: Show total price (dual currency)
+                    if (totalPrice > 0) ...[
+                      const SizedBox(height: 8),
+                      const Divider(height: 1),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.attach_money,
+                            size: 16,
+                            color: AppTheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _formatSalonPrice(totalPrice, salonCurrency),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                  ),
+                                ),
+                                if (userAmount != null)
+                                  Text(
+                                    '≈ ${_formatUserPrice(userAmount)}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontStyle: FontStyle.italic,
+                                      color: isDark
+                                          ? Colors.blue[300]
+                                          : Colors.blue[700],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     if (booking['display_queue_number'] != null &&
                         booking['display_queue_number'].isNotEmpty)
                       Padding(
@@ -1465,12 +1581,16 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
   // =====================================================
   // BOOKING DETAILS BOTTOM SHEET
+  // ✅ NEW: Dual currency display (salon + approx user)
   // =====================================================
   void _showBookingDetails(Map<String, dynamic> booking) {
     final isDark = context.isDarkMode;
     final isVip = booking['is_vip'] ?? false;
     final detailColor = isVip ? _vipColor : AppTheme.primary;
     final symbol = _currencySymbol(booking['currency_code'] as String?);
+
+    final salonCurrency = booking['currency_code'] as String?;
+    final exchangeRate = booking['exchange_rate_at_booking'] as num?;
 
     final services = (booking['services'] as List?) ?? [];
     final servicesTotal =
@@ -1479,6 +1599,13 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
         (booking['total_discount'] as num?)?.toDouble() ?? 0.0;
     final extraCharge = (booking['extra_charge'] as num?)?.toDouble() ?? 0.0;
     final totalPrice = (booking['price'] as num?)?.toDouble() ?? 0.0;
+
+    // ✅ NEW: Convert totals to user currency (if different)
+    final userTotal = _convertToUser(
+      salonPrice: totalPrice,
+      salonCurrency: salonCurrency,
+      exchangeRate: exchangeRate,
+    );
 
     final status = booking['status'] as String? ?? 'pending';
     final paymentStatus = booking['payment_status'] as String? ?? 'unpaid';
@@ -1670,6 +1797,12 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         (s['discount_amount'] as num?)?.toDouble() ?? 0;
                     final sFinal = (s['final_price'] as num?)?.toDouble() ?? 0;
                     final variantLabel = s['variant_label'] as String?;
+                    final displayPrice = sDiscount > 0 ? sFinal : sOriginal;
+                    final userServicePrice = _convertToUser(
+                      salonPrice: displayPrice,
+                      salonCurrency: salonCurrency,
+                      exchangeRate: exchangeRate,
+                    );
 
                     return Container(
                       margin: const EdgeInsets.only(bottom: 6),
@@ -1733,7 +1866,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                                   ),
                                 ),
                               Text(
-                                '$symbol${(sDiscount > 0 ? sFinal : sOriginal).toStringAsFixed(2)}',
+                                '$symbol${displayPrice.toStringAsFixed(2)}',
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
@@ -1744,6 +1877,18 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                                             : Colors.black87),
                                 ),
                               ),
+                              // ✅ NEW: approx user currency
+                              if (userServicePrice != null)
+                                Text(
+                                  '≈ ${_formatUserPrice(userServicePrice)}',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontStyle: FontStyle.italic,
+                                    color: isDark
+                                        ? Colors.blue[300]
+                                        : Colors.blue[700],
+                                  ),
+                                ),
                             ],
                           ),
                         ],
@@ -1780,6 +1925,27 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                   bold: true,
                   color: detailColor,
                 ),
+                // ✅ NEW: User currency approx below total
+                if (userTotal != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          '≈ ${_formatUserPrice(userTotal)} in $_userCurrencyCode',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? Colors.blue[300]
+                                : Colors.blue[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 const Divider(height: 24),
 
                 _buildDetailRow(
@@ -2269,6 +2435,8 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
   // =====================================================
   // BOOKING CARD
+  // ✅ NEW: Dual currency display everywhere (salon + approx user)
+  // ✅ Uses LOCKED exchange rate from appointment
   // =====================================================
   Widget _buildBookingCard(Map<String, dynamic> booking, bool isPendingTab) {
     final isDark = context.isDarkMode;
@@ -2285,7 +2453,9 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
     final status = booking['status'];
     final isVip = booking['is_vip'] ?? false;
-    final symbol = _currencySymbol(booking['currency_code'] as String?);
+    final salonCurrency = booking['currency_code'] as String?;
+    final exchangeRate = booking['exchange_rate_at_booking'] as num?;
+    final symbol = _currencySymbol(salonCurrency);
 
     final services = (booking['services'] as List?) ?? [];
     final duration = booking['duration'] ?? 0;
@@ -2293,6 +2463,13 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     final extraCharge = (booking['extra_charge'] as num?)?.toDouble() ?? 0.0;
     final totalDiscount =
         (booking['total_discount'] as num?)?.toDouble() ?? 0.0;
+
+    // ✅ NEW: Convert total to user currency
+    final userTotalAmount = _convertToUser(
+      salonPrice: totalPrice,
+      salonCurrency: salonCurrency,
+      exchangeRate: exchangeRate,
+    );
 
     final queueToken = booking['queue_token'] as String?;
 
@@ -2651,6 +2828,14 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                     (s['original_price'] as num?)?.toDouble() ?? 0;
                 final hasDiscount = sDiscount > 0;
                 final variantLabel = s['variant_label'] as String?;
+                final displayPrice = hasDiscount ? sFinal : sOriginal;
+
+                // ✅ NEW: user currency conversion for this service
+                final userServiceAmount = _convertToUser(
+                  salonPrice: displayPrice,
+                  salonCurrency: salonCurrency,
+                  exchangeRate: exchangeRate,
+                );
 
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
@@ -2686,15 +2871,34 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                               ),
                             ),
                           if (hasDiscount) const SizedBox(width: 3),
-                          Text(
-                            '$symbol${(hasDiscount ? sFinal : sOriginal).toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: hasDiscount
-                                  ? Colors.green.shade700
-                                  : (isDark ? Colors.white : Colors.black87),
-                            ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '$symbol${displayPrice.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: hasDiscount
+                                      ? Colors.green.shade700
+                                      : (isDark
+                                            ? Colors.white
+                                            : Colors.black87),
+                                ),
+                              ),
+                              // ✅ NEW: approx user amount
+                              if (userServiceAmount != null)
+                                Text(
+                                  '≈ ${_formatUserPrice(userServiceAmount)}',
+                                  style: TextStyle(
+                                    fontSize: 9,
+                                    fontStyle: FontStyle.italic,
+                                    color: isDark
+                                        ? Colors.blue[300]
+                                        : Colors.blue[700],
+                                  ),
+                                ),
+                            ],
                           ),
                         ],
                       ),
@@ -2776,6 +2980,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
             ],
 
             const Divider(height: 14),
+            // ✅ UPDATED: Total row with dual currency
             Row(
               children: [
                 Text(
@@ -2787,13 +2992,31 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                   ),
                 ),
                 const Spacer(),
-                Text(
-                  '$symbol${totalPrice.toStringAsFixed(2)}',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.bold,
-                    color: isVip ? _vipColor : AppTheme.primary,
-                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '$symbol${totalPrice.toStringAsFixed(2)}',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: isVip ? _vipColor : AppTheme.primary,
+                      ),
+                    ),
+                    // ✅ NEW: approx user total
+                    if (userTotalAmount != null)
+                      Text(
+                        '≈ ${_formatUserPrice(userTotalAmount)}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
+                          fontWeight: FontWeight.w500,
+                          color: isDark
+                              ? Colors.blue[300]
+                              : Colors.blue[700],
+                        ),
+                      ),
+                  ],
                 ),
               ],
             ),

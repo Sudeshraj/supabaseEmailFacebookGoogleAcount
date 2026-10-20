@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/timezone_service.dart';
 import '../../services/currency_service.dart';
+import '../../services/currency_settings_service.dart'; // ✅ NEW
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
 
@@ -93,14 +94,19 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   // ✅ Timezone (salon + user)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  static const String _kDefaultCurrency = 'LKR'; // ✅ NEW
   String _userTimezone = '';
   String _selectedSalonTimezone = _kDefaultSalonTimezone;
   String _lastTimezone = '';
   bool _isTimezoneLoaded = false;
 
-  // ✅ Currency (salon)
+  // ✅ Currency (salon + user + rate)
   String _salonCurrencyCode = 'LKR';
+  String _userCurrencyCode = _kDefaultCurrency; // ✅ NEW
+  double? _exchangeRate; // ✅ NEW
   final CurrencyService _currencyService = CurrencyService.instance;
+  final CurrencySettingsService _currencySettings =
+      CurrencySettingsService.instance; // ✅ NEW
 
   // ✅ Responsive
   bool _isWeb = false;
@@ -148,6 +154,21 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       price: price,
       currencyCode: _salonCurrencyCode,
     );
+  }
+
+  /// ✅ NEW: User currency format (approximate)
+  String _formatUserPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _userCurrencyCode,
+    );
+  }
+
+  /// ✅ NEW: Check if dual display is applicable
+  bool get _showApprox {
+    return _exchangeRate != null &&
+        _exchangeRate! > 0 &&
+        _userCurrencyCode != _salonCurrencyCode;
   }
 
   /// ✅ Salon timezone display (main)
@@ -478,7 +499,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ============================================
-  // TIMEZONE
+  // TIMEZONE + CURRENCY INIT
   // ============================================
 
   Future<void> _initialize() async {
@@ -492,6 +513,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     await TimezoneService.setTimezone(_userTimezone);
 
     _lastTimezone = _userTimezone;
+
+    // ✅ NEW: Load user currency
+    try {
+      _userCurrencyCode = await _currencySettings.getUserCurrency();
+      debugPrint('✅ [VIP] User currency loaded: $_userCurrencyCode');
+    } catch (e) {
+      debugPrint('⚠️ [VIP] Failed to load user currency: $e');
+      _userCurrencyCode = _kDefaultCurrency;
+    }
 
     if (!mounted) return;
     setState(() {
@@ -581,14 +611,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _isInitialized = true;
     });
 
-    // ✅ Load salon settings (TZ + currency) FIRST
+    // ✅ Load salon settings (TZ + currency + rate) FIRST
     await _loadSalonSettings();
     await _loadSalonServices();
     await _applyPreselectedServices();
     await _loadHolidays();
   }
 
-  /// ✅ Load salon timezone + currency (main settings)
+  /// ✅ Load salon timezone + currency + exchange rate
   Future<void> _loadSalonSettings() async {
     if (_selectedSalon == null) return;
 
@@ -619,9 +649,49 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           '✅ [VIP] Salon settings loaded: TZ=$_selectedSalonTimezone, '
           'Currency=$_salonCurrencyCode',
         );
+
+        // ✅ NEW: Load exchange rate for this salon → user currency
+        await _loadExchangeRate();
       }
     } catch (e) {
       debugPrint('❌ [VIP] Error loading salon settings: $e');
+    }
+  }
+
+  /// ✅ NEW: Load exchange rate (salon → user)
+  Future<void> _loadExchangeRate() async {
+    if (!mounted) return;
+
+    // Same currency → no rate needed
+    if (_salonCurrencyCode == _userCurrencyCode) {
+      setState(() {
+        _exchangeRate = 1.0;
+      });
+      debugPrint('ℹ️ [VIP] Same currency, rate = 1.0');
+      return;
+    }
+
+    try {
+      final rate = await _currencySettings.getExchangeRate(
+        fromCurrency: _salonCurrencyCode,
+        toCurrency: _userCurrencyCode,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _exchangeRate = rate;
+      });
+
+      debugPrint(
+        '✅ [VIP] Exchange rate loaded: 1 $_salonCurrencyCode = '
+        '${rate?.toStringAsFixed(6) ?? "?"} $_userCurrencyCode',
+      );
+    } catch (e) {
+      debugPrint('⚠️ [VIP] Failed to load exchange rate: $e');
+      if (!mounted) return;
+      setState(() {
+        _exchangeRate = null;
+      });
     }
   }
 
@@ -688,9 +758,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _preselectedServicesApplied = false;
       _availableOffersPerService.clear();
       _serviceOffers.clear();
-      // ✅ Reset salon settings
+      // ✅ Reset salon settings + rate
       _selectedSalonTimezone = _kDefaultSalonTimezone;
       _salonCurrencyCode = 'LKR';
+      _exchangeRate = null;
     });
   }
 
@@ -803,7 +874,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _serviceOffers.clear();
     });
 
-    // ✅ Load salon settings (timezone + currency) BEFORE services
+    // ✅ Load salon settings (timezone + currency + rate) BEFORE services
     await _loadSalonSettings();
     await _loadSalonServices();
   }
@@ -1872,7 +1943,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           breakRanges,
         );
 
-        // ✅ FIXED: Convert UTC to SALON timezone for slot display + past check
         final utcStartStr =
             '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00';
 
@@ -1925,7 +1995,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           displayVipNumber = vipCountBefore + 1;
         }
 
-        // ✅ FIXED: SALON timezone for local display times
         final localStartDateTime =
             TimezoneService.utcToLocalDateTimeForDateWithTimezone(
           utcStartStr,
@@ -2153,16 +2222,31 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       if (!mounted) return;
 
       if (result['success'] == true) {
-        final confirmedVipNumber = result['vip_number'] ?? _generatedVipNumber;
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✅ VIP Booking Confirmed! VIP-$confirmedVipNumber'),
-              backgroundColor: _secondaryColor,
-            ),
-          );
-          Navigator.pop(context, true);
-        }
+        final confirmedVipNumber =
+            result['vip_number'] ?? _generatedVipNumber;
+
+        // ✅ NEW: Extract confirmed amounts from response
+        final confirmedRate =
+            (result['exchange_rate_at_booking'] as num?)?.toDouble();
+        final confirmedPrice =
+            (result['price'] as num?)?.toDouble() ?? _getDisplayTotalPrice();
+        final confirmedUserAmount =
+            (confirmedRate != null &&
+                confirmedRate > 0 &&
+                _userCurrencyCode != _salonCurrencyCode)
+            ? confirmedPrice * confirmedRate
+            : null;
+        final confirmedBookingNumber = result['booking_number']?.toString();
+
+        setState(() => _isBooking = false);
+
+        // ✅ NEW: Success dialog with dual currency
+        _showVipBookingSuccessDialog(
+          vipNumber: confirmedVipNumber,
+          confirmedPrice: confirmedPrice,
+          confirmedUserAmount: confirmedUserAmount,
+          bookingNumber: confirmedBookingNumber,
+        );
       } else {
         final errorMessage = result['message'] ?? 'VIP booking failed';
         final errorCode = result['error_code']?.toString() ?? '';
@@ -2179,6 +2263,218 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     } finally {
       if (mounted) setState(() => _isBooking = false);
     }
+  }
+
+  // ✅ NEW: Success dialog with confirmed amounts
+  void _showVipBookingSuccessDialog({
+    required int vipNumber,
+    required double confirmedPrice,
+    double? confirmedUserAmount,
+    String? bookingNumber,
+  }) {
+    final isDark = context.isDarkMode;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        icon: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.amber.withValues(alpha: 0.15),
+            shape: BoxShape.circle,
+          ),
+          child: const Icon(
+            Icons.star,
+            color: Colors.amber,
+            size: 48,
+          ),
+        ),
+        title: Text(
+          '⭐ VIP Booking Confirmed!',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (bookingNumber != null) ...[
+                Text(
+                  'Booking #$bookingNumber',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white70 : Colors.grey[700],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+              ],
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.amber.shade300,
+                      Colors.amber.shade600,
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'VIP-$vipNumber',
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Amount',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color:
+                                isDark ? Colors.white70 : Colors.grey[700],
+                          ),
+                        ),
+                        Text(
+                          _formatPrice(confirmedPrice),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (confirmedUserAmount != null) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            '≈ Your currency',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontStyle: FontStyle.italic,
+                              color: isDark
+                                  ? Colors.white60
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                          Text(
+                            _formatUserPrice(confirmedUserAmount),
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              fontStyle: FontStyle.italic,
+                              color: isDark
+                                  ? Colors.blue.shade300
+                                  : Colors.blue.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white10
+                            : Colors.orange.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            size: 12,
+                            color: isDark
+                                ? Colors.orange.shade300
+                                : Colors.orange.shade700,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              'Payment will be charged in $_salonCurrencyCode',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontStyle: FontStyle.italic,
+                                color: isDark
+                                    ? Colors.orange.shade300
+                                    : Colors.orange.shade700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                Navigator.of(context).pop(true);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _secondaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'Done',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ==================== UI BUILDERS ====================
@@ -3241,6 +3537,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  // ✅ UPDATED: dual display in panel
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -3261,6 +3558,16 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           color: AppTheme.primary,
                         ),
                       ),
+                      if (_showApprox)
+                        Text(
+                          '≈ ${_formatUserPrice(_getDisplayTotalPrice() * _exchangeRate!)}',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontStyle: FontStyle.italic,
+                            color:
+                                isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                        ),
                     ],
                   ),
                   Icon(Icons.chevron_right, size: 20, color: AppTheme.primary),
@@ -3760,6 +4067,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       );
     }
 
+    final displayPrice = hasOffer && isSelected ? finalPrice : price;
+
     return Column(
       children: [
         Padding(
@@ -3869,6 +4178,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
+                          // ✅ UPDATED: dual display in variant row
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
@@ -3884,9 +4194,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   ),
                                 ),
                               Text(
-                                _formatPrice(
-                                  hasOffer && isSelected ? finalPrice : price,
-                                ),
+                                _formatPrice(displayPrice),
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w700,
@@ -3895,6 +4203,17 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                       : AppTheme.primary,
                                 ),
                               ),
+                              if (_showApprox)
+                                Text(
+                                  '≈ ${_formatUserPrice(displayPrice * _exchangeRate!)}',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontStyle: FontStyle.italic,
+                                    color: isDark
+                                        ? Colors.white60
+                                        : Colors.grey[600],
+                                  ),
+                                ),
                             ],
                           ),
                         ],
@@ -4160,13 +4479,30 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 color: isDark ? Colors.white60 : Colors.grey,
                               ),
                             ),
-                            Text(
-                              _formatPrice(_getDisplayTotalPrice()),
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.primary,
-                              ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  _formatPrice(_getDisplayTotalPrice()),
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppTheme.primary,
+                                  ),
+                                ),
+                                // ✅ NEW: approx user currency
+                                if (_showApprox)
+                                  Text(
+                                    '≈ ${_formatUserPrice(_getDisplayTotalPrice() * _exchangeRate!)}',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontStyle: FontStyle.italic,
+                                      color: isDark
+                                          ? Colors.white60
+                                          : Colors.grey[600],
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ),
@@ -4264,6 +4600,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ],
                 ),
               ),
+              // ✅ UPDATED: dual display
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -4288,6 +4625,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           : AppTheme.primary,
                     ),
                   ),
+                  if (_showApprox)
+                    Text(
+                      '≈ ${_formatUserPrice(finalPrice * _exchangeRate!)}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontStyle: FontStyle.italic,
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(width: 8),
@@ -4356,7 +4702,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   Widget _buildDateSelectionStep() {
     final isDark = context.isDarkMode;
-    final today = _todayDate; // ✅ SALON date
+    final today = _todayDate;
     final maxDate = today.add(const Duration(days: 30));
 
     final firstSelectable = _firstSelectableDate();
@@ -4399,13 +4745,44 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 Icon(Icons.content_cut, size: 18, color: AppTheme.primary),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} • ${_calculateTotalDuration()} min • ${_formatPrice(_getDisplayTotalPrice())}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white70 : Colors.grey[700],
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} • ${_calculateTotalDuration()} min',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white70 : Colors.grey[700],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text(
+                            _formatPrice(_getDisplayTotalPrice()),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                          // ✅ NEW: approx user currency
+                          if (_showApprox) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '≈ ${_formatUserPrice(_getDisplayTotalPrice() * _exchangeRate!)}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontStyle: FontStyle.italic,
+                                color:
+                                    isDark ? Colors.white60 : Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -4526,7 +4903,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       child: CalendarDatePicker(
                         key: ValueKey('cal_$_calendarVersion'),
                         initialDate: calendarInitial,
-                        firstDate: today, // ✅ Salon today
+                        firstDate: today,
                         lastDate: maxDate,
                         selectableDayPredicate: (date) =>
                             _isDaySelectable(date),
@@ -5530,7 +5907,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ✅ Salon timezone (MAIN)
           Row(
             children: [
               const Icon(
@@ -5577,7 +5953,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ],
           ),
 
-          // ✅ User reference (only if different)
           if (showUserTz) ...[
             const SizedBox(height: 6),
             Container(
@@ -6445,6 +6820,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   '⭐ $barberRating rating',
                 ),
                 const SizedBox(height: 12),
+                // ✅ UPDATED: Estimated Amount with dual currency
                 _buildConfirmationTile(
                   Icons.attach_money,
                   'Estimated Amount',
@@ -6452,6 +6828,22 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // ✅ NEW: approx user currency
+                      if (_showApprox)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            '≈ ${_formatUserPrice(totalPrice * _exchangeRate!)} in your currency',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              fontStyle: FontStyle.italic,
+                              color: isDark
+                                  ? Colors.blue.shade300
+                                  : Colors.blue.shade700,
+                            ),
+                          ),
+                        ),
                       if (_discountAmount > 0)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 6),
@@ -6480,7 +6872,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             child: Text(
                               'Price may change after your service. The barber '
                               'can charge extra for additional work, so this '
-                              'may not be the final bill.',
+                              'may not be the final bill. Payment is charged in '
+                              '$_salonCurrencyCode.',
                               style: TextStyle(
                                 fontSize: 12,
                                 height: 1.3,

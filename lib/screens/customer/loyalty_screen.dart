@@ -136,7 +136,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
   // ✅ TIMEZONE HELPERS — Salon timezone
   // ============================================
 
-
   String _getSalonTimezoneDisplay() {
     final tz =
         _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
@@ -430,7 +429,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
 
   // ============================================
   // ✅ LOAD DATA (Salon-Specific via RPC)
-  // ✅ Fixed: Future.wait with explicit <dynamic>
+  // ✅ FIXED: Refresh user TZ + use _selectedSalonId
   // ============================================
 
   Future<void> _loadLoyaltyData() async {
@@ -442,6 +441,19 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     }
 
     try {
+      // ✅ Refresh user timezone (in case changed in settings)
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final currentUserTz =
+            prefs.getString(TimezoneService.kUserTimezone) ??
+                TimezoneService.getCurrentTimezone();
+        if (currentUserTz.isNotEmpty) {
+          _userTimezone = currentUserTz;
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to refresh user TZ: $e');
+      }
+
       final user = supabase.auth.currentUser;
       if (user == null) {
         if (mounted) {
@@ -454,7 +466,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
         return;
       }
 
-      // ✅ Individual Futures with explicit types (fixes inference error)
       final Future<dynamic> globalSummaryFuture = supabase.rpc(
         'get_global_loyalty_summary',
         params: {'p_customer_id': user.id},
@@ -481,7 +492,6 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
           .select('badge_id, earned_at, salon_id')
           .eq('customer_id', user.id);
 
-      // ✅ Explicit <dynamic> fixes "Couldn't infer type parameter 'E'"
       final results = await Future.wait<dynamic>([
         globalSummaryFuture,
         salonLoyaltiesFuture,
@@ -502,9 +512,14 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
         salonLoyaltiesResult is List ? salonLoyaltiesResult : [],
       );
 
-      // ✅ Load salon timezone + currency from first salon
+      // ✅ FIXED: Load salon TZ/currency for currently selected salon
+      // (or first salon if none selected yet)
       if (salonLoyalties.isNotEmpty) {
-        await _loadSalonInfo(salonLoyalties.first['salon_id'] as int?);
+        final salonToLoad = _selectedSalonId ??
+            (salonLoyalties.first['salon_id'] as int?);
+        if (salonToLoad != null) {
+          await _loadSalonInfo(salonToLoad);
+        }
       }
 
       setState(() {
@@ -540,7 +555,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     }
   }
 
-  /// ✅ Load salon timezone + currency
+  /// ✅ FIXED: Load salon timezone + currency (with setState)
   Future<void> _loadSalonInfo(int? salonId) async {
     if (salonId == null) return;
 
@@ -552,14 +567,21 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
           .maybeSingle();
 
       if (response != null && mounted) {
-        final tz = response['timezone'] as String?;
-        if (tz != null && tz.isNotEmpty) {
-          _salonTimezone = tz;
-        }
-        final curr = response['currency_code'] as String?;
-        if (curr != null && curr.isNotEmpty) {
-          _salonCurrencyCode = curr;
-        }
+        setState(() {
+          final tz = response['timezone'] as String?;
+          if (tz != null && tz.isNotEmpty) {
+            _salonTimezone = tz;
+          }
+          final curr = response['currency_code'] as String?;
+          if (curr != null && curr.isNotEmpty) {
+            _salonCurrencyCode = curr;
+          }
+        });
+
+        debugPrint(
+          '✅ Salon $salonId info loaded: TZ=$_salonTimezone, '
+          'Currency=$_salonCurrencyCode',
+        );
       }
     } catch (e) {
       debugPrint('❌ Error loading salon info: $e');
@@ -1230,9 +1252,12 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
         ),
       ),
       child: InkWell(
-        onTap: () {
+        // ✅ FIXED: Reload salon info on tap
+        onTap: () async {
+          if (salonId == null) return;
           setState(() => _selectedSalonId = salonId);
-          _tabController.animateTo(1);
+          await _loadSalonInfo(salonId);
+          if (mounted) _tabController.animateTo(1);
         },
         borderRadius: BorderRadius.circular(16),
         child: Padding(
@@ -1426,7 +1451,7 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
     );
   }
 
-  // ✅ Earning guide — with currency from salon
+  // ✅ Earning guide — with salon currency
   Widget _buildEarningGuide() {
     final isDark = context.isDarkMode;
     final cardColor = context.cardColor;
@@ -1642,8 +1667,11 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                     ),
                   );
                 }).toList(),
-                onChanged: (value) {
+                // ✅ FIXED: Reload salon info on change
+                onChanged: (value) async {
+                  if (value == null) return;
                   setState(() => _selectedSalonId = value);
+                  await _loadSalonInfo(value);
                 },
               ),
             ),
@@ -2286,8 +2314,12 @@ class _LoyaltyScreenState extends State<LoyaltyScreen>
                     );
                   }),
                 ],
-                onChanged: (value) {
+                // ✅ FIXED: Reload salon info on filter change
+                onChanged: (value) async {
                   setState(() => _historySalonFilter = value);
+                  if (value != null) {
+                    await _loadSalonInfo(value);
+                  }
                 },
               ),
             ),

@@ -7,6 +7,7 @@ import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:flutter_application_1/services/currency_service.dart';
+import 'package:flutter_application_1/services/currency_settings_service.dart';
 
 class CustomerHistoryScreen extends StatefulWidget {
   const CustomerHistoryScreen({super.key});
@@ -18,11 +19,13 @@ class CustomerHistoryScreen extends StatefulWidget {
 class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     with SingleTickerProviderStateMixin {
   final supabase = Supabase.instance.client;
-  // ✅ Class-level private field — underscore OK
   final CurrencyService _currencyService = CurrencyService.instance;
+  final CurrencySettingsService _currencySettings =
+      CurrencySettingsService.instance;
 
   // ✅ Default salon timezone
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  static const String _kDefaultCurrency = 'LKR';
 
   List<Map<String, dynamic>> _history = [];
   bool _isLoading = true;
@@ -41,7 +44,12 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   int _completedCount = 0;
   int _cancelledCount = 0;
   int _noShowCount = 0;
-  int _totalSpent = 0;
+
+  // ✅ FIXED: double (was int — precision loss)
+  double _totalSpent = 0.0;
+
+  // ✅ NEW: User currency for display conversion
+  String _userCurrencyCode = _kDefaultCurrency;
 
   // ✅ Salon timezone (for date/time conversions)
   String _salonTimezone = _kDefaultSalonTimezone;
@@ -105,12 +113,27 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     }
   }
 
-  /// ✅ Currency format helper
+  /// ✅ Currency format helper (salon currency)
   String _formatPrice(dynamic price, String? currencyCode) {
     return _currencyService.format(
       price: price,
-      currencyCode: currencyCode ?? 'LKR',
+      currencyCode: currencyCode ?? _kDefaultCurrency,
     );
+  }
+
+  /// ✅ NEW: User currency format helper (approx)
+  String _formatUserPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _userCurrencyCode,
+    );
+  }
+
+  /// ✅ NEW: Check if approx display applies
+  bool _showApprox(String salonCurrencyCode, double? exchangeRate) {
+    return exchangeRate != null &&
+        exchangeRate > 0 &&
+        salonCurrencyCode != _userCurrencyCode;
   }
 
   @override
@@ -136,6 +159,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   // ✅ LOAD HISTORY
   // ✅ mounted checks after every await
   // ✅ salon timezone for date calculations
+  // ✅ multi-currency totalSpent with rate lock
   // ============================================================
   Future<void> _loadHistory() async {
     if (!mounted) return;
@@ -154,6 +178,16 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
         });
         return;
       }
+
+      // ✅ NEW: Load user's preferred currency
+      try {
+        _userCurrencyCode = await _currencySettings.getUserCurrency();
+      } catch (e) {
+        debugPrint('⚠️ Failed to load user currency: $e');
+        _userCurrencyCode = _kDefaultCurrency;
+      }
+
+      if (!mounted) return;
 
       // ✅ Get customer role ID dynamically
       final roleResponse = await supabase
@@ -215,6 +249,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
             end_time,
             status,
             price,
+            currency_code,
+            exchange_rate_at_booking,
             original_price,
             discount_amount,
             extra_charge,
@@ -263,7 +299,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
       int completedCount = 0;
       int cancelledCount = 0;
       int noShowCount = 0;
-      int totalSpent = 0;
+      double totalSpent = 0.0;
 
       for (var item in response) {
         final salon = item['salons'] as Map?;
@@ -278,7 +314,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
             ? salonTz
             : _salonTimezone;
         if (effectiveTz.isNotEmpty && effectiveTz != _salonTimezone) {
-          // Update field for future conversions
           _salonTimezone = effectiveTz;
         }
 
@@ -291,6 +326,16 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
             (acc, s) => acc + ((s['final_price'] as num?)?.toDouble() ?? 0.0),
           );
         }
+
+        // ✅ Currency code from appointment (locked at booking) with salon fallback
+        final aptCurrencyCode =
+            item['currency_code']?.toString() ??
+            salon?['currency_code']?.toString() ??
+            _kDefaultCurrency;
+
+        // ✅ FIXED: exchange rate from appointment (locked)
+        final exchangeRate =
+            (item['exchange_rate_at_booking'] as num?)?.toDouble();
 
         // ✅ Combine multiple service names
         String serviceName = 'Unknown Service';
@@ -326,9 +371,6 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           overrideTimezone: effectiveTz,
         );
 
-        // ✅ Currency code from salon
-        final currencyCode = salon?['currency_code']?.toString() ?? 'LKR';
-
         // ✅ is_past based on SALON today
         final isPast = aptDate != null && aptDate.isBefore(_salonToday);
 
@@ -339,7 +381,8 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
           'services': servicesList,
           'salon_name': salon?['name']?.toString() ?? 'Unknown Salon',
           'salon_logo': salon?['logo_url']?.toString(),
-          'currency_code': currencyCode,
+          'currency_code': aptCurrencyCode,
+          'exchange_rate_at_booking': exchangeRate, // ✅ NEW
           'salon_timezone': effectiveTz,
           'barber_name': barber?['full_name']?.toString() ?? 'Unknown Barber',
           'appointment_date': dateStr,
@@ -360,7 +403,24 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
         });
 
         totalBookings++;
-        totalSpent += price.toInt();
+
+        // ✅ FIXED: Multi-currency total spent (only completed bookings)
+        if (status == 'completed') {
+          if (aptCurrencyCode == _userCurrencyCode) {
+            // Same currency → add directly
+            totalSpent += price;
+          } else if (exchangeRate != null && exchangeRate > 0) {
+            // ✅ rate = 1 salon_currency = N user_currency
+            // price is in salon currency → convert to user currency
+            totalSpent += price * exchangeRate;
+          } else {
+            // ⚠️ Old booking without rate → skip (no wrong numbers)
+            debugPrint(
+              '⚠️ Skipping booking ${item['id']} in totalSpent: '
+              '$aptCurrencyCode → $_userCurrencyCode, no rate',
+            );
+          }
+        }
 
         switch (status) {
           case 'completed':
@@ -386,7 +446,10 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
         _isLoading = false;
       });
 
-      debugPrint('✅ Loaded ${historyList.length} history records');
+      debugPrint(
+        '✅ Loaded ${historyList.length} history records — '
+        'totalSpent: ${_totalSpent.toStringAsFixed(2)} $_userCurrencyCode',
+      );
     } catch (e) {
       debugPrint('❌ Error loading history: $e');
       if (!mounted) return;
@@ -403,7 +466,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   String _formatDisplayDate(String dateStr) {
     try {
       final date = DateTime.parse(dateStr);
-      final salonToday = _salonToday; // ✅ Salon TZ
+      final salonToday = _salonToday;
 
       if (date.year == salonToday.year &&
           date.month == salonToday.month &&
@@ -470,7 +533,10 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => _BookingDetailsSheet(booking: booking),
+      builder: (context) => _BookingDetailsSheet(
+        booking: booking,
+        userCurrencyCode: _userCurrencyCode, // ✅ NEW
+      ),
     );
   }
 
@@ -821,7 +887,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // ✅ BUILD HISTORY CARD — uses salon currency
+  // ✅ BUILD HISTORY CARD — uses salon currency + user approx
   // ============================================================
   Widget _buildHistoryCard(Map<String, dynamic> booking) {
     final isDark = context.isDarkMode;
@@ -860,7 +926,14 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     final price = booking['price'] as double? ?? 0;
     final duration = booking['duration'] as int? ?? 30;
     final bookingNumber = booking['booking_number']?.toString() ?? '';
-    final currencyCode = booking['currency_code']?.toString() ?? 'LKR';
+    final currencyCode =
+        booking['currency_code']?.toString() ?? _kDefaultCurrency;
+    final exchangeRate =
+        (booking['exchange_rate_at_booking'] as num?)?.toDouble();
+
+    // ✅ NEW: Approx user amount for display
+    final showApprox = _showApprox(currencyCode, exchangeRate);
+    final userAmount = showApprox ? price * exchangeRate! : null;
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1024,13 +1097,30 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
                           color: Colors.green,
                         ),
                         const SizedBox(width: 4),
-                        Text(
-                          _formatPrice(price, currencyCode), // ✅ Salon currency
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.green,
-                          ),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _formatPrice(price, currencyCode),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.green,
+                              ),
+                            ),
+                            // ✅ NEW: Approx user currency
+                            if (showApprox && userAmount != null)
+                              Text(
+                                '≈ ${_formatUserPrice(userAmount)}',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontStyle: FontStyle.italic,
+                                  color: isDark
+                                      ? Colors.white60
+                                      : Colors.grey[600],
+                                ),
+                              ),
+                          ],
                         ),
                       ],
                     ),
@@ -1080,15 +1170,10 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
   }
 
   // ============================================================
-  // ✅ BUILD STATS TAB — uses salon currency
+  // ✅ BUILD STATS TAB — user currency display
   // ============================================================
   Widget _buildStatsTab() {
     final isDark = context.isDarkMode;
-
-    // ✅ Determine display currency code (first history item's salon)
-    final displayCurrencyCode = _history.isNotEmpty
-        ? (_history.first['currency_code']?.toString() ?? 'LKR')
-        : 'LKR';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -1108,9 +1193,13 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               Expanded(
                 child: _buildStatCard(
                   title: 'Total Spent',
-                  value: _formatPrice(_totalSpent, displayCurrencyCode), // ✅
+                  // ✅ FIXED: user currency (all converted to user currency)
+                  value: _formatUserPrice(_totalSpent),
                   icon: Icons.attach_money,
                   color: Colors.green,
+                  subtitle: _userCurrencyCode != _kDefaultCurrency
+                      ? 'in $_userCurrencyCode'
+                      : null,
                 ),
               ),
             ],
@@ -1297,6 +1386,7 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
     required String value,
     required IconData icon,
     required Color color,
+    String? subtitle, // ✅ NEW
   }) {
     final isDark = context.isDarkMode;
 
@@ -1330,6 +1420,16 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
               ),
               textAlign: TextAlign.center,
             ),
+            // ✅ NEW: Subtitle (e.g., "in USD")
+            if (subtitle != null)
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontStyle: FontStyle.italic,
+                  color: isDark ? Colors.white60 : Colors.grey[500],
+                ),
+              ),
           ],
         ),
       ),
@@ -1440,19 +1540,22 @@ class _CustomerHistoryScreenState extends State<CustomerHistoryScreen>
 }
 
 // ============================================================
-// BOOKING DETAILS SHEET — uses salon currency
-// ✅ FIXED: no leading underscore for local variable
+// BOOKING DETAILS SHEET — uses salon currency + user approx
+// ✅ NEW: userCurrencyCode param for approx display
 // ============================================================
 class _BookingDetailsSheet extends StatelessWidget {
   final Map<String, dynamic> booking;
+  final String userCurrencyCode; // ✅ NEW
 
-  const _BookingDetailsSheet({required this.booking});
+  const _BookingDetailsSheet({
+    required this.booking,
+    required this.userCurrencyCode,
+  });
 
   @override
   Widget build(BuildContext context) {
     final isDark = context.isDarkMode;
 
-    // ✅ FIXED: no leading underscore for local variable
     final currencyService = CurrencyService.instance;
 
     final serviceName = booking['service_name']?.toString() ?? 'Unknown';
@@ -1471,13 +1574,29 @@ class _BookingDetailsSheet extends StatelessWidget {
     final discountAmount =
         (booking['discount_amount'] as num?)?.toDouble() ?? 0;
     final services = (booking['services'] as List?) ?? [];
-    final currencyCode = booking['currency_code']?.toString() ?? 'LKR';
+    final currencyCode =
+        booking['currency_code']?.toString() ?? 'LKR';
+    final exchangeRate =
+        (booking['exchange_rate_at_booking'] as num?)?.toDouble();
 
-    // ✅ Currency format helper (uses local currencyService)
+    // ✅ NEW: Approx check
+    final showApprox = exchangeRate != null &&
+        exchangeRate > 0 &&
+        currencyCode != userCurrencyCode;
+
+    // ✅ Salon currency format helper
     String formatPrice(dynamic value) {
       return currencyService.format(
         price: value,
         currencyCode: currencyCode,
+      );
+    }
+
+    // ✅ User currency format helper
+    String formatUserPrice(dynamic value) {
+      return currencyService.format(
+        price: value,
+        currencyCode: userCurrencyCode,
       );
     }
 
@@ -1658,7 +1777,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                       value: '$duration minutes',
                     ),
 
-                    // ✅ Services list (multi-service)
+                    // ✅ Services list (multi-service) with dual display
                     if (services.isNotEmpty) ...[
                       Padding(
                         padding: const EdgeInsets.only(top: 12, bottom: 8),
@@ -1684,6 +1803,12 @@ class _BookingDetailsSheet extends StatelessWidget {
                             (s['discount_amount'] as num?)?.toDouble() ?? 0;
                         final variantLabel =
                             s['variant_label']?.toString() ?? '';
+
+                        final sDisplayPrice =
+                            sDiscount > 0 ? sFinal : sOriginal;
+                        final sUserAmount = showApprox
+                            ? sDisplayPrice * exchangeRate
+                            : null;
 
                         return Container(
                           margin: const EdgeInsets.only(bottom: 6),
@@ -1757,9 +1882,7 @@ class _BookingDetailsSheet extends StatelessWidget {
                                       ),
                                     ),
                                   Text(
-                                    formatPrice(
-                                      sDiscount > 0 ? sFinal : sOriginal,
-                                    ),
+                                    formatPrice(sDisplayPrice),
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
@@ -1770,6 +1893,18 @@ class _BookingDetailsSheet extends StatelessWidget {
                                               : Colors.black87),
                                     ),
                                   ),
+                                  // ✅ NEW: approx user currency per service
+                                  if (sUserAmount != null)
+                                    Text(
+                                      '≈ ${formatUserPrice(sUserAmount)}',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontStyle: FontStyle.italic,
+                                        color: isDark
+                                            ? Colors.white60
+                                            : Colors.grey[600],
+                                      ),
+                                    ),
                                 ],
                               ),
                             ],
@@ -1797,12 +1932,17 @@ class _BookingDetailsSheet extends StatelessWidget {
                         valueColor: Colors.orange,
                       ),
 
+                    // ✅ Total with dual display
                     _buildDetailRow(
                       context,
                       icon: Icons.attach_money,
                       label: 'Total Price',
                       value: formatPrice(price),
                       valueColor: Colors.green,
+                      subtitle: showApprox
+                          ? '≈ ${formatUserPrice(price * exchangeRate)} '
+                              'in $userCurrencyCode'
+                          : null,
                     ),
 
                     if (cancelReason != null && cancelReason.isNotEmpty)
@@ -1846,6 +1986,7 @@ class _BookingDetailsSheet extends StatelessWidget {
     required String label,
     required String value,
     Color? valueColor,
+    String? subtitle, // ✅ NEW
   }) {
     final isDark = context.isDarkMode;
 
@@ -1883,6 +2024,21 @@ class _BookingDetailsSheet extends StatelessWidget {
                         (isDark ? Colors.white : Colors.grey[800]),
                   ),
                 ),
+                // ✅ NEW: Subtitle (approximate user currency)
+                if (subtitle != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                        color: isDark
+                            ? Colors.blue.shade300
+                            : Colors.blue.shade700,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import '../../services/timezone_service.dart';
 import '../../services/currency_service.dart';
+import '../../services/currency_settings_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
 
@@ -92,14 +93,19 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   // ✅ Timezone (salon + user)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  static const String _kDefaultCurrency = 'LKR'; // ✅ NEW
   String _userTimezone = '';
   String _selectedSalonTimezone = _kDefaultSalonTimezone;
   String _lastTimezone = '';
   bool _isTimezoneLoaded = false;
 
-  // ✅ Currency (salon)
+  // ✅ Currency (salon + user + rate)
   String _salonCurrencyCode = 'LKR';
+  String _userCurrencyCode = _kDefaultCurrency; // ✅ NEW
+  double? _exchangeRate; // ✅ NEW
   final CurrencyService _currencyService = CurrencyService.instance;
+  final CurrencySettingsService _currencySettings =
+      CurrencySettingsService.instance; // ✅ NEW
 
   // ✅ Responsive
   bool _isWeb = false;
@@ -141,12 +147,27 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   // ✅ CURRENCY + TIMEZONE HELPERS
   // ═══════════════════════════════════════════════════
 
-  /// ✅ Salon currency format
+  /// ✅ Salon currency format (for backend/internal use)
   String _formatPrice(dynamic price) {
     return _currencyService.format(
       price: price,
       currencyCode: _salonCurrencyCode,
     );
+  }
+
+  /// ✅ NEW: User currency format (approximate)
+  String _formatUserPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _userCurrencyCode,
+    );
+  }
+
+  /// ✅ NEW: Check if dual display is applicable
+  bool get _showApprox {
+    return _exchangeRate != null &&
+        _exchangeRate! > 0 &&
+        _userCurrencyCode != _salonCurrencyCode;
   }
 
   /// ✅ Salon timezone display (main)
@@ -437,7 +458,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   // ============================================
-  // TIMEZONE
+  // TIMEZONE + CURRENCY INIT
   // ============================================
 
   Future<void> _initialize() async {
@@ -451,6 +472,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     await TimezoneService.setTimezone(_userTimezone);
 
     _lastTimezone = _userTimezone;
+
+    // ✅ NEW: Load user currency
+    try {
+      _userCurrencyCode = await _currencySettings.getUserCurrency();
+      debugPrint('✅ User currency loaded: $_userCurrencyCode');
+    } catch (e) {
+      debugPrint('⚠️ Failed to load user currency: $e');
+      _userCurrencyCode = _kDefaultCurrency;
+    }
 
     if (!mounted) return;
     setState(() {
@@ -532,7 +562,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _isInitialized = true;
     });
 
-    // ✅ Load salon timezone + currency FIRST (before other data)
+    // ✅ Load salon timezone + currency + exchange rate FIRST
     await _loadSalonSettings();
     await _loadSalonServices();
     await _applyPreselectedServices();
@@ -545,7 +575,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 
-  /// ✅ Load salon timezone + currency (main settings)
+  /// ✅ Load salon timezone + currency + exchange rate
   Future<void> _loadSalonSettings() async {
     if (_selectedSalon == null) return;
 
@@ -576,9 +606,49 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           '✅ Salon settings loaded: TZ=$_selectedSalonTimezone, '
           'Currency=$_salonCurrencyCode',
         );
+
+        // ✅ NEW: Load exchange rate for this salon → user currency
+        await _loadExchangeRate();
       }
     } catch (e) {
       debugPrint('❌ Error loading salon settings: $e');
+    }
+  }
+
+  /// ✅ NEW: Load exchange rate (salon → user)
+  Future<void> _loadExchangeRate() async {
+    if (!mounted) return;
+
+    // Same currency → no rate needed
+    if (_salonCurrencyCode == _userCurrencyCode) {
+      setState(() {
+        _exchangeRate = 1.0;
+      });
+      debugPrint('ℹ️ Same currency, rate = 1.0');
+      return;
+    }
+
+    try {
+      final rate = await _currencySettings.getExchangeRate(
+        fromCurrency: _salonCurrencyCode,
+        toCurrency: _userCurrencyCode,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _exchangeRate = rate;
+      });
+
+      debugPrint(
+        '✅ Exchange rate loaded: 1 $_salonCurrencyCode = '
+        '${rate?.toStringAsFixed(6) ?? "?"} $_userCurrencyCode',
+      );
+    } catch (e) {
+      debugPrint('⚠️ Failed to load exchange rate: $e');
+      if (!mounted) return;
+      setState(() {
+        _exchangeRate = null;
+      });
     }
   }
 
@@ -642,9 +712,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _discountAmount = 0;
       _originalTotalPrice = 0;
       _finalTotalPrice = 0;
-      // ✅ Reset salon settings
+      // ✅ Reset salon + user currency/rate
       _selectedSalonTimezone = _kDefaultSalonTimezone;
       _salonCurrencyCode = 'LKR';
+      _exchangeRate = null;
+      // Keep _userCurrencyCode as-is (user preference)
     });
   }
 
@@ -757,7 +829,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _serviceOffers.clear();
     });
 
-    // ✅ Load salon settings (timezone + currency) BEFORE services
+    // ✅ Load salon settings (timezone + currency + rate) BEFORE services
     await _loadSalonSettings();
     await _loadSalonServices();
   }
@@ -1705,7 +1777,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       String utcStart = data['new_start_time']?.toString() ?? '--:--';
       String utcEnd = data['new_end_time']?.toString() ?? '--:--';
 
-      // ✅ FIXED: SALON timezone for slot display (NOT user timezone)
+      // ✅ SALON timezone for slot display
       String localStart = TimezoneService.utcToLocalTimeForDateWithTimezone(
         utcStart,
         _selectedDate!,
@@ -1849,9 +1921,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         throw Exception('Some services have invalid variants.');
       }
 
-      // ✅ p_utc_* are UTC (RPC saves them as-is). p_appointment_date must
-      //    be the SALON date (already ensured by _selectedDate from salon
-      //    timezone picker).
       final result = await supabase.rpc(
         'create_new_appointment_advanced',
         params: {
@@ -1885,26 +1954,28 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           result['regular_queue_number']?.toString() ??
           'N/A';
 
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Row(
-            children: [
-              const Icon(Icons.check_circle, color: Colors.white, size: 20),
-              const SizedBox(width: 8),
-              Expanded(child: Text('✅ Booking Confirmed! Queue $queueDisplay')),
-            ],
-          ),
-          backgroundColor: _secondaryColor,
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      // ✅ NEW: Extract confirmed amounts from response
+      final confirmedRate =
+          (result['exchange_rate_at_booking'] as num?)?.toDouble();
+      final confirmedPrice =
+          (result['price'] as num?)?.toDouble() ?? _getDisplayTotalPrice();
+      final confirmedUserAmount =
+          (confirmedRate != null &&
+              confirmedRate > 0 &&
+              _userCurrencyCode != _salonCurrencyCode)
+          ? confirmedPrice * confirmedRate
+          : null;
+      final confirmedBookingNumber = result['booking_number']?.toString();
 
-      await Future.delayed(const Duration(milliseconds: 800));
-      if (mounted) {
-        Navigator.pop(context, true);
-      }
+      setState(() => _isBooking = false);
+
+      // ✅ NEW: Show detailed success dialog
+      _showBookingSuccessDialog(
+        queueDisplay: queueDisplay,
+        confirmedPrice: confirmedPrice,
+        confirmedUserAmount: confirmedUserAmount,
+        bookingNumber: confirmedBookingNumber,
+      );
     } catch (e, stackTrace) {
       debugPrint('❌❌❌ BOOKING FAILED: $e');
       debugPrint('   Stack: $stackTrace');
@@ -1931,6 +2002,219 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     } finally {
       if (mounted) setState(() => _isBooking = false);
     }
+  }
+
+  // ✅ NEW: Success dialog with confirmed amounts
+  void _showBookingSuccessDialog({
+    required String queueDisplay,
+    required double confirmedPrice,
+    double? confirmedUserAmount,
+    String? bookingNumber,
+  }) {
+    final isDark = context.isDarkMode;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        icon: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: _secondaryColor.withValues(alpha: 0.15),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.check_circle,
+            color: _secondaryColor,
+            size: 48,
+          ),
+        ),
+        title: Text(
+          '✅ Booking Confirmed!',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (bookingNumber != null) ...[
+                Text(
+                  'Booking #$bookingNumber',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white70 : Colors.grey[700],
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+              ],
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  'Queue $queueDisplay',
+                  style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Amount',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color:
+                                isDark ? Colors.white70 : Colors.grey[700],
+                          ),
+                        ),
+                        Text(
+                          _currencyService.format(
+                            price: confirmedPrice,
+                            currencyCode: _salonCurrencyCode,
+                          ),
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (confirmedUserAmount != null) ...[
+                      const SizedBox(height: 6),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            '≈ Your currency',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontStyle: FontStyle.italic,
+                              color: isDark
+                                  ? Colors.white60
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                          Text(
+                            _currencyService.format(
+                              price: confirmedUserAmount,
+                              currencyCode: _userCurrencyCode,
+                            ),
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              fontStyle: FontStyle.italic,
+                              color: isDark
+                                  ? Colors.blue.shade300
+                                  : Colors.blue.shade700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white10
+                            : Colors.orange.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            size: 12,
+                            color: isDark
+                                ? Colors.orange.shade300
+                                : Colors.orange.shade700,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              'Payment will be charged in $_salonCurrencyCode',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontStyle: FontStyle.italic,
+                                color: isDark
+                                    ? Colors.orange.shade300
+                                    : Colors.orange.shade700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                Navigator.of(context).pop(true);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _secondaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: const Text(
+                'Done',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ==================== UI BUILDERS ====================
@@ -2020,12 +2304,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return Icons.build;
   }
 
-  /// ✅ Salon opening hours — SALON timezone, NOT user timezone
+  /// ✅ Salon opening hours — SALON timezone
   String _getSalonLocalTime(Map<String, dynamic> salon) {
     final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
     final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
 
-    // ✅ FIXED: use SALON timezone
     final tz = _selectedSalonTimezone.isNotEmpty
         ? _selectedSalonTimezone
         : _kDefaultSalonTimezone;
@@ -2969,6 +3252,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  // ✅ UPDATED: dual display in panel
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -2989,6 +3273,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           color: AppTheme.primary,
                         ),
                       ),
+                      if (_showApprox)
+                        Text(
+                          '≈ ${_formatUserPrice(_getDisplayTotalPrice() * _exchangeRate!)}',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontStyle: FontStyle.italic,
+                            color:
+                                isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                        ),
                     ],
                   ),
                   Icon(Icons.chevron_right, size: 20, color: AppTheme.primary),
@@ -3490,6 +3784,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       );
     }
 
+    final displayPrice = hasOffer && isSelected ? finalPrice : price;
+
     return Column(
       children: [
         Padding(
@@ -3599,6 +3895,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
+                          // ✅ UPDATED: dual display in variant row
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
@@ -3614,9 +3911,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                   ),
                                 ),
                               Text(
-                                _formatPrice(
-                                  hasOffer && isSelected ? finalPrice : price,
-                                ),
+                                _formatPrice(displayPrice),
                                 style: TextStyle(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w700,
@@ -3625,6 +3920,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                       : AppTheme.primary,
                                 ),
                               ),
+                              if (_showApprox)
+                                Text(
+                                  '≈ ${_formatUserPrice(displayPrice * _exchangeRate!)}',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontStyle: FontStyle.italic,
+                                    color: isDark
+                                        ? Colors.white60
+                                        : Colors.grey[600],
+                                  ),
+                                ),
                             ],
                           ),
                         ],
@@ -3883,13 +4189,30 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               color: isDark ? Colors.white60 : Colors.grey,
                             ),
                           ),
-                          Text(
-                            _formatPrice(_getDisplayTotalPrice()),
-                            style: TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: AppTheme.primary,
-                            ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                _formatPrice(_getDisplayTotalPrice()),
+                                style: TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.primary,
+                                ),
+                              ),
+                              // ✅ NEW: approx user currency
+                              if (_showApprox)
+                                Text(
+                                  '≈ ${_formatUserPrice(_getDisplayTotalPrice() * _exchangeRate!)}',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontStyle: FontStyle.italic,
+                                    color: isDark
+                                        ? Colors.white60
+                                        : Colors.grey[600],
+                                  ),
+                                ),
+                            ],
                           ),
                         ],
                       ),
@@ -4006,6 +4329,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           : AppTheme.primary,
                     ),
                   ),
+                  if (_showApprox)
+                    Text(
+                      '≈ ${_formatUserPrice(finalPrice * _exchangeRate!)}',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontStyle: FontStyle.italic,
+                        color: isDark ? Colors.white60 : Colors.grey[600],
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(width: 8),
@@ -4073,7 +4405,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   Widget _buildDateSelectionStep() {
     final isDark = context.isDarkMode;
-    final today = _todayDate; // ✅ SALON date
+    final today = _todayDate;
     final maxDate = today.add(const Duration(days: 30));
 
     final firstSelectable = _firstSelectableDate();
@@ -4116,13 +4448,44 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 Icon(Icons.content_cut, size: 18, color: AppTheme.primary),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(
-                    '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} • ${_calculateTotalDuration()} min • ${_formatPrice(_getDisplayTotalPrice())}',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white70 : Colors.grey[700],
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${_selectedServices.length} service${_selectedServices.length > 1 ? 's' : ''} • ${_calculateTotalDuration()} min',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white70 : Colors.grey[700],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Text(
+                            _formatPrice(_getDisplayTotalPrice()),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                          // ✅ NEW: approx user currency
+                          if (_showApprox) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              '≈ ${_formatUserPrice(_getDisplayTotalPrice() * _exchangeRate!)}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontStyle: FontStyle.italic,
+                                color:
+                                    isDark ? Colors.white60 : Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -4243,7 +4606,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       child: CalendarDatePicker(
                         key: ValueKey('cal_$_calendarVersion'),
                         initialDate: calendarInitial,
-                        firstDate: today, // ✅ Salon today
+                        firstDate: today,
                         lastDate: maxDate,
                         selectableDayPredicate: (date) =>
                             _isDaySelectable(date),
@@ -5228,7 +5591,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   // STEP 5: TIME SLOT SELECTION
   // ============================================
 
-  /// ✅ Timezone indicator: Salon time (main) + User reference
   Widget _buildTimezoneIndicator() {
     final isDark = context.isDarkMode;
     final showUserTz = _isDifferentTimezone;
@@ -5246,7 +5608,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ✅ Salon timezone (MAIN)
           Row(
             children: [
               const Icon(
@@ -5293,7 +5654,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             ],
           ),
 
-          // ✅ User reference (only if different)
           if (showUserTz) ...[
             const SizedBox(height: 6),
             Container(
@@ -6213,6 +6573,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                   ),
                 const SizedBox(height: 12),
+                // ✅ UPDATED: Estimated Amount with dual currency
                 _buildConfirmationTile(
                   Icons.attach_money,
                   'Estimated Amount',
@@ -6220,6 +6581,22 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // ✅ NEW: approx user currency
+                      if (_showApprox)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: Text(
+                            '≈ ${_formatUserPrice(totalPrice * _exchangeRate!)} in your currency',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              fontStyle: FontStyle.italic,
+                              color: isDark
+                                  ? Colors.blue.shade300
+                                  : Colors.blue.shade700,
+                            ),
+                          ),
+                        ),
                       if (_discountAmount > 0)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 6),
@@ -6248,7 +6625,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             child: Text(
                               'Price may change after your service. The barber '
                               'can charge extra for additional work, so this '
-                              'may not be the final bill.',
+                              'may not be the final bill. Payment is charged in '
+                              '$_salonCurrencyCode.',
                               style: TextStyle(
                                 fontSize: 12,
                                 height: 1.3,

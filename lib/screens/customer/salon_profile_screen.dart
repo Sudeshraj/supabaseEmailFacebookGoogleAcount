@@ -5,6 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/timezone_service.dart';
 import '../../services/currency_service.dart';
+import '../../services/currency_settings_service.dart'; // ✅ NEW
 import '../../extensions/context_extensions.dart';
 
 class SalonProfileScreen extends StatefulWidget {
@@ -28,19 +29,21 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   List<Map<String, dynamic>> _offers = [];
   bool _isLoadingOffers = true;
 
-  // ✅ Track claim state per offer
   final Set<int> _claimingOfferIds = {};
 
   // ==================== TIMEZONE VARIABLES ====================
-  // ✅ SALON timezone (for all time display) — NOT user timezone!
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
+  static const String _kDefaultCurrency = 'LKR'; // ✅ NEW
   String _salonTimezone = _kDefaultSalonTimezone;
-
-  // ✅ USER timezone (for reference only, if different)
   String _userTimezone = '';
 
-  // ✅ CURRENCY
+  // ✅ CURRENCY (salon + user + exchange rate)
   String _salonCurrencyCode = 'LKR';
+  String _userCurrencyCode = _kDefaultCurrency; // ✅ NEW
+  double? _exchangeRate; // ✅ NEW
+  final CurrencyService _currencyService = CurrencyService.instance;
+  final CurrencySettingsService _currencySettings =
+      CurrencySettingsService.instance; // ✅ NEW
 
   bool _isTimezoneLoaded = false;
 
@@ -88,6 +91,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     return _salonTimezone != _userTimezone;
   }
 
+  /// ✅ Check if user currency differs from salon currency
+  bool get _showApprox {
+    return _exchangeRate != null &&
+        _exchangeRate! > 0 &&
+        _userCurrencyCode != _salonCurrencyCode;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -99,22 +109,19 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
   Future<void> _initialize() async {
     await _initializeTimezone();
-    await _loadSalonInfo(); // ✅ Load salon timezone + currency from DB
+    await _loadSalonInfo(); // ✅ Load salon TZ + currency + user currency + rate
     await Future.wait([
       _loadUserStatus(),
       _loadSalonDetails(),
       _checkIfFollowing(),
       _loadFollowersCount(),
     ]);
-    // ✅ Load offers AFTER user status is known (for claim_status)
     await _loadSalonOffers();
   }
 
-  /// ✅ SIMPLIFIED: Load user timezone via TimezoneService
   Future<void> _initializeTimezone() async {
     await TimezoneService.initialize();
 
-    // ✅ TimezoneService එකේ current timezone එක use කරන්න
     _userTimezone = TimezoneService.getCurrentTimezone();
     if (_userTimezone.isEmpty) {
       _userTimezone = _kDefaultSalonTimezone;
@@ -123,16 +130,26 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     debugPrint('✅ User timezone: $_userTimezone');
   }
 
-  /// ✅ Load salon timezone + currency from DB
+  /// ✅ Load salon timezone + currency + user currency + exchange rate
   Future<void> _loadSalonInfo() async {
-    // ✅ Defaults BEFORE query so they're never empty
+    // ✅ Defaults BEFORE query
     _salonTimezone = _kDefaultSalonTimezone;
-    _salonCurrencyCode = 'LKR';
+    _salonCurrencyCode = _kDefaultCurrency;
+
+    // ✅ Load user currency (from profiles)
+    try {
+      _userCurrencyCode = await _currencySettings.getUserCurrency();
+      debugPrint('✅ User currency: $_userCurrencyCode');
+    } catch (e) {
+      debugPrint('⚠️ Failed to load user currency: $e');
+      _userCurrencyCode = _kDefaultCurrency;
+    }
 
     try {
       final salonId = widget.salon['id'];
       if (salonId == null) {
         if (!mounted) return;
+        await _loadExchangeRate();
         setState(() {
           _isTimezoneLoaded = true;
         });
@@ -160,6 +177,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         }
       }
 
+      // ✅ Load exchange rate for this salon → user currency
+      await _loadExchangeRate();
+
       _convertSalonHoursToLocal();
 
       if (!mounted) return;
@@ -168,17 +188,59 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       });
 
       debugPrint(
-        '✅ Salon timezone: $_salonTimezone, Currency: $_salonCurrencyCode',
+        '✅ Salon: TZ=$_salonTimezone, Currency=$_salonCurrencyCode, '
+        'User currency=$_userCurrencyCode, Rate=$_exchangeRate',
       );
     } catch (e) {
       debugPrint('❌ Error loading salon info: $e');
 
-      // ✅ Fallbacks already set above
+      // ✅ Load rate anyway (with default currency)
+      await _loadExchangeRate();
+
       _convertSalonHoursToLocal();
 
       if (!mounted) return;
       setState(() {
         _isTimezoneLoaded = true;
+      });
+    }
+  }
+
+  /// ✅ NEW: Load exchange rate (salon → user)
+  Future<void> _loadExchangeRate() async {
+    if (!mounted) return;
+
+    // Same currency → no rate needed
+    if (_salonCurrencyCode == _userCurrencyCode) {
+      if (mounted) {
+        setState(() {
+          _exchangeRate = 1.0;
+        });
+      }
+      debugPrint('ℹ️ Same currency, rate = 1.0');
+      return;
+    }
+
+    try {
+      final rate = await _currencySettings.getExchangeRate(
+        fromCurrency: _salonCurrencyCode,
+        toCurrency: _userCurrencyCode,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _exchangeRate = rate;
+      });
+
+      debugPrint(
+        '✅ Exchange rate: 1 $_salonCurrencyCode = '
+        '${rate?.toStringAsFixed(6) ?? "?"} $_userCurrencyCode',
+      );
+    } catch (e) {
+      debugPrint('⚠️ Failed to load exchange rate: $e');
+      if (!mounted) return;
+      setState(() {
+        _exchangeRate = null;
       });
     }
   }
@@ -195,7 +257,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Role check by name (not hardcoded role_id)
       final customerCheck = await supabase
           .from('user_roles')
           .select('status, roles!inner(name)')
@@ -257,7 +318,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ==================== TIMEZONE CONVERSION ====================
-  // ✅ All times use SALON timezone
 
   void _convertSalonHoursToLocal() {
     try {
@@ -277,7 +337,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  /// ✅ UTC → SALON local time (reference date for recurring)
   String _utcToSalonTimeString(String utcTime) {
     try {
       final tz =
@@ -289,7 +348,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  /// ✅ UTC → USER local time (reference only, if different)
   String _utcToUserTimeString(String utcTime) {
     if (!_isDifferentTimezone) return '';
     if (_userTimezone.isEmpty) return '';
@@ -316,10 +374,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  /// ✅ Check if salon is open NOW — uses SALON timezone
   bool _isOpenNow() {
     try {
-      // ✅ Use salon timezone
       final now = _salonNow;
       final nowMinutes = now.hour * 60 + now.minute;
 
@@ -354,14 +410,21 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   // ============================================================
 
   String _formatPrice(dynamic price) {
-    return CurrencyService.instance.format(
+    return _currencyService.format(
       price: price,
       currencyCode: _salonCurrencyCode,
     );
   }
 
-  String get _salonCurrencySymbol =>
-      CurrencyService.instance.getSymbol(_salonCurrencyCode);
+  /// ✅ NEW: User currency format
+  String _formatUserPrice(dynamic price) {
+    return _currencyService.format(
+      price: price,
+      currencyCode: _userCurrencyCode,
+    );
+  }
+
+  String get _salonCurrencySymbol => _currencyService.getSymbol(_salonCurrencyCode);
 
   // ==================== DATA LOADING ====================
 
@@ -417,9 +480,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  // ============================================================
-  // ✅ LOAD OFFERS (with variant info + claim status)
-  // ============================================================
   Future<void> _loadSalonOffers() async {
     try {
       final user = supabase.auth.currentUser;
@@ -452,7 +512,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           .gte('valid_to', today)
           .order('points_required', ascending: true);
 
-      // ✅ Load claims for this customer
       Map<int, String> claimStatus = {};
       if (user != null && offers.isNotEmpty) {
         try {
@@ -471,7 +530,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         }
       }
 
-      // ✅ Load gender/age lookups for variant labels
       final genderIds = <int>{};
       final ageIds = <int>{};
       for (final o in offers) {
@@ -509,7 +567,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         }
       }
 
-      // ✅ Build variant/scope summary for each offer
       final enriched = offers.map<Map<String, dynamic>>((o) {
         final offer = Map<String, dynamic>.from(o);
         final svcList = (offer['offer_services'] as List? ?? []);
@@ -521,7 +578,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           final serviceName = service?['name']?.toString() ?? 'Service';
 
           if (variant == null) {
-            // Service-level
             scopeParts.add(serviceName);
           } else {
             final gid = variant['salon_gender_id'] as int?;
@@ -741,7 +797,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ============================================================
-  // ✅ OFFER CLAIM (uses claim_offer RPC, atomic — salon-specific)
+  // ✅ OFFER CLAIM
   // ============================================================
 
   Future<void> _claimOffer(Map<String, dynamic> offer) async {
@@ -768,7 +824,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Must follow salon first
       if (!_isFollowing) {
         _showSnackBar(
           'Please follow ${widget.salon['name'] ?? 'this salon'} to claim offers',
@@ -777,7 +832,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Already claimed / used guard
       final claimStatus = offer['claim_status'];
       if (claimStatus == 'active') {
         _showSnackBar('You have already claimed this offer', Colors.orange);
@@ -788,7 +842,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      // ✅ Salon-specific points check (client-side)
       final pointsRequired =
           (offer['points_required'] as num?)?.toInt() ?? 0;
 
@@ -815,7 +868,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           }
         } catch (e) {
           debugPrint('⚠️ Error checking salon loyalty: $e');
-          // Fall through — server will validate anyway
         }
       }
 
@@ -825,7 +877,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
       setState(() => _claimingOfferIds.add(offerId));
 
-      // ✅ Atomic RPC (handles points + used_count + validation)
       final response = await supabase.rpc(
         'claim_offer',
         params: {'p_offer_id': offerId},
@@ -1048,11 +1099,20 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   // HELPER METHODS
   // ============================================================
 
+  /// ✅ Offer discount text with approx (if fixed amount)
   String _getDiscountText(Map<String, dynamic> offer) {
     if (offer['discount_type'] == 'percentage') {
       return '${offer['discount_value']}% OFF';
     } else if (offer['discount_type'] == 'fixed') {
-      return '$_salonCurrencySymbol${offer['discount_value']} OFF';
+      final value = (offer['discount_value'] as num?)?.toDouble() ?? 0;
+      final salonText = '$_salonCurrencySymbol${offer['discount_value']} OFF';
+
+      // ✅ Add approx in user currency
+      if (_showApprox && value > 0) {
+        final userValue = value * _exchangeRate!;
+        return '$salonText\n≈ ${_formatUserPrice(userValue)} OFF';
+      }
+      return salonText;
     } else {
       return 'FREE';
     }
@@ -1296,10 +1356,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
-  // ============================================================
-  // LOGO + ACTIONS
-  // ============================================================
-
   Widget _buildLogoAndActionsSection(bool isWeb) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1491,7 +1547,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             color: context.secondaryTextColor,
                           ),
                         ),
-                        // ✅ User timezone reference (only if different)
                         if (_isDifferentTimezone)
                           Text(
                             'Your time: ${_utcToUserTimeString(widget.salon['open_time']?.toString() ?? '09:00:00')} - ${_utcToUserTimeString(widget.salon['close_time']?.toString() ?? '18:00:00')}',
@@ -1614,7 +1669,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   ),
                 )
               : SizedBox(
-                  height: 300,
+                  height: 320,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: _offers.length > 3 ? 3 : _offers.length,
@@ -2008,7 +2063,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ============================================================
-  // ✅ OFFER CARD (variant-aware + claim state)
+  // ✅ OFFER CARD
   // ============================================================
   Widget _buildOfferCard(Map<String, dynamic> offer, int index) {
     final color = _getOfferColor(index);
@@ -2022,7 +2077,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     final isUsed = claimStatus == 'used';
     final scopeSummary = offer['scope_summary']?.toString() ?? '';
 
-    // Button state
     final String buttonLabel;
     final bool buttonEnabled;
     if (!_isFollowing) {
@@ -2142,7 +2196,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
 
-                // ✅ Scope summary (which services / variants)
                 if (scopeSummary.isNotEmpty) ...[
                   const SizedBox(height: 8),
                   Container(
@@ -2205,7 +2258,6 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       ),
                     const Spacer(),
 
-                    // Claim badge overrides days-left badge
                     if (isUsed || isClaimed)
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -2822,16 +2874,31 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        price != null
-                            ? _formatPrice(price)
-                            : '—',
-                        style: context.bodyMedium.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: price != null
-                              ? context.primaryColor
-                              : context.secondaryTextColor,
-                        ),
+                      // ✅ UPDATED: dual currency for variant price
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            price != null ? _formatPrice(price) : '—',
+                            style: context.bodyMedium.copyWith(
+                              fontWeight: FontWeight.w700,
+                              color: price != null
+                                  ? context.primaryColor
+                                  : context.secondaryTextColor,
+                            ),
+                          ),
+                          if (_showApprox && price != null)
+                            Text(
+                              '≈ ${_formatUserPrice(price * _exchangeRate!)}',
+                              style: context.bodySmall.copyWith(
+                                fontStyle: FontStyle.italic,
+                                color: context.isDarkMode
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                                fontSize: 10,
+                              ),
+                            ),
+                        ],
                       ),
                     ],
                   ),
