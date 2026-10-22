@@ -48,7 +48,7 @@
     <!-- ================================================================ -->
 
     <application
-        android:label="flutter_application_1"
+        android:label="Beautibooker"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
@@ -169,70 +169,17 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-
-            <!-- Custom URL Scheme: myapp:// -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />               
-            </intent-filter>
-
-            <!-- Android App Links -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:scheme="https"
-                    android:host="ifhenrgfpahandumdwmt.supabase.co"
-                    android:pathPrefix="/auth/v1/callback" />
-
-                <data
-                    android:scheme="https"
-                    android:host="yourdomain.com"
-                    android:pathPrefix="/auth/callback" />
-            </intent-filter>
-
-            <!-- Local development -->
-            <intent-filter android:autoVerify="true">
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:scheme="https"
-                    android:host="localhost"
-                    android:pathPrefix="/auth/callback" />
-
-                <data
-                    android:scheme="http"
-                    android:host="localhost"
-                    android:pathPrefix="/auth/callback" />
-            </intent-filter>
-
-            <!-- Specific host intent filter -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-
-                <data
-                    android:scheme="https"
-                    android:host="ifhenrgfpahandumdwmt.supabase.co"
-                    android:path="/auth/v1/callback" />
-
-                <data android:scheme="mailto" />
-                <data android:scheme="tel" />
-            </intent-filter>
+            </intent-filter>           
 
             <!-- Auth scheme intent filter -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="myapp" android:host="auth" />
+                <data
+                    android:scheme="com.beautibooker.app"
+                    android:host="auth"
+                    android:path="/callback" />
             </intent-filter>
 
         </activity>

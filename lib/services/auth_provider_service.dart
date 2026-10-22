@@ -1,9 +1,11 @@
 // services/auth_provider_service.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AuthProviderService {
   final SupabaseClient _supabase = Supabase.instance.client;
+  final EnvironmentManager _env = EnvironmentManager();
 
   /// ✅ Get user's auth providers
   Future<List<Map<String, dynamic>>> getUserAuthProviders() async {
@@ -163,7 +165,7 @@ class AuthProviderService {
   Future<bool> linkProvider(String provider) async {
     try {
       // ✅ Redirect URL for linking
-      final redirectUrl = 'myapp://auth-callback';
+      final redirectUrl = _env.getRedirectUrl();
       
       await _supabase.auth.signInWithOAuth(
         _getOAuthProvider(provider),

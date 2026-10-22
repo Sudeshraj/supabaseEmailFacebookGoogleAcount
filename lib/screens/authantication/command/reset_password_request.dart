@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/config/environment_manager.dart';
 import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
@@ -15,6 +16,7 @@ class ResetPasswordRequestScreen extends StatefulWidget {
 class _ResetPasswordRequestScreenState
     extends State<ResetPasswordRequestScreen> {
   final TextEditingController _emailController = TextEditingController();
+  final EnvironmentManager _env = EnvironmentManager();
   bool _loading = false;
   bool _isValidEmail = false;
   String? _emailError;
@@ -63,7 +65,7 @@ class _ResetPasswordRequestScreenState
           print('   Full URL: $redirectUrl');
         }
       } else {
-        redirectUrl = 'myapp://auth/callback';
+        redirectUrl = _env.getRedirectUrl();
         
         if (kDebugMode) {
           print('Mobile mode detected');

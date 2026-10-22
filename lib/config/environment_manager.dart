@@ -89,8 +89,7 @@ class EnvironmentManager {
 
   bool get enableGoogleOAuth {
     return dotenv.env['ENABLE_GOOGLE_OAUTH'] != 'false' &&
-        googleWebClientId.isNotEmpty &&
-        googleWebClientSecret.isNotEmpty;
+        googleWebClientId.isNotEmpty;
   }
 
   // ========== FACEBOOK OAUTH CONFIGURATION ==========
@@ -118,7 +117,7 @@ class EnvironmentManager {
 
   /// NEW: Apple redirect URL
   String get appleRedirectUrl {
-    return dotenv.env['APPLE_REDIRECT_URL'] ?? 'myapp://auth/callback';
+    return dotenv.env['APPLE_REDIRECT_URL'] ?? 'com.beautibooker.app://auth/callback';
   }
 
   /// NEW: Enable/disable Apple OAuth
@@ -148,16 +147,16 @@ class EnvironmentManager {
 
     // Default URLs based on environment
     if (isProduction) {
-      return 'https://yourdomain.com/auth/callback';
+      return 'https://beautibooker.com/auth/callback';
     } else if (isStaging) {
-      return 'https://staging.yourdomain.com/auth/callback';
+      return 'https://staging.beautibooker.com/auth/callback';
     } else {
       return '${Uri.base.origin}/auth/callback';
     }
   }
 
   String get mobileRedirectUrl {
-    return dotenv.env['MOBILE_REDIRECT_URL'] ?? 'myapp://auth/callback';
+    return dotenv.env['MOBILE_REDIRECT_URL'] ?? 'com.beautibooker.app://auth/callback';
   }
 
   String get supabaseOAuthCallbackUrl {
@@ -193,39 +192,9 @@ class EnvironmentManager {
   //       return 'https://yourdomain.com/auth/callback';
   //     }
   //   } else {
-  //     return 'myapp://auth/callback';
+  //     return 'com.beautibooker.app://auth/callback';
   //   }
   // }
-
-  // Get all required redirect URLs for OAuth providers
-  List<String> getRequiredRedirectUrls() {
-    final urls = <String>{
-      // Supabase OAuth callback
-      supabaseOAuthCallbackUrl,
-
-      // Web development URLs
-      'http://localhost:3000/auth/callback',
-      'http://localhost:5000/auth/callback',
-      'http://127.0.0.1:3000/auth/callback',
-      'http://127.0.0.1:5000/auth/callback',
-
-      // Mobile URLs
-      mobileRedirectUrl,
-      'com.example.mysalon://auth/callback',
-    };
-
-    // Add Apple specific URLs
-    if (enableAppleOAuth) {
-      urls.add(appleRedirectUrl);
-    }
-
-    // Add production URL if configured
-    if (isProduction && dotenv.env['PRODUCTION_REDIRECT_URL'] != null) {
-      urls.add(dotenv.env['PRODUCTION_REDIRECT_URL']!);
-    }
-
-    return urls.toList();
-  }
 
   // ========== OPTIONAL CONFIGURATION ==========
 
@@ -522,38 +491,6 @@ class EnvironmentManager {
     debugPrint('=' * 60 + '\n');
   }
 
-  // ========== OAUTH VALIDATION METHODS ==========
-
-  /// UPDATED: Validate OAuth configurations with Apple
-  Map<String, dynamic> validateOAuthConfigurations() {
-    final results = <String, dynamic>{};
-
-    // Google OAuth
-    results['google'] = {
-      'enabled': enableGoogleOAuth,
-      'clientId': googleWebClientId.isNotEmpty,
-      'clientSecret': googleWebClientSecret.isNotEmpty,
-      'validFormat': googleWebClientId.endsWith('.apps.googleusercontent.com'),
-      'redirectUrls': getRequiredRedirectUrls(),
-    };
-
-    // Facebook OAuth
-    results['facebook'] = {
-      'enabled': enableFacebookOAuth,
-      'appId': facebookAppId.isNotEmpty,
-      'clientToken': facebookClientToken.isNotEmpty,
-      'redirectUrls': getRequiredRedirectUrls(),
-    };
-
-    // Apple OAuth
-    results['apple'] = {
-      'enabled': enableAppleOAuth,
-      'serviceId': appleServiceId.isNotEmpty,
-      'redirectUrls': getRequiredRedirectUrls(),
-    };
-
-    return results;
-  }
 
   // Get OAuth provider configuration
   /// UPDATED: Get provider config with Apple

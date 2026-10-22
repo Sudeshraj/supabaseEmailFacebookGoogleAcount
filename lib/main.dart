@@ -687,7 +687,7 @@ Future<void> _setupMobileDeepLinks() async {
 // ============================================================
 // ✅ FIX: previously only checked uri.queryParameters, which is
 // always empty for Supabase's fragment-based redirects
-// (myapp://auth/callback#access_token=...) — so this handler
+// (com.beautibooker.app://auth/callback#access_token=...) — so this handler
 // silently never fired for email verification / magic link /
 // recovery links, only for OAuth-code-style links.
 //
@@ -698,7 +698,7 @@ Future<void> _setupMobileDeepLinks() async {
 Future<void> _handleDeepLink(Uri uri) async {
   final uriString = uri.toString();
 
-  if (uriString.contains('myapp://') || uriString.contains('/auth/callback')) {
+  if (uriString.contains('com.beautibooker.app://') || uriString.contains('/auth/callback')) {
     debugPrint('🔗 Auth deep link detected: $uriString');
 
     final result = await _establishSessionFromUri(uri);
