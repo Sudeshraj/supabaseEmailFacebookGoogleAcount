@@ -139,6 +139,46 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     );
   }
 
+  // ============================================================
+  // ✅ Circular logo - image clipped to a perfect circle, no
+  // background colour / gradient / glow behind it.
+  // ============================================================
+  Widget _buildLogo({required double size}) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final ringColor = isDark
+        ? Colors.white24
+        : primaryColor.withValues(alpha: 0.25);
+
+    return Container(
+      width: size,
+      height: size,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: ringColor, width: 2),
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/images/logo.png',
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              color: primaryColor,
+              child: Center(
+                child: Icon(
+                  Icons.account_circle,
+                  color: Colors.white,
+                  size: size * 0.55,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
   Widget _roleCard({
     required String image,
     required String title,
@@ -288,9 +328,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isDark = context.isDarkMode;
     final backgroundColor = context.backgroundColor;
-    final primaryColor = context.primaryColor;
     final textColor = context.textColor;
     final secondaryTextColor = context.secondaryTextColor;
 
@@ -328,56 +366,11 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                             child: Center(
                               child: Column(
                                 children: [
-                                  Container(
-                                    width: 80,
-                                    height: 80,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: isDark
-                                            ? Colors.white24
-                                            : Colors.grey.shade300,
-                                        width: 2,
-                                      ),
-                                      gradient: LinearGradient(
-                                        colors: [
-                                          primaryColor,
-                                          primaryColor.withValues(alpha: 0.7),
-                                        ],
-                                        begin: Alignment.topCenter,
-                                        end: Alignment.bottomCenter,
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: primaryColor.withValues(
-                                            alpha: 0.4,
-                                          ),
-                                          blurRadius: 20,
-                                          spreadRadius: 5,
-                                        ),
-                                      ],
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(20),
-                                      child: Image.asset(
-                                        'assets/images/logo.png',
-                                        fit: BoxFit.cover,
-                                        errorBuilder:
-                                            (context, error, stackTrace) {
-                                          return Center(
-                                            child: Icon(
-                                              Icons.account_circle,
-                                              color: Colors.white,
-                                              size: 40,
-                                            ),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ),
+                                  // Logo (circle)
+                                  _buildLogo(size: isWeb ? 72 : 80),
                                   const SizedBox(height: 15),
                                   Text(
-                                    'Welcome to MySaloon',
+                                    'Welcome to Beautibooker',
                                     style: TextStyle(
                                       color: textColor,
                                       fontSize: 24,
@@ -405,7 +398,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         children: [
                           Expanded(
                             child: _roleCard(
-                              image: 'saloncus.png',
+                              image: 'assets/images/saloncus.png',
                               title: 'Customer',
                               accentColor: _customerGreen,
                               onTap: () => widget.onNext('customer'),
@@ -414,7 +407,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           const SizedBox(width: 12),
                           Expanded(
                             child: _roleCard(
-                              image: 'salon.png',
+                              image: 'assets/images/salon.png',
                               title: 'Owner',
                               accentColor: _businessBlue,
                               onTap: () => widget.onNext('owner'),
@@ -423,7 +416,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           const SizedBox(width: 12),
                           Expanded(
                             child: _roleCard(
-                              image: 'barber.png',
+                              image: 'assets/images/barber.png',
                               title: 'Barber',
                               accentColor: _employeeOrange,
                               onTap: () => widget.onNext('barber'),
@@ -431,30 +424,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           ),
                         ],
                       ),
-                      const SizedBox(height: 32),
-                      // Description
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.02)
-                              : Colors.grey.shade50,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.grey.shade200,
-                          ),
-                        ),
-                        child: Text(
-                          'Create an account to connect with trusted salons, discover new styles, and grow your business — all in one place.',
-                          style: TextStyle(
-                            color: secondaryTextColor,
-                            fontSize: 15,
-                            height: 1.5,
-                          ),
-                        ),
-                      ),
+                      
                       const SizedBox(height: 32),
                       // Action Buttons
                       _actionButton(

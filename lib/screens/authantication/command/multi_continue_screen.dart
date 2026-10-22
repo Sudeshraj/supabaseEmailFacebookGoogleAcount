@@ -2021,23 +2021,149 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   // ============================================================
-  // ✅ UI BUILD - AppTheme based, Edge-to-Edge, API 36
-  // 🔧 OVERFLOW FIX: the card's inner Column (logo + list + footer)
-  // used to get an UNBOUNDED height (ConstrainedBox only capped
-  // maxWidth), so on any screen where the fixed-size logo + footer
-  // widgets needed slightly more room than was actually available,
-  // Flutter had nowhere to "give" — hence the 2px (or 55/19/27px on
-  // other screens) RenderFlex overflow.
-  //
-  // Fix: (1) LayoutBuilder now gives the card a REAL, finite max
-  // height. (2) That whole card is wrapped in SingleChildScrollView
-  // as a safety net — if content still doesn't fit (tiny window /
-  // large text scale / many profiles), it scrolls instead of
-  // overflowing. (3) The profile-list's `Expanded` (which required a
-  // bounded ancestor to work) is replaced with a `ConstrainedBox` +
-  // internal `ListView.builder(shrinkWrap: true)`, so it caps its own
-  // height and scrolls internally instead of fighting its siblings
-  // for space.
+  // ✅ UI HELPERS (design only - no logic changes)
+  // ============================================================
+
+  /// Circular logo - image clipped to a perfect circle, no background
+  /// colour / gradient / glow behind it.
+  Widget _buildLogo({required double size}) {
+    final isDark = context.isDarkMode;
+    final primaryColor = context.primaryColor;
+    final ringColor = isDark
+        ? Colors.white24
+        : primaryColor.withValues(alpha: 0.25);
+
+    return Container(
+      width: size,
+      height: size,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: ringColor, width: 2),
+      ),
+      child: ClipOval(
+        child: Image.asset(
+          'assets/images/logo.png',
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              color: primaryColor,
+              child: Center(
+                child: Icon(
+                  Icons.account_circle,
+                  color: Colors.white,
+                  size: size * 0.55,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Three-dot "Manage Profiles" menu
+  Widget _buildMenuButton() {
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.1)
+            : Colors.grey.shade200,
+      ),
+      child: PopupMenuButton<String>(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.1)
+                : Colors.grey.shade300,
+          ),
+        ),
+        icon: Icon(Icons.more_vert, color: textColor, size: 20),
+        tooltip: 'Manage Profiles',
+        itemBuilder: (context) => [
+          PopupMenuItem<String>(
+            value: 'select',
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.delete_outline,
+                  color: Colors.redAccent,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Remove Selected',
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          PopupMenuItem<String>(
+            value: 'remove',
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.manage_accounts,
+                  color: Colors.blueAccent,
+                  size: 20,
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  'Manage Account Data',
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+        onSelected: (value) {
+          if (value == 'select') {
+            _startSelectionMode();
+          } else if (value == 'remove') {
+            context.go('/clear-data');
+          }
+        },
+      ),
+    );
+  }
+
+  /// Selection-mode header bar (back / count / select all / delete)
+  Widget _buildSelectionBar({required BorderRadius radius}) {
+    final isDark = context.isDarkMode;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.03)
+            : Colors.grey.shade100,
+        borderRadius: radius,
+        border: Border(
+          bottom: BorderSide(
+            color: isDark ? Colors.white10 : Colors.grey.shade200,
+          ),
+        ),
+      ),
+      child: _buildSelectionModeHeader(),
+    );
+  }
+
+  // ============================================================
+  // ✅ UI BUILD
+  //   • Web / wide screen  -> framed card layout (unchanged look)
+  //   • Mobile             -> frame removed, full screen layout
   // ============================================================
 
   @override
@@ -2045,33 +2171,122 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final isDark = context.isDarkMode;
     final backgroundColor = context.backgroundColor;
     final cardColor = context.cardColor;
-    final textColor = context.textColor;
-    final primaryColor = context.primaryColor;
 
     final Size screenSize = MediaQuery.of(context).size;
     final bool isWeb = screenSize.width > 700;
-    final double maxWidth = isWeb ? 450 : double.infinity;
+
+    // ------------------------------------------------------------
+    // 📱 MOBILE - full screen, no frame / card / border
+    // ------------------------------------------------------------
+    if (!isWeb) {
+      return Scaffold(
+        backgroundColor: backgroundColor,
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // ---------- TOP: logo + menu + profiles ----------
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Stack(
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  top: 24,
+                                  bottom: 24,
+                                ),
+                                child: Center(child: _buildLogo(size: 80)),
+                              ),
+                              if (profiles.isNotEmpty && !_selectionMode)
+                                Positioned(
+                                  top: 8,
+                                  right: 8,
+                                  child: _buildMenuButton(),
+                                ),
+                            ],
+                          ),
+
+                          if (_selectionMode)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                              ),
+                              child: _buildSelectionBar(
+                                radius: BorderRadius.circular(16),
+                              ),
+                            ),
+
+                          if (_loading && _selectedEmail != null)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 32),
+                              child: _buildLoadingState(scrollable: false),
+                            )
+                          else if (profiles.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 32),
+                              child: _buildEmptyState(scrollable: false),
+                            )
+                          else
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                for (int i = 0; i < profiles.length; i++)
+                                  _buildProfileCard(profiles[i], i),
+                              ],
+                            ),
+                        ],
+                      ),
+
+                      // ---------- BOTTOM: footer ----------
+                      if (!_selectionMode)
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                          child: _buildFooter(),
+                        )
+                      else
+                        const SizedBox.shrink(),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      );
+    }
+
+    // ------------------------------------------------------------
+    // 💻 WEB - framed card layout
+    // ------------------------------------------------------------
+    const double maxWidth = 450;
 
     return Scaffold(
       backgroundColor: backgroundColor,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: BoxConstraints(maxWidth: maxWidth),
+            constraints: const BoxConstraints(maxWidth: maxWidth),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               child: LayoutBuilder(
                 builder: (context, constraints) {
-                  // ✅ A real, finite height for the card — this is the
-                  // actual fix. Falls back to 85% of screen height if the
-                  // parent somehow still hands us an unbounded height.
+                  // ✅ A real, finite height for the card. Falls back to
+                  // 85% of screen height if the parent hands us unbounded.
                   final double maxCardHeight = constraints.maxHeight.isFinite
                       ? constraints.maxHeight
                       : screenSize.height * 0.85;
 
                   // Reserve rough space for logo (~140) + footer (~230)
-                  // so the profile-list section gets a sane cap instead
-                  // of trying to consume 100% and overflowing by a few px.
                   final double listMaxHeight = (maxCardHeight - 370).clamp(
                     140.0,
                     480.0,
@@ -2081,7 +2296,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                     constraints: BoxConstraints(maxHeight: maxCardHeight),
                     child: SingleChildScrollView(
                       // ✅ Safety net: absorbs any remaining overflow
-                      // instead of showing the yellow/black stripes.
                       child: Container(
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
@@ -2109,10 +2323,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
                           ),
                         ),
                         child: Column(
-                          mainAxisSize: MainAxisSize
-                              .min, // ✅ size to content, not force-fill
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            // Logo
+                            // Logo (circle) + menu
                             Stack(
                               children: [
                                 Container(
@@ -2120,144 +2333,13 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                     top: 10,
                                     bottom: 25,
                                   ),
-                                  child: Center(
-                                    child: Container(
-                                      width: 80,
-                                      height: 80,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: isDark
-                                              ? Colors.white24
-                                              : Colors.grey.shade300,
-                                          width: 2,
-                                        ),
-                                        gradient: LinearGradient(
-                                          colors: [
-                                            primaryColor,
-                                            primaryColor.withValues(alpha: 0.7),
-                                          ],
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: primaryColor.withValues(
-                                              alpha: 0.4,
-                                            ),
-                                            blurRadius: 20,
-                                            spreadRadius: 5,
-                                          ),
-                                        ],
-                                      ),
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(40),
-                                        child: Image.asset(
-                                          'assets/images/logo.png',
-                                          fit: BoxFit.cover,
-                                          errorBuilder:
-                                              (context, error, stackTrace) {
-                                                return Center(
-                                                  child: Icon(
-                                                    Icons.account_circle,
-                                                    color: Colors.white,
-                                                    size: 40,
-                                                  ),
-                                                );
-                                              },
-                                        ),
-                                      ),
-                                    ),
-                                  ),
+                                  child: Center(child: _buildLogo(size: 72)),
                                 ),
                                 if (profiles.isNotEmpty && !_selectionMode)
                                   Positioned(
                                     top: 0,
                                     right: 0,
-                                    child: Container(
-                                      width: 40,
-                                      height: 40,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: isDark
-                                            ? Colors.white.withValues(
-                                                alpha: 0.1,
-                                              )
-                                            : Colors.grey.shade200,
-                                      ),
-                                      child: PopupMenuButton<String>(
-                                        color: isDark
-                                            ? const Color(0xFF1E1E1E)
-                                            : Colors.white,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            12,
-                                          ),
-                                          side: BorderSide(
-                                            color: isDark
-                                                ? Colors.white.withValues(
-                                                    alpha: 0.1,
-                                                  )
-                                                : Colors.grey.shade300,
-                                          ),
-                                        ),
-                                        icon: Icon(
-                                          Icons.more_vert,
-                                          color: textColor,
-                                          size: 20,
-                                        ),
-                                        tooltip: 'Manage Profiles',
-                                        itemBuilder: (context) => [
-                                          PopupMenuItem<String>(
-                                            value: 'select',
-                                            child: Row(
-                                              children: [
-                                                const Icon(
-                                                  Icons.delete_outline,
-                                                  color: Colors.redAccent,
-                                                  size: 20,
-                                                ),
-                                                const SizedBox(width: 12),
-                                                Text(
-                                                  'Remove Selected',
-                                                  style: TextStyle(
-                                                    color: isDark
-                                                        ? Colors.white
-                                                        : Colors.black87,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                          PopupMenuItem<String>(
-                                            value: 'remove',
-                                            child: Row(
-                                              children: [
-                                                const Icon(
-                                                  Icons.manage_accounts,
-                                                  color: Colors.blueAccent,
-                                                  size: 20,
-                                                ),
-                                                const SizedBox(width: 12),
-                                                Text(
-                                                  'Manage Account Data',
-                                                  style: TextStyle(
-                                                    color: isDark
-                                                        ? Colors.white
-                                                        : Colors.black87,
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ],
-                                        onSelected: (value) {
-                                          if (value == 'select') {
-                                            _startSelectionMode();
-                                          } else if (value == 'remove') {
-                                            context.go('/clear-data');
-                                          }
-                                        },
-                                      ),
-                                    ),
+                                    child: _buildMenuButton(),
                                   ),
                               ],
                             ),
@@ -2283,27 +2365,11 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     if (_selectionMode)
-                                      Container(
-                                        padding: const EdgeInsets.all(16),
-                                        decoration: BoxDecoration(
-                                          color: isDark
-                                              ? Colors.white.withValues(
-                                                  alpha: 0.03,
-                                                )
-                                              : Colors.grey.shade100,
-                                          borderRadius: const BorderRadius.only(
-                                            topLeft: Radius.circular(16),
-                                            topRight: Radius.circular(16),
-                                          ),
-                                          border: Border(
-                                            bottom: BorderSide(
-                                              color: isDark
-                                                  ? Colors.white10
-                                                  : Colors.grey.shade200,
-                                            ),
-                                          ),
+                                      _buildSelectionBar(
+                                        radius: const BorderRadius.only(
+                                          topLeft: Radius.circular(16),
+                                          topRight: Radius.circular(16),
                                         ),
-                                        child: _buildSelectionModeHeader(),
                                       ),
                                     Flexible(
                                       child: _loading && _selectedEmail != null
@@ -2348,94 +2414,100 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState({bool scrollable = true}) {
     final isDark = context.isDarkMode;
     final textColor = context.textColor;
     final primaryColor = context.primaryColor;
 
+    final content = Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.person_add_disabled,
+            size: 60, // ✅ original size retained
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.3)
+                : Colors.grey.shade400,
+          ),
+          const SizedBox(height: 15),
+          Text(
+            'No Saved Profiles',
+            style: TextStyle(
+              color: textColor,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Enable "Remember Me" during login\nto save your profile',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.6)
+                  : Colors.grey.shade600,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 20),
+          OutlinedButton(
+            onPressed: () => context.go('/login'),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: primaryColor),
+              foregroundColor: primaryColor,
+            ),
+            child: const Text('Go to Login'),
+          ),
+        ],
+      ),
+    );
+
+    if (!scrollable) return content;
     return SingleChildScrollView(
       physics: const ClampingScrollPhysics(),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.person_add_disabled,
-              size: 60, // ✅ original size retained
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.3)
-                  : Colors.grey.shade400,
-            ),
-            const SizedBox(height: 15),
-            Text(
-              'No Saved Profiles',
-              style: TextStyle(
-                color: textColor,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Enable "Remember Me" during login\nto save your profile',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.6)
-                    : Colors.grey.shade600,
-                fontSize: 14,
-              ),
-            ),
-            const SizedBox(height: 20),
-            OutlinedButton(
-              onPressed: () => context.go('/login'),
-              style: OutlinedButton.styleFrom(
-                side: BorderSide(color: primaryColor),
-                foregroundColor: primaryColor,
-              ),
-              child: const Text('Go to Login'),
-            ),
-          ],
-        ),
-      ),
+      child: content,
     );
   }
 
-  Widget _buildLoadingState() {
+  Widget _buildLoadingState({bool scrollable = true}) {
     final textColor = context.textColor;
 
+    final content = Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+          ),
+          const SizedBox(height: 15),
+          Text(
+            'Logging in...',
+            style: TextStyle(
+              color: textColor.withValues(alpha: 0.7),
+              fontSize: 14,
+            ),
+          ),
+          if (_selectedEmail != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                _selectedEmail!,
+                style: TextStyle(
+                  color: textColor.withValues(alpha: 0.6),
+                  fontSize: 12,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+        ],
+      ),
+    );
+
+    if (!scrollable) return content;
     return SingleChildScrollView(
       physics: const ClampingScrollPhysics(),
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
-            ),
-            const SizedBox(height: 15),
-            Text(
-              'Logging in...',
-              style: TextStyle(
-                color: textColor.withValues(alpha: 0.7),
-                fontSize: 14,
-              ),
-            ),
-            if (_selectedEmail != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  _selectedEmail!,
-                  style: TextStyle(
-                    color: textColor.withValues(alpha: 0.6),
-                    fontSize: 12,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-          ],
-        ),
-      ),
+      child: content,
     );
   }
 
@@ -2555,8 +2627,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
             ),
           ),
           const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               TextButton(
                 onPressed: () => context.go('/privacy'),

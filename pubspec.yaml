@@ -144,7 +144,8 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
   
-  assets:   
+  assets:  
+    - assets/images/ 
     - .env.development
     - .env.production
     - assets/images/logo.png
