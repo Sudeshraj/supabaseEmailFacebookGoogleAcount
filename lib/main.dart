@@ -1806,7 +1806,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         routerConfig: router,
         scaffoldMessengerKey: messengerKey,
         debugShowCheckedModeBanner: false,
-        title: 'Salon Management',
+        title: 'beautibooker',
 
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,

@@ -58,7 +58,7 @@ class EnvironmentManager {
   }
 
   String get appName {
-    return dotenv.env['APP_NAME'] ?? 'MySalon App';
+    return dotenv.env['APP_NAME'] ?? 'Beautibooker';
   }
 
   String get appVersion {
@@ -174,13 +174,13 @@ class EnvironmentManager {
 
   // String _getRedirectUrl() {
   //   if (kReleaseMode) {
-  //     return 'com.yourcompany.mysalon://auth-callback';
+  //     return 'com.yourcompany.Beautibooker://auth-callback';
   //   } else if (kDebugMode) {
   //     return kIsWeb
   //         ? 'http://localhost:5000/auth/callback'
-  //         : 'com.yourcompany.mysalon.dev://auth-callback';
+  //         : 'com.yourcompany.Beautibooker.dev://auth-callback';
   //   }
-  //   return 'com.yourcompany.mysalon.staging://auth-callback';
+  //   return 'com.yourcompany.Beautibooker.staging://auth-callback';
   // }
 
   //   String _getRedirectUrl() { // singup service eke eka

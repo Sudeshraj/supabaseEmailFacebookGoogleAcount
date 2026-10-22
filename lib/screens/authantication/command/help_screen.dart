@@ -169,10 +169,10 @@ class _HelpScreenState extends State<HelpScreen> {
     // ===== ABOUT SCREEN =====
     'about_en': {
       'title': 'About Us',
-      'how_can_we_help': 'About MySalon',
+      'how_can_we_help': 'About Beautibooker',
       'select_topic': 'Your trusted salon booking platform',
       'quick_actions': 'Quick Actions',
-      'app_name': 'MySalon',
+      'app_name': 'Beautibooker',
       'mission': 'Our Mission',
       'mission_text': 'To provide the best salon experience',
       'features': 'Features',
@@ -182,10 +182,10 @@ class _HelpScreenState extends State<HelpScreen> {
     },
     'about_si': {
       'title': 'අප ගැන',
-      'how_can_we_help': 'MySalon ගැන',
+      'how_can_we_help': 'Beautibooker ගැන',
       'select_topic': 'ඔබේ විශ්වාසවන්ත සැලෝන් වේදිකාව',
       'quick_actions': 'ඉක්මන් ක්‍රියා',
-      'app_name': 'MySalon',
+      'app_name': 'Beautibooker',
       'mission': 'අපගේ මෙහෙවර',
       'mission_text': 'හොඳම සැලෝන් අත්දැකීම ලබා දීම',
       'features': 'විශේෂාංග',
@@ -195,10 +195,10 @@ class _HelpScreenState extends State<HelpScreen> {
     },
     'about_ta': {
       'title': 'எங்களை பற்றி',
-      'how_can_we_help': 'MySalon பற்றி',
+      'how_can_we_help': 'Beautibooker பற்றி',
       'select_topic': 'உங்கள் நம்பிக்கையான சலூன் முன்பதிவு தளம்',
       'quick_actions': 'விரைவு செயல்கள்',
-      'app_name': 'MySalon',
+      'app_name': 'Beautibooker',
       'mission': 'எங்கள் நோக்கம்',
       'mission_text': 'சிறந்த சலூன் அனுபவத்தை வழங்க',
       'features': 'அம்சங்கள்',
@@ -265,7 +265,7 @@ class _HelpScreenState extends State<HelpScreen> {
 
   // ============== EMAIL ==============
   Future<void> _sendEmail({
-    String email = 'support@mysalon.com',
+    String email = 'support@Beautibooker.com',
     String subject = '',
     String body = '',
   }) async {
@@ -341,7 +341,7 @@ class _HelpScreenState extends State<HelpScreen> {
   Future<void> _openMessenger() async {
     try {
       await launchUrl(
-        Uri.parse('https://m.me/mysalonapp'),
+        Uri.parse('https://m.me/Beautibooker'),
         mode: LaunchMode.externalApplication,
       );
     } catch (e) {
@@ -353,7 +353,7 @@ class _HelpScreenState extends State<HelpScreen> {
   Future<void> _openTelegram() async {
     try {
       await launchUrl(
-        Uri.parse('https://t.me/mysalon_support'),
+        Uri.parse('https://t.me/Beautibooker_support'),
         mode: LaunchMode.externalApplication,
       );
     } catch (e) {
@@ -670,7 +670,7 @@ class _HelpScreenState extends State<HelpScreen> {
                             Icons.email,
                             Colors.orange,
                             t('email'),
-                            'support@mysalon.com',
+                            'support@Beautibooker.com',
                             () => _sendEmail(),
                           ),
                         ],
@@ -1144,7 +1144,7 @@ class _HelpScreenState extends State<HelpScreen> {
           'label': t('privacy'),
           'color': Colors.blue,
           'onTap': () => launchUrl(
-            Uri.parse('https://mysalon.com/privacy'),
+            Uri.parse('https://Beautibooker.com/privacy'),
             mode: LaunchMode.externalApplication,
           ),
         },
@@ -1153,7 +1153,7 @@ class _HelpScreenState extends State<HelpScreen> {
           'label': t('terms'),
           'color': Colors.orange,
           'onTap': () => launchUrl(
-            Uri.parse('https://mysalon.com/terms'),
+            Uri.parse('https://Beautibooker.com/terms'),
             mode: LaunchMode.externalApplication,
           ),
         },
@@ -1163,7 +1163,7 @@ class _HelpScreenState extends State<HelpScreen> {
           'color': Colors.amber,
           'onTap': () => launchUrl(
             Uri.parse(
-              'https://play.google.com/store/apps/details?id=com.mysalon.app',
+              'https://play.google.com/store/apps/details?id=com.Beautibooker.app',
             ),
             mode: LaunchMode.externalApplication,
           ),
@@ -1688,7 +1688,7 @@ class _HelpScreenState extends State<HelpScreen> {
             child: ElevatedButton(
               onPressed: () {
                 _sendEmail(
-                  email: 'support@mysalon.com',
+                  email: 'support@Beautibooker.com',
                   subject: 'Contact Form: ${nameController.text}',
                   body:
                       'Name: ${nameController.text}\nEmail: ${emailController.text}\nMessage: ${messageController.text}',

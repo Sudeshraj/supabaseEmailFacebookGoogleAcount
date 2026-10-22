@@ -155,7 +155,7 @@ class _SplashScreenState extends State<SplashScreen>
 
                   // ✅ App Name
                   Text(
-                    'MySalon',
+                    'Beautibooker',
                     style: TextStyle(
                       fontSize: fontSize,
                       fontWeight: FontWeight.bold,

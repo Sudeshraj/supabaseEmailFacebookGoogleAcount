@@ -476,8 +476,8 @@ class PermissionService {
                   '2. Click "Site settings"\n'
                   '3. Find "Notifications" and select "Allow"'
               : 'You can enable notifications anytime from:\n\n'
-                  '• Android: Settings → Apps → MySalon → Notifications\n'
-                  '• iOS: Settings → MySalon → Notifications',
+                  '• Android: Settings → Apps → Beautibooker → Notifications\n'
+                  '• iOS: Settings → Beautibooker → Notifications',
         ),
         actions: [
           TextButton(
