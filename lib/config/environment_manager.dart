@@ -103,9 +103,7 @@ class EnvironmentManager {
   }
 
   bool get enableFacebookOAuth {
-    return dotenv.env['ENABLE_FACEBOOK_OAUTH'] != 'false' &&
-        facebookAppId.isNotEmpty &&
-        facebookClientToken.isNotEmpty;
+    return dotenv.env['ENABLE_FACEBOOK_OAUTH'] != 'false';
   }
 
   // ========== APPLE OAUTH CONFIGURATION ==========

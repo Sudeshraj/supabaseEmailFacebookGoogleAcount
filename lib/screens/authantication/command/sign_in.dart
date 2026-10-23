@@ -1914,34 +1914,15 @@ $provider OAuth Configuration Required:
     );
   }
 
-  /// Back arrow + "Use another account" (only when a saved profile exists)
+  /// Back arrow only (shown when a saved profile exists)
   Widget _buildSavedProfileHeader() {
     final textColor = context.textColor;
-    final hintColor = context.isDarkMode
-        ? Colors.white54
-        : Colors.grey.shade600;
 
     return Align(
       alignment: Alignment.topLeft,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: Icon(
-              Icons.arrow_back_ios_new_rounded,
-              color: textColor,
-              size: 22,
-            ),
-            onPressed: _handleBackButton,
-          ),
-          GestureDetector(
-            onTap: () => context.push('/continue'),
-            child: Text(
-              'Use another account',
-              style: TextStyle(color: hintColor, fontSize: 14),
-            ),
-          ),
-        ],
+      child: IconButton(
+        icon: Icon(Icons.arrow_back_rounded, color: textColor, size: 24),
+        onPressed: _handleBackButton,
       ),
     );
   }
@@ -1960,9 +1941,8 @@ $provider OAuth Configuration Required:
     final inputBorderColor = isDark ? Colors.white24 : Colors.grey.shade300;
 
     // Mobile = slightly taller fields & buttons (easier to tap)
-    final double fieldVPad = compact ? 18 : 16;
+    final double fieldVPad = compact ? 12 : 12;
     final double fieldRadius = compact ? 12 : 8;
-    final double loginHeight = compact ? 54 : 50;
 
     OutlineInputBorder border(Color c) => OutlineInputBorder(
       borderSide: BorderSide(color: c, width: 1.0),
@@ -1993,7 +1973,6 @@ $provider OAuth Configuration Required:
             focusedBorder: border(primaryColor),
             errorBorder: border(Colors.redAccent),
             focusedErrorBorder: border(Colors.redAccent),
-            prefixIcon: Icon(Icons.email_outlined, color: hintColor, size: 20),
             suffixIcon: _emailController.text.isEmpty
                 ? null
                 : _isValidEmail
@@ -2036,11 +2015,6 @@ $provider OAuth Configuration Required:
             focusedBorder: border(primaryColor),
             errorBorder: border(Colors.redAccent),
             focusedErrorBorder: border(Colors.redAccent),
-            prefixIcon: Icon(
-              Icons.lock_outline_rounded,
-              color: hintColor,
-              size: 20,
-            ),
             suffixIcon: _passwordController.text.isNotEmpty
                 ? IconButton(
                     icon: Icon(
@@ -2063,7 +2037,7 @@ $provider OAuth Configuration Required:
 
       // Remember Me Checkbox
       Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
           color: _rememberMe
               ? primaryColor.withValues(alpha: 0.1)
@@ -2087,6 +2061,8 @@ $provider OAuth Configuration Required:
               },
               activeColor: primaryColor,
               checkColor: Colors.white,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             Expanded(
               child: Column(
@@ -2099,6 +2075,7 @@ $provider OAuth Configuration Required:
                         'Remember Me',
                         style: TextStyle(
                           color: textColor,
+                          fontSize: 13,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -2148,6 +2125,7 @@ $provider OAuth Configuration Required:
       // Login Button
       SizedBox(
         width: double.infinity,
+        height: 42,
         child: ElevatedButton(
           onPressed: (_isValid && !_loading && !_coolDown) ? loginUser : null,
           style: ElevatedButton.styleFrom(
@@ -2156,22 +2134,27 @@ $provider OAuth Configuration Required:
                 ? Colors.white12
                 : Colors.grey.shade300,
             foregroundColor: Colors.white,
-            minimumSize: Size(0, loginHeight),
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
-            ),
+            elevation: 0,
+            shape: const StadiumBorder(),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
           ),
           child: _loading
-              ? const CircularProgressIndicator(color: Colors.white)
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    color: Colors.white,
+                    strokeWidth: 2,
+                  ),
+                )
               : _coolDown
               ? const Text(
                   'Please wait...',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                 )
               : const Text(
                   'Log in',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
                 ),
         ),
       ),
@@ -2183,7 +2166,7 @@ $provider OAuth Configuration Required:
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
           child: Text(
-            'Forgotten password?',
+            'Forgot password?',
             style: TextStyle(
               color: hintColor,
               fontSize: 12,
@@ -2304,8 +2287,8 @@ $provider OAuth Configuration Required:
                             // Logo (circle)
                             Padding(
                               padding: const EdgeInsets.only(
-                                top: 12,
-                                bottom: 32,
+                                top: 0,
+                                bottom: 20,
                               ),
                               child: _buildLogo(size: 80),
                             ),
@@ -2386,8 +2369,8 @@ $provider OAuth Configuration Required:
                               // Logo (circle)
                               Padding(
                                 padding: const EdgeInsets.only(
-                                  top: 10,
-                                  bottom: 25,
+                                  top: 6,
+                                  bottom: 18,
                                 ),
                                 child: _buildLogo(size: 72),
                               ),
@@ -2496,8 +2479,7 @@ class _SocialLoginButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = context.isDarkMode;
-    final primaryColor = context.primaryColor;
+    // Same provider colours in light AND dark mode
     final buttonColor = _getButtonColor();
 
     return SizedBox(
@@ -2505,19 +2487,13 @@ class _SocialLoginButton extends StatelessWidget {
       child: OutlinedButton(
         onPressed: isLoading ? null : onPressed,
         style: OutlinedButton.styleFrom(
-          side: BorderSide(
-            color: isDark
-                ? primaryColor.withValues(alpha: 0.5)
-                : buttonColor.withValues(alpha: 0.5),
-          ),
+          side: BorderSide(color: buttonColor.withValues(alpha: 0.5)),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           minimumSize: const Size(0, 48),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
-          backgroundColor: isDark
-              ? primaryColor.withValues(alpha: 0.1)
-              : buttonColor.withValues(alpha: 0.1),
+          backgroundColor: buttonColor.withValues(alpha: 0.1),
         ),
         child: isLoading
             ? SizedBox(
@@ -2525,9 +2501,7 @@ class _SocialLoginButton extends StatelessWidget {
                 width: 20,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(
-                    isDark ? primaryColor : buttonColor,
-                  ),
+                  valueColor: AlwaysStoppedAnimation<Color>(buttonColor),
                 ),
               )
             : Row(
@@ -2540,7 +2514,7 @@ class _SocialLoginButton extends StatelessWidget {
                     child: Text(
                       _getButtonText(),
                       style: TextStyle(
-                        color: isDark ? primaryColor : buttonColor,
+                        color: buttonColor,
                         fontWeight: FontWeight.w600,
                         fontSize: 14,
                       ),

@@ -1284,22 +1284,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
     }
   }
 
-  String _formatLastLogin(String? lastLogin) {
-    if (lastLogin == null || lastLogin.isEmpty) return 'Never';
-    try {
-      final loginTime = DateTime.parse(lastLogin);
-      final now = DateTime.now();
-      final difference = now.difference(loginTime);
-      if (difference.inMinutes < 1) return 'Just now';
-      if (difference.inMinutes < 60) return '${difference.inMinutes}m ago';
-      if (difference.inHours < 24) return '${difference.inHours}h ago';
-      if (difference.inDays < 7) return '${difference.inDays}d ago';
-      return '${difference.inDays ~/ 7}w ago';
-    } catch (e) {
-      return 'Recently';
-    }
-  }
-
   Widget _buildProviderIcon(String provider) {
     final isDark = context.isDarkMode;
     final color = isDark
@@ -1377,7 +1361,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         profile['display_name'] as String? ?? email.split('@').first;
 
     final hasPhoto = photoUrl != null && photoUrl.isNotEmpty;
-    final lastLogin = profile['lastLogin'] as String?;
     final roleColor = hasRole ? _getRoleColor(profileRole) : Colors.orange;
     final roleIcon = hasRole
         ? _getRoleIcon(profileRole)
@@ -1709,16 +1692,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                             ),
                           ),
                         ),
-                        if (lastLogin != null && !isLoading)
-                          Text(
-                            _formatLastLogin(lastLogin),
-                            style: TextStyle(
-                              color: isInactive
-                                  ? Colors.grey.withValues(alpha: 0.5)
-                                  : textColor.withValues(alpha: 0.5),
-                              fontSize: 11,
-                            ),
-                          ),
                         if (isScheduledForDeletion && daysRemaining != null)
                           Text(
                             '${daysRemaining}d left',
@@ -2244,6 +2217,14 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                   _buildProfileCard(profiles[i], i),
                               ],
                             ),
+
+                          if (!_selectionMode)
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              child: _buildAddAnotherAccountButton(),
+                            ),
                         ],
                       ),
 
@@ -2399,6 +2380,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
                               ),
                             ),
 
+                            if (!_selectionMode)
+                              _buildAddAnotherAccountButton(),
                             if (!_selectionMode) _buildFooter(),
                           ],
                         ),
@@ -2579,6 +2562,41 @@ class _ContinueScreenState extends State<ContinueScreen> {
     );
   }
 
+  /// "Use another profile" - Facebook style
+  /// (soft grey pill button, placed right under the profile cards)
+  Widget _buildAddAnotherAccountButton() {
+    final isDark = context.isDarkMode;
+    final bgColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.grey.shade200;
+    final fgColor = isDark ? Colors.white70 : Colors.grey.shade700;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      width: double.infinity,
+      height: 46,
+      child: ElevatedButton(
+        onPressed: () => context.go('/login'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: bgColor,
+          foregroundColor: fgColor,
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          shape: const StadiumBorder(),
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+        ),
+        child: Text(
+          'Use another profile',
+          style: TextStyle(
+            color: fgColor,
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildFooter() {
     final isDark = context.isDarkMode;
     final primaryColor = context.primaryColor;
@@ -2589,40 +2607,25 @@ class _ContinueScreenState extends State<ContinueScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Create new account - Facebook style outlined pill button
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () => context.go('/login'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child: const Text(
-                'Add Another Account',
-                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
+            height: 46,
             child: OutlinedButton(
               onPressed: () => context.go('/signup'),
               style: OutlinedButton.styleFrom(
-                side: BorderSide(color: primaryColor),
+                side: BorderSide(color: primaryColor, width: 1.5),
                 foregroundColor: primaryColor,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+                shape: const StadiumBorder(),
+                padding: const EdgeInsets.symmetric(horizontal: 24),
               ),
-              child: const Text(
+              child: Text(
                 'Create New Account',
-                style: TextStyle(fontWeight: FontWeight.w600),
+                style: TextStyle(
+                  color: primaryColor,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
           ),
