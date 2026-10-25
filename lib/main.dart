@@ -698,7 +698,8 @@ Future<void> _setupMobileDeepLinks() async {
 Future<void> _handleDeepLink(Uri uri) async {
   final uriString = uri.toString();
 
-  if (uriString.contains('com.beautibooker.app://') || uriString.contains('/auth/callback')) {
+  if (uriString.contains('com.beautibooker.app://') ||
+      uriString.contains('/auth/callback')) {
     debugPrint('🔗 Auth deep link detected: $uriString');
 
     final result = await _establishSessionFromUri(uri);
@@ -727,10 +728,7 @@ GoRouter _createRouter() {
     refreshListenable: appState,
     initialLocation: '/',
     debugLogDiagnostics: kDebugMode,
-    observers: [
-      if (kDebugMode) MyRouteObserver(),
-      dashboardRouteObserver, 
-    ],
+    observers: [if (kDebugMode) MyRouteObserver(), dashboardRouteObserver],
     redirect: (context, state) async {
       final path = state.matchedLocation;
       final queryParams = state.uri.queryParameters;
@@ -1806,7 +1804,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         routerConfig: router,
         scaffoldMessengerKey: messengerKey,
         debugShowCheckedModeBanner: false,
-        title: 'beautibooker',
+        title: 'Beautibooker',
 
         theme: AppTheme.lightTheme,
         darkTheme: AppTheme.darkTheme,
