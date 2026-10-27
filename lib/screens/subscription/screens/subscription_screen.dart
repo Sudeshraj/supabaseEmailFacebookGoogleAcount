@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/subscription/providers/subscription_provider.dart';
 import 'package:flutter_application_1/screens/subscription/screens/payment_history_screen.dart';
 import 'package:flutter_application_1/screens/subscription/screens/plans_comparison_screen.dart';
-import 'package:flutter_application_1/screens/subscription/screens/play_billing_service.dart';
+import 'package:flutter_application_1/screens/subscription/services/play_billing_service.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 

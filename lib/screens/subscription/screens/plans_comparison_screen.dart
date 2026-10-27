@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/subscription/models/subscription_plan.dart';
 import 'package:flutter_application_1/screens/subscription/providers/subscription_provider.dart';
-import 'package:flutter_application_1/screens/subscription/screens/play_billing_service.dart';
+import 'package:flutter_application_1/screens/subscription/services/play_billing_service.dart';
 import 'package:flutter_application_1/screens/subscription/services/payment_service.dart';
 import 'package:flutter_application_1/screens/subscription/services/subscription_service.dart';
 import 'package:go_router/go_router.dart';

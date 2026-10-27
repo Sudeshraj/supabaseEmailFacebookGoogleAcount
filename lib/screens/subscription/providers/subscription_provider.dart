@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_application_1/screens/subscription/screens/play_billing_service.dart';
+import 'package:flutter_application_1/screens/subscription/services/play_billing_service.dart';
 import '../models/subscription_plan.dart';
 import '../services/subscription_service.dart';
 
