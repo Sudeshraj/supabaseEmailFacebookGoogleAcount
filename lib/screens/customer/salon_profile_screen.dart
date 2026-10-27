@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/screens/subscription/widgets/pro_gate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -786,6 +787,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
       if (!mounted) return;
+
+      // VIP booking is a Pro feature -> free customers go to the Pro screen
+      if (!await ensureCustomerPro(context, confirm: false)) return;
+      if (!mounted) return;
+
       context.push('/customer/vip-booking', extra: widget.salon);
     } catch (e) {
       debugPrint('❌ VIP navigation error: $e');
@@ -3019,6 +3025,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       }
 
       if (_selectedBookingItems.isEmpty) return;
+      if (!mounted) return;
+
+      // VIP booking is a Pro feature -> free customers go to the Pro screen
+      if (!await ensureCustomerPro(context, confirm: false)) return;
       if (!mounted) return;
 
       final salonWithExtras = Map<String, dynamic>.from(widget.salon);

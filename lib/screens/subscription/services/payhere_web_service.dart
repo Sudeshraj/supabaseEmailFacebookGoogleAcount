@@ -9,10 +9,11 @@ import 'package:web/web.dart' as web;
 
 /// PayHere Web service — Flutter Web only.
 ///
-/// The price is NEVER sent from the app. The app only says which plan it
-/// wants for which salon; the `generate-payhere-hash` Edge Function checks
-/// that the user owns the salon, reads the price from the database, creates
-/// a pending payment and returns order_id + amount + hash + merchant_id.
+/// The price is NEVER sent from the app. The app only says what it wants to
+/// buy (an owner plan for a salon, or customer Pro); the
+/// `generate-payhere-hash` Edge Function checks the caller, reads the price
+/// from the database, creates a pending payment and returns
+/// order_id + amount + hash + merchant_id.
 ///
 /// Two ways to take the payment:
 ///  1. POPUP (preferred): PayHere JS SDK opens an iframe over the app.
@@ -31,13 +32,60 @@ class PayHereWebService {
 
   static const String _sdkUrl = 'https://www.payhere.lk/lib/payhere.js';
 
-  /// Returns:
-  ///  • order id           → popup payment completed
-  ///  • [redirectSentinel] → redirecting to PayHere (page is unloading)
-  ///  • null               → cancelled / failed
+  /// OWNER plan payment (Silver / Gold / Platinum for one salon).
+  /// Returns: order id (popup done) | [redirectSentinel] | null (cancelled/failed)
   Future<String?> startSubscriptionPayment({
     required int salonId,
     required String planName,
+    required String customerEmail,
+    required String customerName,
+    required String customerPhone,
+    required String returnUrl,
+    required String cancelUrl,
+    required void Function(String error) onError,
+  }) {
+    return _startPayment(
+      quoteBody: {'salon_id': salonId, 'plan_name': planName, 'platform': 'web'},
+      itemLabel: '$planName Subscription',
+      custom1: salonId.toString(),
+      custom2: planName,
+      customerEmail: customerEmail,
+      customerName: customerName,
+      customerPhone: customerPhone,
+      returnUrl: returnUrl,
+      cancelUrl: cancelUrl,
+      onError: onError,
+    );
+  }
+
+  /// CUSTOMER Pro membership (yearly). The price comes from the server.
+  Future<String?> startCustomerProPayment({
+    required String customerEmail,
+    required String customerName,
+    required String customerPhone,
+    required String returnUrl,
+    required String cancelUrl,
+    required void Function(String error) onError,
+  }) {
+    return _startPayment(
+      quoteBody: {'kind': 'customer_pro', 'platform': 'web'},
+      itemLabel: 'Pro Membership (1 year)',
+      custom1: 'customer_pro',
+      custom2: 'customer_pro',
+      customerEmail: customerEmail,
+      customerName: customerName,
+      customerPhone: customerPhone,
+      returnUrl: returnUrl,
+      cancelUrl: cancelUrl,
+      onError: onError,
+    );
+  }
+
+  Future<String?> _startPayment({
+    required Map<String, dynamic> quoteBody,
+    required String itemLabel,
+    required String custom1,
+    required String custom2,
     required String customerEmail,
     required String customerName,
     required String customerPhone,
@@ -52,7 +100,7 @@ class PayHereWebService {
     try {
       final response = await _supabase.functions.invoke(
         'generate-payhere-hash',
-        body: {'salon_id': salonId, 'plan_name': planName, 'platform': 'web'},
+        body: quoteBody,
       );
       quote = Map<String, dynamic>.from(response.data as Map);
     } on FunctionException catch (e) {
@@ -77,7 +125,7 @@ class PayHereWebService {
       'cancel_url': cancelUrl,
       'notify_url': '${env.supabaseUrl}/functions/v1/payhere-webhook',
       'order_id': orderId,
-      'items': '$planName Subscription',
+      'items': itemLabel,
       'amount': quote['amount'].toString(),
       'currency': quote['currency'].toString(),
       'hash': quote['hash'].toString(),
@@ -88,8 +136,8 @@ class PayHereWebService {
       'address': 'Colombo',
       'city': 'Colombo',
       'country': 'Sri Lanka',
-      'custom_1': salonId.toString(),
-      'custom_2': planName,
+      'custom_1': custom1,
+      'custom_2': custom2,
     };
 
     // 3. Popup first, redirect as fallback

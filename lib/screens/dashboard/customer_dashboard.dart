@@ -2,6 +2,8 @@ import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/observers/route_observers.dart';
+import 'package:flutter_application_1/screens/subscription/providers/customer_pro_provider.dart';
+import 'package:flutter_application_1/screens/subscription/widgets/pro_gate.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
@@ -11,6 +13,7 @@ import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:universal_platform/universal_platform.dart';
@@ -138,6 +141,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   Future<void> _initializeAsync() async {
+    unawaited(context.read<CustomerProProvider>().load());
     await _initializeTimezoneAndCurrency();
     await _loadCustomerData();
     await _loadDashboardData();
@@ -573,6 +577,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       if (shouldShow) return;
     }
     if (!mounted) return;
+
+    // VIP booking is a Pro feature -> free customers go to the Pro screen
+    if (!await ensureCustomerPro(context, confirm: false)) return;
+    if (!mounted) return;
+
     final result = await context.push('/customer/vip-booking');
     if (result == true && mounted) {
       debugPrint('✅ Returned from VIP booking — refreshing dashboard');
@@ -605,6 +614,11 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       final shouldShow = await _showPermissionCardContext(action: 'vip');
       if (shouldShow) return;
     }
+    if (!mounted) return;
+
+    // VIP booking is a Pro feature -> free customers go to the Pro screen
+    if (!await ensureCustomerPro(context, confirm: false)) return;
+    if (!mounted) return;
 
     final extra = await _buildBookingExtraWithOffer(offer);
     if (!mounted) return;
@@ -2689,6 +2703,22 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     ];
   }
 
+    Widget _buildProButton() {
+    return Consumer<CustomerProProvider>(
+      builder: (context, pro, _) {
+        final isPro = pro.isPro;
+        return IconButton(
+          icon: Icon(
+            isPro ? Icons.workspace_premium : Icons.workspace_premium_outlined,
+            color: isPro ? Colors.amber : Colors.white,
+          ),
+          onPressed: () => context.push('/customer/pro'),
+          tooltip: isPro ? 'Pro Member' : 'Upgrade to Pro',
+        );
+      },
+    );
+  }
+
   Widget _buildOffersButton() {
     return IconButton(
       icon: const Icon(Icons.local_offer_outlined, color: Colors.white),
@@ -3525,6 +3555,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
         ),
         title: null,
         actions: _safeActions([
+          _buildProButton(),
           _buildOffersButton(),
           _buildNotificationIcon(),
           _buildProfilePhoto(),

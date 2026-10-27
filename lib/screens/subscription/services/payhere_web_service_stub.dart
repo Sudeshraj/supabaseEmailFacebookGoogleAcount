@@ -21,4 +21,16 @@ class PayHereWebService {
     onError('Web payments are only available in the web app');
     return null;
   }
+
+  Future<String?> startCustomerProPayment({
+    required String customerEmail,
+    required String customerName,
+    required String customerPhone,
+    required String returnUrl,
+    required String cancelUrl,
+    required void Function(String error) onError,
+  }) async {
+    onError('Web payments are only available in the web app');
+    return null;
+  }
 }

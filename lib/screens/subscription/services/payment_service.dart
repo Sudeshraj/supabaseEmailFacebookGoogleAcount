@@ -55,4 +55,32 @@ class PaymentService {
       return null;
     }
   }
+
+  /// CUSTOMER Pro membership (Rs.500 / year) - web only, same rules as above.
+  Future<String?> startCustomerProPayment({
+    required String customerEmail,
+    required String customerName,
+    required String customerPhone,
+    String? returnUrl,
+    String? cancelUrl,
+  }) async {
+    if (!kIsWeb) {
+      debugPrint('PayHere is web-only. Use Google Play Billing on Android.');
+      return null;
+    }
+
+    try {
+      return await _web.startCustomerProPayment(
+        customerEmail: customerEmail,
+        customerName: customerName,
+        customerPhone: customerPhone,
+        returnUrl: returnUrl ?? Uri.base.origin,
+        cancelUrl: cancelUrl ?? Uri.base.origin,
+        onError: (error) => debugPrint('❌ [Web] Payment error: $error'),
+      );
+    } catch (e, stack) {
+      debugPrint('❌ PaymentService (Pro) error: $e\n$stack');
+      return null;
+    }
+  }
 }

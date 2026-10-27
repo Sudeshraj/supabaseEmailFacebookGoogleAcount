@@ -9,6 +9,7 @@ import 'package:flutter_application_1/alertBox/account_restore_pending_screen.da
 import 'package:flutter_application_1/firebase_options.dart';
 import 'package:flutter_application_1/observers/route_observers.dart';
 import 'package:flutter_application_1/screens/settings/currency_settings_screen.dart';
+import 'package:flutter_application_1/screens/subscription/providers/customer_pro_provider.dart';
 import 'package:flutter_application_1/screens/subscription/providers/subscription_provider.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
@@ -57,6 +58,7 @@ import 'package:flutter_application_1/screens/owner/service_management.dart';
 import 'package:flutter_application_1/screens/settings/profile_management_screen.dart';
 import 'package:flutter_application_1/screens/settings/profile_screen.dart';
 import 'package:flutter_application_1/screens/settings/settings_screen.dart';
+import 'package:flutter_application_1/screens/subscription/screens/customer_pro_screen.dart';
 import 'package:flutter_application_1/screens/subscription/screens/payment_history_screen.dart';
 import 'package:flutter_application_1/screens/subscription/screens/payment_return_screen.dart';
 import 'package:flutter_application_1/screens/subscription/screens/plans_comparison_screen.dart';
@@ -818,6 +820,10 @@ GoRouter _createRouter() {
       // ============================================
       if (path == '/payment-return') {
         return appState.loggedIn ? null : '/login';
+      }
+
+      if (path == '/customer/pro') {
+         return appState.loggedIn ? null : '/login';
       }
 
       // ============================================
@@ -1704,6 +1710,13 @@ GoRouter _createRouter() {
           );
         },
       ),
+      GoRoute(        
+       path: '/customer/pro',
+       name: 'customer_pro',
+       builder: (context, state) => CustomerProScreen(
+         returnStatus: state.uri.queryParameters['payment'], // 'return' | 'cancel' 
+         ),
+      ),
     ],
   );
 }
@@ -1799,6 +1812,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       providers: [
         // ✅ Subscription provider — app එකේ හැම තැනකම access කරන්න පුළුවන්
         ChangeNotifierProvider(create: (_) => SubscriptionProvider()),
+        ChangeNotifierProvider(create: (_) => CustomerProProvider()),
       ],
       child: MaterialApp.router(
         routerConfig: router,
