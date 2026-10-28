@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_application_1/screens/subscription/services/play_billing_service.dart';
 import '../models/subscription_plan.dart';
+import '../services/play_billing_service.dart';
 import '../services/subscription_service.dart';
 
 class SubscriptionProvider extends ChangeNotifier {
@@ -43,6 +43,11 @@ class SubscriptionProvider extends ChangeNotifier {
   /// 'free' | 'payhere' | 'google_play'
   String get planSource => _currentCapabilities?['plan']?['source'] ?? 'free';
   bool get isPlaySource => planSource == 'google_play';
+
+  /// Google Play could not charge the card: 'grace' (plan still on) |
+  /// 'on_hold' (plan off) | null
+  String? get paymentIssue =>
+      _currentCapabilities?['plan']?['payment_issue'] as String?;
   String? get playProductId =>
       _currentCapabilities?['plan']?['play_product_id'] as String?;
 

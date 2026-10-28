@@ -70,6 +70,10 @@ class CustomerProStatus {
   /// every plan that can be bought
   final List<CustomerProPlanOption> plans;
 
+  /// Google Play could not charge the card: 'grace' (access still on) |
+  /// 'on_hold' (access off) | null
+  final String? paymentIssue;
+
   const CustomerProStatus({
     required this.isPro,
     required this.source,
@@ -79,6 +83,7 @@ class CustomerProStatus {
     required this.currentPlanName,
     required this.currentBillingPeriod,
     required this.plans,
+    this.paymentIssue,
   });
 
   bool get isGooglePlay => source == 'google_play';
@@ -131,6 +136,7 @@ class CustomerProStatus {
       plans: plansRaw
           .map((e) => CustomerProPlanOption.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList(),
+      paymentIssue: json['payment_issue'] as String?,
     );
   }
 }

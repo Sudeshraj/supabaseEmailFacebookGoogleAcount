@@ -4,9 +4,9 @@ import 'package:flutter_application_1/screens/subscription/providers/subscriptio
 import 'package:flutter_application_1/screens/subscription/screens/payment_history_screen.dart';
 import 'package:flutter_application_1/screens/subscription/screens/plans_comparison_screen.dart';
 import 'package:flutter_application_1/screens/subscription/services/play_billing_service.dart';
+import 'package:flutter_application_1/screens/subscription/widgets/payment_issue_banner.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
-
 class SubscriptionScreen extends StatefulWidget {
   final int salonId;
   final String ownerId;
@@ -69,8 +69,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                     ),
                     const SizedBox(height: 16),
                     OutlinedButton.icon(
-                      onPressed: () =>
-                          provider.loadCapabilities(widget.salonId),
+                      onPressed: () => provider.loadCapabilities(widget.salonId),
                       icon: const Icon(Icons.refresh),
                       label: const Text('Retry'),
                     ),
@@ -85,6 +84,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: [
+                if (provider.paymentIssue != null)
+                  PaymentIssueBanner(issue: provider.paymentIssue!),
                 _buildCurrentPlanCard(provider),
                 const SizedBox(height: 24),
                 _buildFeatureList(provider),
@@ -298,9 +299,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
         ],
 
         // PayHere (web) subscriptions: cancel here. Already cancelled -> nothing left.
-        if (isPaid &&
-            !provider.isPlaySource &&
-            !provider.cancelAtPeriodEnd) ...[
+        if (isPaid && !provider.isPlaySource && !provider.cancelAtPeriodEnd) ...[
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
@@ -346,9 +345,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(result['message'] ?? 'Done'),
-                    backgroundColor: result['success'] == true
-                        ? null
-                        : Colors.red,
+                    backgroundColor:
+                        result['success'] == true ? null : Colors.red,
                   ),
                 );
               }

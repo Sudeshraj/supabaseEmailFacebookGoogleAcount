@@ -3,15 +3,16 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/subscription/providers/customer_pro_provider.dart';
-import 'package:flutter_application_1/screens/subscription/screens/customer_pro_history_screen.dart';
 import 'package:flutter_application_1/screens/subscription/services/customer_pro_service.dart';
 import 'package:flutter_application_1/screens/subscription/services/payment_service.dart';
 import 'package:flutter_application_1/screens/subscription/services/play_billing_service.dart';
+import 'package:flutter_application_1/screens/subscription/widgets/payment_issue_banner.dart';
 import 'package:in_app_purchase_android/billing_client_wrappers.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'customer_pro_history_screen.dart';
 
 // ============================================================
 // CUSTOMER PRO SCREEN  (route: /customer/pro)
@@ -480,6 +481,10 @@ class _CustomerProScreenState extends State<CustomerProScreen> {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
+        if (status.paymentIssue != null) ...[
+          PaymentIssueBanner(issue: status.paymentIssue!),
+          const SizedBox(height: 12),
+        ],
         _buildHeader(status),
         const SizedBox(height: 16),
         if (_showsPlanSelector(status)) ...[
