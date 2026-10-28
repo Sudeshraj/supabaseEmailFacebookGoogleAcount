@@ -56,8 +56,9 @@ class PaymentService {
     }
   }
 
-  /// CUSTOMER Pro membership (Rs.500 / year) - web only, same rules as above.
+  /// CUSTOMER Pro membership (monthly or yearly) - web only, same rules as above.
   Future<String?> startCustomerProPayment({
+    required String planName,
     required String customerEmail,
     required String customerName,
     required String customerPhone,
@@ -71,6 +72,7 @@ class PaymentService {
 
     try {
       return await _web.startCustomerProPayment(
+        planName: planName,
         customerEmail: customerEmail,
         customerName: customerName,
         customerPhone: customerPhone,

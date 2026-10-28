@@ -136,11 +136,16 @@ class PlayBillingService {
   /// [oldPurchase] != null  -> plan switch:
   ///    upgrade   -> charged now, prorated for the unused time
   ///    downgrade ([deferred] = true) -> starts at the next renewal
+  ///
+  /// [replacementMode] overrides the default (deferred / chargeProratedPrice).
+  /// Switching to a DIFFERENT billing period (monthly <-> yearly) must use
+  /// ReplacementMode.withTimeProration (now) or ReplacementMode.deferred.
   Future<bool> buy({
     required GooglePlayProductDetails product,
     required String ownerId,
     GooglePlayPurchaseDetails? oldPurchase,
     bool deferred = false,
+    ReplacementMode? replacementMode,
   }) async {
     final param = GooglePlayPurchaseParam(
       productDetails: product,
@@ -151,9 +156,10 @@ class PlayBillingService {
           ? null
           : ChangeSubscriptionParam(
               oldPurchaseDetails: oldPurchase,
-              replacementMode: deferred
-                  ? ReplacementMode.deferred
-                  : ReplacementMode.chargeProratedPrice,
+              replacementMode: replacementMode ??
+                  (deferred
+                      ? ReplacementMode.deferred
+                      : ReplacementMode.chargeProratedPrice),
             ),
     );
     return _iap.buyNonConsumable(purchaseParam: param);

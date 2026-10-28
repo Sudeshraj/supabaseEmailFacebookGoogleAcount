@@ -23,6 +23,7 @@ class PayHereWebService {
   }
 
   Future<String?> startCustomerProPayment({
+    required String planName,
     required String customerEmail,
     required String customerName,
     required String customerPhone,

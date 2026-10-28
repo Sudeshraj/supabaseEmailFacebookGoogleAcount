@@ -133,7 +133,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
       end: 1.04,
     ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
 
-    _initializeAsync();
+    // ✅ FIX: build phase eka iwara wela passe load karanna
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _initializeAsync();
+    });
 
     _setupNotificationListeners();
     _searchController.addListener(_onSearchTextChanged);
@@ -141,9 +144,12 @@ class _CustomerDashboardState extends State<CustomerDashboard>
   }
 
   Future<void> _initializeAsync() async {
+    if (!mounted) return;
     unawaited(context.read<CustomerProProvider>().load());
     await _initializeTimezoneAndCurrency();
+    if (!mounted) return;
     await _loadCustomerData();
+    if (!mounted) return;
     await _loadDashboardData();
   }
 

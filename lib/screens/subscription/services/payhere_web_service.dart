@@ -58,8 +58,10 @@ class PayHereWebService {
     );
   }
 
-  /// CUSTOMER Pro membership (yearly). The price comes from the server.
+  /// CUSTOMER Pro membership. [planName] = 'pro_monthly' | 'pro_yearly'.
+  /// The price comes from the server.
   Future<String?> startCustomerProPayment({
+    required String planName,
     required String customerEmail,
     required String customerName,
     required String customerPhone,
@@ -68,10 +70,16 @@ class PayHereWebService {
     required void Function(String error) onError,
   }) {
     return _startPayment(
-      quoteBody: {'kind': 'customer_pro', 'platform': 'web'},
-      itemLabel: 'Pro Membership (1 year)',
+      quoteBody: {
+        'kind': 'customer_pro',
+        'plan_name': planName,
+        'platform': 'web',
+      },
+      itemLabel: planName == 'pro_monthly'
+          ? 'Pro Membership (1 month)'
+          : 'Pro Membership (1 year)',
       custom1: 'customer_pro',
-      custom2: 'customer_pro',
+      custom2: planName,
       customerEmail: customerEmail,
       customerName: customerName,
       customerPhone: customerPhone,
