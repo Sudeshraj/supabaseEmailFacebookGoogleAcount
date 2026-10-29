@@ -152,6 +152,15 @@ flutter:
     - assets/icons/google.svg
     - assets/icons/facebook.svg
     - assets/icons/apple.svg
+    - assets/images/roles/customer_1.webp
+    - assets/images/roles/customer_2.webp
+    - assets/images/roles/customer_3.webp
+    - assets/images/roles/owner_1.webp
+    - assets/images/roles/owner_2.webp
+    - assets/images/roles/owner_3.webp
+    - assets/images/roles/barber_1.webp
+    - assets/images/roles/barber_2.webp
+    - assets/images/roles/barber_3.webp
  
   
   # fonts:

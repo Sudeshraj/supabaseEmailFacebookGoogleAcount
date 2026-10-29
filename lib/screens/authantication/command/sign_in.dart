@@ -16,6 +16,7 @@ import 'package:go_router/go_router.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_svg/flutter_svg.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../alertBox/simple_toast.dart';
 
 // IMPORT SERVICES
@@ -37,6 +38,23 @@ class _ReturningUserCheck {
     this.existingRoles,
   });
 }
+
+// ============================================================
+// MOBILE APP DOWNLOAD LINKS  -> paste your real links here later
+//   Android e.g. https://play.google.com/store/apps/details?id=your.app.id
+//   iOS     e.g. https://apps.apple.com/app/id1234567890
+// While a link is empty, the button shows a "coming soon" message.
+// ============================================================
+const String _kAndroidAppUrl = '';
+const String _kIosAppUrl = '';
+
+// ============================================================
+// HELP & COMMUNITY LINKS  -> paste your real links here later
+//   YouTube channel (watch videos) / Facebook page
+// While a link is empty, the button shows a "coming soon" message.
+// ============================================================
+const String _kYoutubeUrl = '';
+const String _kFacebookPageUrl = '';
 
 class SignInScreen extends StatefulWidget {
   final String? prefilledEmail;
@@ -73,7 +91,6 @@ class _SignInScreenState extends State<SignInScreen>
   // Animation
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
-  late Animation<double> _scaleAnimation;
 
   // Validation
   String? _emailError;
@@ -119,9 +136,6 @@ class _SignInScreenState extends State<SignInScreen>
     _fadeAnimation = CurvedAnimation(
       parent: _animationController,
       curve: Curves.easeIn,
-    );
-    _scaleAnimation = Tween<double>(begin: 0.9, end: 1.0).animate(
-      CurvedAnimation(parent: _animationController, curve: Curves.easeOutBack),
     );
     _animationController.forward();
 
@@ -2232,25 +2246,380 @@ $provider OAuth Configuration Required:
   }
 
   // ============================================================
+  // 📚 HELP & COMMUNITY (web only, bottom of the left panel): video guide,
+  // YouTube channel (watch videos) and Facebook page
+  // ============================================================
+
+  Future<void> _openExternalLink(String url, String label) async {
+    if (url.trim().isEmpty) {
+      SimpleToast.info(context, '$label link will be added soon');
+      return;
+    }
+    try {
+      final ok = await launchUrl(
+        Uri.parse(url.trim()),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!ok && mounted) {
+        SimpleToast.info(context, 'Could not open the link');
+      }
+    } catch (e) {
+      debugPrint('Error opening link: $e');
+      if (mounted) {
+        SimpleToast.info(context, 'Could not open the link');
+      }
+    }
+  }
+
+  /// Compact help / community links bar - sits at the bottom of the LEFT
+  /// panel, next to the middle divider line (YouTube + Facebook icons).
+  Widget _buildHelpLinksBar() {
+    return Wrap(
+      alignment: WrapAlignment.end,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      spacing: 10,
+      runSpacing: 8,
+      children: [
+        _PillLink(
+          icon: Icons.smart_display_rounded,
+          color: const Color(0xFFFF0000),
+          label: 'Watch',
+          tooltip: 'Watch videos on YouTube',
+          onTap: () => _openExternalLink(_kYoutubeUrl, 'YouTube'),
+        ),
+        _PillLink(
+          icon: Icons.facebook_rounded,
+          color: const Color(0xFF1877F2),
+          tooltip: 'Visit our Facebook page',
+          onTap: () => _openExternalLink(_kFacebookPageUrl, 'Facebook page'),
+        ),
+      ],
+    );
+  }
+
+  // ============================================================
+  // 📲 APP DOWNLOAD (web only)
+  // ============================================================
+
+  Future<void> _openAppLink(String url, String storeName) async {
+    if (url.trim().isEmpty) {
+      SimpleToast.info(context, '$storeName app link is coming soon');
+      return;
+    }
+    try {
+      final ok = await launchUrl(
+        Uri.parse(url.trim()),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!ok && mounted) {
+        SimpleToast.info(context, 'Could not open the download link');
+      }
+    } catch (e) {
+      debugPrint('Error opening app link: $e');
+      if (mounted) {
+        SimpleToast.info(context, 'Could not open the download link');
+      }
+    }
+  }
+
+  Widget _buildAppDownloadSection() {
+    final secondaryTextColor = context.secondaryTextColor;
+    final dividerColor = context.dividerColor;
+    final textColor = context.textColor;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      child: Column(
+        children: [
+          Divider(color: dividerColor, thickness: 1),
+          const SizedBox(height: 12),
+          Text(
+            'Get the mobile app',
+            style: TextStyle(
+              color: secondaryTextColor,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _StoreButton(
+                  icon: Icons.android,
+                  iconColor: const Color(0xFF3DDC84),
+                  caption: 'Download for',
+                  title: 'Android',
+                  onTap: () => _openAppLink(_kAndroidAppUrl, 'Android'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StoreButton(
+                  icon: Icons.apple,
+                  iconColor: textColor,
+                  caption: 'Download for',
+                  title: 'iOS',
+                  onTap: () => _openAppLink(_kIosAppUrl, 'iOS'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // 💻 WEB LAYOUT - full screen split (left hero / right form)
+  //    + footer: Privacy Policy · Terms of Service · Help
+  // ============================================================
+
+  Widget _buildWebLayout(Size size) {
+    final backgroundColor = context.backgroundColor;
+    final dividerColor = context.dividerColor;
+    final textColor = context.textColor;
+    final isDark = context.isDarkMode;
+
+    // Hide the left hero panel on medium widths so the form never gets cramped
+    final bool showHero = size.width >= 1000;
+
+    // Login panel is narrow (about 1/3), the left side takes the rest
+    final double rightW = (size.width * 0.32).clamp(400.0, 480.0).toDouble();
+
+    return Scaffold(
+      backgroundColor: backgroundColor,
+      body: SafeArea(
+        child: FadeTransition(
+          opacity: _fadeAnimation,
+          child: Column(
+            children: [
+              // ---------------- MAIN AREA (fills the screen) ----------------
+              Expanded(
+                child: Row(
+                  children: [
+                    // ===== LEFT: logo + illustration + headline =====
+                    if (showHero) Expanded(child: _buildWebHero()),
+
+                    // ===== vertical divider =====
+                    if (showHero)
+                      VerticalDivider(
+                        width: 1,
+                        thickness: 1,
+                        color: dividerColor,
+                      ),
+
+                    // ===== RIGHT: login form =====
+                    _rightSlot(
+                      showHero,
+                      rightW,
+                      Center(
+                        child: SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 24,
+                          ),
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 420),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // Back button when a saved profile exists
+                                if (_hasSavedProfile)
+                                  _buildSavedProfileHeader(),
+
+                                // Logo shown here only when hero panel is hidden
+                                if (!showHero)
+                                  Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(
+                                        bottom: 20,
+                                      ),
+                                      child: _buildLogo(size: 72),
+                                    ),
+                                  ),
+
+                                // Title + who can log in
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 20),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Log in to your account',
+                                        style: TextStyle(
+                                          color: textColor,
+                                          fontSize: 17,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        'Customers, barbers and salon owners all sign in here.',
+                                        style: TextStyle(
+                                          color: context.secondaryTextColor,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                      if (!showHero) ...[
+                                        const SizedBox(height: 12),
+                                        _buildRoleChips(),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+
+                                // Email / password / remember me / login /
+                                // forgot password / OAuth buttons
+                                ..._buildFormChildren(compact: false),
+
+                                // Download the mobile app (Android / iOS)
+                                _buildAppDownloadSection(),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // ---------------- FOOTER ----------------
+              Divider(
+                height: 1,
+                thickness: 1,
+                color: isDark ? Colors.white12 : dividerColor,
+              ),
+              _buildWebFooter(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Right slot: fixed (narrow) width next to the hero, or full width when
+  /// the hero panel is hidden.
+  Widget _rightSlot(bool showHero, double width, Widget child) {
+    return showHero
+        ? SizedBox(width: width, child: child)
+        : Expanded(child: child);
+  }
+
+  /// Left panel: logo (top-left) + animated role showcase
+  /// (image cards in the centre, headline at the bottom-left)
+  Widget _buildWebHero() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(48, 32, 48, 32),
+      child: _RoleShowcase(
+        logo: _buildLogo(size: 60),
+        footer: _buildHelpLinksBar(),
+      ),
+    );
+  }
+
+  /// Small role chips - shown above the form when the hero panel is hidden
+  Widget _buildRoleChips() {
+    final secondaryTextColor = context.secondaryTextColor;
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: _kRoles.map((r) {
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: r.color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(r.icon, size: 14, color: r.color),
+              const SizedBox(width: 6),
+              Text(
+                r.title,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: secondaryTextColor,
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  /// Footer: Privacy Policy · Terms of Service · Help (+ app version)
+  Widget _buildWebFooter() {
+    final secondaryTextColor = context.secondaryTextColor;
+    final primaryColor = context.primaryColor;
+
+    Widget link(String label, String route) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(6),
+        onTap: () =>
+            context.push('$route?from=${Uri.encodeComponent('/login')}'),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: secondaryTextColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 24),
+      child: Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          link('Privacy Policy', '/privacy'),
+          link('Terms of Service', '/terms'),
+          link('Help', '/help'),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              'v${AppVersion.version}',
+              style: TextStyle(
+                color: primaryColor.withValues(alpha: 0.6),
+                fontSize: 11,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
   // ✅ BUILD METHOD
-  //   • Web / wide screen  -> framed card layout (unchanged look)
-  //   • Mobile             -> frame removed, full screen layout
+  //   • Web / wide screen  -> full-screen split layout + footer
+  //   • Mobile             -> frame removed, full screen layout (unchanged)
   // ============================================================
 
   @override
   Widget build(BuildContext context) {
     final backgroundColor = context.backgroundColor;
-    final surfaceColor = context.surfaceColor;
-    final cardColor = context.cardColor;
     final dividerColor = context.dividerColor;
-    final isDark = context.isDarkMode;
-    final borderColor = isDark ? Colors.white12 : Colors.grey.shade200;
 
     final size = MediaQuery.of(context).size;
     final bool isWeb = size.width > 700;
 
     // ------------------------------------------------------------
-    // 📱 MOBILE - full screen, no frame / card / border
+    // 📱 MOBILE - full screen, no frame / card / border (UNCHANGED)
     // ------------------------------------------------------------
     if (!isWeb) {
       return Scaffold(
@@ -2320,84 +2689,9 @@ $provider OAuth Configuration Required:
     }
 
     // ------------------------------------------------------------
-    // 💻 WEB - framed card layout
+    // 💻 WEB - full screen split layout
     // ------------------------------------------------------------
-    const double maxWidth = 480;
-
-    return Scaffold(
-      backgroundColor: backgroundColor,
-      body: SafeArea(
-        child: Center(
-          child: FadeTransition(
-            opacity: _fadeAnimation,
-            child: ScaleTransition(
-              scale: _scaleAnimation,
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: maxWidth),
-                child: Container(
-                  height: size.height - 40,
-                  margin: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 20,
-                  ),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: cardColor,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: borderColor),
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [cardColor, surfaceColor.withValues(alpha: 0.3)],
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // Top section with back button
-                      if (_hasSavedProfile) _buildSavedProfileHeader(),
-
-                      // Main content - scrollable
-                      Expanded(
-                        child: SingleChildScrollView(
-                          physics: const BouncingScrollPhysics(),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              // Logo (circle)
-                              Padding(
-                                padding: const EdgeInsets.only(
-                                  top: 6,
-                                  bottom: 18,
-                                ),
-                                child: _buildLogo(size: 72),
-                              ),
-
-                              // Form
-                              ..._buildFormChildren(compact: false),
-                              const SizedBox(height: 24),
-
-                              // Divider
-                              Divider(color: dividerColor, thickness: 1),
-                              const SizedBox(height: 16),
-
-                              // Privacy Links
-                              _buildPrivacyLinks(),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    return _buildWebLayout(size);
   }
 }
 
@@ -2525,5 +2819,941 @@ class _SocialLoginButton extends StatelessWidget {
               ),
       ),
     );
+  }
+}
+
+
+// ============================================================
+// ROLE DATA
+//  Put your photos in  assets/images/roles/  (and list that folder in
+//  pubspec.yaml under flutter -> assets). If a photo is missing, the
+//  card automatically shows a coloured background with a big icon,
+//  so nothing ever breaks.
+// ============================================================
+
+class _RoleCardInfo {
+  final String label;
+  final IconData icon;
+  final String image;
+
+  const _RoleCardInfo(this.label, this.icon, this.image);
+}
+
+class _RoleInfo {
+  final String title;
+  final IconData icon;
+  final Color color;
+  final String headlineTop;
+  final String headlineAccent;
+  final List<String> texts; // the text list shown on the right side
+  final List<_RoleCardInfo> cards;
+  final IconData badgeIcon;
+  final Color badgeColor;
+  final String? badgeText;
+
+  const _RoleInfo({
+    required this.title,
+    required this.icon,
+    required this.color,
+    required this.headlineTop,
+    required this.headlineAccent,
+    required this.texts,
+    required this.cards,
+    required this.badgeIcon,
+    required this.badgeColor,
+    this.badgeText,
+  });
+}
+
+const List<_RoleInfo> _kRoles = [
+  _RoleInfo(
+    title: 'Customer',
+    icon: Icons.person_rounded,
+    color: Colors.green,
+    headlineTop: 'Find the\nstyle\n',
+    headlineAccent: 'you love.',
+    texts: [
+      'Find salons & barbers',
+      'Book appointments fast',
+      'Track your bookings',
+    ],
+    cards: [
+      _RoleCardInfo(
+        'Top salons',
+        Icons.storefront_rounded,
+        'assets/images/roles/customer_1.webp',
+      ),
+      _RoleCardInfo(
+        'Book in seconds',
+        Icons.calendar_month_rounded,
+        'assets/images/roles/customer_2.webp',
+      ),
+      _RoleCardInfo(
+        'Your barber',
+        Icons.content_cut_rounded,
+        'assets/images/roles/customer_3.webp',
+      ),
+    ],
+    badgeIcon: Icons.favorite_rounded,
+    badgeColor: Color(0xFFE53958),
+  ),
+  _RoleInfo(
+    title: 'Barber',
+    icon: Icons.content_cut_rounded,
+    color: Colors.orange,
+    headlineTop: 'Manage\nyour day\n',
+    headlineAccent: 'your way.',
+    texts: [
+      'Manage your appointments',
+      'See your daily schedule',
+      'Serve customers at your salon',
+    ],
+    cards: [
+      _RoleCardInfo(
+        'Appointments',
+        Icons.event_available_rounded,
+        'assets/images/roles/barber_1.webp',
+      ),
+      _RoleCardInfo(
+        'Daily schedule',
+        Icons.schedule_rounded,
+        'assets/images/roles/barber_2.webp',
+      ),
+      _RoleCardInfo(
+        'Happy clients',
+        Icons.sentiment_very_satisfied_rounded,
+        'assets/images/roles/barber_3.webp',
+      ),
+    ],
+    badgeIcon: Icons.schedule_rounded,
+    badgeColor: Color(0xFF5B5BD6),
+    badgeText: '10:30',
+  ),
+  _RoleInfo(
+    title: 'Salon Owner',
+    icon: Icons.storefront_rounded,
+    color: Colors.blueAccent,
+    headlineTop: 'Build the\nsalon\n',
+    headlineAccent: 'you dream of.',
+    texts: [
+      'Create & manage your salon',
+      'Add & manage your barbers',
+      'All appointments in one place',
+    ],
+    cards: [
+      _RoleCardInfo(
+        'Your salon',
+        Icons.storefront_rounded,
+        'assets/images/roles/owner_1.webp',
+      ),
+      _RoleCardInfo(
+        'Your barbers',
+        Icons.groups_rounded,
+        'assets/images/roles/owner_2.webp',
+      ),
+      _RoleCardInfo(
+        'All bookings',
+        Icons.event_note_rounded,
+        'assets/images/roles/owner_3.webp',
+      ),
+    ],
+    badgeIcon: Icons.trending_up_rounded,
+    badgeColor: Color(0xFF1E9E5A),
+  ),
+];
+
+// ============================================================
+// ANIMATION SPEED  (change these numbers to make it faster / slower)
+// ============================================================
+const Duration _kRoleHold = Duration(seconds: 6); // time each role stays
+const Duration _kSceneAnim = Duration(milliseconds: 1600); // cards in
+const Duration _kTextAnim = Duration(milliseconds: 1500); // text list in
+const Duration _kHeadlineAnim = Duration(milliseconds: 600); // headline in
+const Duration _kFadeOut = Duration(milliseconds: 300); // old content out
+
+Widget _topLeftLayout(Widget? current, List<Widget> previous) {
+  return Stack(
+    alignment: Alignment.topLeft,
+    clipBehavior: Clip.none,
+    children: [...previous, ?current],
+  );
+}
+
+// ============================================================
+// ANIMATED ROLE SHOWCASE
+//  - Own StatefulWidget + own Timer: only THIS widget rebuilds, the
+//    login form (text fields) is never rebuilt by the animation.
+//  - Implicit animations only (no per-frame controllers),
+//    RepaintBoundary around the scene.
+//  - Keeps changing no matter where the user clicks. It only stops when
+//    a role chip is tapped (tap the same chip again to resume).
+//    Respects the "reduce motion" accessibility setting.
+// ============================================================
+
+class _RoleShowcase extends StatefulWidget {
+  final Widget logo;
+  final Widget? footer; // e.g. help links, bottom-right (next to the divider)
+
+  const _RoleShowcase({required this.logo, this.footer});
+
+  @override
+  State<_RoleShowcase> createState() => _RoleShowcaseState();
+}
+
+class _RoleShowcaseState extends State<_RoleShowcase> {
+  Timer? _timer;
+  int _active = 0;
+  bool _pinned = false; // true after the user taps a role chip
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+  }
+
+  void _startTimer() {
+    _timer?.cancel();
+    _timer = Timer.periodic(_kRoleHold, (_) {
+      if (!mounted || _pinned) return;
+      setState(() => _active = (_active + 1) % _kRoles.length);
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion = MediaQuery.of(context).disableAnimations;
+    final fadeIn = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 350);
+    final fadeOut = reduceMotion ? Duration.zero : _kFadeOut;
+    final headlineIn = reduceMotion ? Duration.zero : _kHeadlineAnim;
+    final chipAnim = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 300);
+
+    final role = _kRoles[_active];
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final isDark = context.isDarkMode;
+
+    final headline = SizedBox(
+      height: 150,
+      child: AnimatedSwitcher(
+        duration: headlineIn,
+        reverseDuration: fadeOut,
+        layoutBuilder: _topLeftLayout,
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.08),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
+        ),
+        child: Text.rich(
+          key: ValueKey(_active),
+          TextSpan(
+            style: TextStyle(
+              color: textColor,
+              fontSize: 44,
+              height: 1.1,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -1,
+            ),
+            children: [
+              TextSpan(text: role.headlineTop),
+              TextSpan(
+                text: role.headlineAccent,
+                style: TextStyle(color: role.color),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final textList = SizedBox(
+      height: 100,
+      child: AnimatedSwitcher(
+        duration: fadeIn,
+        reverseDuration: fadeOut,
+        layoutBuilder: _topLeftLayout,
+        child: _RoleTextList(
+          key: ValueKey(_active),
+          info: role,
+          instant: reduceMotion,
+        ),
+      ),
+    );
+
+    final roleChips = Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var i = 0; i < _kRoles.length; i++)
+                InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () {
+                    if (_pinned && _active == i) {
+                      // tapping the pinned role again -> auto change resumes
+                      setState(() => _pinned = false);
+                      _startTimer();
+                    } else {
+                      // user picked a role -> auto change stops
+                      _timer?.cancel();
+                      setState(() {
+                        _active = i;
+                        _pinned = true;
+                      });
+                    }
+                  },
+                  child: AnimatedContainer(
+                    duration: chipAnim,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: i == _active
+                          ? _kRoles[i].color.withValues(alpha: 0.15)
+                          : (isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.grey.shade100),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: i == _active
+                            ? _kRoles[i].color.withValues(alpha: 0.6)
+                            : Colors.transparent,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _kRoles[i].icon,
+                          size: 16,
+                          color: i == _active
+                              ? _kRoles[i].color
+                              : secondaryTextColor,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          _kRoles[i].title,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: i == _active ? textColor : secondaryTextColor,
+                          ),
+                        ),
+                        if (_pinned && i == _active) ...[
+                          const SizedBox(width: 6),
+                          Icon(
+                            Icons.push_pin_rounded,
+                            size: 12,
+                            color: _kRoles[i].color,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          );
+
+    return Padding(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // ---------- top row: logo (left) + role chips (right) ----------
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              widget.logo,
+              const SizedBox(width: 24),
+              Expanded(child: roleChips),
+            ],
+          ),
+
+          // ---------- image cards (centre) ----------
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, c) {
+                // Scale the scene to the free space (up to 1.4x bigger)
+                final sx = c.maxWidth / 400;
+                final sy = c.maxHeight / 440;
+                final scale = (sx < sy ? sx : sy).clamp(0.3, 1.4).toDouble();
+
+                return Center(
+                  child: RepaintBoundary(
+                    child: SizedBox(
+                      width: 400 * scale,
+                      height: 440 * scale,
+                      child: FittedBox(
+                        fit: BoxFit.contain,
+                        child: SizedBox(
+                          width: 400,
+                          height: 440,
+                          child: AnimatedSwitcher(
+                            duration: fadeIn,
+                            reverseDuration: fadeOut,
+                            child: _RoleScene(
+                              key: ValueKey(_active),
+                              info: role,
+                              instant: reduceMotion,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // ---------- headline (left) + text list (right) ----------
+          // Wide panel  -> side by side
+          // Narrow panel -> text list under the headline
+          LayoutBuilder(
+            builder: (context, c) {
+              if (c.maxWidth >= 600) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    headline,
+                    const SizedBox(width: 32),
+                    Expanded(child: textList),
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [headline, const SizedBox(height: 4), textList],
+              );
+            },
+          ),
+
+
+          if (widget.footer != null) ...[
+            const SizedBox(height: 14),
+            Align(alignment: Alignment.centerRight, child: widget.footer!),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The text list for ONE role. Each line slides in from the RIGHT
+/// towards the left, one after another.
+class _RoleTextList extends StatelessWidget {
+  final _RoleInfo info;
+  final bool instant;
+
+  const _RoleTextList({super.key, required this.info, this.instant = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final textColor = context.textColor;
+    final total = instant ? Duration.zero : _kTextAnim;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < info.texts.length; i++)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: _StaggerIn(
+              duration: total,
+              start: 0.15 + i * 0.2,
+              end: (0.15 + i * 0.2 + 0.4).clamp(0.0, 1.0),
+              offset: const Offset(56, 0), // starts on the right
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.check_circle_rounded, size: 18, color: info.color),
+                  const SizedBox(width: 10),
+                  Flexible(
+                    child: Text(
+                      info.texts[i],
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// The 3 image cards + floating badge for ONE role.
+/// Each card slides/fades in one after another (staggered, slow).
+class _RoleScene extends StatelessWidget {
+  final _RoleInfo info;
+  final bool instant;
+
+  const _RoleScene({super.key, required this.info, this.instant = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final cards = info.cards;
+    final hasText = info.badgeText != null;
+    final total = instant ? Duration.zero : _kSceneAnim;
+
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        // back-left card
+        Positioned(
+          left: 0,
+          top: 60,
+          child: _StaggerIn(
+            duration: total,
+            start: 0.0,
+            end: 0.4,
+            child: _ImageCard(
+              info: cards[0],
+              color: info.color,
+              shade: 0.0,
+              width: 190,
+              height: 240,
+            ),
+          ),
+        ),
+
+        // main tall card (right)
+        Positioned(
+          left: 150,
+          top: 0,
+          child: _StaggerIn(
+            duration: total,
+            start: 0.15,
+            end: 0.55,
+            child: _ImageCard(
+              info: cards[1],
+              color: info.color,
+              shade: 0.22,
+              width: 240,
+              height: 340,
+            ),
+          ),
+        ),
+
+        // bottom card (overlaps the other two)
+        Positioned(
+          left: 70,
+          top: 270,
+          child: _StaggerIn(
+            duration: total,
+            start: 0.3,
+            end: 0.7,
+            child: _ImageCard(
+              info: cards[2],
+              color: info.color,
+              shade: 0.42,
+              width: 230,
+              height: 170,
+            ),
+          ),
+        ),
+
+        // floating badge (heart / time / trend)
+        Positioned(
+          right: 0,
+          bottom: 90,
+          child: _PopIn(
+            duration: total,
+            start: 0.6,
+            end: 1.0,
+            child: Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: hasText ? 14 : 16,
+                vertical: hasText ? 10 : 16,
+              ),
+              decoration: BoxDecoration(
+                color: info.badgeColor,
+                borderRadius: BorderRadius.circular(40),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    info.badgeIcon,
+                    color: Colors.white,
+                    size: hasText ? 18 : 26,
+                  ),
+                  if (hasText) ...[
+                    const SizedBox(width: 6),
+                    Text(
+                      info.badgeText!,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One image card: photo (or coloured fallback with a big icon),
+/// small icon badge on the top-left, label at the bottom.
+class _ImageCard extends StatelessWidget {
+  final _RoleCardInfo info;
+  final Color color;
+  final double shade;
+  final double width;
+  final double height;
+
+  const _ImageCard({
+    required this.info,
+    required this.color,
+    required this.shade,
+    required this.width,
+    required this.height,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Color.lerp(color, Colors.black, shade) ?? color;
+
+    // Shown when the photo is not available -> big icon instead
+    Widget fallback() {
+      return Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [base.withValues(alpha: 0.95), base.withValues(alpha: 0.55)],
+          ),
+        ),
+        child: Center(
+          child: Icon(
+            info.icon,
+            size: (width < height ? width : height) * 0.38,
+            color: Colors.white.withValues(alpha: 0.9),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.22),
+            blurRadius: 24,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(
+              info.image,
+              fit: BoxFit.cover,
+              cacheWidth: 900,
+              errorBuilder: (context, error, stackTrace) => fallback(),
+            ),
+
+            // soft dark gradient so the label is always readable
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    Colors.black.withValues(alpha: 0.55),
+                  ],
+                  stops: const [0.55, 1.0],
+                ),
+              ),
+            ),
+
+            // small icon badge (top-left)
+            Positioned(
+              left: 12,
+              top: 12,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(info.icon, size: 18, color: base),
+              ),
+            ),
+
+            // label (bottom-left)
+            Positioned(
+              left: 14,
+              right: 14,
+              bottom: 12,
+              child: Text(
+                info.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Fade + slide in. It plays only between [start] and [end] (0..1) of the
+/// total [duration], so several of these can be staggered one after another.
+/// [offset] is where it starts from (default: 24px below its final place).
+class _StaggerIn extends StatelessWidget {
+  final Duration duration;
+  final double start;
+  final double end;
+  final Offset offset;
+  final Widget child;
+
+  const _StaggerIn({
+    required this.duration,
+    required this.child,
+    this.start = 0.0,
+    this.end = 1.0,
+    this.offset = const Offset(0, 24),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: duration,
+      curve: Interval(start, end, curve: Curves.easeOutCubic),
+      child: child,
+      builder: (context, v, child) => Opacity(
+        opacity: v.clamp(0.0, 1.0),
+        child: Transform.translate(
+          offset: Offset(offset.dx * (1 - v), offset.dy * (1 - v)),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+/// Pop (scale) in with a little bounce, between [start] and [end].
+class _PopIn extends StatelessWidget {
+  final Duration duration;
+  final double start;
+  final double end;
+  final Widget child;
+
+  const _PopIn({
+    required this.duration,
+    required this.child,
+    this.start = 0.0,
+    this.end = 1.0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween<double>(begin: 0, end: 1),
+      duration: duration,
+      curve: Interval(start, end, curve: Curves.easeOutBack),
+      child: child,
+      builder: (context, v, child) => Opacity(
+        opacity: v.clamp(0.0, 1.0),
+        child: Transform.scale(scale: v, child: child),
+      ),
+    );
+  }
+}
+
+
+// ============================================================
+// STORE BUTTON (Android / iOS download)
+// ============================================================
+
+class _StoreButton extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String caption;
+  final String title;
+  final VoidCallback onTap;
+
+  const _StoreButton({
+    required this.icon,
+    required this.iconColor,
+    required this.caption,
+    required this.title,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.05)
+                : Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: isDark ? Colors.white24 : Colors.grey.shade300,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 28, color: iconColor),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      caption,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: secondaryTextColor, fontSize: 10),
+                    ),
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: textColor,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+// ============================================================
+// PILL LINK (YouTube / Facebook icon buttons)
+//   label given   -> pill with icon + text
+//   label == null -> round icon-only button (with tooltip)
+// ============================================================
+
+class _PillLink extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String? label;
+  final String? tooltip;
+  final VoidCallback onTap;
+
+  const _PillLink({
+    required this.icon,
+    required this.color,
+    required this.onTap,
+    this.label,
+    this.tooltip,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.isDarkMode;
+    final textColor = context.textColor;
+    final hasLabel = label != null;
+
+    final button = Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(30),
+        onTap: onTap,
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: hasLabel ? 14 : 10,
+            vertical: 10,
+          ),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: isDark ? 0.16 : 0.1),
+            borderRadius: BorderRadius.circular(30),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 20, color: color),
+              if (hasLabel) ...[
+                const SizedBox(width: 8),
+                Text(
+                  label!,
+                  style: TextStyle(
+                    color: textColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+
+    return tooltip == null ? button : Tooltip(message: tooltip!, child: button);
   }
 }
