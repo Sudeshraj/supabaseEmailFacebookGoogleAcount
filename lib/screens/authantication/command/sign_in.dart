@@ -2514,7 +2514,7 @@ $provider OAuth Configuration Required:
   /// (image cards in the centre, headline at the bottom-left)
   Widget _buildWebHero() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(48, 32, 48, 32),
+      padding: const EdgeInsets.fromLTRB(36, 24, 36, 20),
       child: _RoleShowcase(
         logo: _buildLogo(size: 60),
         footer: _buildHelpLinksBar(),
@@ -2971,6 +2971,16 @@ const Duration _kTextAnim = Duration(milliseconds: 1500); // text list in
 const Duration _kHeadlineAnim = Duration(milliseconds: 600); // headline in
 const Duration _kFadeOut = Duration(milliseconds: 300); // old content out
 
+// ============================================================
+// IMAGE CARD SCENE SIZE
+//   The 3 cards are drawn on a canvas of _kSceneW x _kSceneH and then
+//   scaled up/down to fit the screen. Raise _kSceneMaxScale to allow
+//   even bigger cards on very large monitors.
+// ============================================================
+const double _kSceneW = 560;
+const double _kSceneH = 410;
+const double _kSceneMaxScale = 2.4;
+
 Widget _topLeftLayout(Widget? current, List<Widget> previous) {
   return Stack(
     alignment: Alignment.topLeft,
@@ -3042,8 +3052,8 @@ class _RoleShowcaseState extends State<_RoleShowcase> {
     final secondaryTextColor = context.secondaryTextColor;
     final isDark = context.isDarkMode;
 
-    final headline = SizedBox(
-      height: 150,
+    Widget buildHeadline(double fs) => SizedBox(
+      height: fs * 3.4,
       child: AnimatedSwitcher(
         duration: headlineIn,
         reverseDuration: fadeOut,
@@ -3063,7 +3073,7 @@ class _RoleShowcaseState extends State<_RoleShowcase> {
           TextSpan(
             style: TextStyle(
               color: textColor,
-              fontSize: 44,
+              fontSize: fs,
               height: 1.1,
               fontWeight: FontWeight.w800,
               letterSpacing: -1,
@@ -3184,25 +3194,52 @@ class _RoleShowcaseState extends State<_RoleShowcase> {
             ],
           ),
 
-          // ---------- image cards (centre) ----------
+          // ---------- body: image cards + headline + text list ----------
+          // The layout is picked automatically (cards on top with the text
+          // under them, OR text on the left with the cards on the right) so the
+          // image cards are as BIG as possible on laptops, tablets and big
+          // monitors.
           Expanded(
             child: LayoutBuilder(
               builder: (context, c) {
-                // Scale the scene to the free space (up to 1.4x bigger)
-                final sx = c.maxWidth / 400;
-                final sy = c.maxHeight / 440;
-                final scale = (sx < sy ? sx : sy).clamp(0.3, 1.4).toDouble();
+                const double sw = _kSceneW; // scene canvas
+                const double sh = _kSceneH;
 
-                return Center(
-                  child: RepaintBoundary(
+                // ----- option A: cards on top, text under them -----
+                final double fsA = c.maxWidth >= 700 ? 44 : 32;
+                final bool rowText = c.maxWidth >= 560;
+                final double textBlockH = rowText
+                    ? fsA * 3.4 + 12
+                    : fsA * 3.4 + 4 + 100 + 12;
+                final double sxA = c.maxWidth / sw;
+                final double syA = (c.maxHeight - textBlockH) / sh;
+                final double scaleA = sxA < syA ? sxA : syA;
+
+                // ----- option B: text on the left, cards on the right -----
+                const double textW = 330;
+                const double gap = 24;
+                final double sxB = (c.maxWidth - textW - gap) / sw;
+                final double syB = c.maxHeight / sh;
+                final double scaleB = sxB < syB ? sxB : syB;
+
+                final bool sideBySide =
+                    c.maxWidth >= 720 &&
+                    c.maxHeight >= 300 &&
+                    scaleB > scaleA * 1.05;
+
+                Widget sceneBox(double rawScale) {
+                  final double scale = rawScale
+                      .clamp(0.3, _kSceneMaxScale)
+                      .toDouble();
+                  return RepaintBoundary(
                     child: SizedBox(
-                      width: 400 * scale,
-                      height: 440 * scale,
+                      width: sw * scale,
+                      height: sh * scale,
                       child: FittedBox(
                         fit: BoxFit.contain,
                         child: SizedBox(
-                          width: 400,
-                          height: 440,
+                          width: sw,
+                          height: sh,
                           child: AnimatedSwitcher(
                             duration: fadeIn,
                             reverseDuration: fadeOut,
@@ -3215,36 +3252,58 @@ class _RoleShowcaseState extends State<_RoleShowcase> {
                         ),
                       ),
                     ),
-                  ),
+                  );
+                }
+
+                if (sideBySide) {
+                  return Row(
+                    children: [
+                      SizedBox(
+                        width: textW,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            buildHeadline(44),
+                            const SizedBox(height: 16),
+                            textList,
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: gap),
+                      Expanded(child: Center(child: sceneBox(scaleB))),
+                    ],
+                  );
+                }
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: Center(child: sceneBox(scaleA))),
+                    const SizedBox(height: 12),
+                    if (rowText)
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          buildHeadline(fsA),
+                          const SizedBox(width: 24),
+                          Expanded(child: textList),
+                        ],
+                      )
+                    else
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          buildHeadline(fsA),
+                          const SizedBox(height: 4),
+                          textList,
+                        ],
+                      ),
+                  ],
                 );
               },
             ),
           ),
-
-          const SizedBox(height: 12),
-
-          // ---------- headline (left) + text list (right) ----------
-          // Wide panel  -> side by side
-          // Narrow panel -> text list under the headline
-          LayoutBuilder(
-            builder: (context, c) {
-              if (c.maxWidth >= 600) {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    headline,
-                    const SizedBox(width: 32),
-                    Expanded(child: textList),
-                  ],
-                );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [headline, const SizedBox(height: 4), textList],
-              );
-            },
-          ),
-
 
           if (widget.footer != null) ...[
             const SizedBox(height: 14),
@@ -3325,7 +3384,7 @@ class _RoleScene extends StatelessWidget {
         // back-left card
         Positioned(
           left: 0,
-          top: 60,
+          top: 90,
           child: _StaggerIn(
             duration: total,
             start: 0.0,
@@ -3342,7 +3401,7 @@ class _RoleScene extends StatelessWidget {
 
         // main tall card (right)
         Positioned(
-          left: 150,
+          left: 160,
           top: 0,
           child: _StaggerIn(
             duration: total,
@@ -3360,8 +3419,8 @@ class _RoleScene extends StatelessWidget {
 
         // bottom card (overlaps the other two)
         Positioned(
-          left: 70,
-          top: 270,
+          left: 330,
+          top: 230,
           child: _StaggerIn(
             duration: total,
             start: 0.3,
@@ -3378,8 +3437,8 @@ class _RoleScene extends StatelessWidget {
 
         // floating badge (heart / time / trend)
         Positioned(
-          right: 0,
-          bottom: 90,
+          left: 405,
+          top: 150,
           child: _PopIn(
             duration: total,
             start: 0.6,
@@ -3491,7 +3550,7 @@ class _ImageCard extends StatelessWidget {
             Image.asset(
               info.image,
               fit: BoxFit.cover,
-              cacheWidth: 900,
+              cacheWidth: 1400,
               errorBuilder: (context, error, stackTrace) => fallback(),
             ),
 
