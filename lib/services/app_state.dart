@@ -255,49 +255,49 @@ class AppState extends ChangeNotifier {
   }
 
   // Refresh app state
-// Concurrent refreshState() calls (auth listener + _handlePostLogin)
-// එකිනෙකට අතරමං කරන්නේ නැතුව පිළිවෙළට run කරන්න.
-Future<void> _refreshChain = Future.value();
+  // Concurrent refreshState() calls (auth listener + _handlePostLogin)
+  // එකිනෙකට අතරමං කරන්නේ නැතුව පිළිවෙළට run කරන්න.
+  Future<void> _refreshChain = Future.value();
 
-Future<void> refreshState({bool silent = false}) {
-  final next = _refreshChain.then((_) => _refreshStateImpl(silent: silent));
-  _refreshChain = next.catchError((_) {});
-  return next;
-}
-
-Future<void> _refreshStateImpl({bool silent = false}) async {
-  if (!silent) _setLoading(true);
-  _setErrorMessage(null);
-
-  try {
-    _setCurrentUser(Supabase.instance.client.auth.currentUser);
-    await _checkAuthenticationState();
-    await _updateUserProfile();
-
-    final hasProfiles = await SessionManager.hasProfile();
-    final rememberMe = await SessionManager.isRememberMeEnabled();
-
-    _setHasLocalProfile(hasProfiles);
-    _setRememberMeEnabled(rememberMe);
-
-    _lastUpdateTime = DateTime.now();
-
-    developer.log(
-      'AppState: Refreshed - Roles: $_roles, Current: $_currentRole',
-      name: 'AppState',
-    );
-  } catch (e, stackTrace) {
-    developer.log(
-      'State refresh error: $e',
-      name: 'AppState',
-      error: e,
-      stackTrace: stackTrace,
-    );
-    if (!silent) _setErrorMessage('Failed to refresh state');
-  } finally {
-    if (!silent) _setLoading(false);
+  Future<void> refreshState({bool silent = false}) {
+    final next = _refreshChain.then((_) => _refreshStateImpl(silent: silent));
+    _refreshChain = next.catchError((_) {});
+    return next;
   }
-}
+
+  Future<void> _refreshStateImpl({bool silent = false}) async {
+    if (!silent) _setLoading(true);
+    _setErrorMessage(null);
+
+    try {
+      _setCurrentUser(Supabase.instance.client.auth.currentUser);
+      await _checkAuthenticationState();
+      await _updateUserProfile();
+
+      final hasProfiles = await SessionManager.hasProfile();
+      final rememberMe = await SessionManager.isRememberMeEnabled();
+
+      _setHasLocalProfile(hasProfiles);
+      _setRememberMeEnabled(rememberMe);
+
+      _lastUpdateTime = DateTime.now();
+
+      developer.log(
+        'AppState: Refreshed - Roles: $_roles, Current: $_currentRole',
+        name: 'AppState',
+      );
+    } catch (e, stackTrace) {
+      developer.log(
+        'State refresh error: $e',
+        name: 'AppState',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      if (!silent) _setErrorMessage('Failed to refresh state');
+    } finally {
+      if (!silent) _setLoading(false);
+    }
+  }
 
   // Logout user
   /// Full, permanent logout - actually revokes the token server-side
@@ -498,7 +498,18 @@ Future<void> _refreshStateImpl({bool silent = false}) async {
     _setLoading(true);
     try {
       debugPrint('🔄 User confirmed restore for scheduled profile: $email');
-      await SessionManager.autoRestoreProfileLevelOnLogin(email: email);
+      // ✅ FIX: autoRestoreProfileLevelOnLogin() returns bool. Before, the
+      // result was ignored: on a failed restore the pending flag was
+      // cleared anyway, the DB still said is_active=false, and the user
+      // landed back on the restore prompt with no explanation. Now the
+      // pending state is kept and an error message is set.
+      final restored = await SessionManager.autoRestoreProfileLevelOnLogin(
+        email: email,
+      );
+      if (!restored) {
+        _setErrorMessage('Failed to restore your account. Please try again.');
+        return;
+      }
       _setPendingDeletionRestore(pending: false);
       await refreshState();
     } catch (e) {

@@ -144,8 +144,12 @@ class _ContinueScreenState extends State<ContinueScreen> {
       if (session == null) return false;
 
       if (session.expiresAt != null) {
+        // ✅ FIX: Session.expiresAt is Unix SECONDS - needs * 1000 for
+        // fromMillisecondsSinceEpoch (it used to give a 1970 date, so
+        // _hasValidSession() was always false and the DB role/status
+        // checks below were silently skipped).
         final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-          session.expiresAt!,
+          session.expiresAt! * 1000,
         );
         return DateTime.now().isBefore(expiryTime);
       }
@@ -192,7 +196,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         bool sessionValid = true;
         if (session.expiresAt != null) {
           final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-            session.expiresAt!,
+            session.expiresAt! * 1000,
           );
           sessionValid = DateTime.now().isBefore(expiryTime);
         }
@@ -258,7 +262,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
             bool sessionValid = true;
             if (session.expiresAt != null) {
               final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-                session.expiresAt!,
+                session.expiresAt! * 1000,
               );
               sessionValid = DateTime.now().isBefore(expiryTime);
             }
@@ -324,7 +328,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
         bool sessionValid = true;
         if (session.expiresAt != null) {
           final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-            session.expiresAt!,
+            session.expiresAt! * 1000,
           );
           sessionValid = DateTime.now().isBefore(expiryTime);
         }
@@ -2187,14 +2191,42 @@ class _ContinueScreenState extends State<ContinueScreen> {
   }
 
   /// Compact help / community links bar - sits at the bottom of the LEFT
-  /// panel, next to the middle divider line (YouTube + Facebook icons).
+  /// panel, next to the middle divider line (app download, YouTube, Facebook).
   Widget _buildHelpLinksBar() {
+    final secondaryTextColor = context.secondaryTextColor;
+    final textColor = context.textColor;
+
     return Wrap(
       alignment: WrapAlignment.end,
       crossAxisAlignment: WrapCrossAlignment.center,
       spacing: 10,
       runSpacing: 8,
       children: [
+        // ----- mobile app download (small, left of the YouTube button) -----
+        Text(
+          'Get the app',
+          style: TextStyle(
+            color: secondaryTextColor,
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        _PillLink(
+          icon: Icons.android,
+          color: const Color(0xFF3DDC84),
+          label: 'Android',
+          tooltip: 'Download for Android',
+          onTap: () => _openAppLink(_kAndroidAppUrl, 'Android'),
+        ),
+        _PillLink(
+          icon: Icons.apple,
+          color: textColor,
+          label: 'iOS',
+          tooltip: 'Download for iOS',
+          onTap: () => _openAppLink(_kIosAppUrl, 'iOS'),
+        ),
+
+        // ----- YouTube + Facebook -----
         _PillLink(
           icon: Icons.smart_display_rounded,
           color: const Color(0xFFFF0000),
@@ -2235,54 +2267,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
         SimpleToast.info(context, 'Could not open the download link');
       }
     }
-  }
-
-  Widget _buildAppDownloadSection() {
-    final secondaryTextColor = context.secondaryTextColor;
-    final dividerColor = context.dividerColor;
-    final textColor = context.textColor;
-
-    return Padding(
-      padding: const EdgeInsets.only(top: 4, bottom: 8),
-      child: Column(
-        children: [
-          Divider(color: dividerColor, thickness: 1),
-          const SizedBox(height: 12),
-          Text(
-            'Get the mobile app',
-            style: TextStyle(
-              color: secondaryTextColor,
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: _StoreButton(
-                  icon: Icons.android,
-                  iconColor: const Color(0xFF3DDC84),
-                  caption: 'Download for',
-                  title: 'Android',
-                  onTap: () => _openAppLink(_kAndroidAppUrl, 'Android'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _StoreButton(
-                  icon: Icons.apple,
-                  iconColor: textColor,
-                  caption: 'Download for',
-                  title: 'iOS',
-                  onTap: () => _openAppLink(_kIosAppUrl, 'iOS'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
   }
 
   // ============================================================
@@ -2435,7 +2419,9 @@ class _ContinueScreenState extends State<ContinueScreen> {
     final double rightW = (size.width * 0.32).clamp(400.0, 480.0).toDouble();
 
     // Bounded height for the profile list (it scrolls inside)
-    final double listMaxHeight = (size.height - 470).clamp(160.0, 460.0).toDouble();
+    final double listMaxHeight = (size.height - 470)
+        .clamp(160.0, 460.0)
+        .toDouble();
 
     return Scaffold(
       backgroundColor: backgroundColor,
@@ -2563,8 +2549,7 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                           ),
                                         Flexible(
                                           child:
-                                              _loading &&
-                                                  _selectedEmail != null
+                                              _loading && _selectedEmail != null
                                               ? _buildLoadingState()
                                               : profiles.isEmpty
                                               ? _buildEmptyState()
@@ -2598,9 +2583,6 @@ class _ContinueScreenState extends State<ContinueScreen> {
                                   // "Create New Account"
                                   _buildCreateAccountButton(),
                                   const SizedBox(height: 16),
-
-                                  // Download the mobile app (Android / iOS)
-                                  _buildAppDownloadSection(),
                                 ],
                               ],
                             ),
@@ -3667,79 +3649,74 @@ class _RoleShowcaseState extends State<_RoleShowcase> {
     );
 
     final roleChips = Wrap(
-            alignment: WrapAlignment.end,
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (var i = 0; i < _kRoles.length; i++)
-                InkWell(
-                  borderRadius: BorderRadius.circular(20),
-                  onTap: () {
-                    if (_pinned && _active == i) {
-                      // tapping the pinned role again -> auto change resumes
-                      setState(() => _pinned = false);
-                      _startTimer();
-                    } else {
-                      // user picked a role -> auto change stops
-                      _timer?.cancel();
-                      setState(() {
-                        _active = i;
-                        _pinned = true;
-                      });
-                    }
-                  },
-                  child: AnimatedContainer(
-                    duration: chipAnim,
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: i == _active
-                          ? _kRoles[i].color.withValues(alpha: 0.15)
-                          : (isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : Colors.grey.shade100),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: i == _active
-                            ? _kRoles[i].color.withValues(alpha: 0.6)
-                            : Colors.transparent,
-                      ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _kRoles[i].icon,
-                          size: 16,
-                          color: i == _active
-                              ? _kRoles[i].color
-                              : secondaryTextColor,
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          _kRoles[i].title,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: i == _active ? textColor : secondaryTextColor,
-                          ),
-                        ),
-                        if (_pinned && i == _active) ...[
-                          const SizedBox(width: 6),
-                          Icon(
-                            Icons.push_pin_rounded,
-                            size: 12,
-                            color: _kRoles[i].color,
-                          ),
-                        ],
-                      ],
+      alignment: WrapAlignment.end,
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (var i = 0; i < _kRoles.length; i++)
+          InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () {
+              if (_pinned && _active == i) {
+                // tapping the pinned role again -> auto change resumes
+                setState(() => _pinned = false);
+                _startTimer();
+              } else {
+                // user picked a role -> auto change stops
+                _timer?.cancel();
+                setState(() {
+                  _active = i;
+                  _pinned = true;
+                });
+              }
+            },
+            child: AnimatedContainer(
+              duration: chipAnim,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: i == _active
+                    ? _kRoles[i].color.withValues(alpha: 0.15)
+                    : (isDark
+                          ? Colors.white.withValues(alpha: 0.05)
+                          : Colors.grey.shade100),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: i == _active
+                      ? _kRoles[i].color.withValues(alpha: 0.6)
+                      : Colors.transparent,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _kRoles[i].icon,
+                    size: 16,
+                    color: i == _active ? _kRoles[i].color : secondaryTextColor,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _kRoles[i].title,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: i == _active ? textColor : secondaryTextColor,
                     ),
                   ),
-                ),
-            ],
-          );
+                  if (_pinned && i == _active) ...[
+                    const SizedBox(width: 6),
+                    Icon(
+                      Icons.push_pin_rounded,
+                      size: 12,
+                      color: _kRoles[i].color,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
 
     return Padding(
       padding: EdgeInsets.zero,
@@ -4078,7 +4055,10 @@ class _ImageCard extends StatelessWidget {
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [base.withValues(alpha: 0.95), base.withValues(alpha: 0.55)],
+            colors: [
+              base.withValues(alpha: 0.95),
+              base.withValues(alpha: 0.55),
+            ],
           ),
         ),
         child: Center(
@@ -4232,86 +4212,6 @@ class _PopIn extends StatelessWidget {
     );
   }
 }
-
-
-// ============================================================
-// STORE BUTTON (Android / iOS download)
-// ============================================================
-
-class _StoreButton extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String caption;
-  final String title;
-  final VoidCallback onTap;
-
-  const _StoreButton({
-    required this.icon,
-    required this.iconColor,
-    required this.caption,
-    required this.title,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = context.isDarkMode;
-    final textColor = context.textColor;
-    final secondaryTextColor = context.secondaryTextColor;
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.05)
-                : Colors.grey.shade50,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(
-              color: isDark ? Colors.white24 : Colors.grey.shade300,
-            ),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 28, color: iconColor),
-              const SizedBox(width: 10),
-              Flexible(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      caption,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: secondaryTextColor, fontSize: 10),
-                    ),
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: textColor,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 
 // ============================================================
 // PILL LINK (YouTube / Facebook icon buttons)

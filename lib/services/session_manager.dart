@@ -20,9 +20,18 @@ class SessionManager {
   static const String _keyCurrentRole = 'current_selected_role';
   static const String _keyAvailableProfiles = 'available_profiles';
 
-  // Secure storage
-  static final FlutterSecureStorage _secureStorage =
-      const FlutterSecureStorage();
+  // ✅ FIX: previously `const FlutterSecureStorage()` with NO default
+  // options, while writes used `iOptions: synchronizable: true` and
+  // several reads/deletes (getRefreshToken, removeProfile,
+  // _cleanupInvalidSession, requestDataDeletion) used no options at
+  // all. On iOS a Keychain item written as synchronizable is not
+  // found by a query that doesn't ask for synchronizable, so those
+  // reads could return null and those deletes could silently miss.
+  // Now every call uses the SAME options via the instance defaults.
+  static final FlutterSecureStorage _secureStorage = FlutterSecureStorage(
+    aOptions: _getAndroidOptions(),
+    iOptions: _getIOSOptions(),
+  );
   static late SharedPreferences _prefs;
 
   // Current consent version
@@ -41,11 +50,18 @@ class SessionManager {
   }
 
   // Session validation
+  // ✅ FIX: Supabase's Session.expiresAt is Unix SECONDS, not
+  // milliseconds. It used to be passed straight to
+  // DateTime.fromMillisecondsSinceEpoch(), producing a date in
+  // January 1970, so every session looked expired. All expiry
+  // conversions below now multiply by 1000.
   static bool isSessionValid(Session? session) {
     if (session == null) return false;
     if (session.expiresAt == null) return true;
 
-    final expiryTime = DateTime.fromMillisecondsSinceEpoch(session.expiresAt!);
+    final expiryTime = DateTime.fromMillisecondsSinceEpoch(
+      session.expiresAt! * 1000,
+    );
     final now = DateTime.now();
     final timeUntilExpiry = expiryTime.difference(now);
     return timeUntilExpiry.inMinutes > 2;
@@ -76,6 +92,60 @@ class SessionManager {
       return pendingRole;
     }
     return null;
+  }
+
+  // ============================================================
+  // ✅ NEW: PENDING OAUTH CONSENT (web / browser OAuth)
+  // ------------------------------------------------------------
+  // Browser-based OAuth (web, and Apple on Android) leaves the app
+  // page. On web the page fully reloads, so SignInScreen and the
+  // choices the user made in its dialog ("Stay signed in",
+  // "Send me offers") are lost before the /auth/callback screen
+  // runs. SignInScreen saves them here right before the redirect;
+  // AuthCallbackHandlerScreen reads them back exactly once.
+  // Entries older than 30 minutes are ignored.
+  // ============================================================
+  static const String _pendingOAuthConsentKey = 'pending_oauth_consent';
+
+  static Future<void> setPendingOAuthConsent({
+    required String provider,
+    required bool rememberMe,
+    required bool marketingConsent,
+  }) async {
+    await _prefs.setString(
+      _pendingOAuthConsentKey,
+      jsonEncode({
+        'provider': provider.toLowerCase(),
+        'rememberMe': rememberMe,
+        'marketingConsent': marketingConsent,
+        'savedAt': DateTime.now().toIso8601String(),
+      }),
+    );
+    debugPrint(
+      '📌 Pending OAuth consent saved: $provider rememberMe=$rememberMe marketing=$marketingConsent',
+    );
+  }
+
+  /// Returns the saved choices once, then deletes them. Returns null
+  /// if nothing is saved or the entry is older than 30 minutes.
+  static Future<Map<String, dynamic>?> consumePendingOAuthConsent() async {
+    final raw = _prefs.getString(_pendingOAuthConsentKey);
+    if (raw == null) return null;
+    await _prefs.remove(_pendingOAuthConsentKey);
+
+    try {
+      final data = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+      final savedAt = DateTime.tryParse(data['savedAt'] as String? ?? '');
+      if (savedAt == null ||
+          DateTime.now().difference(savedAt) > const Duration(minutes: 30)) {
+        debugPrint('⏭️ Pending OAuth consent expired - ignoring');
+        return null;
+      }
+      return data;
+    } catch (e) {
+      debugPrint('⚠️ Could not read pending OAuth consent: $e');
+      return null;
+    }
   }
 
   /// ✅ NEW: Persists the "quick-switch logout is in effect" flag to
@@ -310,6 +380,23 @@ class SessionManager {
         debugPrint('⏰ Setting first lastLogin for $email: $lastLogin');
       }
 
+      // ✅ FIX: marketing consent used to be `marketingConsent ?? false`,
+      // so ANY call that didn't pass it (e.g. the background
+      // saveUserProfile in AppState._updateUserProfile, or
+      // logoutForContinue) silently reset the user's saved choice to
+      // false. Now an omitted value keeps whatever was stored before.
+      final bool finalMarketingConsent =
+          marketingConsent ??
+          (existingProfile['marketingConsent'] as bool? ?? false);
+      final String existingMarketingAt =
+          existingProfile['marketingConsentAt'] as String? ?? '';
+      final String finalMarketingConsentAt = !finalMarketingConsent
+          ? ''
+          : (marketingConsentAt?.toIso8601String() ??
+                (existingMarketingAt.isNotEmpty
+                    ? existingMarketingAt
+                    : now.toIso8601String()));
+
       final profileData = <String, dynamic>{
         'email': email,
         'userId': userId,
@@ -334,10 +421,8 @@ class SessionManager {
         'dataRetentionDate': now
             .add(const Duration(days: 730))
             .toIso8601String(),
-        'marketingConsent': marketingConsent ?? false,
-        'marketingConsentAt': marketingConsent == true
-            ? (marketingConsentAt ?? now).toIso8601String()
-            : '',
+        'marketingConsent': finalMarketingConsent,
+        'marketingConsentAt': finalMarketingConsentAt,
         'appVersion': AppVersion.version,
       };
 
@@ -590,6 +675,15 @@ class SessionManager {
           }
         }
 
+        // ✅ FIX: remember what was stored BEFORE overwriting it, so
+        // we only trigger an AppState refresh when the role really
+        // changed. Previously every call (including the one inside
+        // saveUserProfile, which AppState._updateUserProfile calls on
+        // every refresh) ended in appState.refreshState(), which
+        // called saveUserProfile again -> a refresh loop only held
+        // back by the 500 ms throttle in saveUserProfile.
+        final previousRole = _prefs.getString(_keyCurrentRole);
+
         await _prefs.setString(_keyCurrentRole, role);
         debugPrint('✅ Saved current role to SharedPreferences: $role');
 
@@ -608,8 +702,12 @@ class SessionManager {
           debugPrint('✅ Updated last_used for role: $role');
         }
 
-        appState.refreshState(silent: true);
-        debugPrint('✅ AppState refreshed');
+        if (previousRole != role) {
+          appState.refreshState(silent: true);
+          debugPrint('✅ AppState refreshed (role changed)');
+        } else {
+          debugPrint('ℹ️ Role unchanged - skipping AppState refresh');
+        }
       }
 
       debugPrint('💾 ===== saveCurrentRole completed =====');
@@ -1164,7 +1262,7 @@ class SessionManager {
       if (user != null && session != null && user.email == email) {
         if (session.expiresAt != null) {
           final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-            session.expiresAt!,
+            session.expiresAt! * 1000,
           );
           hasValidSession = DateTime.now().isBefore(expiryTime);
         } else {
@@ -1293,7 +1391,7 @@ class SessionManager {
 
       if (session.expiresAt != null) {
         final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-          session.expiresAt!,
+          session.expiresAt! * 1000,
         );
         final now = DateTime.now();
 
@@ -1374,7 +1472,7 @@ class SessionManager {
 
           if (session.expiresAt != null) {
             final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-              session.expiresAt!,
+              session.expiresAt! * 1000,
             );
             result['session_expired'] = DateTime.now().isAfter(expiryTime);
             result['seconds_until_expiry'] = expiryTime
@@ -1484,7 +1582,16 @@ class SessionManager {
   }
 
   /// ✅ Auto-restore entire profile on login
-  static Future<void> autoRestoreProfileLevelOnLogin({
+  ///
+  /// ✅ FIX: this used to return `Future<void>` and silently `return`
+  /// on every failure path (RPC missing, RPC threw, null response,
+  /// `success != true`, or a message that didn't happen to contain the
+  /// word "restored"). AppState.confirmRestoreScheduledProfile() then
+  /// cleared the pending flag and refreshed as if it had worked, the
+  /// DB still said is_active=false, and the user was dropped back on
+  /// the restore screen with no explanation. It now returns whether
+  /// the restore really succeeded so the caller can show an error.
+  static Future<bool> autoRestoreProfileLevelOnLogin({
     required String email,
   }) async {
     try {
@@ -1493,12 +1600,11 @@ class SessionManager {
 
       if (user == null) {
         debugPrint('⚠️ No user logged in');
-        return;
+        return false;
       }
 
-      debugPrint('🔄 Checking auto-restore for entire profile: $email');
+      debugPrint('🔄 Restoring entire profile: $email');
 
-      // ✅ Try-catch for RPC call
       dynamic response;
       try {
         response = await supabase.rpc(
@@ -1507,42 +1613,45 @@ class SessionManager {
         );
       } catch (rpcError) {
         debugPrint(
-          '⚠️ RPC function "auto_restore_profile_level_on_login" not found: $rpcError',
+          '❌ RPC "auto_restore_profile_level_on_login" failed: $rpcError',
         );
-        // RPC function not found - skip
-        return;
+        return false;
       }
 
-      if (response == null) {
-        debugPrint('⚠️ No response from RPC');
-        return;
+      if (response == null || response is! Map) {
+        debugPrint('❌ Unexpected/empty response from restore RPC: $response');
+        return false;
       }
 
-      final success = response['success'] as bool? ?? false;
-
-      if (success &&
-          response['message']?.toString().contains('restored') == true) {
-        debugPrint('✅ Entire profile auto-restored');
-
-        // ✅ Update local status
-        try {
-          await _updateLocalProfileLevelStatus(email: email, status: 'active');
-        } catch (e) {
-          debugPrint('⚠️ _updateLocalProfileLevelStatus error: $e');
-        }
-
-        // ✅ Remove schedule
-        try {
-          await _prefs.remove('del_profile_$email');
-        } catch (e) {
-          debugPrint('⚠️ Failed to remove schedule: $e');
-        }
-
-        // ✅ Refresh app state
-        appState.refreshState();
+      if (response['success'] != true) {
+        debugPrint('❌ Restore RPC did not succeed: $response');
+        return false;
       }
+
+      debugPrint('✅ Entire profile restored');
+
+      // ✅ Update local status
+      try {
+        await _updateLocalProfileLevelStatus(email: email, status: 'active');
+      } catch (e) {
+        debugPrint('⚠️ _updateLocalProfileLevelStatus error: $e');
+      }
+
+      // ✅ Remove schedule
+      try {
+        await _prefs.remove('del_profile_$email');
+      } catch (e) {
+        debugPrint('⚠️ Failed to remove schedule: $e');
+      }
+
+      // ✅ Refresh app state (kept for any other callers; refreshState()
+      // is serialized so a second call from the caller is harmless)
+      appState.refreshState();
+
+      return true;
     } catch (e) {
       debugPrint('❌ Error auto-restoring profile level: $e');
+      return false;
     }
   }
 
@@ -1815,7 +1924,7 @@ class SessionManager {
 
       if (session.expiresAt != null) {
         final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-          session.expiresAt!,
+          session.expiresAt! * 1000,
         );
         final now = DateTime.now();
         final minutesUntilExpiry = expiryTime.difference(now).inMinutes;
@@ -1920,10 +2029,13 @@ class SessionManager {
 
   static AndroidOptions _getAndroidOptions() => const AndroidOptions();
 
-  static IOSOptions _getIOSOptions() => const IOSOptions(
-    accessibility: KeychainAccessibility.unlocked,
-    synchronizable: true,
-  );
+  // ✅ FIX: `synchronizable: true` removed. It made the refresh token
+  // sync through iCloud Keychain to the user's other devices, and
+  // reads/deletes without the same option couldn't see those items.
+  // NOTE: tokens already written with synchronizable=true on iOS
+  // won't be found any more, so iOS users sign in once again.
+  static IOSOptions _getIOSOptions() =>
+      const IOSOptions(accessibility: KeychainAccessibility.unlocked);
 
   static Future<bool> hasValidSupabaseSession(String email) async {
     try {
@@ -1934,7 +2046,7 @@ class SessionManager {
       if (session != null && user != null && user.email == email) {
         if (session.expiresAt != null) {
           final expiryTime = DateTime.fromMillisecondsSinceEpoch(
-            session.expiresAt!,
+            session.expiresAt! * 1000,
           );
           final now = DateTime.now();
           return now.isBefore(expiryTime);
@@ -2500,151 +2612,27 @@ class SessionManager {
   // ✅ PROCESS EXPIRED DELETIONS - ADD TO SESSIONMANAGER
   // =====================================================
 
-  /// 🔥 Process expired profile deletions (auto-delete after 90 days)
+  /// 🔥 Expired account / role deletions are processed ONLY on the server
+  /// (pg_cron: revoke-apple-tokens 01:45 UTC, then
+  /// process_expired_profile_deletions() 02:00 UTC).
+  ///
+  /// The database functions process_expired_profile_deletions() and
+  /// process_expired_role_deletions() are executable by service_role only
+  /// (a logged-in user must not be able to trigger deletions), so calling
+  /// them from the app fails with "permission denied". These three methods
+  /// are kept as harmless no-ops so existing callers still compile.
   static Future<void> processExpiredDeletions() async {
-    try {
-      final supabase = Supabase.instance.client;
-
-      debugPrint('🧹 Processing expired deletions...');
-
-      // ✅ Call database function for profile level deletions
-      final profileResponse = await supabase.rpc(
-        'process_expired_profile_deletions',
-      );
-
-      if (profileResponse != null && profileResponse is List) {
-        for (var deleted in profileResponse) {
-          final userId = deleted['user_id'] as String?;
-          final email = deleted['email'] as String?;
-
-          if (userId != null && email != null) {
-            debugPrint('🗑️ Auto-deleted expired profile: $email');
-
-            // ✅ Remove from local storage
-            await removeProfile(email);
-            await _prefs.remove('del_profile_$email');
-          }
-        }
-        debugPrint(
-          '✅ Expired profile deletions processed: ${profileResponse.length} profiles',
-        );
-      }
-
-      // ✅ Call database function for role level deletions
-      final roleResponse = await supabase.rpc('process_expired_role_deletions');
-
-      if (roleResponse != null && roleResponse is List) {
-        for (var deleted in roleResponse) {
-          final userId = deleted['user_id'] as String?;
-          final role = deleted['role'] as String?;
-
-          if (userId != null && role != null) {
-            debugPrint('🗑️ Auto-deleted expired role: $userId - $role');
-
-            // ✅ Remove from local storage
-            final profiles = await getProfiles();
-            final index = profiles.indexWhere((p) => p['userId'] == userId);
-
-            if (index != -1) {
-              final email = profiles[index]['email'] as String?;
-              if (email != null) {
-                // Remove from available profiles
-                final availableProfiles = await getAvailableProfiles();
-                final updatedAvailable = availableProfiles
-                    .where((p) => !(p['userId'] == userId && p['role'] == role))
-                    .toList();
-                await saveAvailableProfiles(updatedAvailable);
-
-                // Remove schedule
-                await _prefs.remove('del_${email}_$role');
-              }
-            }
-          }
-        }
-        debugPrint(
-          '✅ Expired role deletions processed: ${roleResponse.length} roles',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error processing expired deletions: $e');
-    }
+    debugPrint('ℹ️ processExpiredDeletions: handled by the server (cron)');
   }
 
-  /// 🔥 Process expired profile deletions (Profile Level)
   static Future<void> processExpiredProfileDeletions() async {
-    try {
-      final supabase = Supabase.instance.client;
-
-      debugPrint('🧹 Processing expired profile deletions...');
-
-      final response = await supabase.rpc('process_expired_profile_deletions');
-
-      if (response != null && response is List) {
-        for (var deleted in response) {
-          final userId = deleted['user_id'] as String?;
-          final email = deleted['email'] as String?;
-
-          if (userId != null && email != null) {
-            debugPrint('🗑️ Auto-deleted expired profile: $email');
-
-            // ✅ Remove from local storage
-            await removeProfile(email);
-            await _prefs.remove('del_profile_$email');
-          }
-        }
-        debugPrint(
-          '✅ Expired profile deletions processed: ${response.length} profiles',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error processing expired profile deletions: $e');
-    }
+    debugPrint(
+      'ℹ️ processExpiredProfileDeletions: handled by the server (cron)',
+    );
   }
 
-  /// 🔥 Process expired role deletions
   static Future<void> processExpiredRoleDeletions() async {
-    try {
-      final supabase = Supabase.instance.client;
-
-      debugPrint('🧹 Processing expired role deletions...');
-
-      final response = await supabase.rpc('process_expired_role_deletions');
-
-      if (response != null && response is List) {
-        for (var deleted in response) {
-          final userId = deleted['user_id'] as String?;
-          final role = deleted['role'] as String?;
-
-          if (userId != null && role != null) {
-            debugPrint('🗑️ Auto-deleted expired role: $userId - $role');
-
-            // ✅ Remove from local storage
-            final profiles = await getProfiles();
-            final index = profiles.indexWhere((p) => p['userId'] == userId);
-
-            if (index != -1) {
-              final email = profiles[index]['email'] as String?;
-              if (email != null) {
-                // Remove from available profiles
-                final availableProfiles = await getAvailableProfiles();
-                final updatedAvailable = availableProfiles
-                    .where((p) => !(p['userId'] == userId && p['role'] == role))
-                    .toList();
-                await saveAvailableProfiles(updatedAvailable);
-
-                // Remove schedule
-                await _prefs.remove('del_${email}_$role');
-              }
-            }
-          }
-        }
-        debugPrint(
-          '✅ Expired role deletions processed: ${response.length} roles',
-        );
-      }
-    } catch (e) {
-      debugPrint('❌ Error processing expired role deletions: $e');
-    }
+    debugPrint('ℹ️ processExpiredRoleDeletions: handled by the server (cron)');
   }
 
   // =====================================================

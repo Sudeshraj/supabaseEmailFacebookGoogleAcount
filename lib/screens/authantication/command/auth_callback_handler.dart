@@ -257,6 +257,24 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         );
       }
 
+      // ✅ Choices the user made in SignInScreen's OAuth dialog before the
+      // browser redirect (saved by SessionManager.setPendingOAuthConsent).
+      // They override the defaults above. Read once; ignored when older
+      // than 30 minutes or when saved for a different provider.
+      bool? marketingConsent;
+      try {
+        final pending = await SessionManager.consumePendingOAuthConsent();
+        if (pending != null && pending['provider'] == provider.toLowerCase()) {
+          rememberMe = pending['rememberMe'] as bool? ?? rememberMe;
+          marketingConsent = pending['marketingConsent'] as bool?;
+          debugPrint(
+            '📌 Applied pending OAuth consent: rememberMe=$rememberMe marketing=$marketingConsent',
+          );
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error reading pending OAuth consent: $e');
+      }
+
       await SessionManager.saveUserProfile(
         email: email,
         userId: user.id,
@@ -269,11 +287,11 @@ class _AuthCallbackHandlerScreenState extends State<AuthCallbackHandlerScreen> {
         provider: provider,
         termsAcceptedAt: DateTime.now(),
         privacyAcceptedAt: DateTime.now(),
+        marketingConsent: marketingConsent,
+        marketingConsentAt: marketingConsent == true ? DateTime.now() : null,
       );
 
-      if (rememberMe) {
-        await SessionManager.setRememberMe(true);
-      }
+      await SessionManager.setRememberMe(rememberMe);
 
       debugPrint(
         '✅ Profile saved from auth callback for: $email (rememberMe: $rememberMe, roles: $roles)',

@@ -13,6 +13,17 @@ import 'package:flutter_application_1/extensions/context_extensions.dart';
 /// must be easy to discover and clearly labeled. This screen is
 /// separate from ProfileManagementScreen (which handles role
 /// switching) to keep the deletion action unambiguous.
+///
+/// ✅ How deletion works end to end:
+///   1. This screen only SCHEDULES deletion (90-day grace period).
+///   2. Logging in again within 90 days restores the account.
+///   3. After 90 days the server does everything on its own:
+///        01:45 UTC  revoke-apple-tokens (Edge Function, Apple users)
+///        02:00 UTC  process_expired_profile_deletions() (pg_cron)
+///      -> deletes the data, the profile AND the auth.users login.
+///   The app must NOT call revoke-apple-tokens itself: that function is
+///   cron-only (it needs the CRON_SECRET), and Apple's token must stay
+///   valid during the grace period so a restore keeps working.
 class DeleteAccountScreen extends StatefulWidget {
   const DeleteAccountScreen({super.key});
 
@@ -25,7 +36,6 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
   bool _isLoading = false;
   bool _confirmTextValid = false;
   String? _userEmail;
-  String? _loginProvider;
 
   // ✅ Web Scroll Controller
   final ScrollController _scrollController = ScrollController();
@@ -49,8 +59,6 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
   void _loadUserInfo() {
     final user = Supabase.instance.client.auth.currentUser;
     _userEmail = user?.email;
-    _loginProvider =
-        user?.userMetadata?['provider']?.toString().toLowerCase();
   }
 
   void _validateConfirmText() {
@@ -61,29 +69,13 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     }
   }
 
-  // ============================================================
-  // 🔥 APPLE TOKEN REVOCATION (App Store Guideline 5.1.1(v))
-  // ============================================================
-  Future<void> _revokeAppleTokenIfNeeded() async {
-    if (_loginProvider != 'apple') return;
-
-    try {
-      debugPrint('🍎 Apple account detected - revoking token...');
-      // ⚠️ IMPORTANT: Apple token revocation requires the original
-      // authorization code, which must be stored server-side at
-      // sign-in time (Supabase Edge Function recommended) since
-      // Apple only issues it once during initial authentication.
-      //
-      // Call your backend endpoint here, e.g.:
-      // await Supabase.instance.client.functions.invoke(
-      //   'revoke-apple-token',
-      //   body: {'email': _userEmail},
-      // );
-      debugPrint('🍎 Apple token revocation request sent');
-    } catch (e) {
-      debugPrint('❌ Apple token revocation failed: $e');
-      // Don't block deletion flow if revocation fails - log for
-      // manual follow-up, but continue with account deletion.
+  // ✅ Back works whether the screen was pushed (context.push) or opened
+  // with context.go (nothing to pop).
+  void _goBack() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/');
     }
   }
 
@@ -98,10 +90,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     try {
       debugPrint('🗑️ Starting account deletion for: $_userEmail');
 
-      // Step 1: Revoke Apple token if applicable
-      await _revokeAppleTokenIfNeeded();
-
-      // Step 2: Schedule profile-level deletion (90-day grace period)
+      // Step 1: Schedule profile-level deletion (90-day grace period).
+      // Must run BEFORE logout (the database function checks auth.uid()).
       final success = await SessionManager.updateProfileLevelStatus(
         email: _userEmail!,
         status: 'scheduled_for_deletion',
@@ -114,18 +104,17 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
 
       debugPrint('✅ Account scheduled for deletion');
 
-      // Step 3: Sign out immediately (account is now deactivated)
-      await Supabase.instance.client.auth.signOut();
-      await appState.refreshState();
-
+      // Step 2: Tell the user FIRST, while this screen still exists.
+      // (After logout the router replaces this screen, which would
+      // remove the dialog and `mounted` would already be false.)
       if (!mounted) return;
+      setState(() => _isLoading = false);
 
-      // Step 4: Show confirmation and navigate to login
       await showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => AlertDialog(
-          backgroundColor: context.backgroundColor,
+        builder: (dialogContext) => AlertDialog(
+          backgroundColor: dialogContext.backgroundColor,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -133,10 +122,12 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             children: [
               const Icon(Icons.check_circle_outline, color: Colors.green),
               const SizedBox(width: 8),
-              Text(
-                'Account Deletion Scheduled',
-                style: context.titleLarge.copyWith(
-                  color: context.textColor,
+              Flexible(
+                child: Text(
+                  'Account Deletion Scheduled',
+                  style: dialogContext.titleLarge.copyWith(
+                    color: dialogContext.textColor,
+                  ),
                 ),
               ),
             ],
@@ -146,13 +137,13 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             'permanent deletion in 90 days.\n\n'
             'You can restore your account anytime within this period '
             'by logging back in.',
-            style: context.bodyMedium.copyWith(
-              color: context.textColor,
+            style: dialogContext.bodyMedium.copyWith(
+              color: dialogContext.textColor,
             ),
           ),
           actions: [
             ElevatedButton(
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primary,
                 foregroundColor: Colors.white,
@@ -163,8 +154,15 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
         ),
       );
 
-      if (!mounted) return;
-      context.go('/login');
+      // Step 3: Full logout. appState.logout() clears the state in one
+      // go and the router sends the user to /continue or /login itself,
+      // so no context.go() is needed here.
+      try {
+        await appState.logout();
+      } catch (e) {
+        debugPrint('⚠️ Logout after scheduling failed: $e');
+        await Supabase.instance.client.auth.signOut();
+      }
     } catch (e) {
       debugPrint('❌ Error deleting account: $e');
       if (mounted) {
@@ -192,12 +190,9 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
-        title: Text(
+        title: const Text(
           'Delete Account',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
@@ -205,21 +200,13 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
         centerTitle: isWeb,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
+          onPressed: _goBack,
           tooltip: 'Back',
         ),
       ),
       body: _isLoading
-          ? Center(
-              child: CircularProgressIndicator(
-                color: AppTheme.primary,
-              ),
-            )
-          : SafeArea(
-              child: isWeb
-                  ? _buildWebLayout()
-                  : _buildMobileLayout(),
-            ),
+          ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
+          : SafeArea(child: isWeb ? _buildWebLayout() : _buildMobileLayout()),
     );
   }
 
@@ -306,9 +293,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           decoration: BoxDecoration(
             color: Colors.orange.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Colors.orange.withValues(alpha: 0.2),
-            ),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -328,6 +313,8 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
                 '• Your bookings, data, and settings will be preserved during the grace period\n'
                 '• You have 90 days to restore your account by logging back in\n'
                 '• After 90 days, your account and all data will be permanently deleted\n'
+                '• Salons you own will be deactivated; upcoming appointments will be cancelled\n'
+                '• Paid subscriptions are not cancelled automatically - cancel them in Google Play / the App Store\n'
                 '• This action cannot be undone after the 90-day period',
                 style: TextStyle(
                   fontSize: 13,
@@ -346,9 +333,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
           decoration: BoxDecoration(
             color: Colors.green.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: Colors.green.withValues(alpha: 0.2),
-            ),
+            border: Border.all(color: Colors.green.withValues(alpha: 0.2)),
           ),
           child: Row(
             children: [
@@ -382,9 +367,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
         TextField(
           controller: _confirmController,
           textCapitalization: TextCapitalization.characters,
-          style: TextStyle(
-            color: isDark ? Colors.white : Colors.black87,
-          ),
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
           decoration: InputDecoration(
             hintText: _confirmKeyword,
             hintStyle: TextStyle(
@@ -416,13 +399,13 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: _confirmTextValid
-                ? _confirmAndDeleteAccount
-                : null,
+            onPressed: _confirmTextValid ? _confirmAndDeleteAccount : null,
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
-              disabledBackgroundColor: isDark ? Colors.grey[800] : Colors.grey[300],
+              disabledBackgroundColor: isDark
+                  ? Colors.grey[800]
+                  : Colors.grey[300],
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
@@ -430,10 +413,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             ),
             child: const Text(
               'Delete My Account',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
             ),
           ),
         ),
@@ -441,7 +421,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
         SizedBox(
           width: double.infinity,
           child: OutlinedButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: _goBack,
             style: OutlinedButton.styleFrom(
               foregroundColor: isDark ? Colors.white : Colors.black87,
               side: BorderSide(
@@ -454,9 +434,7 @@ class _DeleteAccountScreenState extends State<DeleteAccountScreen> {
             ),
             child: Text(
               'Cancel',
-              style: TextStyle(
-                color: isDark ? Colors.white : Colors.black87,
-              ),
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             ),
           ),
         ),
