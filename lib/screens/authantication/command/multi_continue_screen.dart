@@ -1040,7 +1040,8 @@ class _ContinueScreenState extends State<ContinueScreen> {
                 final accessToken = fbResult.accessToken!;
                 final response = await supabase.auth.signInWithIdToken(
                   provider: OAuthProvider.facebook,
-                  idToken: accessToken.tokenString,
+                  idToken: accessToken.tokenString, // Note: active flutter_facebook_auth versions format tokens this way
+                  accessToken: accessToken.tokenString, // Facebook වලට accessToken එක අනිවාර්යයෙන්ම දෙන්න ඕනේ
                 );
 
                 if (response.user != null) {
