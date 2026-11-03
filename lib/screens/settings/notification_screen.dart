@@ -697,12 +697,19 @@ class _NotificationScreenState extends State<NotificationScreen> {
       } else if (type == 'low_stock') {
         await context.push('/owner/inventory');
       } else if (type == 'daily_summary') {
-        await context.push('/owner/dashboard');
+        await context.push('/owner');
+      } else if (type != null &&
+          (type.startsWith('subscription_') || type == 'salon_limit_exceeded')) {
+        // plan events -> owner dashboard (subscription tile is there)
+        context.go('/owner');
+        return;
       } else {
-        await context.push('/owner/dashboard');
+        await context.push('/owner');
       }
     } else {
-      if (type == 'appointment_confirmed' || type == 'booking_confirmed') {
+      if (type != null && type.startsWith('customer_pro_')) {
+        await context.push('/customer/pro');
+      } else if(type == 'appointment_confirmed' || type == 'booking_confirmed') {
         final appointmentId = data?['appointment_id'] ?? data?['bookingId'];
         if (appointmentId != null) {
           await context.push('/customer/booking/$appointmentId');
@@ -810,6 +817,23 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return Icons.inventory;
       case 'daily_summary':
         return Icons.analytics;
+      case 'subscription_activated':
+      case 'customer_pro_activated':
+        return Icons.workspace_premium;
+      case 'subscription_expiring':
+      case 'customer_pro_expiring':
+        return Icons.hourglass_bottom;
+      case 'subscription_expired':
+      case 'customer_pro_expired':
+        return Icons.timer_off;
+      case 'subscription_revoked':
+      case 'customer_pro_revoked':
+        return Icons.money_off;
+      case 'subscription_payment_issue':
+      case 'customer_pro_payment_issue':
+        return Icons.credit_card_off;
+      case 'salon_limit_exceeded':
+        return Icons.store;      
       default:
         return Icons.notifications;
     }
@@ -852,6 +876,20 @@ class _NotificationScreenState extends State<NotificationScreen> {
         return Colors.red;
       case 'daily_summary':
         return Colors.cyan;
+      case 'subscription_activated':
+      case 'customer_pro_activated':
+        return Colors.green;
+      case 'subscription_expiring':
+      case 'customer_pro_expiring':
+      case 'subscription_payment_issue':
+      case 'customer_pro_payment_issue':
+      case 'salon_limit_exceeded':
+        return Colors.orange;
+      case 'subscription_expired':
+      case 'customer_pro_expired':
+      case 'subscription_revoked':
+      case 'customer_pro_revoked':
+        return Colors.red;
       default:
         return Colors.grey;
     }
