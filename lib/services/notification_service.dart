@@ -17,14 +17,7 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _localNotifications =
       FlutterLocalNotificationsPlugin();
 
-  // ✅ FIX: guards init()/initWithoutPermission() so it's safe to call
-  // more than once (e.g. if a future code path re-initializes after
-  // permission is granted, or on hot-restart in dev). Without this,
-  // every extra call would register another full set of
-  // FirebaseMessaging.onMessage / onMessageOpenedApp / onTokenRefresh
-  // listeners on top of the existing ones, multiplying every
-  // notification's side effects (DB writes, local notification
-  // popups, navigation) by however many times init() was called.
+  // Guards init() so listeners are never registered twice.
   bool _initialized = false;
 
   // Supabase client
@@ -36,6 +29,16 @@ class NotificationService {
 
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
+
+  // ✅ NEW: the real GoRouter instance. main.dart must set this right
+  // after the router is created:
+  //     router = _createRouter();
+  //     NotificationService.router = router;
+  // (The old code used NotificationService.navigatorKey, but main.dart's
+  // GoRouter uses ITS OWN navigatorKey, so this one was never attached
+  // to anything and currentState was always null -> tapping a
+  // notification never navigated anywhere.)
+  static GoRouter? router;
 
   // Web VAPID Key
   static const String _webVapidKey =
@@ -60,7 +63,6 @@ class NotificationService {
   /// Initialize with optional permission request
   /// For Web: Pass requestPermission: false to avoid auto-prompt
   Future<void> init({bool requestPermission = true}) async {
-    // ✅ FIX: idempotency guard — see _initialized doc comment above.
     if (_initialized) {
       debugPrint('⚠️ NotificationService already initialized - skipping');
       return;
@@ -75,19 +77,32 @@ class NotificationService {
       await _initMobileNotifications();
     }
 
-    // ✅ Web - NEVER get token (triggers permission request)
-    // ✅ Mobile - Always get token
     if (!isWeb) {
+      // Mobile - always get token
       await _getTokenAndSave();
     } else {
-      debugPrint(
-        '🌐 Web: Skipping token get (web token handled by JavaScript)',
-      );
+      // ✅ Web - only fetch the token if the user ALREADY granted
+      // permission earlier (getToken() would otherwise trigger a prompt).
+      // If no user is logged in yet, the token is stored locally and
+      // synced after sign-in via syncPendingToken().
+      try {
+        if (await hasPermission()) {
+          final token = await _firebaseMessaging.getToken(
+            vapidKey: _webVapidKey,
+          );
+          if (token != null) {
+            await _saveTokenToSupabase(token);
+          }
+        } else {
+          debugPrint('🌐 Web: permission not granted yet - skipping token');
+        }
+      } catch (e) {
+        debugPrint('⚠️ Web token fetch on init failed: $e');
+      }
     }
 
     _setupMessageListeners();
 
-    // ✅ Android 16 (API 36) specific optimizations
     if (isAndroid) {
       await _setupAndroid36Optimizations();
     }
@@ -107,50 +122,28 @@ class NotificationService {
 
   Future<void> _setupAndroid36Optimizations() async {
     try {
-      // ✅ Android 16 quota management - WorkManager already handles
       debugPrint('🤖 Android 16 (API 36) optimizations applied');
-
-      // ✅ Register for battery optimization exceptions if needed
-      // WorkManager 2.9.0+ auto handles quota management
     } catch (e) {
       debugPrint('⚠️ Android 16 optimization error: $e');
     }
   }
 
   // ===============================================================
-  // 🔥 WEB INIT - COMPLETE FIX
+  // 🔥 WEB INIT
   // ===============================================================
 
   Future<void> _initWebNotifications({bool requestPermission = true}) async {
     try {
       if (requestPermission) {
-        // ✅ User action එකෙන් පස්සේ විතරක් permission ඉල්ලන්න
         debugPrint('🌐 Web: Initializing with permission request');
-        // Web එකේදී getToken() call කරන්න එපා - JavaScript එකෙන් කරන්න
-        // Token එක JavaScript එකෙන් Flutter එකට එනවා
       } else {
-        // ✅ Permission ඉල්ලන්නේ නැතුව Firebase initialize කරන්න
         debugPrint('🌐 Web: Initializing WITHOUT permission request');
-
-        // ✅ FIX: previously called _setupWebMessageListeners() here,
-        // which registered its own FirebaseMessaging.onMessage /
-        // onMessageOpenedApp / getInitialMessage handlers. init()
-        // ALSO unconditionally calls _setupMessageListeners() a few
-        // lines later (for both web and mobile), which registers an
-        // equivalent, overlapping set of handlers for web too. The
-        // result: every incoming foreground message on web fired
-        // BOTH handler sets, and _setupMessageListeners()'s onMessage
-        // callback itself called _handleWebForegroundMessage() (which
-        // also saved to the DB) on top of its own direct DB save —
-        // so a single push notification produced 3 duplicate
-        // `notifications` table rows and could show the same item
-        // three times in the UI. _setupMessageListeners() already
-        // fully covers the web case via its `isWeb` branch, so this
-        // duplicate registration is simply removed; no functionality
-        // is lost.
       }
 
-      // ✅ Token refresh listener - only if token already exists
+      // NOTE: message listeners are registered ONLY in
+      // _setupMessageListeners() (called from init for every platform).
+      // Registering them here too caused duplicate handling.
+
       _firebaseMessaging.onTokenRefresh.listen((newToken) {
         if (newToken.isNotEmpty) {
           _saveTokenToSupabase(newToken);
@@ -162,13 +155,12 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 MOBILE INIT - COMPLETE WITH ANDROID 16 SUPPORT
+  // 🔥 MOBILE INIT
   // ===============================================================
 
   Future<void> _initMobileNotifications() async {
     await _initLocalNotifications();
 
-    // ✅ Android 16: Request critical permissions if needed
     if (isAndroid) {
       await _requestAndroidCriticalPermissions();
     }
@@ -176,8 +168,6 @@ class NotificationService {
 
   Future<void> _requestAndroidCriticalPermissions() async {
     try {
-      // ✅ Android 16 (API 36): POST_NOTIFICATIONS permission
-      // This is required for Android 13+
       final settings = await _firebaseMessaging.getNotificationSettings();
       if (settings.authorizationStatus != AuthorizationStatus.authorized) {
         debugPrint('🤖 Requesting notification permissions for Android 16');
@@ -194,14 +184,13 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 LOCAL NOTIFICATIONS (Mobile - Android 16 Optimized)
+  // 🔥 LOCAL NOTIFICATIONS (Mobile)
   // ===============================================================
 
   Future<void> _initLocalNotifications() async {
     if (isWeb) return;
 
     try {
-      // ✅ Android 16 (API 36) compatible channel settings
       const AndroidInitializationSettings androidSettings =
           AndroidInitializationSettings('@mipmap/ic_launcher');
 
@@ -223,14 +212,6 @@ class NotificationService {
             _handleNavigation(payload);
           }
         },
-        // ✅ FIX: _handleBackgroundNotificationResponse was already
-        // defined (with @pragma('vm:entry-point'), specifically
-        // meant for this) but never actually passed here, so it was
-        // dead code. Without it, tapping a local notification while
-        // the app is fully backgrounded/terminated has no navigation
-        // handler running in that headless context — the plugin
-        // requires a separate top-level/static callback for that
-        // case since the main isolate's UI may not be running yet.
         onDidReceiveBackgroundNotificationResponse:
             _handleBackgroundNotificationResponse,
       );
@@ -256,7 +237,6 @@ class NotificationService {
 
   Future<void> _createAndroidNotificationChannel() async {
     try {
-      // ✅ Android 16 (API 36) compatible channel
       const AndroidNotificationChannel channel = AndroidNotificationChannel(
         'salon_channel',
         'Salon Booking Notifications',
@@ -273,7 +253,6 @@ class NotificationService {
           >()
           ?.createNotificationChannel(channel);
 
-      // ✅ Android 16: Create additional channels for different types
       const AndroidNotificationChannel vipChannel = AndroidNotificationChannel(
         'vip_channel',
         'VIP Notifications',
@@ -297,7 +276,7 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 PERMISSION METHODS - COMPLETE CROSS PLATFORM
+  // 🔥 PERMISSION METHODS
   // ===============================================================
 
   /// Request Web Permission - Call from user action only
@@ -316,7 +295,6 @@ class NotificationService {
 
       if (granted) {
         debugPrint('✅ Web permission granted');
-        // Token එක get කරන්න
         String? token = await _firebaseMessaging.getToken(
           vapidKey: _webVapidKey,
         );
@@ -372,7 +350,6 @@ class NotificationService {
 
   Future<bool> requestAndroidPermission() async {
     try {
-      // ✅ Android 16 (API 36) permission request
       final settings = await _firebaseMessaging.requestPermission(
         alert: true,
         badge: true,
@@ -404,7 +381,7 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 TOKEN MANAGEMENT - COMPLETE CROSS PLATFORM
+  // 🔥 TOKEN MANAGEMENT - ONE ROW PER DEVICE (user_fcm_tokens)
   // ===============================================================
 
   Future<String?> getToken() async {
@@ -412,7 +389,6 @@ class NotificationService {
       if (isWeb) {
         return await _firebaseMessaging.getToken(vapidKey: _webVapidKey);
       } else {
-        // ✅ Android 16: Get token with proper error handling
         return await _firebaseMessaging.getToken();
       }
     } catch (e) {
@@ -421,14 +397,17 @@ class NotificationService {
     }
   }
 
+  /// Fetch + save this device's token. Works for web AND mobile.
+  /// Call it after sign-in (main.dart auth listener does this).
   Future<void> saveTokenManually() async {
-    // ✅ Mobile only - Web uses JavaScript
-    if (isWeb) {
-      debugPrint('🌐 Web: Use requestWebPermission() to get token');
+    // Web: only fetch if permission was already granted, otherwise
+    // getToken() would trigger a permission prompt.
+    if (isWeb && !await hasPermission()) {
+      debugPrint('🌐 Web: permission not granted yet - skipping token save');
       return;
     }
 
-    String? token = await getToken();
+    final token = await getToken();
     if (token != null) {
       await _saveTokenToSupabase(token);
     } else {
@@ -437,7 +416,7 @@ class NotificationService {
   }
 
   Future<void> _getTokenAndSave() async {
-    // ✅ Mobile only - Web handled separately
+    // Mobile only - web is handled in init()/requestWebPermission()
     if (isWeb) {
       debugPrint('🌐 Web: _getTokenAndSave should not be called on web');
       return;
@@ -466,20 +445,53 @@ class NotificationService {
         return;
       }
 
-      await supabase
-          .from('profiles')
-          .update({
-            'fcm_token': token,
-            'platform': platformName,
-            'updated_at': DateTime.now().toIso8601String(),
-          })
-          .eq('id', user.id);
+      // ✅ One row per device token (web + android + ios are all kept).
+      // register_fcm_token moves the token to the current user if the
+      // same device was used by another account before.
+      await supabase.rpc(
+        'register_fcm_token',
+        params: {'p_token': token, 'p_platform': platformName},
+      );
+
+      // Keep the legacy column updated for backwards compatibility.
+      try {
+        await supabase
+            .from('profiles')
+            .update({
+              'fcm_token': token,
+              'platform': platformName,
+              'updated_at': DateTime.now().toUtc().toIso8601String(),
+            })
+            .eq('id', user.id);
+      } catch (e) {
+        debugPrint('⚠️ Legacy profiles.fcm_token update failed: $e');
+      }
 
       await _clearStoredToken();
-      debugPrint('✅ Token saved to Supabase for ${user.id}');
+      debugPrint('✅ Token ($platformName) saved for ${user.id}');
     } catch (e) {
-      debugPrint('❌ Error saving to Supabase: $e');
+      debugPrint('❌ Error saving token: $e');
       await _storeTokenLocally(token);
+    }
+  }
+
+  /// ✅ NEW: call this BEFORE signing the user out, so the next person
+  /// using this device doesn't keep receiving the previous user's pushes.
+  Future<void> unregisterCurrentDeviceToken() async {
+    try {
+      if (!_isSupabaseReady()) return;
+      if (isWeb && !await hasPermission()) return;
+
+      final token = await getToken();
+      if (token == null) return;
+
+      await supabase.rpc(
+        'unregister_fcm_token',
+        params: {'p_token': token},
+      );
+      debugPrint('🧹 Device token unregistered');
+    } catch (e) {
+      debugPrint('⚠️ Error unregistering device token: $e');
     }
   }
 
@@ -530,42 +542,13 @@ class NotificationService {
   // ===============================================================
   // 🔥 WEB FOREGROUND MESSAGE HANDLING
   // ===============================================================
-  // ✅ FIX: the standalone _setupWebMessageListeners() method (which
-  // used to register its own onMessage/onMessageOpenedApp/
-  // getInitialMessage listeners) has been removed entirely — it was
-  // called from _initWebNotifications() AND duplicated everything
-  // _setupMessageListeners() already does below (which runs
-  // unconditionally for every platform, web included, via its
-  // internal `isWeb` branch). Having both registered meant every web
-  // push notification was handled twice over, and — because this
-  // method used to also call _saveNotificationToDatabase() itself —
-  // combined with _setupMessageListeners()'s own direct DB save, a
-  // single incoming message produced 3 duplicate database rows.
-  //
-  // _handleWebForegroundMessage() below no longer saves to the
-  // database itself; _setupMessageListeners()'s onMessage callback
-  // already does that for every platform before branching into this
-  // method, so this is purely "what extra thing does web need on top
-  // of the shared DB save" (currently: nothing but a debug log, since
-  // the native browser popup was intentionally removed — see the
-  // comment further down).
+  // The DB save is done by _setupMessageListeners()'s onMessage handler
+  // (with dedupe). This only handles anything extra web needs.
+  // The native browser popup is intentionally not shown here: it needs
+  // dart:js_interop, which breaks Android/iOS builds in a shared file.
   void _handleWebForegroundMessage(RemoteMessage message) {
     RemoteNotification? notification = message.notification;
     if (notification != null) {
-      // NOTE: Native browser Notification popup removed.
-      // Reason: it required dart:js_interop, which is web-only and
-      // breaks Android/iOS builds when compiled into a shared file.
-      // The notification is still saved to the database (by the
-      // caller, _setupMessageListeners()'s onMessage handler) and
-      // shown inside the app UI / notification bell. If you need an
-      // actual OS-level browser popup on web, put that code in a
-      // separate file guarded by a conditional import, e.g.:
-      //   notification_service.dart (this file, no js_interop)
-      //   notification_web_popup_stub.dart   (no-op version)
-      //   notification_web_popup_web.dart    (real dart:js_interop version)
-      // and export the right one with:
-      //   export 'notification_web_popup_stub.dart'
-      //       if (dart.library.js_interop) 'notification_web_popup_web.dart';
       debugPrint(
         '🌐 Web foreground message handled (saved to DB, no native popup)',
       );
@@ -573,7 +556,7 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 DATABASE OPERATIONS USING RPC - COMPLETE
+  // 🔥 DATABASE OPERATIONS USING RPC
   // ===============================================================
 
   Future<void> _saveNotificationToDatabase({
@@ -586,7 +569,36 @@ class NotificationService {
       final user = supabase.auth.currentUser;
       if (user == null) return;
 
-      // ✅ Convert data values to strings
+      // ✅ DEDUPE: the sender (sendNotificationWithRole) already saved
+      // this notification via RPC before the push arrived. If an
+      // identical row exists from the last 2 minutes, don't insert it
+      // again.
+      try {
+        final since = DateTime.now()
+            .toUtc()
+            .subtract(const Duration(minutes: 2))
+            .toIso8601String();
+
+        final existing = await supabase
+            .from('notifications')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('title', title)
+            .eq('body', body)
+            .gte('created_at', since)
+            .limit(1);
+
+        if (existing.isNotEmpty) {
+          debugPrint(
+            '♻️ Duplicate notification skipped (already saved by sender)',
+          );
+          return;
+        }
+      } catch (e) {
+        debugPrint('⚠️ Dedupe check failed, saving anyway: $e');
+      }
+
+      // Convert data values to strings
       final Map<String, String> stringData = {};
       if (data != null) {
         data.forEach((key, value) {
@@ -596,7 +608,6 @@ class NotificationService {
         });
       }
 
-      // ✅ Use RPC
       final result = await supabase.rpc(
         'send_notification',
         params: {
@@ -612,12 +623,11 @@ class NotificationService {
     } catch (e) {
       debugPrint('❌ RPC error: $e');
 
-      // ✅ Fallback: Get user again
+      // Fallback: direct insert
       try {
         final user = supabase.auth.currentUser;
         if (user == null) return;
 
-        // Convert data values to strings
         final Map<String, dynamic> dbData = {};
         if (data != null) {
           data.forEach((key, value) {
@@ -634,7 +644,7 @@ class NotificationService {
           'type': type,
           'data': dbData,
           'is_read': false,
-          'created_at': DateTime.now().toIso8601String(),
+          'created_at': DateTime.now().toUtc().toIso8601String(),
         });
         debugPrint('✅ Notification saved via fallback');
       } catch (fallbackError) {
@@ -677,7 +687,7 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 ROLE-BASED NOTIFICATION METHODS - COMPLETE
+  // 🔥 ROLE-BASED NOTIFICATION METHODS
   // ===============================================================
 
   Future<List<Map<String, dynamic>>> getNotificationsWithRole({
@@ -754,7 +764,7 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 SEND NOTIFICATION WITH ROLE - COMPLETE
+  // 🔥 SEND NOTIFICATION WITH ROLE
   // ===============================================================
 
   Future<void> sendNotificationWithRole({
@@ -766,7 +776,7 @@ class NotificationService {
     required String role,
   }) async {
     try {
-      // ✅ Check if user has active role
+      // Check if user has active role
       final userRoles = await supabase
           .from('user_roles')
           .select('status, roles!inner(name)')
@@ -780,7 +790,7 @@ class NotificationService {
         return;
       }
 
-      // ✅ Convert all data values to strings for FCM
+      // Convert all data values to strings for FCM
       final Map<String, String> stringData = {};
       if (data != null) {
         data.forEach((key, value) {
@@ -791,7 +801,7 @@ class NotificationService {
       }
       stringData['role'] = role;
 
-      // ✅ Save notification to database using RPC
+      // Save notification to database using RPC
       final result = await supabase.rpc(
         'send_notification',
         params: {
@@ -805,21 +815,19 @@ class NotificationService {
 
       debugPrint('✅ Notification saved via RPC: $result');
 
-      // ✅ Send push notification
+      // Send push notification
       await _sendPushNotificationWithToken(
         userId: userId,
         title: title,
         body: body,
-        data:
-            data, // Original data (will be converted to strings in the method)
+        data: data,
         role: role,
       );
     } catch (e) {
       debugPrint('❌ Error sending notification: $e');
 
-      // ✅ Fallback: Direct insert
+      // Fallback: direct insert
       try {
-        // Convert data to strings for database
         final Map<String, dynamic> dbData = {};
         if (data != null) {
           data.forEach((key, value) {
@@ -854,10 +862,13 @@ class NotificationService {
     required String role,
   }) async {
     try {
-      // ✅ Step 1: Get user profile from database
+      // ✅ The edge function now looks up ALL device tokens for this
+      // user itself (user_fcm_tokens), so we no longer read/send a
+      // single fcm_token from the client and no longer bail out when
+      // profiles.fcm_token is empty.
       final userProfile = await supabase
           .from('profiles')
-          .select('fcm_token, full_name, email')
+          .select('full_name, email')
           .eq('id', userId)
           .maybeSingle();
 
@@ -866,26 +877,15 @@ class NotificationService {
         return;
       }
 
-      final fcmToken = userProfile['fcm_token'] as String?;
-
-      // ✅ Step 2: Check if FCM token exists
-      if (fcmToken == null || fcmToken.isEmpty) {
-        debugPrint('⚠️ No FCM token for user $userId');
-        return;
-      }
-
       debugPrint('📤 Sending push notification to user: $userId');
-      debugPrint('📤 FCM Token: ${fcmToken.substring(0, 10)}...');
 
-      // ✅ Step 3: Convert all data values to strings (FCM requirement)
+      // Convert all data values to strings (FCM requirement)
       final Map<String, String> stringData = {};
 
-      // Add basic fields
       stringData['screen'] = data?['screen']?.toString() ?? 'home';
       stringData['bookingId'] = data?['bookingId']?.toString() ?? '';
       stringData['role'] = role;
 
-      // Add all extra data as strings
       if (data != null) {
         data.forEach((key, value) {
           if (value != null && key != 'screen' && key != 'bookingId') {
@@ -894,7 +894,6 @@ class NotificationService {
         });
       }
 
-      // ✅ Step 4: Prepare payload
       final Map<String, dynamic> payload = {
         'userId': userId,
         'title': title,
@@ -903,30 +902,28 @@ class NotificationService {
         'screen': data?['screen']?.toString() ?? 'home',
         'bookingId': data?['bookingId']?.toString() ?? '',
         'extraData': stringData,
-        'fcmToken': fcmToken,
       };
 
       debugPrint('📤 Payload: ${payload.keys}');
 
-      // ✅ Step 5: Call Supabase Edge Function
       final result = await supabase.functions.invoke(
         'send-notification',
         body: payload,
       );
 
-      // ✅ Step 6: Handle response
       if (result.status == 200) {
         final responseData = result.data as Map<String, dynamic>?;
 
         if (responseData?['success'] == true) {
           if (responseData?['pushFailed'] == true) {
             debugPrint(
-              '⚠️ Push notification failed but notification saved in database: ${responseData?['message']}',
+              '⚠️ Push failed but notification saved in database: ${responseData?['message']}',
             );
             debugPrint('⚠️ FCM Error: ${responseData?['error']}');
           } else {
-            debugPrint('✅ Push notification sent successfully to $userId');
-            debugPrint('✅ FCM Message ID: ${responseData?['result']?['name']}');
+            debugPrint(
+              '✅ Push sent to $userId (${responseData?['sent'] ?? '?'}/${responseData?['total'] ?? '?'} devices)',
+            );
           }
         } else {
           debugPrint(
@@ -947,7 +944,7 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 BULK NOTIFICATION METHODS - COMPLETE
+  // 🔥 BULK NOTIFICATION METHODS
   // ===============================================================
 
   Future<void> sendNotificationToActiveUsers({
@@ -959,22 +956,9 @@ class NotificationService {
     int? salonId,
   }) async {
     try {
-      // ✅ FIX: `user_roles` has NO `salon_id` column and no relation
-      // to `salons` at all (confirmed against the schema) — the old
-      // `.eq('salons.id', salonId)` filter referenced a relation that
-      // doesn't exist, so Supabase/PostgREST threw at query time and
-      // the surrounding try/catch silently swallowed it: notifying a
-      // specific salon's owner sent NOTHING, with no visible error.
-      // On top of that, the filter was only ever applied when
-      // `role == 'owner'` — a `salonId` passed with `role == 'barber'`
-      // was silently ignored, so "notify this salon's barbers" was
-      // actually notifying every active barber in the entire system.
-      //
-      // The schema's real relationships are:
-      //   - owner  -> salon:  salons.owner_id      (direct column)
-      //   - barber -> salon:  salon_barbers table   (salon_id, barber_id, status)
-      // Both are used explicitly below instead of trying to filter
-      // through user_roles.
+      // Relationships:
+      //   owner  -> salon:  salons.owner_id      (direct column)
+      //   barber -> salon:  salon_barbers table  (salon_id, barber_id, status)
       final List<String> targetUserIds = [];
 
       if (salonId != null && role == 'owner') {
@@ -1010,7 +994,6 @@ class NotificationService {
           targetUserIds.add(row['barber_id'] as String);
         }
       } else {
-        // No salon scoping requested — every active user with this role.
         final rows = await supabase
             .from('user_roles')
             .select('user_id, roles!inner(name)')
@@ -1026,24 +1009,19 @@ class NotificationService {
         '📤 Sending notification to ${targetUserIds.length} active $role users',
       );
 
+      // ✅ No longer skips users whose profiles.fcm_token is empty:
+      // tokens now live in user_fcm_tokens (checked by the edge
+      // function), and every user still gets the in-app notification
+      // row even if they have no device token yet.
       for (final userId in targetUserIds) {
-        final profile = await supabase
-            .from('profiles')
-            .select('fcm_token')
-            .eq('id', userId)
-            .maybeSingle();
-
-        final fcmToken = profile?['fcm_token'] as String?;
-        if (fcmToken != null && fcmToken.isNotEmpty) {
-          await sendNotificationWithRole(
-            userId: userId,
-            title: title,
-            body: body,
-            type: type,
-            role: role,
-            data: data,
-          );
-        }
+        await sendNotificationWithRole(
+          userId: userId,
+          title: title,
+          body: body,
+          type: type,
+          role: role,
+          data: data,
+        );
       }
     } catch (e) {
       debugPrint('❌ Error sending to active users: $e');
@@ -1055,12 +1033,6 @@ class NotificationService {
     int? salonId,
   }) async {
     try {
-      // ✅ FIX: same underlying issue as sendNotificationToActiveUsers()
-      // above — `user_roles` has no relation to `salons`, so
-      // `.eq('salons.id', salonId)` threw at query time and this
-      // silently returned an empty list via the catch block for any
-      // salon-scoped 'owner' lookup, and never filtered by salon at
-      // all for 'barber' (returned every active barber system-wide).
       List<Map<String, dynamic>> users = [];
 
       if (salonId != null && role == 'owner') {
@@ -1179,7 +1151,7 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 MARK AS READ METHODS - COMPLETE
+  // 🔥 MARK AS READ / DELETE METHODS
   // ===============================================================
 
   Future<bool> markAsRead(int notificationId) async {
@@ -1605,7 +1577,7 @@ class NotificationService {
         'offerTitle': offerTitle,
         'discountText': discountText,
         'salonName': salonName,
-        'offerId': offerId.toString(), // ✅ Convert to string
+        'offerId': offerId.toString(),
         'screen': 'offers',
         'role': 'customer',
       },
@@ -2145,8 +2117,9 @@ class NotificationService {
   // ===============================================================
 
   void _setupMessageListeners() {
-    // ✅ Foreground message listener - All platforms
+    // Foreground message listener - All platforms
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      // Saved with dedupe (sender already saved the row via RPC).
       _saveNotificationToDatabase(
         title: message.notification?.title ?? 'Notification',
         body: message.notification?.body ?? '',
@@ -2161,12 +2134,12 @@ class NotificationService {
       }
     });
 
-    // ✅ App opened from notification - All platforms
+    // App opened from notification - All platforms
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
       _handleMessage(message);
     });
 
-    // ✅ Initial message when app is terminated - All platforms
+    // Initial message when app is terminated - All platforms
     FirebaseMessaging.instance.getInitialMessage().then((
       RemoteMessage? message,
     ) {
@@ -2177,7 +2150,7 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 MOBILE NOTIFICATION DISPLAY - ANDROID 16 OPTIMIZED (FIXED)
+  // 🔥 MOBILE NOTIFICATION DISPLAY
   // ===============================================================
 
   Future<void> showMobileNotification(RemoteMessage message) async {
@@ -2186,12 +2159,8 @@ class NotificationService {
     try {
       RemoteNotification? notification = message.notification;
 
-      // ✅ FIX: previously returned immediately whenever
-      // message.notification was null — which is exactly the shape of
-      // a "data-only" FCM message (no `notification` block, only
-      // `data`). Any such message silently showed nothing at all. Now
-      // falls back to reading title/body out of the data payload, and
-      // only bails out if there's truly nothing to show.
+      // Falls back to title/body in the data payload for data-only
+      // FCM messages.
       final String title =
           notification?.title ?? message.data['title']?.toString() ?? '';
       final String body =
@@ -2202,7 +2171,6 @@ class NotificationService {
       final notificationType = message.data['type'] ?? 'general';
       final notificationColor = _getNotificationColor(notificationType);
 
-      // ✅ FIXED: Correct parameters for AndroidNotificationDetails
       AndroidNotificationDetails androidPlatformChannelSpecifics =
           AndroidNotificationDetails(
             _getAndroidChannelId(notificationType),
@@ -2290,7 +2258,7 @@ class NotificationService {
   }
 
   // ===============================================================
-  // 🔥 NAVIGATION HANDLING - COMPLETE
+  // 🔥 NAVIGATION HANDLING
   // ===============================================================
 
   void _handleMessage(RemoteMessage message) {
@@ -2300,29 +2268,26 @@ class NotificationService {
     }
   }
 
-  // ✅ FIX: every case below previously targeted a path that does not
-  // exist anywhere in main.dart's GoRouter route table (verified by
-  // cross-checking every `path:` string GoRouter actually defines).
-  // Since main.dart's router has no `errorBuilder` override, tapping
-  // any of these notifications landed the user on GoRouter's default
-  // "page not found" screen instead of anywhere useful — not a crash,
-  // but a dead end for every notification type below except
-  // 'barber_appointments', 'offers', and 'my_bookings' (the only three
-  // that already happened to match a real route).
-  //
-  // Two of these also need a role-appropriate destination, not just
-  // any existing path: '/owner/*' routes redirect away any user
-  // without the 'owner' role, and '/barber/*' routes redirect away
-  // any user without the 'barber' role (see the redirect callback in
-  // main.dart's _createRouter()). So a barber tapping a "leave status"
-  // notification can't be sent to '/owner/barber-leaves' (that's an
-  // owner-only screen and the redirect would just bounce them back to
-  // '/barber'), and an owner tapping a "review" notification can't be
-  // sent to '/barber/reviews' for the same reason in reverse. Neither
-  // a barber-facing "my leave requests" screen nor an owner-facing
-  // "my reviews" screen exists in the route table yet, so both fall
-  // back to that role's own dashboard for now rather than a broken or
-  // wrong-role destination.
+  /// ✅ Navigates using the real GoRouter (set from main.dart).
+  /// Falls back to the navigator key context if the router isn't set.
+  void _go(String path) {
+    final r = router;
+    if (r != null) {
+      r.go(path);
+      return;
+    }
+    final ctx = navigatorKey.currentState?.context;
+    if (ctx != null) {
+      ctx.go(path);
+    } else {
+      debugPrint('⚠️ No router available to navigate to $path');
+    }
+  }
+
+  // Every path below exists in main.dart's GoRouter route table.
+  // '/owner/*' and '/barber/*' routes are role-protected, so a screen
+  // that has no role-appropriate route falls back to that role's
+  // dashboard.
   void _handleNavigation(String payload) {
     try {
       Map<String, dynamic> data = jsonDecode(payload);
@@ -2334,85 +2299,74 @@ class NotificationService {
           // ========== BARBER SCREENS ==========
           case 'barber_appointment':
           case 'barber_appointments':
-            // No per-booking detail route exists for barbers yet, so
-            // both cases land on the appointments list.
-            navigatorKey.currentState?.context.go('/barber/appointments');
+            _go('/barber/appointments');
             break;
           case 'barber_leaves':
-            // '/owner/barber-leaves' is an owner-only screen (role
-            // redirect would bounce a barber straight back out of it).
-            // No barber-facing "my leave requests" route exists yet,
-            // so fall back to the barber's own dashboard.
-            navigatorKey.currentState?.context.go('/barber');
+            // No barber-facing leave screen yet.
+            _go('/barber');
             break;
 
           // ========== OWNER SCREENS ==========
           case 'owner_leaves':
-            // This one IS owner-facing and '/owner/barber-leaves' is
-            // reachable by an owner.
-            navigatorKey.currentState?.context.go('/owner/barber-leaves');
+            _go('/owner/barber-leaves');
             break;
           case 'owner_salon':
-            // No generic "view my salon" route exists (only
-            // /owner/salon/create, /edit, /holidays, each needing a
-            // specific salonId) — fall back to the owner dashboard.
-            navigatorKey.currentState?.context.go('/owner');
+            _go('/owner');
             break;
           case 'owner_reviews':
-            // '/barber/reviews' is a barber-only screen (role redirect
-            // would bounce an owner straight back out of it). No
-            // owner-facing "my salon's reviews" route exists yet, so
-            // fall back to the owner's own dashboard.
-            navigatorKey.currentState?.context.go('/owner');
+            _go('/owner');
             break;
           case 'owner_bookings':
-            navigatorKey.currentState?.context.go('/owner/appointments');
+            _go('/owner/appointments');
             break;
           case 'owner_inventory':
-            // No inventory route exists yet.
-            navigatorKey.currentState?.context.go('/owner');
+            _go('/owner');
             break;
           case 'owner_dashboard':
-            navigatorKey.currentState?.context.go('/owner');
+            _go('/owner');
             break;
 
           // ========== CUSTOMER SCREENS ==========
           case 'booking_details':
-            // No per-booking detail route exists for customers yet —
-            // land on the bookings list regardless of bookingId.
-            navigatorKey.currentState?.context.go('/customer/my-bookings');
+            _go('/customer/my-bookings');
             break;
           case 'vip_bookings':
-            // Route is singular: '/customer/vip-booking'.
-            navigatorKey.currentState?.context.go('/customer/vip-booking');
+            _go('/customer/vip-booking');
             break;
           case 'offers':
-            navigatorKey.currentState?.context.go('/customer/offers');
+            _go('/customer/offers');
             break;
           case 'waiting_list':
-            // No waiting-list route exists yet.
-            navigatorKey.currentState?.context.go('/customer');
+            _go('/customer');
             break;
           case 'my_bookings':
-            navigatorKey.currentState?.context.go('/customer/my-bookings');
+            _go('/customer/my-bookings');
             break;
           case 'reviews':
-            // No "my reviews" route exists for customers yet.
-            navigatorKey.currentState?.context.go('/customer');
+            _go('/customer');
             break;
           case 'loyalty':
-            // No loyalty route exists yet.
-            navigatorKey.currentState?.context.go('/customer');
+            _go('/customer/loyalty');
+            break;
+          case 'customer_pro':
+            _go('/customer/pro');
+            break;
+
+          // ========== OWNER: SUBSCRIPTION ==========
+          // '/subscription' needs salonId/ownerId in `extra`, which a
+          // push payload can't carry, so land on the owner dashboard.
+          case 'subscription':
+            _go('/owner');
             break;
 
           // ========== DEFAULT ==========
           default:
             if (role == 'barber') {
-              navigatorKey.currentState?.context.go('/barber');
+              _go('/barber');
             } else if (role == 'owner') {
-              navigatorKey.currentState?.context.go('/owner');
+              _go('/owner');
             } else {
-              navigatorKey.currentState?.context.go('/customer');
+              _go('/customer');
             }
             break;
         }

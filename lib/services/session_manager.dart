@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/utils/app_version.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -1861,6 +1862,7 @@ class SessionManager {
             .eq('id', user.id);
       }
 
+      await NotificationService().unregisterCurrentDeviceToken();
       await supabase.auth
           .signOut(); // full logout - token DOES get revoked here
 
