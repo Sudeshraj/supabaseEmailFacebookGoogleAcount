@@ -404,6 +404,7 @@ Future<void> main() async {
 
     // ========== PHASE 9: ROUTER ==========
     router = _createRouter();
+    NotificationService.router = router;
 
     // ========== PHASE 9B: PLATFORM CONFIG (deep links) ==========
     await _setupPlatformSpecificConfig();
