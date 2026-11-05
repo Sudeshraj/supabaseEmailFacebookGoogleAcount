@@ -147,10 +147,15 @@ final ThemeNotifier themeNotifier = ThemeNotifier();
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Initialize Firebase for background isolate
+  // A message that has a `notification` block is ALREADY displayed by the OS
+  // (Android system tray / iOS) while the app is in the background or closed.
+  // Showing it again here is exactly what created the duplicate.
+  // Only data-only messages need to be displayed manually.
+  if (message.notification != null) return;
+
+  // Initialize Firebase for the background isolate
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   final notificationService = NotificationService();
-  // Show notification in background
   if (!notificationService.isWeb) {
     await notificationService.showMobileNotification(message);
   }
@@ -469,6 +474,13 @@ void _setupAuthStateListener() {
       await SessionManager.setPendingQuickLogout(false);
       appState.refreshState();
       await NotificationService().syncPendingToken();
+        // ✅ Register THIS device's token for the user who just signed in
+  // (web + mobile). Safe to call repeatedly - it is an upsert.
+  try {
+    await NotificationService().saveTokenManually();
+  } catch (e) {
+    debugPrint('⚠️ saveTokenManually failed: $e');
+  }
     }
 
     if (event == AuthChangeEvent.signedOut ||

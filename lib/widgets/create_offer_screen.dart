@@ -26,7 +26,7 @@ class CreateOfferScreen extends StatefulWidget {
   final int salonId;
   final String salonName;
   final String currencyCode;
-  // ✅ Salon timezone (for showing timezone info to owner)
+  // Salon timezone (for showing timezone info to owner)
   final String? salonTimezone;
   final Map<String, dynamic>? editingOffer;
 
@@ -98,6 +98,16 @@ class _ServiceSelection {
       } else {
         variantIds.add(variantId);
       }
+
+      // Every priced variant ticked one by one == the whole service is
+      // ticked, so the checkbox state and the saved rows stay consistent.
+      if (pricedVariants.isNotEmpty &&
+          pricedVariants.every(variantIds.contains)) {
+        allVariantServices.add(serviceId);
+        for (final v in pricedVariants) {
+          variantIds.remove(v);
+        }
+      }
     }
   }
 
@@ -110,11 +120,15 @@ class _ServiceSelection {
 }
 
 class _CreateOfferScreenState extends State<CreateOfferScreen> {
-  // ✅ Default salon timezone (DB default — NOT user timezone!)
+  // Default salon timezone (DB default — NOT user timezone!)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
 
+  // Limits (the push notification body must stay under 500 characters)
+  static const int _kTitleMax = 80;
+  static const int _kDescriptionMax = 300;
+  static const int _kNotifyDescriptionMax = 200;
+
   final supabase = Supabase.instance.client;
-  final NotificationService _notificationService = NotificationService();
   final CurrencyService _currencyService = CurrencyService.instance;
 
   // ==================== STEP MANAGEMENT ====================
@@ -134,6 +148,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
   // Form state
   String _discountType = 'percentage';
+  // Date-only values (set in initState from the SALON's today)
   DateTime _validFrom = DateTime.now();
   DateTime _validTo = DateTime.now().add(const Duration(days: 30));
   bool _sendNotification = true;
@@ -143,7 +158,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   TimeOfDay? _validFromTime;
   TimeOfDay? _validToTime;
 
-  // ✅ Selection
+  // Selection
   final _ServiceSelection _selection = _ServiceSelection();
   List<Map<String, dynamic>> _availableServices = [];
   List<Map<String, dynamic>> _serviceMenuTree = [];
@@ -166,6 +181,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   ];
 
   bool _isSaving = false;
+  // Set after a successful save so the offer can never be submitted twice.
+  bool _saved = false;
 
   bool get _isEditing => widget.editingOffer != null;
   bool get _isDark => context.isDarkMode;
@@ -183,14 +200,14 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   bool get _currencyUsesDecimals =>
       _currencyService.getInfo(widget.currencyCode).decimals > 0;
 
-  // ✅ Effective salon timezone (fallback to salon default, NOT device)
+  // Effective salon timezone (fallback to salon default, NOT device)
   String get _effectiveSalonTimezone {
     final tz = widget.salonTimezone;
     if (tz != null && tz.isNotEmpty) return tz;
     return _kDefaultSalonTimezone;
   }
 
-  // ✅ Salon "today" — used for date picker bounds
+  // Salon "today" — used for date defaults / picker bounds / validation
   DateTime get _salonToday {
     final tz = _effectiveSalonTimezone;
     try {
@@ -203,7 +220,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     }
   }
 
-  // ✅ Check if salon timezone differs from user
+  // Check if salon timezone differs from user
   bool get _isDifferentTimezone {
     final salonTz = _effectiveSalonTimezone;
     final userTz = TimezoneService.getCurrentTimezone();
@@ -237,14 +254,19 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         final toStr = offer['valid_to_time'].toString();
         if (fromStr.isNotEmpty && toStr.isNotEmpty) {
           _hasTimeRestriction = true;
-          // ✅ Load times from DB (stored as salon-local, parse directly)
+          // Load times from DB (stored as salon-local, parse directly)
           _validFromTime = _parseTime(fromStr);
           _validToTime = _parseTime(toStr);
         }
       }
+    } else {
+      // New offer: start from the SALON's today (not the device date)
+      final today = _salonToday;
+      _validFrom = today;
+      _validTo = today.add(const Duration(days: 30));
     }
 
-    // ✅ FIX: PostFrameCallback - context ready වුනාට පස්සේ load කරනවා
+    // PostFrameCallback - context ready වුනාට පස්සේ load කරනවා
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadServiceMenuTree();
     });
@@ -271,12 +293,29 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     return '$minAge–$maxAge yrs';
   }
 
+  String _shortError(Object e) {
+    final s = e.toString();
+    return s.length > 100 ? s.substring(0, 100) : s;
+  }
+
+  // 20.0 -> "20", 12.5 -> "12.5"
+  static String _trimNumber(num v) {
+    final d = v.toDouble();
+    return d == d.roundToDouble() ? d.toInt().toString() : d.toString();
+  }
+
+  static String _clip(String text, int max) {
+    final t = text.trim();
+    if (t.length <= max) return t;
+    return '${t.substring(0, max - 1).trimRight()}…';
+  }
+
   // ============================================
-  // ✅ TimeOfDay → salon-local time string
+  // TimeOfDay → salon-local time string
   //
   // Offers වල time restriction කියන්නේ "salon වේලාවට" අදාළ.
   // Owner picks time එක salon location එකේ clock එකට අනුව.
-  // ✅ Save as-is (salon local time). No timezone conversion.
+  // Save as-is (salon local time). No timezone conversion.
   // ============================================
   String _timeOfDayToSalonTimeString(TimeOfDay time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
@@ -442,14 +481,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         });
       }
 
-      if (!mounted) return;
-      setState(() {
-        _availableServices = flatServices;
-        _serviceMenuTree = tree;
-        _isLoadingServices = false;
-      });
-
-      // Build variant id maps
+      // Build variant id maps BEFORE the first rebuild that needs them
       for (final s in flatServices) {
         final sid = s['id'] as int;
         final variants = variantsByService[sid] ?? <Map<String, dynamic>>[];
@@ -465,11 +497,17 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
             .toList();
       }
 
-      // Apply editing state
+      // Apply editing state (needs the maps above)
       if (_isEditing) {
         _applyEditingOffer();
-        if (mounted) setState(() {});
       }
+
+      if (!mounted) return;
+      setState(() {
+        _availableServices = flatServices;
+        _serviceMenuTree = tree;
+        _isLoadingServices = false;
+      });
     } catch (e) {
       debugPrint('Error loading service menu: $e');
       if (!mounted) return;
@@ -480,11 +518,17 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   void _applyEditingOffer() {
     final offerServices = widget.editingOffer!['offer_services'] as List? ?? [];
 
+    _selection.clear();
+
     if (offerServices.isEmpty) {
+      // An offer with no offer_services rows applies to ALL services, so
+      // show every service that can be selected as ticked. (Leaving the
+      // selection empty would force the owner to re-pick everything.)
+      _selection.servicePricedVariantIds.forEach((sid, priced) {
+        if (priced.isNotEmpty) _selection.allVariantServices.add(sid);
+      });
       return;
     }
-
-    _selection.clear();
 
     for (final os in offerServices) {
       final sid = os['service_id'] as int?;
@@ -531,7 +575,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   Future<void> _selectDateRange() async {
-    // ✅ Use SALON today (not device) for date picker bounds
+    // Use SALON today (not device) for date picker bounds
     final salonToday = _salonToday;
 
     final validFromDay = DateTime(
@@ -601,9 +645,18 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         if (_validTo.isBefore(_validFrom)) {
           return 'End date must be after start date';
         }
-        if (_hasTimeRestriction &&
-            (_validFromTime == null || _validToTime == null)) {
-          return 'Please select both start and end times';
+        if (!_isEditing && _validTo.isBefore(_salonToday)) {
+          return 'End date cannot be in the past';
+        }
+        if (_hasTimeRestriction) {
+          if (_validFromTime == null || _validToTime == null) {
+            return 'Please select both start and end times';
+          }
+          final startMin = _validFromTime!.hour * 60 + _validFromTime!.minute;
+          final endMin = _validToTime!.hour * 60 + _validToTime!.minute;
+          if (endMin <= startMin) {
+            return 'End time must be after start time';
+          }
         }
         return null;
       case 2:
@@ -664,7 +717,10 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   // SAVE OFFER
   // ============================================
   Future<void> _saveOffer() async {
-    if (_isSaving) return;
+    // _isSaving is set synchronously below (before the first await), so a
+    // second tap can never start a second save. _saved blocks re-submits
+    // after success.
+    if (_isSaving || _saved) return;
 
     for (int step = 0; step <= 2; step++) {
       final err = _stepError(step);
@@ -677,11 +733,19 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
     setState(() => _isSaving = true);
 
+    // Values needed by the follower notifications, captured NOW because
+    // this screen is disposed as soon as it pops.
+    final notifySalonId = widget.salonId;
+    final notifySalonName = widget.salonName;
+    final shouldNotify = !_isEditing && _sendNotification;
+
+    int? createdOfferId; // set only when THIS call inserted a new offer
+
     try {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
 
-      // ✅ Convert time to salon-local time string (save as-is)
+      // Convert time to salon-local time string (save as-is)
       String? validFromTimeStr;
       String? validToTimeStr;
       if (_hasTimeRestriction &&
@@ -691,14 +755,16 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         validToTimeStr = _timeOfDayToSalonTimeString(_validToTime!);
       }
 
-      final offerData = {
+      final double discountValue = _discountType != 'free_service'
+          ? double.parse(_discountValueController.text)
+          : 0;
+
+      final Map<String, dynamic> offerData = {
         'salon_id': widget.salonId,
         'title': _titleController.text.trim(),
         'description': _descriptionController.text.trim(),
         'discount_type': _discountType,
-        'discount_value': _discountType != 'free_service'
-            ? double.parse(_discountValueController.text)
-            : 0,
+        'discount_value': discountValue,
         'points_required': int.tryParse(_pointsRequiredController.text) ?? 0,
         'valid_from': _validFrom.toIso8601String().split('T')[0],
         'valid_to': _validTo.toIso8601String().split('T')[0],
@@ -707,117 +773,214 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         'usage_limit': _usageLimitController.text.isNotEmpty
             ? int.parse(_usageLimitController.text)
             : null,
-        'is_active': true,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
+      // NOTE: 'is_active' is deliberately NOT part of the update. Editing
+      // an offer must not silently re-activate an offer the owner has
+      // deactivated. New offers start active (set on insert below).
+
+      // Build offer_services rows (service + variant level) BEFORE touching
+      // the database.
+      final List<Map<String, dynamic>> serviceRows = [];
+      for (final sid in _selection.allVariantServices) {
+        serviceRows.add({'service_id': sid, 'variant_id': null});
+      }
+      for (final vid in _selection.variantIds) {
+        final meta = _variantMeta[vid];
+        if (meta == null) continue;
+        serviceRows.add({
+          'service_id': meta['service_id'] as int,
+          'variant_id': vid,
+        });
+      }
+      if (serviceRows.isEmpty) {
+        throw Exception('Please select at least one service or variant');
+      }
 
       int offerId;
 
       if (_isEditing) {
-        final offerId_ = widget.editingOffer!['id'] as int;
-        await supabase.from('offers').update(offerData).eq('id', offerId_);
-        offerId = offerId_;
+        offerId = widget.editingOffer!['id'] as int;
+        await supabase.from('offers').update(offerData).eq('id', offerId);
+
+        // Old scope, kept so it can be restored if saving the new scope fails
+        final oldScope = (widget.editingOffer!['offer_services'] as List? ?? [])
+            .map<Map<String, dynamic>>(
+              (os) => {
+                'offer_id': offerId,
+                'service_id': os['service_id'],
+                'variant_id': os['variant_id'],
+              },
+            )
+            .toList();
 
         await supabase.from('offer_services').delete().eq('offer_id', offerId);
+
+        try {
+          await supabase
+              .from('offer_services')
+              .insert(
+                serviceRows.map((r) => {...r, 'offer_id': offerId}).toList(),
+              );
+        } catch (e) {
+          // Don't leave the offer with NO scope (= applies to everything)
+          if (oldScope.isNotEmpty) {
+            try {
+              await supabase.from('offer_services').insert(oldScope);
+            } catch (restoreError) {
+              debugPrint('❌ Could not restore old offer scope: $restoreError');
+            }
+          }
+          rethrow;
+        }
       } else {
-        offerData['created_at'] = DateTime.now().toUtc().toIso8601String();
-        offerData['used_count'] = 0;
+        final insertData = {
+          ...offerData,
+          'is_active': true,
+          'used_count': 0,
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+        };
 
         final inserted = await supabase
             .from('offers')
-            .insert(offerData)
+            .insert(insertData)
             .select('id')
             .single();
         offerId = inserted['id'] as int;
-      }
+        createdOfferId = offerId;
 
-      // ✅ Build offer_services rows (service + variant level)
-      if (!_selection.isEmpty) {
-        final rows = <Map<String, dynamic>>[];
-
-        // Service-level rows (variant_id = NULL)
-        for (final sid in _selection.allVariantServices) {
-          rows.add({
-            'offer_id': offerId,
-            'service_id': sid,
-            'variant_id': null,
-          });
-        }
-
-        // Variant-level rows
-        for (final vid in _selection.variantIds) {
-          final meta = _variantMeta[vid];
-          if (meta == null) continue;
-          final sid = meta['service_id'] as int;
-          rows.add({'offer_id': offerId, 'service_id': sid, 'variant_id': vid});
-        }
-
-        if (rows.isNotEmpty) {
-          await supabase.from('offer_services').insert(rows);
+        try {
+          await supabase
+              .from('offer_services')
+              .insert(
+                serviceRows.map((r) => {...r, 'offer_id': offerId}).toList(),
+              );
+        } catch (e) {
+          // An offer without offer_services rows would apply to ALL
+          // services, so remove the half-created offer.
+          try {
+            await supabase.from('offers').delete().eq('id', offerId);
+            createdOfferId = null;
+          } catch (cleanupError) {
+            debugPrint('❌ Could not remove half-created offer: $cleanupError');
+          }
+          rethrow;
         }
       }
 
-      // ✅ Fire-and-forget notifications (don't block save)
-      if (!_isEditing && _sendNotification) {
-        _sendOfferNotifications(offerData, offerId).catchError((e) {
+      // Everything is saved. Notify followers in the background (does not
+      // block closing the screen, and does not use this State afterwards).
+      if (shouldNotify) {
+        final discountText = _buildDiscountText(
+          type: _discountType,
+          value: discountValue,
+        );
+
+        var notifyDescription = _clip(
+          _descriptionController.text,
+          _kNotifyDescriptionMax,
+        );
+        if (_validFrom.isAfter(_salonToday)) {
+          final starts =
+              'Starts on ${DateFormat('MMM dd, yyyy').format(_validFrom)}.';
+          notifyDescription = notifyDescription.isEmpty
+              ? starts
+              : '$notifyDescription $starts';
+        }
+
+        _notifyFollowers(
+          salonId: notifySalonId,
+          salonName: notifySalonName,
+          offerId: offerId,
+          offerTitle: _clip(_titleController.text, _kTitleMax),
+          offerDescription: notifyDescription,
+          discountText: discountText,
+        ).catchError((e) {
           debugPrint('Background notification error: $e');
         });
       }
 
-      if (!mounted) return;
+      _saved = true;
 
-      _showSnackBar(
-        _isEditing
-            ? '✏️ Offer updated successfully'
-            : '✨ Offer created successfully!',
-        context.successColor,
-      );
+      if (!mounted) return;
 
       Navigator.pop(context, true);
     } catch (e) {
-      debugPrint('Error saving offer: $e');
-      _showSnackBar('Failed: ${e.toString()}', context.errorColor);
+      debugPrint('Error saving offer: $e (created id: $createdOfferId)');
+      if (!mounted) return;
+      _showSnackBar(
+        'Failed to save offer. ${_shortError(e)}',
+        context.errorColor,
+      );
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
   }
 
-  Future<void> _sendOfferNotifications(
-    Map<String, dynamic> offerData,
-    int offerId,
-  ) async {
+  String _buildDiscountText({required String type, required double value}) {
+    if (type == 'percentage') {
+      return '${_trimNumber(value)}% OFF';
+    } else if (type == 'fixed') {
+      return '${_currencyService.format(price: value, currencyCode: widget.currencyCode)} OFF';
+    }
+    return 'FREE SERVICE';
+  }
+
+  // ============================================
+  // FOLLOWER NOTIFICATIONS
+  // static: runs after this screen is gone, so it must not touch State/
+  // BuildContext. Followers are processed in small parallel batches.
+  // ============================================
+  static Future<void> _notifyFollowers({
+    required int salonId,
+    required String salonName,
+    required int offerId,
+    required String offerTitle,
+    required String offerDescription,
+    required String discountText,
+  }) async {
     try {
-      final followers = await supabase.rpc(
+      final followers = await Supabase.instance.client.rpc(
         'get_active_customer_followers',
-        params: {'p_salon_id': widget.salonId},
+        params: {'p_salon_id': salonId},
       );
 
-      if (followers == null || followers.isEmpty) return;
+      if (followers == null) return;
+      final list = followers as List;
+      if (list.isEmpty) return;
 
-      String discountText;
-      if (offerData['discount_type'] == 'percentage') {
-        discountText = '${offerData['discount_value']}% OFF';
-      } else if (offerData['discount_type'] == 'fixed') {
-        discountText =
-            '${_currencyService.format(price: offerData['discount_value'], currencyCode: widget.currencyCode)} OFF';
-      } else {
-        discountText = 'FREE SERVICE';
+      // One notification per customer, even if a row repeats
+      final customerIds = <String>{};
+      for (final f in list) {
+        final id = f['customer_id'];
+        if (id is String && id.isNotEmpty) customerIds.add(id);
       }
 
-      for (var follower in followers) {
-        try {
-          await _notificationService.sendSpecialOffer(
-            customerId: follower['customer_id'] as String,
-            offerTitle: offerData['title'] as String,
-            offerDescription: offerData['description'] as String? ?? '',
-            discountText: discountText,
-            offerId: offerId,
-            salonName: widget.salonName,
-          );
-        } catch (e) {
-          debugPrint('Notification failed: $e');
-        }
+      final service = NotificationService();
+      final ids = customerIds.toList();
+      const batchSize = 5;
+
+      for (int i = 0; i < ids.length; i += batchSize) {
+        final batch = ids.skip(i).take(batchSize);
+        await Future.wait(
+          batch.map((customerId) async {
+            try {
+              await service.sendSpecialOffer(
+                customerId: customerId,
+                offerTitle: offerTitle,
+                offerDescription: offerDescription,
+                discountText: discountText,
+                offerId: offerId,
+                salonName: salonName,
+              );
+            } catch (e) {
+              debugPrint('Notification failed for $customerId: $e');
+            }
+          }),
+        );
       }
+
+      debugPrint('📤 Offer notification processed for ${ids.length} follower(s)');
     } catch (e) {
       debugPrint('Error sending notifications: $e');
     }
@@ -1140,6 +1303,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                 label: 'Offer Title *',
                 hint: 'e.g., Summer Sale',
                 icon: Icons.title,
+                inputFormatters: [LengthLimitingTextInputFormatter(_kTitleMax)],
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) {
                     return 'Please enter offer title';
@@ -1157,6 +1321,9 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                 hint: 'Describe your offer...',
                 icon: Icons.description,
                 maxLines: 3,
+                inputFormatters: [
+                  LengthLimitingTextInputFormatter(_kDescriptionMax),
+                ],
               ),
             ],
           ),
@@ -1346,7 +1513,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
             if (_hasTimeRestriction) ...[
               const SizedBox(height: 16),
               _buildTimeRangePicker(),
-              // ✅ Timezone note (only if salon tz != user tz)
+              // Timezone note (only if salon tz != user tz)
               if (_isDifferentTimezone) ...[
                 const SizedBox(height: 8),
                 _buildInfoBanner(

@@ -30,14 +30,10 @@ class NotificationService {
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
 
-  // ✅ NEW: the real GoRouter instance. main.dart must set this right
-  // after the router is created:
+  // The real GoRouter instance. main.dart sets this right after the
+  // router is created:
   //     router = _createRouter();
   //     NotificationService.router = router;
-  // (The old code used NotificationService.navigatorKey, but main.dart's
-  // GoRouter uses ITS OWN navigatorKey, so this one was never attached
-  // to anything and currentState was always null -> tapping a
-  // notification never navigated anywhere.)
   static GoRouter? router;
 
   // Web VAPID Key
@@ -81,10 +77,10 @@ class NotificationService {
       // Mobile - always get token
       await _getTokenAndSave();
     } else {
-      // ✅ Web - only fetch the token if the user ALREADY granted
-      // permission earlier (getToken() would otherwise trigger a prompt).
-      // If no user is logged in yet, the token is stored locally and
-      // synced after sign-in via syncPendingToken().
+      // Web - only fetch the token if the user ALREADY granted permission
+      // earlier (getToken() would otherwise trigger a prompt). If no user
+      // is logged in yet, the token is stored locally and synced after
+      // sign-in via syncPendingToken().
       try {
         if (await hasPermission()) {
           final token = await _firebaseMessaging.getToken(
@@ -445,7 +441,7 @@ class NotificationService {
         return;
       }
 
-      // ✅ One row per device token (web + android + ios are all kept).
+      // One row per device token (web + android + ios are all kept).
       // register_fcm_token moves the token to the current user if the
       // same device was used by another account before.
       await supabase.rpc(
@@ -475,8 +471,10 @@ class NotificationService {
     }
   }
 
-  /// ✅ NEW: call this BEFORE signing the user out, so the next person
-  /// using this device doesn't keep receiving the previous user's pushes.
+  /// Optional: call this BEFORE signing the user out if you want this
+  /// device to STOP receiving the user's pushes after logout (shared
+  /// devices, account deletion). For a normal logout do not call it, so
+  /// booking reminders keep arriving.
   Future<void> unregisterCurrentDeviceToken() async {
     try {
       if (!_isSupabaseReady()) return;
@@ -485,10 +483,7 @@ class NotificationService {
       final token = await getToken();
       if (token == null) return;
 
-      await supabase.rpc(
-        'unregister_fcm_token',
-        params: {'p_token': token},
-      );
+      await supabase.rpc('unregister_fcm_token', params: {'p_token': token});
       debugPrint('🧹 Device token unregistered');
     } catch (e) {
       debugPrint('⚠️ Error unregistering device token: $e');
@@ -542,116 +537,21 @@ class NotificationService {
   // ===============================================================
   // 🔥 WEB FOREGROUND MESSAGE HANDLING
   // ===============================================================
-  // The DB save is done by _setupMessageListeners()'s onMessage handler
-  // (with dedupe). This only handles anything extra web needs.
-  // The native browser popup is intentionally not shown here: it needs
-  // dart:js_interop, which breaks Android/iOS builds in a shared file.
+  // The in-app notification row is created by the SERVER before the push
+  // is sent, so nothing is saved here. The native browser popup for the
+  // foreground is shown by index.html (messaging.onMessage); it is not
+  // done here because it needs dart:js_interop, which breaks Android/iOS
+  // builds in a shared file.
   void _handleWebForegroundMessage(RemoteMessage message) {
     RemoteNotification? notification = message.notification;
     if (notification != null) {
-      debugPrint(
-        '🌐 Web foreground message handled (saved to DB, no native popup)',
-      );
+      debugPrint('🌐 Web foreground message received');
     }
   }
 
   // ===============================================================
-  // 🔥 DATABASE OPERATIONS USING RPC
+  // 🔥 NOTIFICATION LIST (RPC)
   // ===============================================================
-
-  Future<void> _saveNotificationToDatabase({
-    required String title,
-    required String body,
-    required String type,
-    Map<String, dynamic>? data,
-  }) async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) return;
-
-      // ✅ DEDUPE: the sender (sendNotificationWithRole) already saved
-      // this notification via RPC before the push arrived. If an
-      // identical row exists from the last 2 minutes, don't insert it
-      // again.
-      try {
-        final since = DateTime.now()
-            .toUtc()
-            .subtract(const Duration(minutes: 2))
-            .toIso8601String();
-
-        final existing = await supabase
-            .from('notifications')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('title', title)
-            .eq('body', body)
-            .gte('created_at', since)
-            .limit(1);
-
-        if (existing.isNotEmpty) {
-          debugPrint(
-            '♻️ Duplicate notification skipped (already saved by sender)',
-          );
-          return;
-        }
-      } catch (e) {
-        debugPrint('⚠️ Dedupe check failed, saving anyway: $e');
-      }
-
-      // Convert data values to strings
-      final Map<String, String> stringData = {};
-      if (data != null) {
-        data.forEach((key, value) {
-          if (value != null) {
-            stringData[key] = value.toString();
-          }
-        });
-      }
-
-      final result = await supabase.rpc(
-        'send_notification',
-        params: {
-          'p_user_id': user.id,
-          'p_title': title,
-          'p_body': body,
-          'p_type': type,
-          'p_data': stringData,
-        },
-      );
-
-      debugPrint('✅ Notification saved via RPC: $result');
-    } catch (e) {
-      debugPrint('❌ RPC error: $e');
-
-      // Fallback: direct insert
-      try {
-        final user = supabase.auth.currentUser;
-        if (user == null) return;
-
-        final Map<String, dynamic> dbData = {};
-        if (data != null) {
-          data.forEach((key, value) {
-            if (value != null) {
-              dbData[key] = value;
-            }
-          });
-        }
-
-        await supabase.from('notifications').insert({
-          'user_id': user.id,
-          'title': title,
-          'body': body,
-          'type': type,
-          'data': dbData,
-          'is_read': false,
-          'created_at': DateTime.now().toUtc().toIso8601String(),
-        });
-        debugPrint('✅ Notification saved via fallback');
-      } catch (fallbackError) {
-        debugPrint('❌ Fallback failed: $fallbackError');
-      }
-    }
-  }
 
   Future<int> getUnreadCount(String userId) async {
     try {
@@ -790,7 +690,7 @@ class NotificationService {
         return;
       }
 
-      // Convert all data values to strings for FCM
+      // Convert all data values to strings
       final Map<String, String> stringData = {};
       if (data != null) {
         data.forEach((key, value) {
@@ -801,7 +701,8 @@ class NotificationService {
       }
       stringData['role'] = role;
 
-      // Save notification to database using RPC
+      // Save the in-app notification row (server-side dedupe inside the
+      // send_notification RPC, Section 102).
       final result = await supabase.rpc(
         'send_notification',
         params: {
@@ -815,6 +716,13 @@ class NotificationService {
 
       debugPrint('✅ Notification saved via RPC: $result');
 
+      // The same notification was created a moment ago (retry / double
+      // call) -> do NOT push it a second time.
+      if (result is Map && result['duplicate'] == true) {
+        debugPrint('♻️ Duplicate skipped for $userId (no second push)');
+        return;
+      }
+
       // Send push notification
       await _sendPushNotificationWithToken(
         userId: userId,
@@ -822,6 +730,7 @@ class NotificationService {
         body: body,
         data: data,
         role: role,
+        type: type,
       );
     } catch (e) {
       debugPrint('❌ Error sending notification: $e');
@@ -860,12 +769,12 @@ class NotificationService {
     required String body,
     Map<String, dynamic>? data,
     required String role,
+    String type = 'general',
   }) async {
     try {
-      // ✅ The edge function now looks up ALL device tokens for this
-      // user itself (user_fcm_tokens), so we no longer read/send a
-      // single fcm_token from the client and no longer bail out when
-      // profiles.fcm_token is empty.
+      // The edge function looks up ALL device tokens of this user itself
+      // (user_fcm_tokens), so no single fcm_token is read or sent from
+      // the client here.
       final userProfile = await supabase
           .from('profiles')
           .select('full_name, email')
@@ -893,6 +802,10 @@ class NotificationService {
           }
         });
       }
+
+      // The notification type drives the Android channel / colour on the
+      // device (VIP channel etc.), so it must travel with the push.
+      stringData['type'] = type;
 
       final Map<String, dynamic> payload = {
         'userId': userId,
@@ -1009,10 +922,8 @@ class NotificationService {
         '📤 Sending notification to ${targetUserIds.length} active $role users',
       );
 
-      // ✅ No longer skips users whose profiles.fcm_token is empty:
-      // tokens now live in user_fcm_tokens (checked by the edge
-      // function), and every user still gets the in-app notification
-      // row even if they have no device token yet.
+      // Users without a device token still get the in-app notification
+      // row; the edge function simply finds no token for them.
       for (final userId in targetUserIds) {
         await sendNotificationWithRole(
           userId: userId,
@@ -2102,7 +2013,7 @@ class NotificationService {
       userId: userId,
       title: title,
       body: body,
-      type: data?['type'] ?? 'general',
+      type: (data?['type'] ?? 'general').toString(),
       role: role,
       data: {
         'screen': data?['screen'] ?? 'home',
@@ -2117,16 +2028,12 @@ class NotificationService {
   // ===============================================================
 
   void _setupMessageListeners() {
-    // Foreground message listener - All platforms
+    // Foreground message listener - All platforms.
+    // The in-app notification row was already created by the SERVER
+    // (send_notification RPC / DB functions) BEFORE this push was sent,
+    // so nothing is saved here. Saving again only created duplicates.
+    // We only DISPLAY the notification.
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      // Saved with dedupe (sender already saved the row via RPC).
-      _saveNotificationToDatabase(
-        title: message.notification?.title ?? 'Notification',
-        body: message.notification?.body ?? '',
-        type: message.data['type'] ?? 'general',
-        data: message.data,
-      );
-
       if (!isWeb) {
         showMobileNotification(message);
       } else {
@@ -2168,7 +2075,8 @@ class NotificationService {
 
       if (title.isEmpty && body.isEmpty) return;
 
-      final notificationType = message.data['type'] ?? 'general';
+      final String notificationType = (message.data['type'] ?? 'general')
+          .toString();
       final notificationColor = _getNotificationColor(notificationType);
 
       AndroidNotificationDetails androidPlatformChannelSpecifics =
@@ -2268,7 +2176,7 @@ class NotificationService {
     }
   }
 
-  /// ✅ Navigates using the real GoRouter (set from main.dart).
+  /// Navigates using the real GoRouter (set from main.dart).
   /// Falls back to the navigator key context if the router isn't set.
   void _go(String path) {
     final r = router;
@@ -2291,8 +2199,8 @@ class NotificationService {
   void _handleNavigation(String payload) {
     try {
       Map<String, dynamic> data = jsonDecode(payload);
-      String screen = data['screen'] ?? 'home';
-      String role = data['role'] ?? 'customer';
+      String screen = (data['screen'] ?? 'home').toString();
+      String role = (data['role'] ?? 'customer').toString();
 
       WidgetsBinding.instance.addPostFrameCallback((_) {
         switch (screen) {
