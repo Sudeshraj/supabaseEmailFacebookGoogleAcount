@@ -200,8 +200,7 @@
     <!-- ================================================================ -->
 
     <queries>
-
-        <!--Android 11+ සඳහා Facebook App එක හඳුනා ගැනීමට අවසර දීම for native popup-->
+        <!--Android 11+ සඳහා Facebook App එක හඳුනා ගැනීමට අවසර දීම -->
         <provider android:authorities="com.facebook.katana.provider.PlatformProvider" />
         <package android:name="com.facebook.katana" />
 
