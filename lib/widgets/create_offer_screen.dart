@@ -1,10 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/time_picker_dialog.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
-import '../../services/notification_service.dart';
 import '../../services/currency_service.dart';
 import '../../services/timezone_service.dart';
 import '../../extensions/context_extensions.dart';
@@ -123,10 +123,9 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   // Default salon timezone (DB default — NOT user timezone!)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
 
-  // Limits (the push notification body must stay under 500 characters)
+  // Input limits (the server clips the description in the notification)
   static const int _kTitleMax = 80;
   static const int _kDescriptionMax = 300;
-  static const int _kNotifyDescriptionMax = 200;
 
   final supabase = Supabase.instance.client;
   final CurrencyService _currencyService = CurrencyService.instance;
@@ -296,18 +295,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   String _shortError(Object e) {
     final s = e.toString();
     return s.length > 100 ? s.substring(0, 100) : s;
-  }
-
-  // 20.0 -> "20", 12.5 -> "12.5"
-  static String _trimNumber(num v) {
-    final d = v.toDouble();
-    return d == d.roundToDouble() ? d.toInt().toString() : d.toString();
-  }
-
-  static String _clip(String text, int max) {
-    final t = text.trim();
-    if (t.length <= max) return t;
-    return '${t.substring(0, max - 1).trimRight()}…';
   }
 
   // ============================================
@@ -733,10 +720,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
     setState(() => _isSaving = true);
 
-    // Values needed by the follower notifications, captured NOW because
-    // this screen is disposed as soon as it pops.
-    final notifySalonId = widget.salonId;
-    final notifySalonName = widget.salonName;
     final shouldNotify = !_isEditing && _sendNotification;
 
     int? createdOfferId; // set only when THIS call inserted a new offer
@@ -868,41 +851,45 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         }
       }
 
-      // Everything is saved. Notify followers in the background (does not
-      // block closing the screen, and does not use this State afterwards).
+      // Everything is saved. The DATABASE notifies the followers: ONE call
+      // (notify_offer_followers, Section 111.5) creates the in-app rows and
+      // sends the pushes for every follower. Nothing loops in the app, so it
+      // does not matter if the owner closes the app right after this.
+      bool notifyFailed = false;
       if (shouldNotify) {
-        final discountText = _buildDiscountText(
-          type: _discountType,
-          value: discountValue,
-        );
+        try {
+          final res = await supabase
+              .rpc('notify_offer_followers', params: {'p_offer_id': offerId})
+              .timeout(const Duration(seconds: 20));
 
-        var notifyDescription = _clip(
-          _descriptionController.text,
-          _kNotifyDescriptionMax,
-        );
-        if (_validFrom.isAfter(_salonToday)) {
-          final starts =
-              'Starts on ${DateFormat('MMM dd, yyyy').format(_validFrom)}.';
-          notifyDescription = notifyDescription.isEmpty
-              ? starts
-              : '$notifyDescription $starts';
+          if (res is Map && res['success'] == false) {
+            notifyFailed = true;
+            debugPrint('⚠️ notify_offer_followers: ${res['message']}');
+          } else if (res is Map) {
+            debugPrint('📤 Followers notified: ${res['notified'] ?? 0}');
+          }
+        } on TimeoutException {
+          // The request already reached the server, which keeps working on
+          // it. Not a failure.
+          debugPrint('⏱ notify_offer_followers is still running on the server');
+        } catch (e) {
+          notifyFailed = true;
+          debugPrint('⚠️ notify_offer_followers failed: $e');
         }
-
-        _notifyFollowers(
-          salonId: notifySalonId,
-          salonName: notifySalonName,
-          offerId: offerId,
-          offerTitle: _clip(_titleController.text, _kTitleMax),
-          offerDescription: notifyDescription,
-          discountText: discountText,
-        ).catchError((e) {
-          debugPrint('Background notification error: $e');
-        });
       }
 
       _saved = true;
 
       if (!mounted) return;
+
+      _showSnackBar(
+        _isEditing
+            ? '✏️ Offer updated successfully'
+            : (notifyFailed
+                  ? '✨ Offer created, but followers could not be notified'
+                  : '✨ Offer created successfully!'),
+        notifyFailed ? Colors.orange : context.successColor,
+      );
 
       Navigator.pop(context, true);
     } catch (e) {
@@ -914,75 +901,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       );
     } finally {
       if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
-  String _buildDiscountText({required String type, required double value}) {
-    if (type == 'percentage') {
-      return '${_trimNumber(value)}% OFF';
-    } else if (type == 'fixed') {
-      return '${_currencyService.format(price: value, currencyCode: widget.currencyCode)} OFF';
-    }
-    return 'FREE SERVICE';
-  }
-
-  // ============================================
-  // FOLLOWER NOTIFICATIONS
-  // static: runs after this screen is gone, so it must not touch State/
-  // BuildContext. Followers are processed in small parallel batches.
-  // ============================================
-  static Future<void> _notifyFollowers({
-    required int salonId,
-    required String salonName,
-    required int offerId,
-    required String offerTitle,
-    required String offerDescription,
-    required String discountText,
-  }) async {
-    try {
-      final followers = await Supabase.instance.client.rpc(
-        'get_active_customer_followers',
-        params: {'p_salon_id': salonId},
-      );
-
-      if (followers == null) return;
-      final list = followers as List;
-      if (list.isEmpty) return;
-
-      // One notification per customer, even if a row repeats
-      final customerIds = <String>{};
-      for (final f in list) {
-        final id = f['customer_id'];
-        if (id is String && id.isNotEmpty) customerIds.add(id);
-      }
-
-      final service = NotificationService();
-      final ids = customerIds.toList();
-      const batchSize = 5;
-
-      for (int i = 0; i < ids.length; i += batchSize) {
-        final batch = ids.skip(i).take(batchSize);
-        await Future.wait(
-          batch.map((customerId) async {
-            try {
-              await service.sendSpecialOffer(
-                customerId: customerId,
-                offerTitle: offerTitle,
-                offerDescription: offerDescription,
-                discountText: discountText,
-                offerId: offerId,
-                salonName: salonName,
-              );
-            } catch (e) {
-              debugPrint('Notification failed for $customerId: $e');
-            }
-          }),
-        );
-      }
-
-      debugPrint('📤 Offer notification processed for ${ids.length} follower(s)');
-    } catch (e) {
-      debugPrint('Error sending notifications: $e');
     }
   }
 
