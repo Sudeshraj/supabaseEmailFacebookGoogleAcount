@@ -1,7 +1,7 @@
 import 'dart:io' show Platform, File;
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/alertBox/time_picker_dialog.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
@@ -21,6 +21,12 @@ import '../../utils/image_compression.dart';
 //  0. Basic + Contact Info (+ logo/cover)
 //  1. Business Hours + Currency
 //  2. Review & Create
+//
+// PHONE NUMBER:
+//  - Country (dial) code is auto-detected from the salon timezone
+//    (user can change it from a picker).
+//  - The number is saved in the DB in E.164 format, e.g. +94771234567
+//    (works directly with wa.me / tel: / sms:).
 // ====================================================================
 class CreateSalonScreen extends StatefulWidget {
   const CreateSalonScreen({super.key});
@@ -39,6 +45,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   //   3. Salon timezone is empty (display)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
 
+  // Default phone country (ISO) when timezone → country detection fails
+  static const String _kDefaultPhoneIso = 'LK';
+
   // ==================== STEP MANAGEMENT ====================
   int _currentStep = 0;
   int _furthestStep = 0;
@@ -46,7 +55,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
 
   // ==================== CONTROLLERS ====================
   final TextEditingController _nameController = TextEditingController();
+  // _addressController = address (free text, same as before)
   final TextEditingController _addressController = TextEditingController();
+  final TextEditingController _provinceController = TextEditingController();
+  final TextEditingController _districtController = TextEditingController();
+  final TextEditingController _cityController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
@@ -54,6 +67,34 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   // Validation flags
   bool _isPhoneValid = true;
   bool _isEmailValid = true;
+
+  // ==================== PHONE COUNTRY CODE ====================
+  // ISO country code of the selected dial code (e.g. 'LK' → +94)
+  String _phoneIso = _kDefaultPhoneIso;
+
+  // Country list (iso / name / dial / flag) lives in TimezoneService
+  List<Map<String, String>> get _supportedDialCodes =>
+      TimezoneService.countryDialList;
+
+  Map<String, String> get _currentDialEntry => _supportedDialCodes.firstWhere(
+        (c) => c['iso'] == _phoneIso,
+        orElse: () => _supportedDialCodes.first,
+      );
+
+  String get _currentDial => _currentDialEntry['dial']!;
+  String get _currentDialFlag => _currentDialEntry['flag']!;
+
+  // ==================== ADDRESS COUNTRY ====================
+  // ISO country code of the salon address (used for filtering salons)
+  String _countryIso = _kDefaultPhoneIso;
+
+  Map<String, String> get _countryEntry => _supportedDialCodes.firstWhere(
+        (c) => c['iso'] == _countryIso,
+        orElse: () => _supportedDialCodes.first,
+      );
+
+  String get _countryName => _countryEntry['name']!;
+  String get _countryFlag => _countryEntry['flag']!;
 
   // Images
   File? _logoFile;
@@ -104,11 +145,290 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
 
   bool _isConfirmDialogOpen = false;
 
+  // ==================== BUSINESS TYPE (loaded from DB) ====================
+  List<Map<String, dynamic>> _businessTypes = [];
+  int? _selectedBusinessTypeId;
+  bool _isLoadingBusinessTypes = true;
+  bool _businessTypesLoadFailed = false;
+
+  /// Business type is required, unless the list could not be loaded at all
+  /// (then the owner is not blocked from creating the salon).
+  bool get _isBusinessTypeValid =>
+      _businessTypes.isEmpty || _selectedBusinessTypeId != null;
+
+  String? get _selectedBusinessTypeName {
+    if (_selectedBusinessTypeId == null) return null;
+    for (final t in _businessTypes) {
+      if (t['id'] == _selectedBusinessTypeId) {
+        return t['display_name'] as String?;
+      }
+    }
+    return null;
+  }
+
   late bool _isWeb;
   late bool _isDark;
 
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
+
+  // ============================================================
+  // ✅ PHONE HELPERS (country code + E.164)
+  // ============================================================
+
+  /// Detect the dial code from the SALON timezone
+  /// (Asia/Colombo → LK → +94). Falls back to Sri Lanka.
+  void _detectDialCodeFromTimezone() {
+    final tz = _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
+    final iso = TimezoneService.getIsoForTimezone(tz);
+    _phoneIso = iso.isEmpty ? _kDefaultPhoneIso : iso;
+    // address country = same detected country (user can change it)
+    _countryIso = _phoneIso;
+  }
+
+  /// Digits the user typed WITHOUT country code and WITHOUT leading 0.
+  ///   '0771234567'     → '771234567'
+  ///   '077 123 4567'   → '771234567'
+  ///   '+94771234567'   → '771234567'
+  ///   '0094771234567'  → '771234567'
+  String _extractNational(String raw) {
+    final trimmed = raw.trim();
+    var digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+
+    if (trimmed.startsWith('+') || trimmed.startsWith('00')) {
+      if (trimmed.startsWith('00') && digits.length >= 2) {
+        digits = digits.substring(2);
+      }
+      final dialDigits = _currentDial.substring(1);
+      if (digits.startsWith(dialDigits)) {
+        digits = digits.substring(dialDigits.length);
+      }
+      return digits;
+    }
+
+    if (digits.startsWith('0')) digits = digits.substring(1);
+    return digits;
+  }
+
+  /// Final E.164 value for the DB (e.g. +94771234567). null if empty.
+  String? _buildE164() {
+    final national = _extractNational(_phoneController.text);
+    if (national.isEmpty) return null;
+    return '$_currentDial$national';
+  }
+
+  /// Number with the country code is valid?
+  bool _isNationalNumberValid(String national) {
+    if (national.isEmpty) return true; // optional field
+    final dialDigits = _currentDial.substring(1);
+    if (_phoneIso == 'LK') {
+      // Sri Lanka: 9 digits after +94 (e.g. 771234567)
+      return national.length == 9;
+    }
+    // Generic: E.164 allows max 15 digits in total
+    return national.length >= 6 &&
+        national.length <= 14 &&
+        (dialDigits.length + national.length) <= 15;
+  }
+
+  /// If the user types / pastes a number that starts with '+', switch the
+  /// selected country automatically (longest dial code match).
+  void _handlePhoneChanged(String value) {
+    final trimmed = value.trim();
+    if (trimmed.startsWith('+')) {
+      final digits = trimmed.replaceAll(RegExp(r'[^0-9]'), '');
+      final sorted = [..._supportedDialCodes]
+        ..sort((a, b) => b['dial']!.length.compareTo(a['dial']!.length));
+
+      for (final c in sorted) {
+        final dialDigits = c['dial']!.substring(1);
+        if (digits.startsWith(dialDigits)) {
+          final rest = digits.substring(dialDigits.length);
+          // For shared dial codes (+1) keep the current selection
+          final keepCurrent =
+              _currentDial == c['dial'] && _phoneIso != c['iso'];
+          setState(() {
+            if (!keepCurrent) _phoneIso = c['iso']!;
+          });
+          _phoneController.value = TextEditingValue(
+            text: rest,
+            selection: TextSelection.collapsed(offset: rest.length),
+          );
+          break;
+        }
+      }
+    }
+    _validatePhone(_phoneController.text);
+  }
+
+  void _showDialCodePicker() {
+    _showCountryPicker(
+      title: 'Select Country Code',
+      selectedIso: _phoneIso,
+      showDial: true,
+      onSelected: (iso) {
+        setState(() => _phoneIso = iso);
+        _validatePhone(_phoneController.text);
+      },
+    );
+  }
+
+  void _showAddressCountryPicker() {
+    _showCountryPicker(
+      title: 'Select Country',
+      selectedIso: _countryIso,
+      showDial: false,
+      onSelected: (iso) {
+        setState(() {
+          _countryIso = iso;
+          // phone empty නම් phone code එකත් country එකත් එක්ක sync කරන්න
+          if (_phoneController.text.trim().isEmpty) _phoneIso = iso;
+        });
+      },
+    );
+  }
+
+  /// Generic searchable country picker (used for dial code AND address country)
+  void _showCountryPicker({
+    required String title,
+    required String selectedIso,
+    required bool showDial,
+    required void Function(String iso) onSelected,
+  }) {
+    final isDark = _isDark;
+    String query = '';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final q = query.trim().toLowerCase();
+          final list = _supportedDialCodes.where((c) {
+            if (q.isEmpty) return true;
+            return c['name']!.toLowerCase().contains(q) ||
+                c['dial']!.contains(q) ||
+                c['iso']!.toLowerCase() == q;
+          }).toList();
+
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(ctx).size.height * 0.7,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: TextField(
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                        onChanged: (v) => setSheetState(() => query = v),
+                        decoration: InputDecoration(
+                          hintText: showDial
+                              ? 'Search country or code'
+                              : 'Search country',
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.search,
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
+                          filled: true,
+                          fillColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[100],
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: list.length,
+                        itemBuilder: (_, i) {
+                          final c = list[i];
+                          final selected = c['iso'] == selectedIso;
+                          return ListTile(
+                            leading: Text(
+                              c['flag']!,
+                              style: const TextStyle(fontSize: 24),
+                            ),
+                            title: Text(
+                              c['name']!,
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black87,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (showDial)
+                                  Text(
+                                    c['dial']!,
+                                    style: TextStyle(
+                                      color: isDark
+                                          ? Colors.white70
+                                          : Colors.grey[700],
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                if (selected) ...[
+                                  const SizedBox(width: 8),
+                                  const Icon(
+                                    Icons.check_circle,
+                                    color: AppTheme.primary,
+                                    size: 20,
+                                  ),
+                                ],
+                              ],
+                            ),
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              onSelected(c['iso']!);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 
   // ============================================================
   // ✅ TIMEZONE HELPERS
@@ -167,6 +487,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     WidgetsBinding.instance.addObserver(this);
 
     _initializeWithTimezone();
+    _loadBusinessTypes();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkPlanLimit();
@@ -195,6 +516,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
 
     _nameController.dispose();
     _addressController.dispose();
+    _provinceController.dispose();
+    _districtController.dispose();
+    _cityController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
     _descriptionController.dispose();
@@ -284,7 +608,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
             ),
           ),
           title: Text(
-            'Salon Limit Reached',
+            'Business Limit Reached',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontWeight: FontWeight.bold,
@@ -296,7 +620,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
             children: [
               Text(
                 'Your $planDisplay plan allows only $maxSalons '
-                'active salon${maxSalons > 1 ? "s" : ""}. '
+                'active business${maxSalons > 1 ? "es" : ""}. '
                 'You currently have $currentSalons.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
@@ -322,7 +646,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        'Upgrade your plan to create more salons.',
+                        'Upgrade your plan to create more businesses.',
                         style: TextStyle(
                           fontSize: 13,
                           color: _isDark ? Colors.white70 : Colors.grey[800],
@@ -376,7 +700,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         if (!mounted) return;
 
         if (salonResponse == null) {
-          _showSnackBar('No active salon found', Colors.orange);
+          _showSnackBar('No active business found', Colors.orange);
           Navigator.pop(context);
           return;
         }
@@ -432,6 +756,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       _detectCurrencyFromTimezone();
       debugPrint('✅ Currency AUTO-DETECTED: $_salonCurrencyCode');
 
+      // ✅ Phone country code auto-detect from salon timezone
+      _detectDialCodeFromTimezone();
+      debugPrint('✅ Dial code AUTO-DETECTED: $_currentDial ($_phoneIso)');
+
       // ✅ Business hours initialize
       _initializeBusinessHours();
 
@@ -446,6 +774,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
           _userTimezone = _kDefaultSalonTimezone;
           _salonTimezone = _kDefaultSalonTimezone;
           _detectCurrencyFromTimezone();
+          _detectDialCodeFromTimezone();
           _initializeBusinessHours();
           _isTimezoneLoaded = true;
         });
@@ -472,6 +801,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         setState(() {
           _userTimezone = currentTimezone;
           // ✅ Salon timezone NOT changed — new salon keeps its TZ
+          // (so the phone country code also stays the same)
 
           // ✅ FIX: Re-sync local TimeOfDay to new user TZ (for display)
           if (_openTimeUtc.isNotEmpty) {
@@ -534,17 +864,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   // ============================================================
   void _validatePhone(String value) {
     setState(() {
-      if (value.isEmpty) {
+      if (value.trim().isEmpty) {
         _isPhoneValid = true;
       } else {
-        final cleaned = value.replaceAll(RegExp(r'[^0-9]'), '');
-        if (cleaned.length >= 9 &&
-            cleaned.length <= 10 &&
-            cleaned.startsWith('0')) {
-          _isPhoneValid = true;
-        } else {
-          _isPhoneValid = false;
-        }
+        final national = _extractNational(value);
+        _isPhoneValid = _isNationalNumberValid(national);
       }
     });
   }
@@ -565,7 +889,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   bool _canProceedFromStep(int step) {
     switch (step) {
       case 0:
-        return _nameController.text.trim().isNotEmpty &&
+        return _isBusinessTypeValid &&
+            _nameController.text.trim().isNotEmpty &&
+            _cityController.text.trim().isNotEmpty &&
             _isPhoneValid &&
             _isEmailValid;
       case 1:
@@ -578,7 +904,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   String _stepRequirementMessage(int step) {
     switch (step) {
       case 0:
-        return 'Please enter a salon name (and a valid phone/email if provided)';
+        return 'Please select a business type, enter a business name and city (and a valid phone/email if provided)';
       default:
         return '';
     }
@@ -669,8 +995,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     required IconData icon,
     TextInputType keyboardType = TextInputType.text,
     int maxLines = 1,
-    bool isPhone = false,
     bool isEmail = false,
+    bool rebuildOnChange = false,
   }) {
     final isDark = _isDark;
 
@@ -682,17 +1008,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         keyboardType: keyboardType,
         maxLines: maxLines,
         onChanged: (value) {
-          if (isPhone) _validatePhone(value);
           if (isEmail) _validateEmail(value);
+          // Continue button state (required fields) refresh
+          if (rebuildOnChange) setState(() {});
         },
         decoration: InputDecoration(
           labelText: label,
           hintText: hint,
           hintStyle: TextStyle(color: isDark ? Colors.white70 : Colors.grey),
           prefixIcon: Icon(icon, color: isDark ? Colors.white70 : Colors.grey),
-          errorText: isPhone && !_isPhoneValid && controller.text.isNotEmpty
-              ? 'Enter valid phone number (e.g., 0771234567)'
-              : isEmail && !_isEmailValid && controller.text.isNotEmpty
+          errorText: isEmail && !_isEmailValid && controller.text.isNotEmpty
               ? 'Enter valid email address'
               : null,
           errorStyle: TextStyle(color: isDark ? Colors.red[300] : Colors.red),
@@ -727,6 +1052,434 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
           fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
           filled: true,
         ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ PHONE FIELD (country code picker + number)
+  // ============================================================
+  Widget _buildPhoneField() {
+    final isDark = _isDark;
+    final hasText = _phoneController.text.trim().isNotEmpty;
+    final showError = hasText && !_isPhoneValid;
+    final e164 = _buildE164();
+
+    final errorMessage = _phoneIso == 'LK'
+        ? 'Enter valid phone number (e.g., 0771234567)'
+        : 'Enter a valid phone number';
+
+    final borderColor = isDark ? Colors.grey[700]! : Colors.grey[300]!;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // ---------- Country code button ----------
+              InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: _showDialCodePicker,
+                child: Container(
+                  height: 48,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _currentDialFlag,
+                        style: const TextStyle(fontSize: 20),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _currentDial,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      Icon(
+                        Icons.arrow_drop_down,
+                        color: isDark ? Colors.white70 : Colors.grey[600],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              // ---------- Number ----------
+              Expanded(
+                child: TextFormField(
+                  controller: _phoneController,
+                  style:
+                      TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()]')),
+                    LengthLimitingTextInputFormatter(20),
+                  ],
+                  onChanged: _handlePhoneChanged,
+                  decoration: InputDecoration(
+                    labelText: 'Phone Number',
+                    hintText: _phoneIso == 'LK' ? '0771234567' : 'Phone number',
+                    hintStyle: TextStyle(
+                      color: isDark ? Colors.white70 : Colors.grey,
+                    ),
+                    prefixIcon: Icon(
+                      Icons.phone,
+                      color: isDark ? Colors.white70 : Colors.grey,
+                    ),
+                    errorText: showError ? errorMessage : null,
+                    errorMaxLines: 2,
+                    errorStyle: TextStyle(
+                      color: isDark ? Colors.red[300] : Colors.red,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide:
+                          const BorderSide(color: AppTheme.primary, width: 2),
+                    ),
+                    errorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Colors.red, width: 1),
+                    ),
+                    focusedErrorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Colors.red, width: 2),
+                    ),
+                    fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                    filled: true,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(
+                Icons.auto_awesome,
+                size: 11,
+                color: isDark ? Colors.teal[300] : Colors.teal[700],
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  (e164 != null && _isPhoneValid)
+                      ? 'Will be saved as $e164 (works with WhatsApp / SMS / calls)'
+                      : 'Country code auto-detected from business timezone — tap to change',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.teal[300] : Colors.teal[700],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ ADDRESS HELPERS (structured address)
+  // ============================================================
+
+  /// "colombo 03" → "Colombo 03"  (so filters group the same city together)
+  String _titleCase(String input) {
+    final cleaned = input.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (cleaned.isEmpty) return '';
+    return cleaned
+        .split(' ')
+        .map(
+          (w) => w.isEmpty
+              ? w
+              : w[0].toUpperCase() + w.substring(1).toLowerCase(),
+        )
+        .join(' ');
+  }
+
+  /// Location summary for the review step (display only, NOT saved).
+  /// The `address` column keeps exactly what the user typed.
+  String _composeFullAddress() {
+    final parts = [
+      _addressController.text.trim(),
+      _titleCase(_cityController.text),
+      _titleCase(_districtController.text),
+      _titleCase(_provinceController.text),
+      _countryName,
+    ].where((p) => p.isNotEmpty);
+    return parts.join(', ');
+  }
+
+  String? _nullIfEmpty(String value) => value.trim().isEmpty ? null : value.trim();
+
+  /// Country selector (looks like a text field, opens the country picker)
+  Widget _buildCountryField() {
+    final isDark = _isDark;
+    final borderColor = isDark ? Colors.grey[700]! : Colors.grey[300]!;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: _showAddressCountryPicker,
+            child: InputDecorator(
+              decoration: InputDecoration(
+                labelText: 'Country *',
+                prefixIcon: Icon(
+                  Icons.public,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                suffixIcon: Icon(
+                  Icons.arrow_drop_down,
+                  color: isDark ? Colors.white70 : Colors.grey[600],
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: borderColor),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: borderColor),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                filled: true,
+              ),
+              child: Row(
+                children: [
+                  Text(_countryFlag, style: const TextStyle(fontSize: 20)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _countryName,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Icon(
+                Icons.auto_awesome,
+                size: 11,
+                color: isDark ? Colors.teal[300] : Colors.teal[700],
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  'Auto-detected from business timezone — tap to change',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.teal[300] : Colors.teal[700],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ BUSINESS TYPE (loaded from the business_types table)
+  // ============================================================
+  Future<void> _loadBusinessTypes() async {
+    if (mounted) {
+      setState(() {
+        _isLoadingBusinessTypes = true;
+        _businessTypesLoadFailed = false;
+      });
+    }
+
+    try {
+      final data = await supabase
+          .from('business_types')
+          .select('id, code, display_name, icon_name')
+          .eq('is_active', true)
+          .order('display_order', ascending: true);
+
+      if (!mounted) return;
+      setState(() {
+        _businessTypes = List<Map<String, dynamic>>.from(data as List);
+        _isLoadingBusinessTypes = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading business types: $e');
+      if (!mounted) return;
+      setState(() {
+        _businessTypes = [];
+        _isLoadingBusinessTypes = false;
+        _businessTypesLoadFailed = true;
+      });
+    }
+  }
+
+  /// business_types.icon_name (text in DB) → Flutter icon
+  IconData _businessTypeIcon(String? name) {
+    switch (name) {
+      case 'content_cut':
+        return Icons.content_cut;
+      case 'face_retouching_natural':
+        return Icons.face_retouching_natural;
+      case 'face':
+        return Icons.face;
+      case 'people':
+        return Icons.people;
+      case 'spa':
+        return Icons.spa;
+      case 'back_hand':
+        return Icons.back_hand;
+      case 'auto_awesome':
+        return Icons.auto_awesome;
+      case 'camera_alt':
+        return Icons.camera_alt;
+      case 'brush':
+        return Icons.brush;
+      case 'fitness_center':
+        return Icons.fitness_center;
+      case 'local_hospital':
+        return Icons.local_hospital;
+      case 'local_car_wash':
+        return Icons.local_car_wash;
+      case 'home_repair_service':
+        return Icons.home_repair_service;
+      case 'checkroom':
+        return Icons.checkroom;
+      case 'pets':
+        return Icons.pets;
+      case 'school':
+        return Icons.school;
+      case 'celebration':
+        return Icons.celebration;
+      default:
+        return Icons.storefront;
+    }
+  }
+
+  Widget _buildBusinessTypeSelector() {
+    final isDark = _isDark;
+
+    Widget content;
+    if (_isLoadingBusinessTypes) {
+      content = const Padding(
+        padding: EdgeInsets.symmetric(vertical: 8),
+        child: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      );
+    } else if (_businessTypesLoadFailed) {
+      content = Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Could not load business types',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.red[300] : Colors.red,
+              ),
+            ),
+          ),
+          TextButton.icon(
+            onPressed: _loadBusinessTypes,
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Retry'),
+          ),
+        ],
+      );
+    } else if (_businessTypes.isEmpty) {
+      content = Text(
+        'No business types available',
+        style: TextStyle(
+          fontSize: 12,
+          color: isDark ? Colors.white60 : Colors.grey[600],
+        ),
+      );
+    } else {
+      content = Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: _businessTypes.map((t) {
+          final id = t['id'] as int;
+          final selected = id == _selectedBusinessTypeId;
+          return ChoiceChip(
+            avatar: Icon(
+              _businessTypeIcon(t['icon_name'] as String?),
+              size: 18,
+              color: selected ? Colors.white : AppTheme.primary,
+            ),
+            label: Text(t['display_name'] as String),
+            selected: selected,
+            showCheckmark: false,
+            selectedColor: AppTheme.primary,
+            backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+            labelStyle: TextStyle(
+              fontSize: 13,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+              color: selected
+                  ? Colors.white
+                  : (isDark ? Colors.white : Colors.black87),
+            ),
+            onSelected: (_) => setState(() => _selectedBusinessTypeId = id),
+          );
+        }).toList(),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Business Type *',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white70 : Colors.grey[700],
+            ),
+          ),
+          const SizedBox(height: 8),
+          content,
+        ],
       ),
     );
   }
@@ -801,7 +1554,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Auto-detected from salon timezone ($_salonTimezone)',
+              'Auto-detected from business timezone ($_salonTimezone)',
               style: TextStyle(
                 fontSize: 12,
                 color: isDark ? Colors.white60 : Colors.grey,
@@ -1640,7 +2393,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Times are shown for salon location',
+                            'Times are shown for business location',
                             style: TextStyle(
                               fontSize: 10,
                               fontStyle: FontStyle.italic,
@@ -1718,7 +2471,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Salon hours: '
+                          'Business hours: '
                           '${_formatTimeOfDay(_openTimeLocal)} - '
                           '${_formatTimeOfDay(_closeTimeLocal)}',
                           style: TextStyle(
@@ -1764,7 +2517,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                   ],
                   const SizedBox(height: 4),
                   Text(
-                    'Stored in UTC · Times shown for salon location',
+                    'Stored in UTC · Times shown for business location',
                     style: TextStyle(
                       fontSize: 9,
                       fontStyle: FontStyle.italic,
@@ -1842,19 +2595,41 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   }
 
   Widget _buildReviewStep() {
+    final phoneE164 = _buildE164();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildStepHeader(
           'Review & Create',
-          'Check everything below, then tap "Create Salon" to finish.',
+          'Check everything below, then tap "Create Business" to finish.',
         ),
         _buildReviewTile(
           icon: Icons.store,
-          title: 'Salon Name',
+          title: 'Business Name',
           value: _nameController.text.trim().isEmpty
               ? 'Not set'
               : _nameController.text.trim(),
+          onEdit: () => _goToStep(0),
+        ),
+        _buildReviewTile(
+          icon: Icons.category,
+          title: 'Business Type',
+          value: _selectedBusinessTypeName ?? 'Not set',
+          onEdit: () => _goToStep(0),
+        ),
+        _buildReviewTile(
+          icon: Icons.location_on,
+          title: 'Location',
+          value: _composeFullAddress().isEmpty
+              ? 'Not set'
+              : _composeFullAddress(),
+          onEdit: () => _goToStep(0),
+        ),
+        _buildReviewTile(
+          icon: Icons.phone,
+          title: 'Phone',
+          value: phoneE164 ?? 'Not set',
           onEdit: () => _goToStep(0),
         ),
         _buildReviewTile(
@@ -1874,7 +2649,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         ),
         const SizedBox(height: 8),
         _buildInfoBanner(
-          'Tapping "Create Salon" will save the salon with the details above.',
+          'Tapping "Create Business" will save the business with the details above.',
           Icons.info_outline,
           AppTheme.primary,
         ),
@@ -1928,13 +2703,18 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     if (_isConfirmDialogOpen) return;
     _isConfirmDialogOpen = true;
 
+    final phoneE164 = _buildE164();
+
     final confirmed = await showCustomAlert(
       context: context,
-      title: "Create Salon?",
+      title: "Create Business?",
       message: 'Do you want to create "${_nameController.text.trim()}"?\n\n'
+          '${_selectedBusinessTypeName != null ? 'Type: $_selectedBusinessTypeName\n' : ''}'
+          'Location: ${_titleCase(_cityController.text)}, $_countryName\n'
+          '${phoneE164 != null ? 'Phone: $phoneE164\n' : ''}'
           'Currency: $_salonCurrencyCode ($_salonCurrencySymbol)\n'
           'Timezone: $_salonTimezone\n\n'
-          'This will save the salon with everything you\'ve set up.',
+          'This will save the business with everything you\'ve set up.',
       isError: false,
       buttonText: "Create",
       buttonIcon: Icons.add_business,
@@ -1976,14 +2756,20 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       final salonTz =
           _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
 
+      // ✅ Phone is saved in E.164 format (+94771234567) or null
+      final phoneE164 = _buildE164();
+
       final salonData = {
         'name': _nameController.text.trim(),
-        'address': _addressController.text.trim().isEmpty
-            ? null
-            : _addressController.text.trim(),
-        'phone': _phoneController.text.trim().isEmpty
-            ? null
-            : _phoneController.text.trim(),
+        'business_type_id': _selectedBusinessTypeId,
+        // address stays exactly as typed (same as before)
+        'address': _nullIfEmpty(_addressController.text),
+        // structured location (used for filters)
+        'country_code': _countryIso,
+        'province': _nullIfEmpty(_titleCase(_provinceController.text)),
+        'district': _nullIfEmpty(_titleCase(_districtController.text)),
+        'city': _nullIfEmpty(_titleCase(_cityController.text)),
+        'phone': phoneE164,
         'email': _emailController.text.trim().isEmpty
             ? null
             : _emailController.text.trim(),
@@ -2046,7 +2832,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         // ✅ FIX: Show warning if images failed
         if (imageUploadFailed) {
           _showSnackBar(
-            'Salon created, but some images failed to upload. Edit to retry.',
+            'Business created, but some images failed to upload. Edit to retry.',
             Colors.orange,
           );
         }
@@ -2110,7 +2896,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       children: [
         _buildStepHeader(
           'Basic & Contact Information',
-          'Add your salon\'s core details and how customers can reach you.',
+          'Add your business\'s core details and how customers can reach you.',
         ),
         _buildCoverSection(),
         Transform.translate(
@@ -2142,9 +2928,68 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                 const SizedBox(height: 16),
                 _buildTextField(
                   controller: _nameController,
-                  label: 'Salon Name *',
-                  hint: 'Enter salon name',
+                  label: 'Business Name *',
+                  hint: 'Enter business name',
                   icon: Icons.store,
+                  rebuildOnChange: true,
+                ),
+                const SizedBox(height: 12),
+                // ✅ Business type (loaded from DB)
+                _buildBusinessTypeSelector(),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _descriptionController,
+                  label: 'Description',
+                  hint: 'Tell about your business',
+                  icon: Icons.description,
+                  maxLines: 3,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Card(
+          color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Location',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildCountryField(),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _provinceController,
+                  label: 'Province / State',
+                  hint: 'Enter province or state',
+                  icon: Icons.map,
+                ),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _districtController,
+                  label: 'District',
+                  hint: 'Enter district',
+                  icon: Icons.account_tree,
+                ),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _cityController,
+                  label: 'City / Town *',
+                  hint: 'Enter city or town',
+                  icon: Icons.location_city,
+                  rebuildOnChange: true,
                 ),
                 const SizedBox(height: 12),
                 _buildTextField(
@@ -2154,13 +2999,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                   icon: Icons.location_on,
                   maxLines: 2,
                 ),
-                const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _descriptionController,
-                  label: 'Description',
-                  hint: 'Tell about your salon',
-                  icon: Icons.description,
-                  maxLines: 3,
+                const SizedBox(height: 8),
+                Text(
+                  'Country and city help customers find your business with filters',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
+                  ),
                 ),
               ],
             ),
@@ -2186,19 +3031,13 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                   ),
                 ),
                 const SizedBox(height: 16),
-                _buildTextField(
-                  controller: _phoneController,
-                  label: 'Phone Number',
-                  hint: 'Enter phone number (e.g., 0771234567)',
-                  icon: Icons.phone,
-                  keyboardType: TextInputType.phone,
-                  isPhone: true,
-                ),
+                // ✅ Country code picker + phone number
+                _buildPhoneField(),
                 const SizedBox(height: 12),
                 _buildTextField(
                   controller: _emailController,
                   label: 'Email Address',
-                  hint: 'Enter email address (e.g., salon@example.com)',
+                  hint: 'Enter email address (e.g., business@example.com)',
                   icon: Icons.email,
                   keyboardType: TextInputType.emailAddress,
                   isEmail: true,
@@ -2461,7 +3300,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              isLastStep ? 'Create Salon' : 'Continue',
+                              isLastStep ? 'Create Business' : 'Continue',
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -2499,7 +3338,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       return Scaffold(
         backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
         appBar: AppBar(
-          title: const Text('Create New Salon'),
+          title: const Text('Create New Business'),
           backgroundColor: AppTheme.primary,
           foregroundColor: Colors.white,
           elevation: 0,
@@ -2532,7 +3371,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: AppBar(
         title: const Text(
-          'Create New Salon',
+          'Create New Business',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: AppTheme.primary,

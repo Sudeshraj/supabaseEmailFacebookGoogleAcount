@@ -1342,6 +1342,109 @@ static DateTime getNowInTimezone(String timezone) {
   }
 }
 
+// =====================================================================
+// TimezoneService එක ඇතුළට paste කරන්න (class එකේ ඇතුළේ, උදා:
+// "CURRENCY HELPERS" section එකට උඩින්)
+// =====================================================================
+
+  // ==================== ✅ COUNTRY / DIAL CODE HELPERS ====================
+  // iso / name / dial code / flag. Phone country code picker + address
+  // country picker දෙකම මේ list එක පාවිච්චි කරනවා (single source of truth).
+  static const List<Map<String, String>> countryDialList = [
+    {'iso': 'LK', 'name': 'Sri Lanka', 'dial': '+94', 'flag': '🇱🇰'},
+    {'iso': 'IN', 'name': 'India', 'dial': '+91', 'flag': '🇮🇳'},
+    {'iso': 'US', 'name': 'United States', 'dial': '+1', 'flag': '🇺🇸'},
+    {'iso': 'CA', 'name': 'Canada', 'dial': '+1', 'flag': '🇨🇦'},
+    {'iso': 'GB', 'name': 'United Kingdom', 'dial': '+44', 'flag': '🇬🇧'},
+    {'iso': 'AU', 'name': 'Australia', 'dial': '+61', 'flag': '🇦🇺'},
+    {'iso': 'NZ', 'name': 'New Zealand', 'dial': '+64', 'flag': '🇳🇿'},
+    {'iso': 'AE', 'name': 'United Arab Emirates', 'dial': '+971', 'flag': '🇦🇪'},
+    {'iso': 'SA', 'name': 'Saudi Arabia', 'dial': '+966', 'flag': '🇸🇦'},
+    {'iso': 'SG', 'name': 'Singapore', 'dial': '+65', 'flag': '🇸🇬'},
+    {'iso': 'MY', 'name': 'Malaysia', 'dial': '+60', 'flag': '🇲🇾'},
+    {'iso': 'TH', 'name': 'Thailand', 'dial': '+66', 'flag': '🇹🇭'},
+    {'iso': 'VN', 'name': 'Vietnam', 'dial': '+84', 'flag': '🇻🇳'},
+    {'iso': 'ID', 'name': 'Indonesia', 'dial': '+62', 'flag': '🇮🇩'},
+    {'iso': 'PH', 'name': 'Philippines', 'dial': '+63', 'flag': '🇵🇭'},
+    {'iso': 'JP', 'name': 'Japan', 'dial': '+81', 'flag': '🇯🇵'},
+    {'iso': 'KR', 'name': 'South Korea', 'dial': '+82', 'flag': '🇰🇷'},
+    {'iso': 'CN', 'name': 'China', 'dial': '+86', 'flag': '🇨🇳'},
+    {'iso': 'PK', 'name': 'Pakistan', 'dial': '+92', 'flag': '🇵🇰'},
+    {'iso': 'BD', 'name': 'Bangladesh', 'dial': '+880', 'flag': '🇧🇩'},
+    {'iso': 'NP', 'name': 'Nepal', 'dial': '+977', 'flag': '🇳🇵'},
+    {'iso': 'DE', 'name': 'Germany', 'dial': '+49', 'flag': '🇩🇪'},
+    {'iso': 'FR', 'name': 'France', 'dial': '+33', 'flag': '🇫🇷'},
+    {'iso': 'IT', 'name': 'Italy', 'dial': '+39', 'flag': '🇮🇹'},
+    {'iso': 'ES', 'name': 'Spain', 'dial': '+34', 'flag': '🇪🇸'},
+    {'iso': 'CH', 'name': 'Switzerland', 'dial': '+41', 'flag': '🇨🇭'},
+    {'iso': 'TR', 'name': 'Turkey', 'dial': '+90', 'flag': '🇹🇷'},
+    {'iso': 'RU', 'name': 'Russia', 'dial': '+7', 'flag': '🇷🇺'},
+    {'iso': 'ZA', 'name': 'South Africa', 'dial': '+27', 'flag': '🇿🇦'},
+    {'iso': 'EG', 'name': 'Egypt', 'dial': '+20', 'flag': '🇪🇬'},
+    {'iso': 'NG', 'name': 'Nigeria', 'dial': '+234', 'flag': '🇳🇬'},
+    {'iso': 'KE', 'name': 'Kenya', 'dial': '+254', 'flag': '🇰🇪'},
+    {'iso': 'BR', 'name': 'Brazil', 'dial': '+55', 'flag': '🇧🇷'},
+    {'iso': 'MX', 'name': 'Mexico', 'dial': '+52', 'flag': '🇲🇽'},
+    {'iso': 'AR', 'name': 'Argentina', 'dial': '+54', 'flag': '🇦🇷'},
+    {'iso': 'CL', 'name': 'Chile', 'dial': '+56', 'flag': '🇨🇱'},
+    {'iso': 'CO', 'name': 'Colombia', 'dial': '+57', 'flag': '🇨🇴'},
+    {'iso': 'PE', 'name': 'Peru', 'dial': '+51', 'flag': '🇵🇪'},
+  ];
+
+  /// countryTimezones map එකේ නැති timezones (aliases / extra countries)
+  static const Map<String, String> _extraTimezoneCountries = {
+    'Asia/Calcutta': 'IN',
+    'Asia/Shanghai': 'CN',
+    'Asia/Chongqing': 'CN',
+    'Asia/Harbin': 'CN',
+    'Europe/Zurich': 'CH',
+    'Europe/Belfast': 'GB',
+    'Asia/Saigon': 'VN',
+    'Asia/Katmandu': 'NP',
+    'Asia/Kuching': 'MY',
+    'Australia/Melbourne': 'AU',
+    'Australia/Brisbane': 'AU',
+    'Australia/Adelaide': 'AU',
+    'Australia/Darwin': 'AU',
+    'Australia/Hobart': 'AU',
+    'Asia/Muscat': 'AE',
+    'Asia/Abu_Dhabi': 'AE',
+  };
+
+  /// ISO country code for a timezone ('Asia/Colombo' → 'LK').
+  /// Unknown timezone → '' (caller decides the default).
+  /// (getCountryCodeFor() වගේ garbage fallback එකක් නෑ.)
+  static String getIsoForTimezone(String timezone) {
+    for (final entry in countryTimezones.entries) {
+      for (final t in entry.value) {
+        if (t['timezone'] == timezone) return entry.key;
+      }
+    }
+    return _extraTimezoneCountries[timezone] ?? '';
+  }
+
+  /// Dial code for a timezone ('Asia/Colombo' → '+94'). Unknown → '+94'.
+  static String getDialCodeForTimezone(String timezone) {
+    final iso = getIsoForTimezone(timezone);
+    return getDialCodeForIso(iso.isEmpty ? 'LK' : iso);
+  }
+
+  /// Dial code for an ISO country code ('LK' → '+94').
+  static String getDialCodeForIso(String iso) {
+    for (final c in countryDialList) {
+      if (c['iso'] == iso) return c['dial']!;
+    }
+    return '+94';
+  }
+
+  /// Country name for an ISO code ('LK' → 'Sri Lanka').
+  static String getCountryNameForIso(String iso) {
+    for (final c in countryDialList) {
+      if (c['iso'] == iso) return c['name']!;
+    }
+    return iso;
+  }
+
   // ==================== BACKWARD COMPATIBILITY (DEPRECATED METHODS) ====================
 
   @Deprecated(
