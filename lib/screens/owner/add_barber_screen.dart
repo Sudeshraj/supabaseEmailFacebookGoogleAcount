@@ -44,8 +44,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   String _deviceTimezone = '';
   String _salonTimezone = '';
   bool _isTimezoneLoaded = false;
-  String _salonOpenTimeUtc = '09:00:00';
-  String _salonCloseTimeUtc = '18:00:00';
 
   // ==================== CURRENCY VARIABLES ====================
   String _salonCurrencyCode = 'LKR';
@@ -176,14 +174,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // DST-SAFE TIMEZONE CONVERSION
-  // ============================================================
-
-  String _localTimeToUtcString(TimeOfDay localTime, String timezone) {
-    return TimezoneService.timeOfDayToUtcWithTimezone(localTime, timezone);
-  }
-
-  // ============================================================
   // INITIALIZE ALL DATA
   // ============================================================
 
@@ -193,7 +183,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
       final prefs = await SharedPreferences.getInstance();
       // ✅ Use TimezoneService constant
-      final cachedTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
+      final cachedTimezone =
+          prefs.getString(TimezoneService.kUserTimezone) ??
           prefs.getString('cached_timezone');
 
       if (cachedTimezone != null && cachedTimezone.isNotEmpty) {
@@ -243,19 +234,13 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       if (response != null) {
         setState(() {
           final tz = response['timezone'] as String?;
-          _salonTimezone =
-              (tz != null && tz.isNotEmpty) ? tz : 'Asia/Colombo';
-          _salonOpenTimeUtc = response['open_time'] ?? '09:00:00';
-          _salonCloseTimeUtc = response['close_time'] ?? '18:00:00';
-          _salonCurrencyCode =
-              response['currency_code'] as String? ?? 'LKR';
+          _salonTimezone = (tz != null && tz.isNotEmpty) ? tz : 'Asia/Colombo';
+          _salonCurrencyCode = response['currency_code'] as String? ?? 'LKR';
         });
       } else {
         if (!mounted) return;
         setState(() {
           _salonTimezone = 'Asia/Colombo';
-          _salonOpenTimeUtc = '09:00:00';
-          _salonCloseTimeUtc = '18:00:00';
           _salonCurrencyCode = 'LKR';
         });
       }
@@ -267,261 +252,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       if (!mounted) return;
       setState(() {
         _salonTimezone = 'Asia/Colombo';
-        _salonOpenTimeUtc = '09:00:00';
-        _salonCloseTimeUtc = '18:00:00';
         _salonCurrencyCode = 'LKR';
       });
-    }
-  }
-
-  // ============================================================
-  // ✅ LOAD BARBER LUNCH BREAKS — BATCH QUERIES (2 total)
-  // ============================================================
-  Future<Map<int, Map<String, String>>> _loadBarberLunchBreaks() async {
-    final Map<int, Map<String, String>> lunchBreaks = {};
-
-    try {
-      final salonIdInt = int.parse(_selectedSalonId!);
-      final currentDate = DateTime.now();
-      final int currentDayOfWeek = currentDate.weekday;
-
-      // ✅ Calculate all 7 dates
-      final List<String> weekDates = [];
-      for (int dayOfWeek = 1; dayOfWeek <= 7; dayOfWeek++) {
-        final targetDate = currentDate.add(
-          Duration(days: dayOfWeek - currentDayOfWeek),
-        );
-        weekDates.add(targetDate.toIso8601String().split('T')[0]);
-      }
-
-      // ✅ Query 1: ALL special breaks in ONE call
-      final specialBreaksResponse = await supabase
-          .from('barber_special_breaks')
-          .select('start_time, end_time, break_date')
-          .eq('barber_id', _selectedBarberId!)
-          .eq('salon_id', salonIdInt)
-          .eq('break_type', 'lunch')
-          .inFilter('break_date', weekDates);
-
-      final Map<String, Map<String, String>> specialBreaksByDate = {};
-      for (var sb in specialBreaksResponse) {
-        specialBreaksByDate[sb['break_date'] as String] = {
-          'start': sb['start_time'] as String,
-          'end': sb['end_time'] as String,
-        };
-      }
-
-      // ✅ Query 2: ALL regular breaks in ONE call
-      final regularBreaksResponse = await supabase
-          .from('barber_breaks')
-          .select('start_time, end_time, day_of_week')
-          .eq('barber_id', _selectedBarberId!)
-          .eq('salon_id', salonIdInt)
-          .eq('break_type', 'lunch');
-
-      final Map<int, Map<String, String>> regularBreaksByDay = {};
-      for (var rb in regularBreaksResponse) {
-        regularBreaksByDay[rb['day_of_week'] as int] = {
-          'start': rb['start_time'] as String,
-          'end': rb['end_time'] as String,
-        };
-      }
-
-      // ✅ Match in-memory
-      for (int dayOfWeek = 1; dayOfWeek <= 7; dayOfWeek++) {
-        final dateStr = weekDates[dayOfWeek - 1];
-
-        // Priority 1: Special break
-        if (specialBreaksByDate.containsKey(dateStr)) {
-          final sb = specialBreaksByDate[dateStr]!;
-          lunchBreaks[dayOfWeek] = {
-            'start': sb['start']!,
-            'end': sb['end']!,
-            'source': 'special',
-            'date': dateStr,
-          };
-          continue;
-        }
-
-        // Priority 2: Regular break
-        if (regularBreaksByDay.containsKey(dayOfWeek)) {
-          final rb = regularBreaksByDay[dayOfWeek]!;
-          lunchBreaks[dayOfWeek] = {
-            'start': rb['start']!,
-            'end': rb['end']!,
-            'source': 'regular',
-          };
-          continue;
-        }
-
-        // Priority 3: Default 12-1 PM
-        final defaultStartUtc = _localTimeToUtcString(
-          const TimeOfDay(hour: 12, minute: 0),
-          _salonTimezone,
-        );
-        final defaultEndUtc = _localTimeToUtcString(
-          const TimeOfDay(hour: 13, minute: 0),
-          _salonTimezone,
-        );
-
-        lunchBreaks[dayOfWeek] = {
-          'start': defaultStartUtc,
-          'end': defaultEndUtc,
-          'source': 'default',
-        };
-      }
-
-      return lunchBreaks;
-    } catch (e) {
-      debugPrint('❌ Error loading lunch breaks: $e');
-      // Fallback to default for all 7 days
-      final Map<int, Map<String, String>> defaultBreaks = {};
-      for (int day = 1; day <= 7; day++) {
-        defaultBreaks[day] = {
-          'start': _localTimeToUtcString(
-            const TimeOfDay(hour: 12, minute: 0),
-            _salonTimezone,
-          ),
-          'end': _localTimeToUtcString(
-            const TimeOfDay(hour: 13, minute: 0),
-            _salonTimezone,
-          ),
-          'source': 'default_error',
-        };
-      }
-      return defaultBreaks;
-    }
-  }
-
-  // ============================================================
-  // ✅ CREATE BARBER LUNCH BREAKS — BATCH QUERIES
-  // ============================================================
-  Future<void> _createBarberLunchBreaks() async {
-    try {
-      final salonIdInt = int.parse(_selectedSalonId!);
-      final lunchBreaks = await _loadBarberLunchBreaks();
-
-      final currentDate = DateTime.now();
-      final int currentDayOfWeek = currentDate.weekday;
-
-      // ✅ Load existing special breaks for all 7 days in ONE query
-      final weekDates = <String>[];
-      for (int dayOfWeek = 1; dayOfWeek <= 7; dayOfWeek++) {
-        final targetDate = currentDate.add(
-          Duration(days: dayOfWeek - currentDayOfWeek),
-        );
-        weekDates.add(targetDate.toIso8601String().split('T')[0]);
-      }
-
-      final existingSpecialResponse = await supabase
-          .from('barber_special_breaks')
-          .select('id, break_date')
-          .eq('barber_id', _selectedBarberId!)
-          .eq('salon_id', salonIdInt)
-          .eq('break_type', 'lunch')
-          .inFilter('break_date', weekDates);
-
-      final Set<String> existingSpecialDates = existingSpecialResponse
-          .map((r) => r['break_date'] as String)
-          .toSet();
-
-      // ✅ Load existing regular breaks in ONE query
-      final existingRegularResponse = await supabase
-          .from('barber_breaks')
-          .select('id, day_of_week')
-          .eq('barber_id', _selectedBarberId!)
-          .eq('salon_id', salonIdInt)
-          .eq('break_type', 'lunch');
-
-      final Map<int, int> existingRegularByDay = {};
-      for (var rb in existingRegularResponse) {
-        existingRegularByDay[rb['day_of_week'] as int] = rb['id'] as int;
-      }
-
-      // ✅ Prepare batch data
-      final List<Map<String, dynamic>> specialInserts = [];
-      final List<Map<String, dynamic>> regularInserts = [];
-      final List<Map<String, dynamic>> regularUpdates = [];
-
-      for (int dayOfWeek = 1; dayOfWeek <= 7; dayOfWeek++) {
-        final lunchBreak = lunchBreaks[dayOfWeek];
-        if (lunchBreak == null) continue;
-
-        final startTime = lunchBreak['start']!;
-        final endTime = lunchBreak['end']!;
-        final source = lunchBreak['source']!;
-
-        final targetDate = currentDate.add(
-          Duration(days: dayOfWeek - currentDayOfWeek),
-        );
-        final dateStr = targetDate.toIso8601String().split('T')[0];
-
-        if (source == 'special') {
-          if (!existingSpecialDates.contains(dateStr)) {
-            specialInserts.add({
-              'barber_id': _selectedBarberId!,
-              'salon_id': salonIdInt,
-              'break_date': dateStr,
-              'start_time': startTime,
-              'end_time': endTime,
-              'break_type': 'lunch',
-              'reason': 'Auto-created from special break',
-              'created_at': DateTime.now().toIso8601String(),
-              'updated_at': DateTime.now().toIso8601String(),
-            });
-          }
-        } else {
-          // Regular or default
-          if (existingRegularByDay.containsKey(dayOfWeek)) {
-            regularUpdates.add({
-              'id': existingRegularByDay[dayOfWeek]!,
-              'start_time': startTime,
-              'end_time': endTime,
-            });
-          } else {
-            regularInserts.add({
-              'barber_id': _selectedBarberId!,
-              'salon_id': salonIdInt,
-              'day_of_week': dayOfWeek,
-              'start_time': startTime,
-              'end_time': endTime,
-              'break_type': 'lunch',
-              'created_at': DateTime.now().toIso8601String(),
-              'updated_at': DateTime.now().toIso8601String(),
-            });
-          }
-        }
-      }
-
-      // ✅ Batch insert special breaks
-      if (specialInserts.isNotEmpty) {
-        await supabase.from('barber_special_breaks').insert(specialInserts);
-      }
-
-      // ✅ Batch insert regular breaks
-      if (regularInserts.isNotEmpty) {
-        await supabase.from('barber_breaks').insert(regularInserts);
-      }
-
-      // ✅ Batch update regular breaks (loop needed — Supabase has no bulk update)
-      for (var update in regularUpdates) {
-        final id = update['id'];
-        await supabase
-            .from('barber_breaks')
-            .update({
-              'start_time': update['start_time'],
-              'end_time': update['end_time'],
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('id', id);
-      }
-
-      debugPrint(
-        '📊 Lunch Break: Special=${specialInserts.length}, '
-        'Regular Created=${regularInserts.length}, Updated=${regularUpdates.length}',
-      );
-    } catch (e) {
-      debugPrint('❌ Error creating lunch breaks: $e');
     }
   }
 
@@ -538,34 +270,6 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       debugPrint('❌ Error loading IP: $e');
     } finally {
       if (mounted) setState(() => _isLoadingIp = false);
-    }
-  }
-
-  // ============================================================
-  // LOG OWNER ACTIVITY
-  // ============================================================
-
-  Future<void> _logOwnerActivity({
-    required String actionType,
-    required String targetType,
-    String? targetId,
-    Map<String, dynamic>? details,
-  }) async {
-    try {
-      final ownerId = supabase.auth.currentUser?.id;
-      if (ownerId == null) return;
-      final ip = _currentIp ?? await IpHelper.getPublicIp();
-      await supabase.from('owner_activity_log').insert({
-        'owner_id': ownerId,
-        'action_type': actionType,
-        'target_type': targetType,
-        'target_id': targetId,
-        'details': details ?? {},
-        'ip_address': ip,
-        'created_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      debugPrint('❌ Error logging activity: $e');
     }
   }
 
@@ -802,9 +506,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       }
 
       // ✅ Batch check: single query for all barber IDs
-      final barberIds = response
-          .map((b) => b['user_id'] as String)
-          .toList();
+      final barberIds = response.map((b) => b['user_id'] as String).toList();
 
       final existingResponse = await supabase
           .from('salon_barbers')
@@ -823,8 +525,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           'full_name': barber['full_name'] ?? 'Unknown',
           'email': barber['email'] ?? '',
           'avatar_url': barber['avatar_url'],
-          'already_in_salon':
-              alreadyInSalonIds.contains(barber['user_id']),
+          'already_in_salon': alreadyInSalonIds.contains(barber['user_id']),
         });
       }
 
@@ -935,8 +636,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         categoryMap[cat['id']] = cat;
       }
 
-      final serviceIds =
-          servicesResponse.map((s) => s['id'] as int).toList();
+      final serviceIds = servicesResponse.map((s) => s['id'] as int).toList();
       List<Map<String, dynamic>> variantsResponse = [];
 
       if (serviceIds.isNotEmpty) {
@@ -990,7 +690,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         final genderId = variant['salon_gender_id'];
         final ageId = variant['salon_age_category_id'];
         final genderName = genderMap[genderId] ?? 'Unknown';
-        final ageData = ageMap[ageId] ??
+        final ageData =
+            ageMap[ageId] ??
             {'display_name': 'Unknown', 'min_age': 0, 'max_age': 0};
         final ageName =
             '${ageData['display_name']} (${ageData['min_age']}-${ageData['max_age']} yrs)';
@@ -1010,17 +711,13 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       for (var service in servicesResponse) {
         final serviceId = service['id'] as int;
         final categoryId = service['category_id'];
-        final category = categoryMap[categoryId] ??
-            {
-              'display_name': 'Other',
-              'icon_name': 'build',
-              'color': '#FF6B8B',
-            };
+        final category =
+            categoryMap[categoryId] ??
+            {'display_name': 'Other', 'icon_name': 'build', 'color': '#FF6B8B'};
         final variants = variantsByService[serviceId] ?? [];
 
         variants.sort((a, b) {
-          final genderCompare =
-              a['gender_name'].compareTo(b['gender_name']);
+          final genderCompare = a['gender_name'].compareTo(b['gender_name']);
           if (genderCompare != 0) return genderCompare;
           return a['age_category_name'].compareTo(b['age_category_name']);
         });
@@ -1046,7 +743,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 category['icon_name'] ??
                 'build',
           ),
-          'icon_name': service['icon_name']?.toString() ??
+          'icon_name':
+              service['icon_name']?.toString() ??
               category['icon_name'] ??
               'build',
           'color': category['color'] ?? '#FF6B8B',
@@ -1068,9 +766,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             .map((s) => s['id'] as String)
             .toSet();
 
-        _expandedServices.removeWhere(
-          (id) => !currentServiceIds.contains(id),
-        );
+        _expandedServices.removeWhere((id) => !currentServiceIds.contains(id));
 
         for (var service in processedServices) {
           final serviceId = service['id'] as String;
@@ -1196,8 +892,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     if (hasVariants) {
       final variants = service['variants'] as List;
       if (variants.isEmpty) return false;
-      return variants
-          .every((v) => _barberAssignedVariantIds.contains(v['id']));
+      return variants.every((v) => _barberAssignedVariantIds.contains(v['id']));
     } else {
       return _barberAssignedServiceIds.contains(service['id']);
     }
@@ -1249,11 +944,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             padding: const EdgeInsets.only(left: 8, bottom: 4),
             child: Row(
               children: [
-                Icon(
-                  Icons.check_circle,
-                  size: 16,
-                  color: context.successColor,
-                ),
+                Icon(Icons.check_circle, size: 16, color: context.successColor),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1331,10 +1022,82 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   // ============================================================
-  // ✅ ADD BARBER — BATCH INSERT (30+ → 3 queries)
+  // ADD BARBER — single atomic RPC (add_barber_to_salon)
   // ============================================================
 
+  /// Builds [{service_id, variant_id}] from the current selection.
+  List<Map<String, dynamic>> _buildServicesPayload() {
+    final payload = <Map<String, dynamic>>[];
+    for (final entry in _selectedItems.entries) {
+      final serviceId = int.parse(entry.key);
+      if (entry.value.isEmpty) {
+        payload.add({'service_id': serviceId, 'variant_id': null});
+      } else {
+        for (final variantId in entry.value) {
+          payload.add({'service_id': serviceId, 'variant_id': variantId});
+        }
+      }
+    }
+    return payload;
+  }
+
+  /// Extra info for the activity log (names etc.). The server adds the
+  /// trusted fields (salon, counts, timezone) and overrides on clash.
+  List<Map<String, dynamic>> _buildSelectedServicesLog() {
+    final list = <Map<String, dynamic>>[];
+    for (final entry in _selectedItems.entries) {
+      final service = _services.firstWhere(
+        (s) => s['id'].toString() == entry.key,
+        orElse: () => <String, dynamic>{},
+      );
+      if (service.isEmpty) continue;
+      final serviceId = int.parse(entry.key);
+      final name = service['name'] ?? 'Unknown';
+      if (entry.value.isEmpty) {
+        list.add({
+          'service_id': serviceId,
+          'service_name': name,
+          'type': 'full_service',
+        });
+      } else {
+        for (final variantId in entry.value) {
+          final variant = _findVariantById(entry.key, variantId);
+          list.add({
+            'service_id': serviceId,
+            'service_name': name,
+            'variant_id': variantId,
+            'variant_details': variant?['display_text'] ?? 'Variant',
+            'type': 'variant',
+          });
+        }
+      }
+    }
+    return list;
+  }
+
+  void _resetAfterAdd() {
+    setState(() {
+      _selectedBarberId = null;
+      _selectedItems.clear();
+      _expandedServices
+        ..clear()
+        ..addAll(
+          _services
+              .where((s) => s['hasVariants'] == true)
+              .map((s) => s['id'] as String),
+        );
+      _searchController.clear();
+      _searchResults = [];
+      _isSearching = false;
+      _selectedCategoryTab = null;
+      _barberAssignedVariantIds = {};
+      _barberAssignedServiceIds = {};
+    });
+  }
+
   Future<void> _addBarber() async {
+    if (_isLoading) return; // double-tap guard
+
     if (_selectedBarberId == null) {
       _showSnackBar('Please select a barber', context.errorColor);
       return;
@@ -1348,17 +1111,72 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       return;
     }
 
-    final isActive = await _isBarberActive(_selectedBarberId!);
-    if (!isActive) {
-      _showSnackBar(
-        'This barber account is inactive. Please reactivate before adding.',
-        Colors.orange,
+    final confirmed = await _showConfirmAddBarberDialog();
+    if (!confirmed || !mounted) return;
+
+    await _submitAddBarber();
+  }
+
+  Future<void> _submitAddBarber() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final barberName = _getBarberName();
+
+      final result = await supabase.rpc(
+        'add_barber_to_salon',
+        params: {
+          'p_salon_id': int.parse(_selectedSalonId!),
+          'p_barber_id': _selectedBarberId!,
+          'p_services': _buildServicesPayload(),
+          'p_meta': {
+            'barber_name': barberName,
+            'device_timezone': _deviceTimezone,
+            'selected_services_count': _totalSelectedItems,
+            'selected_services': _buildSelectedServicesLog(),
+          },
+          'p_ip': _currentIp,
+        },
       );
-      return;
+
+      if (!mounted) return;
+
+      final res = Map<String, dynamic>.from(result as Map);
+      if (res['success'] != true) {
+        final inactive = res['code'] == 'barber_inactive';
+        _showSnackBar(
+          res['message']?.toString() ?? 'Failed to add barber',
+          inactive ? Colors.orange : context.errorColor,
+        );
+        return;
+      }
+
+      final services = res['services_added'] ?? 0;
+      final variants = res['variants_added'] ?? 0;
+
+      _showSnackBar(
+        'Barber added successfully!\n'
+        '• ${res['schedules'] ?? 7} schedules configured\n'
+        '• Lunch breaks configured\n'
+        '• $services services, $variants variants added\n'
+        '• Salon timezone: ${_salonTimezone.split('/').last}\n'
+        '• Currency: $_salonCurrencyCode ($_salonCurrencySymbol)',
+        context.successColor,
+      );
+
+      _resetAfterAdd();
+    } on PostgrestException catch (e) {
+      debugPrint('❌ Error adding barber (postgrest): ${e.message}');
+      if (mounted) _showSnackBar('Error: ${e.message}', context.errorColor);
+    } catch (e) {
+      debugPrint('❌ Error adding barber: $e');
+      if (mounted) _showSnackBar('Error: ${e.toString()}', context.errorColor);
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
 
-    if (!mounted) return;
-
+  Future<bool> _showConfirmAddBarberDialog() async {
     final primaryColor = context.primaryColor;
     final textColor = context.textColor;
     final secondaryTextColor = context.secondaryTextColor;
@@ -1561,307 +1379,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     } finally {
       _isDialogShowing = false;
     }
-
-    if (confirm != true) return;
-    if (!mounted) return;
-    setState(() => _isLoading = true);
-
-    try {
-      final salonIdInt = int.parse(_selectedSalonId!);
-      final openTimeUtc = _salonOpenTimeUtc;
-      final closeTimeUtc = _salonCloseTimeUtc;
-      final List<int> weekDays = [1, 2, 3, 4, 5, 6, 7];
-
-      // ============================================
-      // STEP 1: Get or create salon_barber
-      // ============================================
-      final salonBarberResponse = await supabase
-          .from('salon_barbers')
-          .select('id')
-          .eq('salon_id', salonIdInt)
-          .eq('barber_id', _selectedBarberId!)
-          .maybeSingle();
-
-      int salonBarberId;
-      if (salonBarberResponse == null) {
-        final newSalonBarber = await supabase
-            .from('salon_barbers')
-            .insert({
-              'salon_id': salonIdInt,
-              'barber_id': _selectedBarberId!,
-              'status': 'active',
-            })
-            .select('id')
-            .single();
-        salonBarberId = newSalonBarber['id'];
-      } else {
-        salonBarberId = salonBarberResponse['id'];
-        await supabase
-            .from('salon_barbers')
-            .update({'status': 'active'})
-            .eq('id', salonBarberId);
-      }
-
-      // ============================================
-      // STEP 2: Schedules — batch load + batch insert/update
-      // ============================================
-      final existingSchedulesResponse = await supabase
-          .from('barber_schedules')
-          .select('id, day_of_week')
-          .eq('barber_id', _selectedBarberId!)
-          .eq('salon_id', salonIdInt);
-
-      final Map<int, int> existingSchedulesByDay = {};
-      for (var s in existingSchedulesResponse) {
-        existingSchedulesByDay[s['day_of_week'] as int] = s['id'] as int;
-      }
-
-      final List<Map<String, dynamic>> scheduleInserts = [];
-      int updatedCount = 0;
-
-      for (int dayOfWeek in weekDays) {
-        if (existingSchedulesByDay.containsKey(dayOfWeek)) {
-          await supabase
-              .from('barber_schedules')
-              .update({
-                'is_working': true,
-                'start_time': openTimeUtc,
-                'end_time': closeTimeUtc,
-                'updated_at': DateTime.now().toIso8601String(),
-              })
-              .eq('id', existingSchedulesByDay[dayOfWeek]!);
-          updatedCount++;
-        } else {
-          scheduleInserts.add({
-            'barber_id': _selectedBarberId!,
-            'salon_id': salonIdInt,
-            'day_of_week': dayOfWeek,
-            'start_time': openTimeUtc,
-            'end_time': closeTimeUtc,
-            'is_working': true,
-          });
-        }
-      }
-
-      int createdCount = 0;
-      if (scheduleInserts.isNotEmpty) {
-        await supabase.from('barber_schedules').insert(scheduleInserts);
-        createdCount = scheduleInserts.length;
-      }
-
-      // ============================================
-      // STEP 3: Lunch breaks (already batched)
-      // ============================================
-      await _createBarberLunchBreaks();
-
-      // ============================================
-      // STEP 4: barber_services — BATCH INSERT
-      // ============================================
-      // Build the full list of items to insert
-      final List<Map<String, dynamic>> toInsert = [];
-      final List<Map<String, dynamic>> selectedServicesList = [];
-
-      for (var entry in _selectedItems.entries) {
-        final serviceId = int.parse(entry.key);
-        final variantIds = entry.value;
-
-        Map<String, dynamic>? service;
-        for (var s in _services) {
-          if (s['id'] == entry.key) {
-            service = s;
-            break;
-          }
-        }
-        if (service == null) continue;
-
-        if (variantIds.isEmpty) {
-          selectedServicesList.add({
-            'service_id': serviceId,
-            'service_name': service['name'] ?? 'Unknown',
-            'type': 'full_service',
-          });
-          toInsert.add({
-            'salon_barber_id': salonBarberId,
-            'service_id': serviceId,
-            'variant_id': null,
-          });
-        } else {
-          for (var variantId in variantIds) {
-            final variant = _findVariantById(entry.key, variantId);
-            selectedServicesList.add({
-              'service_id': serviceId,
-              'service_name': service['name'] ?? 'Unknown',
-              'variant_id': variantId,
-              'variant_details': variant != null
-                  ? (variant['display_text'] ?? 'Variant')
-                  : 'Variant',
-              'type': 'variant',
-            });
-            toInsert.add({
-              'salon_barber_id': salonBarberId,
-              'service_id': serviceId,
-              'variant_id': variantId,
-            });
-          }
-        }
-      }
-
-      // Check existing in ONE query
-      final existingServicesResponse = await supabase
-          .from('barber_services')
-          .select('service_id, variant_id')
-          .eq('salon_barber_id', salonBarberId);
-
-      final Set<String> existingKeys = {};
-      for (var row in existingServicesResponse) {
-        final key =
-            '${row['service_id']}_${row['variant_id'] ?? "null"}';
-        existingKeys.add(key);
-      }
-
-      // Filter to only new items
-      final List<Map<String, dynamic>> finalInserts = [];
-      for (var item in toInsert) {
-        final key = '${item['service_id']}_${item['variant_id'] ?? "null"}';
-        if (!existingKeys.contains(key)) {
-          finalInserts.add(item);
-        }
-      }
-
-      // Batch insert
-      int servicesAddedCount = 0;
-      int variantsAddedCount = 0;
-      if (finalInserts.isNotEmpty) {
-        await supabase.from('barber_services').insert(finalInserts);
-
-        // Count for logging
-        for (var item in finalInserts) {
-          if (item['variant_id'] == null) {
-            servicesAddedCount++;
-          } else {
-            variantsAddedCount++;
-          }
-        }
-      }
-
-      // ============================================
-      // STEP 5: user_roles
-      // ============================================
-      final userRoleCheck = await supabase
-          .from('user_roles')
-          .select('id, status')
-          .eq('user_id', _selectedBarberId!)
-          .eq('role_id', 2)
-          .maybeSingle();
-
-      if (userRoleCheck == null) {
-        final roleResponse = await supabase
-            .from('roles')
-            .select('id')
-            .eq('name', 'barber')
-            .maybeSingle();
-
-        if (roleResponse != null) {
-          await supabase.from('user_roles').insert({
-            'user_id': _selectedBarberId!,
-            'role_id': roleResponse['id'],
-            'status': 'active',
-            'created_at': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-          });
-        }
-      } else if (userRoleCheck['status'] != 'active') {
-        await supabase
-            .from('user_roles')
-            .update({
-              'status': 'active',
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('id', userRoleCheck['id']);
-      }
-
-      // ============================================
-      // STEP 6: Log activity
-      // ============================================
-      await _logOwnerActivity(
-        actionType: 'add_barber',
-        targetType: 'barber',
-        targetId: _selectedBarberId,
-        details: {
-          'barber_name': _getBarberName(),
-          'barber_id': _selectedBarberId,
-          'salon_id': salonIdInt,
-          'salon_name': _selectedSalonDetails?['name'],
-          'salon_timezone': _salonTimezone,
-          'salon_currency': _salonCurrencyCode,
-          'selected_services_count': _totalSelectedItems,
-          'selected_services': selectedServicesList,
-          'device_timezone': _deviceTimezone,
-          'schedules_created': createdCount,
-          'schedules_updated': updatedCount,
-          'services_added': servicesAddedCount,
-          'variants_added': variantsAddedCount,
-          'role_status': 'active',
-        },
-      );
-
-      // ============================================
-      // STEP 7: Success UI
-      // ============================================
-      if (!mounted) return;
-      _showSnackBar(
-        'Barber added successfully!\n'
-        '• $createdCount schedules created\n'
-        '• Lunch breaks configured\n'
-        '• $servicesAddedCount services, $variantsAddedCount variants added\n'
-        '• Salon timezone: ${_salonTimezone.split('/').last}\n'
-        '• Currency: $_salonCurrencyCode ($_salonCurrencySymbol)',
-        context.successColor,
-      );
-
-      setState(() {
-        _selectedBarberId = null;
-        _selectedItems.clear();
-        // Restore default expand state
-        _expandedServices
-          ..clear()
-          ..addAll(
-            _services
-                .where((s) => s['hasVariants'] == true)
-                .map((s) => s['id'] as String),
-          );
-        _searchController.clear();
-        _searchResults = [];
-        _isSearching = false;
-        _selectedCategoryTab = null;
-        _barberAssignedVariantIds = {};
-        _barberAssignedServiceIds = {};
-      });
-    } catch (e) {
-      debugPrint('❌ Error adding barber: $e');
-      if (mounted) {
-        _showSnackBar('Error: ${e.toString()}', context.errorColor);
-      }
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<bool> _isBarberActive(String barberId) async {
-    try {
-      final response = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', barberId)
-          .eq('role_id', 2)
-          .maybeSingle();
-
-      if (response == null) return true;
-      return response['status'] == 'active';
-    } catch (e) {
-      debugPrint('❌ Error checking barber status: $e');
-      return false;
-    }
+    return confirm == true;
   }
 
   void _showSnackBar(String message, Color color) {
@@ -1871,9 +1389,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         content: Text(message),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         duration: const Duration(seconds: 4),
       ),
     );
@@ -1980,8 +1496,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
     final tintColor = isDark
         ? cardColor.withValues(alpha: 0.3)
-        : _cardColorTints[index % _cardColorTints.length]
-            .withValues(alpha: 0.4);
+        : _cardColorTints[index % _cardColorTints.length].withValues(
+            alpha: 0.4,
+          );
 
     return Card(
       elevation: 2,
@@ -2145,10 +1662,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 padding: const EdgeInsets.all(16),
                 child: Text(
                   service['description'],
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: secondaryTextColor,
-                  ),
+                  style: TextStyle(fontSize: 13, color: secondaryTextColor),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -2223,9 +1737,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 10,
-                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
                           ),
                         ),
                       )
@@ -2254,9 +1766,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 10,
-                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 10),
                           ),
                         ),
                       ),
@@ -2270,10 +1780,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     );
   }
 
-  Widget _buildVariantCard(
-    String serviceId,
-    Map<String, dynamic> variant,
-  ) {
+  Widget _buildVariantCard(String serviceId, Map<String, dynamic> variant) {
     final isDark = context.isDarkMode;
     final primaryColor = context.primaryColor;
     final textColor = context.textColor;
@@ -2298,13 +1805,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             color: isAssigned
                 ? (isDark ? Colors.grey[850] : Colors.grey[200])
                 : isSelected
-                    ? primaryColor.withValues(alpha: 0.1)
-                    : cardColor.withValues(alpha: 0.7),
+                ? primaryColor.withValues(alpha: 0.1)
+                : cardColor.withValues(alpha: 0.7),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: (isSelected && !isAssigned)
-                  ? primaryColor
-                  : dividerColor,
+              color: (isSelected && !isAssigned) ? primaryColor : dividerColor,
               width: (isSelected && !isAssigned) ? 1.5 : 1,
             ),
           ),
@@ -2323,11 +1828,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 child: Icon(
                   variant['gender_name'].toLowerCase().contains('male')
                       ? Icons.male
-                      : variant['gender_name'].toLowerCase().contains(
-                            'female',
-                          )
-                          ? Icons.female
-                          : Icons.people,
+                      : variant['gender_name'].toLowerCase().contains('female')
+                      ? Icons.female
+                      : Icons.people,
                   color: (isSelected && !isAssigned)
                       ? primaryColor
                       : secondaryTextColor,
@@ -2432,11 +1935,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                     ),
                   ),
                   child: isSelected
-                      ? const Icon(
-                          Icons.check,
-                          size: 14,
-                          color: Colors.white,
-                        )
+                      ? const Icon(Icons.check, size: 14, color: Colors.white)
                       : null,
                 ),
             ],
@@ -2457,9 +1956,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       return Card(
         elevation: _isWeb ? 4 : 2,
         color: cardColor,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: Container(
           padding: const EdgeInsets.all(40),
           child: Column(
@@ -2500,10 +1997,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             children: [
               CircularProgressIndicator(color: primaryColor),
               const SizedBox(height: 16),
-              Text(
-                'Loading services...',
-                style: TextStyle(color: textColor),
-              ),
+              Text('Loading services...', style: TextStyle(color: textColor)),
             ],
           ),
         ),
@@ -2650,9 +2144,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     return Card(
       elevation: isWeb ? 4 : 2,
       color: cardColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: EdgeInsets.all(isWeb ? 20 : 16),
         child: Column(
@@ -2713,8 +2205,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 separatorBuilder: (_, _) => const SizedBox(height: 8),
                 itemBuilder: (context, index) {
                   final salon = _ownerSalons[index];
-                  final isSelected =
-                      _selectedSalonId == salon['id'].toString();
+                  final isSelected = _selectedSalonId == salon['id'].toString();
                   return _buildSalonTile(salon, isSelected);
                 },
               ),
@@ -2819,8 +2310,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color:
-              isSelected ? primaryColor.withValues(alpha: 0.05) : cardColor,
+          color: isSelected ? primaryColor.withValues(alpha: 0.05) : cardColor,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? primaryColor : borderColor,
@@ -2840,8 +2330,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               child: salon['logo_url'] == null
                   ? Icon(
                       Icons.store,
-                      color:
-                          isSelected ? Colors.white : secondaryTextColor,
+                      color: isSelected ? Colors.white : secondaryTextColor,
                       size: 20,
                     )
                   : null,
@@ -2866,10 +2355,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                   if (salon['address'] != null)
                     Text(
                       salon['address'],
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: secondaryTextColor,
-                      ),
+                      style: TextStyle(fontSize: 12, color: secondaryTextColor),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2898,9 +2384,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     return Card(
       elevation: isWeb ? 4 : 2,
       color: cardColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
         padding: EdgeInsets.all(isWeb ? 20 : 16),
         child: Column(
@@ -2941,14 +2425,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 hintText: _selectedSalonId != null
                     ? 'Type name or email to search...'
                     : 'Select a salon first',
-                prefixIcon:
-                    Icon(Icons.search, color: secondaryTextColor),
+                prefixIcon: Icon(Icons.search, color: secondaryTextColor),
                 suffixIcon: _searchController.text.isNotEmpty
                     ? IconButton(
-                        icon: Icon(
-                          Icons.clear,
-                          color: secondaryTextColor,
-                        ),
+                        icon: Icon(Icons.clear, color: secondaryTextColor),
                         onPressed: () {
                           _searchController.clear();
                           setState(() {
@@ -2974,8 +2454,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                   vertical: isWeb ? 16 : 12,
                 ),
                 filled: true,
-                fillColor:
-                    isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
               ),
             ),
             if (_selectedSalonId == null)
@@ -3084,8 +2563,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     final alreadyInSalon = barber['already_in_salon'] == true;
 
     return ListTile(
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       leading: CircleAvatar(
         radius: 24,
         backgroundColor: isSelected
@@ -3132,10 +2610,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 2,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: Colors.blue.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
@@ -3164,16 +2639,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                   color: primaryColor,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(
-                  Icons.check,
-                  color: Colors.white,
-                  size: 16,
-                ),
+                child: const Icon(Icons.check, color: Colors.white, size: 16),
               )
-            : Icon(
-                Icons.radio_button_unchecked,
-                color: secondaryTextColor,
-              ),
+            : Icon(Icons.radio_button_unchecked, color: secondaryTextColor),
       ),
       onTap: () {
         setState(() {
@@ -3232,8 +2700,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               children: [
                 Text(
                   'Selected Barber',
-                  style:
-                      TextStyle(fontSize: 12, color: secondaryTextColor),
+                  style: TextStyle(fontSize: 12, color: secondaryTextColor),
                 ),
                 Text(
                   barber['full_name'] ?? 'Unknown',
@@ -3278,18 +2745,15 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
     return Container(
       width: double.infinity,
-      padding:
-          EdgeInsets.symmetric(horizontal: isWeb ? 0 : 16, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: isWeb ? 0 : 16, vertical: 8),
       alignment: isWeb ? Alignment.centerLeft : null,
       child: ElevatedButton(
         onPressed: _isLoading ? null : _addBarber,
         style: ElevatedButton.styleFrom(
           backgroundColor: primaryColor,
           foregroundColor: Colors.white,
-          minimumSize:
-              Size(isWeb ? 320 : double.infinity, isWeb ? 54 : 54),
-          maximumSize:
-              Size(isWeb ? 420 : double.infinity, isWeb ? 60 : 60),
+          minimumSize: Size(isWeb ? 320 : double.infinity, isWeb ? 54 : 54),
+          maximumSize: Size(isWeb ? 420 : double.infinity, isWeb ? 60 : 60),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -3315,9 +2779,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
-                      isWeb
-                          ? 'Add Barber to Selected Salon'
-                          : 'Add Barber',
+                      isWeb ? 'Add Barber to Selected Salon' : 'Add Barber',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -3345,7 +2807,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
     _isWeb = context.isWeb;
 
-    final isLoading = _isLoading ||
+    final isLoading =
+        _isLoading ||
         _isLoadingServices ||
         _isLoadingSalons ||
         _isLoadingSalonData ||
@@ -3378,10 +2841,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           if (_totalSelectedItems > 0)
             Container(
               margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 6,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(20),
@@ -3389,11 +2849,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
-                    Icons.check_circle,
-                    size: 16,
-                    color: Colors.white,
-                  ),
+                  const Icon(Icons.check_circle, size: 16, color: Colors.white),
                   const SizedBox(width: 4),
                   Text(
                     '$_totalSelectedItems',
@@ -3436,8 +2892,8 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 ),
               )
             : _isWeb
-                ? _buildWebLayout()
-                : _buildMobileLayout(),
+            ? _buildWebLayout()
+            : _buildMobileLayout(),
       ),
     );
   }
