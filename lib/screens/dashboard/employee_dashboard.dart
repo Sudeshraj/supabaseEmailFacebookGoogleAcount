@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/observers/route_observers.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
@@ -13,13 +16,16 @@ import 'package:flutter_application_1/widgets/section_header.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
 import 'package:intl/intl.dart';
 
-final RouteObserver<ModalRoute<void>> routeObserver =
-    RouteObserver<ModalRoute<void>>();
+/// Backward-compatible alias: other files that imported `routeObserver`
+/// from this file keep working, but it now points to the shared observer
+/// that is registered in the router (same one the customer dashboard uses).
+final RouteObserver<ModalRoute<void>> routeObserver = dashboardRouteObserver;
 
 class EmployeeDashboard extends StatefulWidget {
   const EmployeeDashboard({super.key});
@@ -28,7 +34,8 @@ class EmployeeDashboard extends StatefulWidget {
   State<EmployeeDashboard> createState() => _EmployeeDashboardState();
 }
 
-class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
+class _EmployeeDashboardState extends State<EmployeeDashboard>
+    with WidgetsBindingObserver, RouteAware {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
@@ -96,6 +103,13 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // Notification count
   int _unreadNotificationCount = 0;
+  bool _isRefreshingCount = false;
+
+  // ✅ Guard so overlapping refreshes (e.g. dialog pops) don't pile up
+  bool _isReloading = false;
+
+  // FCM foreground subscription (cancelled in dispose)
+  StreamSubscription<RemoteMessage>? _onMessageSub;
 
   // Responsive screen variables
   bool _isLargeScreen = false;
@@ -142,6 +156,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _initialize();
   }
 
@@ -167,12 +182,21 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
     if (route is PageRoute) {
-      routeObserver.subscribe(this, route);
+      dashboardRouteObserver.subscribe(this, route);
     }
     // ✅ FIX: Defer setState to next frame (avoid setState-during-build)
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _checkScreenSize();
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed && _isActive) {
+      debugPrint('🔄 Employee dashboard resumed - refreshing notification count');
+      _loadNotificationCount();
+    }
   }
 
   void _checkScreenSize() {
@@ -193,7 +217,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   @override
   void dispose() {
-    routeObserver.unsubscribe(this);
+    dashboardRouteObserver.unsubscribe(this);
+    WidgetsBinding.instance.removeObserver(this);
+    _onMessageSub?.cancel();
     _scrollController.dispose();
     super.dispose();
   }
@@ -201,8 +227,19 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
   @override
   void didPopNext() {
     debugPrint('🔄 Returning to EmployeeDashboard - Auto refresh');
-    // ✅ FIX: Silent refresh (no loading spinner flash)
-    _loadData(showLoading: false);
+    if (!mounted || !_isActive || _isReloading) return;
+
+    _isReloading = true;
+    () async {
+      try {
+        // salon list / currency / timezone may have changed
+        await _loadAssignedSalons();
+        // ✅ Silent refresh (no loading spinner flash)
+        await _loadData(showLoading: false);
+      } finally {
+        _isReloading = false;
+      }
+    }();
   }
 
   // ==================== TIMEZONE INITIALIZATION ====================
@@ -455,14 +492,27 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   // ==================== LOAD NOTIFICATION COUNT ====================
 
+  /// ✅ Cached + guarded (same pattern as customer / owner dashboards)
   Future<void> _loadNotificationCount() async {
-    if (_employeeId.isEmpty) return;
+    if (_employeeId.isEmpty || _isRefreshingCount) return;
+    _isRefreshingCount = true;
 
     try {
+      // Show cached value instantly (no flicker)
+      final prefs = await SharedPreferences.getInstance();
+      final cacheKey = 'cached_barber_unread_count_$_employeeId';
+      final cached = prefs.getInt(cacheKey) ?? 0;
+      if (mounted && _unreadNotificationCount != cached) {
+        setState(() => _unreadNotificationCount = cached);
+      }
+
       final count = await _notificationService.getUnreadCountWithRole(
         userId: _employeeId,
         role: 'barber',
       );
+
+      await prefs.setInt(cacheKey, count);
+
       if (!mounted) return;
       setState(() {
         _unreadNotificationCount = count;
@@ -470,7 +520,66 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
       debugPrint('✅ Unread notifications: $count');
     } catch (e) {
       debugPrint('❌ Error loading notification count: $e');
+    } finally {
+      _isRefreshingCount = false;
     }
+  }
+
+  /// ✅ Same layout as the customer dashboard (48x48 tap target,
+  /// badge anchored at right:8 / top:8) so it looks right on mobile AND web.
+  Widget _buildNotificationIcon() {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.notifications_outlined, color: Colors.white),
+          onPressed: _viewNotifications,
+          tooltip: 'Notifications',
+          splashRadius: 24,
+          iconSize: 24,
+        ),
+        if (_unreadNotificationCount > 0)
+          Positioned(
+            right: 8,
+            top: 8,
+            child: GestureDetector(
+              onTap: _viewNotifications,
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                child: Text(
+                  _unreadNotificationCount > 99
+                      ? '99+'
+                      : '$_unreadNotificationCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// ✅ Prevents AppBar actions from overflowing on narrow screens
+  List<Widget> _safeActions(List<Widget> children) {
+    return [
+      Flexible(
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Row(mainAxisSize: MainAxisSize.min, children: children),
+        ),
+      ),
+    ];
   }
 
   // ==================== PROFILE IMAGE ====================
@@ -1233,12 +1342,21 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
 
   void _setupNotificationListeners() {
     try {
-      FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      _onMessageSub?.cancel();
+      _onMessageSub = FirebaseMessaging.onMessage.listen((
+        RemoteMessage message,
+      ) {
+        if (!mounted) return;
+
         if (message.data['type'] == 'new_booking_assigned') {
           _showNewAssignmentAlert(message);
           _loadData(showLoading: false);
         } else if (message.data['type'] == 'booking_reminder') {
           _showReminderAlert(message);
+          _loadNotificationCount();
+        } else {
+          // any other foreground message → keep the badge in sync
+          _loadNotificationCount();
         }
       });
     } catch (e) {
@@ -1534,7 +1652,8 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     }
   }
 
-  /// ✅ Redundant refresh removed (didPopNext already handles it)
+  /// ✅ Refreshes the unread count as soon as we come back
+  /// (didPopNext also refreshes everything; this is the explicit safety net)
   Future<void> _viewNotifications() async {
     if (!_hasPermission) {
       final shouldShow = await _showPermissionCardContext(
@@ -1545,7 +1664,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
     if (!mounted) return;
 
     await context.push('/notifications?role=barber');
-    // didPopNext fires on return — no explicit count refresh needed here
+    if (mounted) _loadNotificationCount();
   }
 
   void _viewBookingDetails(String customerName) {
@@ -2109,7 +2228,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
             ),
           ),
           title: null,
-          actions: [_buildProfileImage()],
+          actions: _safeActions([_buildProfileImage()]),
         ),
         drawer: SideMenu(
           userRole: 'barber',
@@ -2152,6 +2271,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
                     if (_isActive) {
                       await _loadAssignedSalons();
                       await _loadData();
+                      _setupNotificationListeners();
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -2186,52 +2306,11 @@ class _EmployeeDashboardState extends State<EmployeeDashboard> with RouteAware {
           ),
         ),
         title: null,
-        actions: [
-          Stack(
-            clipBehavior: Clip.none,
-            children: [
-              IconButton(
-                icon: const Icon(
-                  Icons.notifications_outlined,
-                  size: 22,
-                  color: Colors.white,
-                ),
-                onPressed: _viewNotifications,
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                constraints: const BoxConstraints(),
-              ),
-              if (_unreadNotificationCount > 0)
-                Positioned(
-                  right: 2,
-                  top: 2,
-                  child: Container(
-                    padding: const EdgeInsets.all(2),
-                    decoration: const BoxDecoration(
-                      color: Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                    constraints: const BoxConstraints(
-                      minWidth: 16,
-                      minHeight: 16,
-                    ),
-                    child: Text(
-                      _unreadNotificationCount > 99
-                          ? '99+'
-                          : '$_unreadNotificationCount',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 8,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ),
-            ],
-          ),
+        actions: _safeActions([
+          _buildNotificationIcon(),
           _buildProfileImage(),
           const SizedBox(width: 8),
-        ],
+        ]),
       ),
       drawer: SideMenu(
         userRole: 'barber',

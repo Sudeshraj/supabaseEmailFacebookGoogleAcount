@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_application_1/observers/route_observers.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
@@ -16,14 +17,17 @@ import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
 
 import '../subscription/providers/subscription_provider.dart';
 import '../../services/session_manager.dart';
 
-final RouteObserver<ModalRoute<void>> routeObserver =
-    RouteObserver<ModalRoute<void>>();
+/// Backward-compatible alias: other files that imported `routeObserver`
+/// from this file keep working, but it now points to the shared observer
+/// that is registered in the router (same one the customer dashboard uses).
+final RouteObserver<ModalRoute<void>> routeObserver = dashboardRouteObserver;
 
 class OwnerDashboard extends StatefulWidget {
   const OwnerDashboard({super.key});
@@ -33,7 +37,10 @@ class OwnerDashboard extends StatefulWidget {
 }
 
 class _OwnerDashboardState extends State<OwnerDashboard>
-    with SingleTickerProviderStateMixin, RouteAware {
+    with
+        WidgetsBindingObserver,
+        SingleTickerProviderStateMixin,
+        RouteAware {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   final NotificationService _notificationService = NotificationService();
@@ -90,6 +97,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   // Notification count
   int _unreadNotificationCount = 0;
+  bool _isRefreshingCount = false;
 
   // Responsive
   bool _isLargeScreen = false;
@@ -114,6 +122,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   bool _initialLoadDone = false;
   int _serviceMenuVersion = 0;
+
+  /// ✅ Guard so overlapping refreshes (e.g. dialog pops) don't pile up
+  bool _isReloading = false;
 
   // ============================================================
   // ✅ SALON TIMEZONE HELPERS
@@ -163,6 +174,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
@@ -181,11 +194,20 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
     if (route is PageRoute) {
-      routeObserver.subscribe(this, route);
+      dashboardRouteObserver.subscribe(this, route);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _checkScreenSize();
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('🔄 Owner dashboard resumed - refreshing notification count');
+      _loadNotificationCount();
+    }
   }
 
   void _checkScreenSize() {
@@ -209,14 +231,16 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   @override
   void didPopNext() {
     debugPrint('🔄 Dashboard: Returning from child screen, refreshing data');
-    if (mounted) setState(() => _serviceMenuVersion++);
+    if (!mounted) return;
+    setState(() => _serviceMenuVersion++);
     _refreshAllData();
     _refreshSubscription();
   }
 
   @override
   void dispose() {
-    routeObserver.unsubscribe(this);
+    dashboardRouteObserver.unsubscribe(this);
+    WidgetsBinding.instance.removeObserver(this);
     _onMessageSub?.cancel();
     _onOpenedSub?.cancel();
     _pulseCtrl.dispose();
@@ -226,7 +250,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   Future<void> _initializeAndLoad() async {
     await TimezoneService.initialize();
-    await _loadRoleIds();       // ✅ Load role ids first
+    await _loadRoleIds(); // ✅ Load role ids first
     await _ensureOwnerRole();
     if (!mounted) return;
     await _loadAllData();
@@ -525,10 +549,13 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   }
 
   // ============================================================
-  // ✅ NOTIFICATION COUNT
+  // ✅ NOTIFICATION COUNT (cached + guarded, same as customer)
   // ============================================================
 
   Future<void> _loadNotificationCount() async {
+    if (_isRefreshingCount) return;
+    _isRefreshingCount = true;
+
     try {
       final userId = supabase.auth.currentUser?.id;
       if (userId == null || userId.isEmpty) {
@@ -536,61 +563,86 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         return;
       }
 
+      // Show cached value instantly (no flicker)
+      final prefs = await SharedPreferences.getInstance();
+      final cacheKey = 'cached_owner_unread_count_$userId';
+      final cached = prefs.getInt(cacheKey) ?? 0;
+      if (mounted && _unreadNotificationCount != cached) {
+        setState(() => _unreadNotificationCount = cached);
+      }
+
       final count = await _notificationService.getUnreadCountWithRole(
         userId: userId,
         role: 'owner',
       );
 
+      await prefs.setInt(cacheKey, count);
+
       if (!mounted) return;
-      setState(() {
-        _unreadNotificationCount = count;
-      });
+      setState(() => _unreadNotificationCount = count);
       debugPrint('✅ Unread notifications (owner): $count');
     } catch (e) {
       debugPrint('❌ Error loading notification count: $e');
+    } finally {
+      _isRefreshingCount = false;
     }
   }
 
+  /// ✅ Same layout as the customer dashboard (48x48 tap target,
+  /// badge anchored at right:8 / top:8) so it looks right on mobile AND web.
   Widget _buildNotificationIcon() {
     return Stack(
       clipBehavior: Clip.none,
       children: [
         IconButton(
-          icon: const Icon(
-            Icons.notifications_outlined,
-            size: 22,
-            color: Colors.white,
-          ),
+          icon: const Icon(Icons.notifications_outlined, color: Colors.white),
           onPressed: _viewNotifications,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(),
+          tooltip: 'Notifications',
+          splashRadius: 24,
+          iconSize: 24,
         ),
         if (_unreadNotificationCount > 0)
           Positioned(
-            right: 0,
-            top: 0,
-            child: Container(
-              padding: const EdgeInsets.all(2),
-              decoration: const BoxDecoration(
-                color: Colors.red,
-                shape: BoxShape.circle,
-              ),
-              constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-              child: Text(
-                _unreadNotificationCount > 99
-                    ? '99+'
-                    : '$_unreadNotificationCount',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 8,
-                  fontWeight: FontWeight.bold,
+            right: 8,
+            top: 8,
+            child: GestureDetector(
+              onTap: _viewNotifications,
+              child: Container(
+                padding: const EdgeInsets.all(2),
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
                 ),
-                textAlign: TextAlign.center,
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                child: Text(
+                  _unreadNotificationCount > 99
+                      ? '99+'
+                      : '$_unreadNotificationCount',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
               ),
             ),
           ),
       ],
     );
+  }
+
+  /// ✅ Prevents AppBar actions from overflowing on narrow screens
+  List<Widget> _safeActions(List<Widget> children) {
+    return [
+      Flexible(
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerRight,
+          child: Row(mainAxisSize: MainAxisSize.min, children: children),
+        ),
+      ),
+    ];
   }
 
   Widget _buildPlanBadge() {
@@ -1746,6 +1798,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     );
   }
 
+  /// ✅ Refreshes the unread count as soon as we come back
   Future<void> _viewNotifications() async {
     if (!_hasPermission) {
       final shouldShow =
@@ -1753,7 +1806,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       if (shouldShow) return;
     }
     if (!mounted) return;
-    context.push('/notifications?role=owner');
+    await context.push('/notifications?role=owner');
+    if (mounted) _loadNotificationCount();
   }
 
   // ============================================================
@@ -2116,7 +2170,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             .from('user_roles')
             .select('user_id')
             .inFilter('user_id', barberIds)
-            .eq('role_id', _barberRoleId!)   // ✅ dynamic
+            .eq('role_id', _barberRoleId!) // ✅ dynamic
             .eq('status', 'active');
 
         if (!mounted) return;
@@ -2202,7 +2256,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             .from('user_roles')
             .select('user_id')
             .inFilter('user_id', barberIds)
-            .eq('role_id', _barberRoleId!)   // ✅ dynamic
+            .eq('role_id', _barberRoleId!) // ✅ dynamic
             .eq('status', 'active')
             .limit(1);
 
@@ -2243,7 +2297,19 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
   }
 
-  Future<void> _refreshAllData() async => _loadAllData();
+  /// ✅ Overlap-safe refresh: if a reload is already running, skip
+  Future<void> _refreshAllData() async {
+    if (_isReloading) {
+      debugPrint('⏭️ Reload already in progress, skipping');
+      return;
+    }
+    _isReloading = true;
+    try {
+      await _loadAllData();
+    } finally {
+      _isReloading = false;
+    }
+  }
 
   Future<void> _onServicesSaved() async {
     await _checkOnboardingStatus();
@@ -2320,6 +2386,9 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         } else if (message.data['type'] == 'new_booking_assigned') {
           _showNewAssignmentAlert(message);
           _loadNotificationCount();
+        } else {
+          // any other foreground message → keep the badge in sync
+          _loadNotificationCount();
         }
       });
 
@@ -2327,6 +2396,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
         RemoteMessage message,
       ) {
         if (!mounted) return;
+        _loadNotificationCount();
         if (message.data['type'] == 'new_booking') _viewBookings();
       });
 
@@ -2569,7 +2639,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ),
           ),
           title: null,
-          actions: [_buildProfileImage()],
+          actions: _safeActions([_buildProfileImage()]),
         ),
         drawer: SideMenu(
           userRole: 'owner',
@@ -2607,7 +2677,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
             ),
           ),
           title: null,
-          actions: [_buildProfileImage()],
+          actions: _safeActions([_buildProfileImage()]),
         ),
         drawer: SideMenu(
           userRole: 'owner',
@@ -2676,12 +2746,12 @@ class _OwnerDashboardState extends State<OwnerDashboard>
           ),
         ),
         title: null,
-        actions: [
+        actions: _safeActions([
           _buildPlanBadge(),
           _buildNotificationIcon(),
           _buildProfileImage(),
           const SizedBox(width: 8),
-        ],
+        ]),
       ),
       drawer: SideMenu(
         userRole: 'owner',
