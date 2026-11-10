@@ -15,7 +15,6 @@ import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
 import '../../extensions/context_extensions.dart';
@@ -93,7 +92,6 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   // Notification Unread Count
   int _unreadNotificationCount = 0;
-  bool _isRefreshingCount = false;
 
   // Timezone Variables
   bool _isTimezoneLoaded = false;
@@ -189,7 +187,10 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   @override
   void didPopNext() {
-    if (mounted) _loadDashboardData();
+    if (mounted) {
+    _loadDashboardData();
+    _loadUnreadCount();   
+  }
   }
 
   void _checkScreenSize() {
@@ -652,21 +653,24 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  Future<void> _viewNotifications() async {
-    if (!_hasPermission) {
-      final shouldShow = await _showPermissionCardContext(
-        action: 'notification',
-      );
-      if (shouldShow) return;
-    }
-
-    if (!mounted) return;
-    final result = await context.push('/notifications?role=customer');
-    await _refreshUnreadCount();
-    if (result == true) {
-      _loadDashboardData();
-    }
+Future<void> _viewNotifications() async {
+  if (!_hasPermission) {
+    final shouldShow = await _showPermissionCardContext(
+      action: 'notification',
+    );
+    if (shouldShow) return;
   }
+
+  if (!mounted) return;
+  final result = await context.push('/notifications?role=customer');
+
+  // ✅ Side menu එකේ වගේම live fetch
+  await _loadUnreadCount();
+
+  if (result == true) {
+    _loadDashboardData();
+  }
+}
 
   void _viewLoyaltyProgram() {
     context.push('/customer/loyalty');
@@ -1401,58 +1405,24 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  Future<void> _loadUnreadCount() async {
-    if (_isRefreshingCount) return;
+Future<void> _loadUnreadCount() async {
+  try {
+    final user = supabase.auth.currentUser;
+    if (user == null) return;
 
-    try {
-      _isRefreshingCount = true;
-      final user = supabase.auth.currentUser;
-      if (user == null) return;
+    final count = await _notificationService.getUnreadCountWithRole(
+      userId: user.id,
+      role: 'customer',
+    );
 
-      final prefs = await SharedPreferences.getInstance();
-      final cachedCount = prefs.getInt('cached_unread_count_${user.id}') ?? 0;
-
-      if (mounted && _unreadNotificationCount != cachedCount) {
-        setState(() {
-          _unreadNotificationCount = cachedCount;
-        });
-      }
-
-      final count = await _notificationService.getUnreadCount(user.id);
-
-      await prefs.setInt('cached_unread_count_${user.id}', count);
-
-      if (mounted) {
-        setState(() {
-          _unreadNotificationCount = count;
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error loading unread count: $e');
-    } finally {
-      _isRefreshingCount = false;
-    }
+    if (!mounted) return;
+    setState(() => _unreadNotificationCount = count);
+    debugPrint('✅ Unread notifications (customer): $count');
+  } catch (e) {
+    debugPrint('❌ Error loading unread count: $e');
   }
+}
 
-  Future<void> _refreshUnreadCount() async {
-    try {
-      final user = supabase.auth.currentUser;
-      if (user == null) return;
-
-      final count = await _notificationService.getUnreadCount(user.id);
-
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('cached_unread_count_${user.id}', count);
-
-      if (mounted) {
-        setState(() {
-          _unreadNotificationCount = count;
-        });
-      }
-    } catch (e) {
-      debugPrint('❌ Error refreshing unread count: $e');
-    }
-  }
 
   // ============================================================
   // ✅ APPLY OFFER

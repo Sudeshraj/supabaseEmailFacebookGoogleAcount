@@ -17,7 +17,6 @@ import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
 
@@ -97,7 +96,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   // Notification count
   int _unreadNotificationCount = 0;
-  bool _isRefreshingCount = false;
 
   // Responsive
   bool _isLargeScreen = false;
@@ -552,41 +550,27 @@ class _OwnerDashboardState extends State<OwnerDashboard>
   // ✅ NOTIFICATION COUNT (cached + guarded, same as customer)
   // ============================================================
 
-  Future<void> _loadNotificationCount() async {
-    if (_isRefreshingCount) return;
-    _isRefreshingCount = true;
-
-    try {
-      final userId = supabase.auth.currentUser?.id;
-      if (userId == null || userId.isEmpty) {
-        debugPrint('⚠️ No user ID for notification count');
-        return;
-      }
-
-      // Show cached value instantly (no flicker)
-      final prefs = await SharedPreferences.getInstance();
-      final cacheKey = 'cached_owner_unread_count_$userId';
-      final cached = prefs.getInt(cacheKey) ?? 0;
-      if (mounted && _unreadNotificationCount != cached) {
-        setState(() => _unreadNotificationCount = cached);
-      }
-
-      final count = await _notificationService.getUnreadCountWithRole(
-        userId: userId,
-        role: 'owner',
-      );
-
-      await prefs.setInt(cacheKey, count);
-
-      if (!mounted) return;
-      setState(() => _unreadNotificationCount = count);
-      debugPrint('✅ Unread notifications (owner): $count');
-    } catch (e) {
-      debugPrint('❌ Error loading notification count: $e');
-    } finally {
-      _isRefreshingCount = false;
+Future<void> _loadNotificationCount() async {
+  try {
+    final userId = supabase.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) {
+      debugPrint('⚠️ No user ID for notification count');
+      return;
     }
+
+    // ✅ Side menu එකේ වගේම — no cache, live fetch
+    final count = await _notificationService.getUnreadCountWithRole(
+      userId: userId,
+      role: 'owner',
+    );
+
+    if (!mounted) return;
+    setState(() => _unreadNotificationCount = count);
+    debugPrint('✅ Unread notifications (owner): $count');
+  } catch (e) {
+    debugPrint('❌ Error loading notification count: $e');
   }
+}
 
   /// ✅ Same layout as the customer dashboard (48x48 tap target,
   /// badge anchored at right:8 / top:8) so it looks right on mobile AND web.
@@ -1807,7 +1791,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     }
     if (!mounted) return;
     await context.push('/notifications?role=owner');
-    if (mounted) _loadNotificationCount();
+    if (mounted) await _loadNotificationCount();
   }
 
   // ============================================================
@@ -2354,6 +2338,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       await _loadSubscription();
       if (token != _switchOperationToken) return;
+
 
       debugPrint('✅ Subscription reloaded after salon switch');
     } catch (e) {

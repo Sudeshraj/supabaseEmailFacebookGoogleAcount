@@ -16,7 +16,6 @@ import 'package:flutter_application_1/widgets/section_header.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
@@ -103,7 +102,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
 
   // Notification count
   int _unreadNotificationCount = 0;
-  bool _isRefreshingCount = false;
 
   // ✅ Guard so overlapping refreshes (e.g. dialog pops) don't pile up
   bool _isReloading = false;
@@ -224,23 +222,25 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     super.dispose();
   }
 
-  @override
-  void didPopNext() {
-    debugPrint('🔄 Returning to EmployeeDashboard - Auto refresh');
-    if (!mounted || !_isActive || _isReloading) return;
+@override
+void didPopNext() {
+  debugPrint('🔄 Returning to EmployeeDashboard - Auto refresh');
+  if (!mounted || !_isActive) return;
 
-    _isReloading = true;
-    () async {
-      try {
-        // salon list / currency / timezone may have changed
-        await _loadAssignedSalons();
-        // ✅ Silent refresh (no loading spinner flash)
-        await _loadData(showLoading: false);
-      } finally {
-        _isReloading = false;
-      }
-    }();
-  }
+  // Notification count එක side menu එකේ වගේම refresh
+  _loadNotificationCount();
+
+  if (_isReloading) return;
+  _isReloading = true;
+  () async {
+    try {
+      await _loadAssignedSalons();
+      await _loadData(showLoading: false);
+    } finally {
+      _isReloading = false;
+    }
+  }();
+}
 
   // ==================== TIMEZONE INITIALIZATION ====================
 
@@ -492,38 +492,23 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
 
   // ==================== LOAD NOTIFICATION COUNT ====================
 
-  /// ✅ Cached + guarded (same pattern as customer / owner dashboards)
-  Future<void> _loadNotificationCount() async {
-    if (_employeeId.isEmpty || _isRefreshingCount) return;
-    _isRefreshingCount = true;
+Future<void> _loadNotificationCount() async {
+  if (_employeeId.isEmpty) return;
 
-    try {
-      // Show cached value instantly (no flicker)
-      final prefs = await SharedPreferences.getInstance();
-      final cacheKey = 'cached_barber_unread_count_$_employeeId';
-      final cached = prefs.getInt(cacheKey) ?? 0;
-      if (mounted && _unreadNotificationCount != cached) {
-        setState(() => _unreadNotificationCount = cached);
-      }
+  try {
+    // ✅ Side menu එකේ වගේම — no guard, no cache
+    final count = await _notificationService.getUnreadCountWithRole(
+      userId: _employeeId,
+      role: 'barber',
+    );
 
-      final count = await _notificationService.getUnreadCountWithRole(
-        userId: _employeeId,
-        role: 'barber',
-      );
-
-      await prefs.setInt(cacheKey, count);
-
-      if (!mounted) return;
-      setState(() {
-        _unreadNotificationCount = count;
-      });
-      debugPrint('✅ Unread notifications: $count');
-    } catch (e) {
-      debugPrint('❌ Error loading notification count: $e');
-    } finally {
-      _isRefreshingCount = false;
-    }
+    if (!mounted) return;
+    setState(() => _unreadNotificationCount = count);
+    debugPrint('✅ Unread notifications (barber): $count');
+  } catch (e) {
+    debugPrint('❌ Error loading notification count: $e');
   }
+}
 
   /// ✅ Same layout as the customer dashboard (48x48 tap target,
   /// badge anchored at right:8 / top:8) so it looks right on mobile AND web.
@@ -951,7 +936,6 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     try {
       await _loadAppointments();
       await _loadStatistics();
-      await _loadNotificationCount();
 
       if (mounted) {
         setState(() => _isLoading = false);
@@ -1664,7 +1648,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     if (!mounted) return;
 
     await context.push('/notifications?role=barber');
-    if (mounted) _loadNotificationCount();
+    if (mounted) await _loadNotificationCount();
   }
 
   void _viewBookingDetails(String customerName) {
