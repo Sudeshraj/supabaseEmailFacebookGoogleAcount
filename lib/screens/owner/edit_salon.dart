@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/alertBox/time_picker_dialog.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
+import 'package:flutter_application_1/widgets/service_menu_editor.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,6 +13,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
 import '../../services/timezone_service.dart';
 import '../../utils/image_compression.dart';
+import '../../utils/map_link_utils.dart';
+import 'package:geolocator/geolocator.dart';
 
 // ====================================================================
 // EDIT BUSINESS SCREEN (class name EditSalonScreen is unchanged)
@@ -80,6 +83,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // Phone exactly as saved in the DB (VIEW mode)
   String _dbPhone = '';
 
+  // rating + followers (view mode info card)
+  double _averageRating = 0.0;
+  int _totalReviews = 0;
+  int _followersCount = 0;
+  bool _isLoadingRating = true;
+
   // ==================== PHONE COUNTRY CODE ====================
   // ISO country code of the selected dial code (e.g. 'LK' → +94)
   String _phoneIso = _kDefaultPhoneIso;
@@ -89,9 +98,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       TimezoneService.countryDialList;
 
   Map<String, String> get _currentDialEntry => _supportedDialCodes.firstWhere(
-    (c) => c['iso'] == _phoneIso,
-    orElse: () => _supportedDialCodes.first,
-  );
+        (c) => c['iso'] == _phoneIso,
+        orElse: () => _supportedDialCodes.first,
+      );
 
   String get _currentDial => _currentDialEntry['dial']!;
   String get _currentDialFlag => _currentDialEntry['flag']!;
@@ -101,12 +110,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   String _countryIso = _kDefaultPhoneIso;
 
   Map<String, String> get _countryEntry => _supportedDialCodes.firstWhere(
-    (c) => c['iso'] == _countryIso,
-    orElse: () => _supportedDialCodes.first,
-  );
+        (c) => c['iso'] == _countryIso,
+        orElse: () => _supportedDialCodes.first,
+      );
 
   String get _countryName => _countryEntry['name']!;
   String get _countryFlag => _countryEntry['flag']!;
+
 
   // Images
   File? _logoFile;
@@ -185,6 +195,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     return null;
   }
 
+
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
@@ -195,7 +206,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ✅ TIMEZONE DISPLAY HELPERS (with fallback)
   // ============================================
   String _getSalonTimezoneDisplay() {
-    final tz = _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
+    final tz =
+        _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
     return tz;
   }
 
@@ -209,9 +221,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final salonTz = _salonTimezone.isEmpty
         ? _kDefaultSalonTimezone
         : _salonTimezone;
-    final userTz = _userTimezone.isEmpty
-        ? _kDefaultSalonTimezone
-        : _userTimezone;
+    final userTz =
+        _userTimezone.isEmpty ? _kDefaultSalonTimezone : _userTimezone;
     return salonTz == userTz;
   }
 
@@ -255,8 +266,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         // shared dial code (+1): prefer the business country
         final sameDialIso = _supportedDialCodes.firstWhere(
           (c) => c['iso'] == _countryIso && c['dial'] == bestDial,
-          orElse: () =>
-              _supportedDialCodes.firstWhere((c) => c['dial'] == bestDial),
+          orElse: () => _supportedDialCodes.firstWhere(
+            (c) => c['dial'] == bestDial,
+          ),
         )['iso']!;
         _phoneIso = sameDialIso;
         _phoneController.text = digits.substring(bestDial.length - 1);
@@ -289,6 +301,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     _provinceController.dispose();
     _districtController.dispose();
     _cityController.dispose();
+    _mapUrlController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
     _descriptionController.dispose();
@@ -304,8 +317,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       await TimezoneService.initialize();
       final prefs = await SharedPreferences.getInstance();
 
-      _userTimezone =
-          prefs.getString(TimezoneService.kUserTimezone) ??
+      _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
           TimezoneService.getCurrentTimezone();
 
       // ✅ Fallback if empty
@@ -341,6 +353,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       // business types list (own try/catch inside: a failure here must
       // not hide the business data)
       await _loadBusinessTypes();
+      // province / district / city dropdowns (re-select the saved values)
+      await _loadLocationConfig(restoreFromText: true);
+      // rating + followers for the profile card
+      await _loadViewStats();
     } catch (e) {
       debugPrint('❌ Error loading data: $e');
       if (mounted) {
@@ -405,6 +421,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     _districtController.text = response['district']?.toString() ?? '';
     _cityController.text = response['city']?.toString() ?? '';
 
+    // ✅ MAP LOCATION (coordinates + link as saved)
+    _latitude = (response['latitude'] as num?)?.toDouble();
+    _longitude = (response['longitude'] as num?)?.toDouble();
+    _mapUrlController.text = response['map_url']?.toString() ?? '';
+    _mapUrlError = null;
+
     // ✅ PHONE (needs _countryIso above for old local numbers)
     _dbPhone = (response['phone'] as String? ?? '').trim();
     _applyStoredPhone(_dbPhone);
@@ -415,12 +437,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final savedCurrencyCode = response['currency_code']?.toString();
     if (savedCurrencyCode != null && savedCurrencyCode.isNotEmpty) {
       _dbCurrencyCode = savedCurrencyCode;
-      _dbCurrencySymbol =
-          response['currency_symbol']?.toString() ??
+      _dbCurrencySymbol = response['currency_symbol']?.toString() ??
           _getSymbolForCode(_dbCurrencyCode);
     } else {
-      _dbCurrencyCode = TimezoneService.getCurrencyForTimezone(_salonTimezone);
-      _dbCurrencySymbol = TimezoneService.getSymbolForCurrency(_dbCurrencyCode);
+      _dbCurrencyCode =
+          TimezoneService.getCurrencyForTimezone(_salonTimezone);
+      _dbCurrencySymbol =
+          TimezoneService.getSymbolForCurrency(_dbCurrencyCode);
     }
     // Working copy for EDIT mode
     _salonCurrencyCode = _dbCurrencyCode;
@@ -532,6 +555,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     switch (step) {
       case 0:
         return _isBusinessTypeValid &&
+            _mapUrlError == null &&
             _nameController.text.trim().isNotEmpty &&
             _cityController.text.trim().isNotEmpty &&
             _isPhoneValid &&
@@ -654,11 +678,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       selectedIso: _countryIso,
       showDial: false,
       onSelected: (iso) {
+        if (iso == _countryIso) return;
         setState(() {
           _countryIso = iso;
           // phone empty නම් phone code එකත් country එකත් එක්ක sync කරන්න
           if (_phoneController.text.trim().isEmpty) _phoneIso = iso;
         });
+        // old province / district / city belong to the old country
+        _onCountryChanged();
       },
     );
   }
@@ -804,6 +831,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       ),
     );
   }
+
 
   // ============================================
   // IMAGE FUNCTIONS
@@ -1053,34 +1081,25 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     if (mounted) setState(() => _isUploadingLogo = true);
     try {
       if (_logoWebBytes != null) {
-        await supabase.storage
-            .from('salon-images')
-            .uploadBinary(
+        await supabase.storage.from('salon-images').uploadBinary(
               filePath,
               _logoWebBytes!,
-              fileOptions: const FileOptions(
-                upsert: true,
-                contentType: 'image/jpeg',
-              ),
+              fileOptions:
+                  const FileOptions(upsert: true, contentType: 'image/jpeg'),
             );
       } else if (_logoFile != null) {
-        await supabase.storage
-            .from('salon-images')
-            .upload(
+        await supabase.storage.from('salon-images').upload(
               filePath,
               _logoFile!,
-              fileOptions: const FileOptions(
-                upsert: true,
-                contentType: 'image/jpeg',
-              ),
+              fileOptions:
+                  const FileOptions(upsert: true, contentType: 'image/jpeg'),
             );
       } else {
         return _currentLogoUrl;
       }
 
-      final baseUrl = supabase.storage
-          .from('salon-images')
-          .getPublicUrl(filePath);
+      final baseUrl =
+          supabase.storage.from('salon-images').getPublicUrl(filePath);
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading logo: $e');
@@ -1110,34 +1129,25 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     if (mounted) setState(() => _isUploadingCover = true);
     try {
       if (_coverWebBytes != null) {
-        await supabase.storage
-            .from('salon-images')
-            .uploadBinary(
+        await supabase.storage.from('salon-images').uploadBinary(
               filePath,
               _coverWebBytes!,
-              fileOptions: const FileOptions(
-                upsert: true,
-                contentType: 'image/jpeg',
-              ),
+              fileOptions:
+                  const FileOptions(upsert: true, contentType: 'image/jpeg'),
             );
       } else if (_coverFile != null) {
-        await supabase.storage
-            .from('salon-images')
-            .upload(
+        await supabase.storage.from('salon-images').upload(
               filePath,
               _coverFile!,
-              fileOptions: const FileOptions(
-                upsert: true,
-                contentType: 'image/jpeg',
-              ),
+              fileOptions:
+                  const FileOptions(upsert: true, contentType: 'image/jpeg'),
             );
       } else {
         return _currentCoverUrl;
       }
 
-      final baseUrl = supabase.storage
-          .from('salon-images')
-          .getPublicUrl(filePath);
+      final baseUrl =
+          supabase.storage.from('salon-images').getPublicUrl(filePath);
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading cover: $e');
@@ -1168,8 +1178,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final confirmed = await showCustomAlert(
       context: context,
       title: "Save Changes?",
-      message:
-          'Do you want to save changes to "${_nameController.text.trim()}"?\n\n'
+      message: 'Do you want to save changes to "${_nameController.text.trim()}"?\n\n'
           '${_selectedBusinessTypeName != null ? 'Type: $_selectedBusinessTypeName\n' : ''}'
           'Location: ${_titleCase(_cityController.text)}, $_countryName\n'
           '${phoneE164 != null ? 'Phone: $phoneE164\n' : ''}'
@@ -1253,6 +1262,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         'address': _nullIfEmpty(_addressController.text),
         // structured location (used for filters)
         'country_code': _countryIso,
+        // map location (coordinates + optional link). The link is checked
+        // again by the database trigger validate_salon_map_url.
+        'latitude': _latitudeForSave,
+        'longitude': _longitudeForSave,
+        'map_url': _mapUrlForSave(),
         'province': _nullIfEmpty(_titleCase(_provinceController.text)),
         'district': _nullIfEmpty(_titleCase(_districtController.text)),
         'city': _nullIfEmpty(_titleCase(_cityController.text)),
@@ -1274,7 +1288,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         'updated_at': DateTime.now().toIso8601String(),
       };
 
-      await supabase.from('salons').update(updateData).eq('id', widget.salonId);
+      await supabase
+          .from('salons')
+          .update(updateData)
+          .eq('id', widget.salonId);
 
       if (!mounted) return;
 
@@ -1325,11 +1342,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(
-              Icons.warning_amber_rounded,
-              color: Colors.red,
-              size: 28,
-            ),
+            const Icon(Icons.warning_amber_rounded,
+                color: Colors.red, size: 28),
             const SizedBox(width: 12),
             Text(
               'Delete Business',
@@ -1407,7 +1421,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             ),
             child: const Text(
               'Delete Permanently',
@@ -1580,10 +1595,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
             ),
           ),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 10,
-          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: AppTheme.primary, width: 2),
@@ -1607,149 +1620,900 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // VIEW MODE — read-only widgets
   // ============================================
 
-  Widget _buildViewContent() {
-    final isDark = _isDark;
-    final locationLine = _composeFullAddress();
+  // ============================================
+  // VIEW MODE — business profile
+  //
+  // Same design as the customer's salon profile screen (cover, logo, info
+  // card, about, contact) but WITHOUT the customer actions: no booking,
+  // no VIP booking, no follow, no WhatsApp. The Service Menu is the same
+  // ServiceMenuEditor the owner dashboard uses, so services can be added /
+  // edited right here. The Edit button opens the edit forms (wizard).
+  // ============================================
 
-    String dash(String v) => v.trim().isEmpty ? '—' : v.trim();
+  String _dash(String v) => v.trim().isEmpty ? '—' : v.trim();
+
+  bool _isOpenNow() {
+    final open = _openTimeSalonLocal;
+    final close = _closeTimeSalonLocal;
+    if (open == null || close == null) return false;
+    try {
+      final tz =
+          _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+      final now = TimezoneService.getNowInTimezone(tz);
+      final nowMinutes = now.hour * 60 + now.minute;
+      final openMinutes = open.hour * 60 + open.minute;
+      final closeMinutes = close.hour * 60 + close.minute;
+      if (closeMinutes < openMinutes) {
+        return nowMinutes >= openMinutes || nowMinutes <= closeMinutes;
+      }
+      return nowMinutes >= openMinutes && nowMinutes <= closeMinutes;
+    } catch (e) {
+      debugPrint('Error checking open status: $e');
+      return false;
+    }
+  }
+
+  /// rating + followers shown in the info card
+  Future<void> _loadViewStats() async {
+    try {
+      final reviews = await supabase
+          .from('reviews')
+          .select('overall_rating')
+          .eq('salon_id', widget.salonId)
+          .eq('status', 'published');
+
+      final followers = await supabase
+          .from('salon_followers')
+          .select('id')
+          .eq('salon_id', widget.salonId);
+
+      if (!mounted) return;
+
+      double total = 0;
+      for (final r in reviews) {
+        total += (r['overall_rating'] as num?)?.toDouble() ?? 0;
+      }
+
+      setState(() {
+        _totalReviews = reviews.length;
+        _averageRating = reviews.isEmpty ? 0 : total / reviews.length;
+        _followersCount = followers.length;
+        _isLoadingRating = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading rating / followers: $e');
+      if (!mounted) return;
+      setState(() => _isLoadingRating = false);
+    }
+  }
+
+  /// services are changed inside ServiceMenuEditor itself
+  Future<void> _onServicesSaved() async {}
+
+  Widget _buildViewContent() {
+    final isWeb = _isWeb;
+    final isOpen = _isOpenNow();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildCoverSectionReadOnly(),
-        Transform.translate(
-          offset: const Offset(16, -40),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: _buildLogoSeparateReadOnly(),
+        _buildViewCover(isWeb),
+        _buildViewLogoAndActions(isWeb),
+        Container(
+          margin: const EdgeInsets.only(top: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildViewInfoSection(isOpen),
+              const SizedBox(height: 20),
+              _buildViewServiceMenuSection(),
+              const SizedBox(height: 24),
+              _buildViewAboutSection(),
+              _buildViewDetailsSection(),
+              const SizedBox(height: 24),
+              _buildViewContactSection(),
+              const SizedBox(height: 40),
+            ],
           ),
         ),
-        const SizedBox(height: 16),
+      ],
+    );
+  }
 
-        Text(
-          _nameController.text.trim().isEmpty
-              ? 'Unnamed Business'
-              : _nameController.text.trim(),
-          style: TextStyle(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: isDark ? Colors.white : Colors.black87,
+  // ---------------- cover + logo ----------------
+
+  Widget _buildViewCover(bool isWeb) {
+    final topInset = MediaQuery.paddingOf(context).top;
+
+    return Stack(
+      children: [
+        SizedBox(
+          width: double.infinity,
+          height: isWeb ? 350 : 280,
+          child: _buildViewCoverImage(),
+        ),
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 100,
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.3),
+                  Colors.black.withValues(alpha: 0.6),
+                ],
+              ),
+            ),
           ),
         ),
-        if (_selectedBusinessTypeName != null) ...[
-          const SizedBox(height: 4),
-          Text(
-            _selectedBusinessTypeName!,
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppTheme.primary,
+        Positioned(
+          top: topInset + 12,
+          left: 16,
+          child: _buildViewCircleButton(
+            icon: Icons.arrow_back,
+            tooltip: 'Back',
+            onTap: () => Navigator.pop(context),
+          ),
+        ),
+        Positioned(
+          top: topInset + 12,
+          right: 16,
+          child: Row(
+            children: [
+              _buildViewCircleButton(
+                icon: Icons.edit,
+                tooltip: 'Edit',
+                onTap: _enterEditMode,
+              ),
+              const SizedBox(width: 8),
+              _buildViewCircleButton(
+                icon: Icons.delete_outline,
+                tooltip: 'Delete Business',
+                onTap: _isDeleting ? null : _deleteSalon,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildViewCircleButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onTap,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.35),
+        shape: const CircleBorder(),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(icon, color: Colors.white, size: 22),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildViewCoverImage() {
+    final url = _currentCoverUrl;
+    if (url != null && url.isNotEmpty) {
+      return Image.network(
+        url,
+        width: double.infinity,
+        height: double.infinity,
+        fit: BoxFit.cover,
+        errorBuilder: (context, error, stackTrace) =>
+            _buildViewDefaultCover(),
+      );
+    }
+    return _buildViewDefaultCover();
+  }
+
+  Widget _buildViewDefaultCover() {
+    return Container(
+      width: double.infinity,
+      height: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: _isDark
+              ? [
+                  AppTheme.primary.withValues(alpha: 0.6),
+                  AppTheme.primary.withValues(alpha: 0.7),
+                  AppTheme.primary.withValues(alpha: 0.5),
+                ]
+              : [
+                  AppTheme.primary.withValues(alpha: 0.8),
+                  AppTheme.primary.withValues(alpha: 0.9),
+                  AppTheme.primary,
+                ],
+        ),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.storefront,
+              size: 60,
+              color: Colors.white.withValues(alpha: 0.7),
+            ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Text(
+                _nameController.text.trim().isEmpty
+                    ? 'Business'
+                    : _nameController.text.trim(),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white.withValues(alpha: 0.9),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildViewLogoAndActions(bool isWeb) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Transform.translate(
+            offset: const Offset(0, -40),
+            child: _buildViewLogo(isWeb),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (_hasMapLocation) ...[
+                    OpenInMapsButton(
+                      latitude: _latitude,
+                      longitude: _longitude,
+                      mapUrl: _mapUrlController.text,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  ElevatedButton.icon(
+                    onPressed: _enterEditMode,
+                    icon: const Icon(Icons.edit, size: 18),
+                    label: const Text('Edit'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: context.primaryColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      elevation: 0,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
-        if (locationLine.isNotEmpty) ...[
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Icon(
-                Icons.location_on,
-                size: 16,
-                color: isDark ? Colors.white60 : Colors.grey,
+      ),
+    );
+  }
+
+  Widget _buildViewLogo(bool isWeb) {
+    final logoSize = isWeb ? 120.0 : 90.0;
+    final url = _currentLogoUrl;
+    final hasLogo = url != null && url.isNotEmpty;
+    final name = _nameController.text.trim();
+
+    return Container(
+      width: logoSize,
+      height: logoSize,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: _isDark ? Colors.grey[800]! : Colors.white,
+          width: isWeb ? 4 : 3,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        image: hasLogo
+            ? DecorationImage(image: NetworkImage(url), fit: BoxFit.cover)
+            : null,
+      ),
+      child: !hasLogo
+          ? Container(
+              decoration: const BoxDecoration(
+                color: AppTheme.primary,
+                shape: BoxShape.circle,
               ),
-              const SizedBox(width: 4),
-              Expanded(
+              child: Center(
                 child: Text(
-                  locationLine,
+                  name.isEmpty ? 'B' : name.substring(0, 1).toUpperCase(),
                   style: TextStyle(
-                    fontSize: 13,
-                    color: isDark ? Colors.white60 : Colors.grey[600],
+                    fontSize: isWeb ? 48 : 36,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            )
+          : null,
+    );
+  }
+
+  // ---------------- info card ----------------
+
+  Widget _buildViewStarRating(double rating) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (index) {
+        if (index < rating.floor()) {
+          return const Icon(Icons.star, color: Colors.amber, size: 16);
+        } else if (index < rating && rating - index > 0.5) {
+          return const Icon(Icons.star_half, color: Colors.amber, size: 16);
+        } else {
+          return Icon(
+            Icons.star_border,
+            color: _isDark
+                ? Colors.white30
+                : Colors.amber.withValues(alpha: 0.7),
+            size: 16,
+          );
+        }
+      }),
+    );
+  }
+
+  Widget _buildViewInfoSection(bool isOpen) {
+    final locationLine = _composeFullAddress();
+    final openText = _openTimeSalonLocal?.format(context) ?? '—';
+    final closeText = _closeTimeSalonLocal?.format(context) ?? '—';
+    final showUserTime = !_isSameTimezone &&
+        _openTimeLocal != null &&
+        _closeTimeLocal != null;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: context.cardColor,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              _nameController.text.trim().isEmpty
+                  ? 'Unnamed Business'
+                  : _nameController.text.trim(),
+              style: context.headlineMedium.copyWith(color: context.textColor),
+            ),
+            if (_selectedBusinessTypeName != null) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  _selectedBusinessTypeName!,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary,
                   ),
                 ),
               ),
             ],
+            const SizedBox(height: 6),
+            if (!_isLoadingRating)
+              Wrap(
+                spacing: 16,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _buildViewStarRating(_averageRating),
+                      const SizedBox(width: 6),
+                      Text(
+                        _averageRating.toStringAsFixed(1),
+                        style: context.bodyMedium.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: context.textColor,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '($_totalReviews reviews)',
+                        style: context.bodySmall.copyWith(
+                          color: context.secondaryTextColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  Container(
+                    width: 4,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: _isDark ? Colors.white30 : Colors.grey[400],
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.people,
+                          size: 16, color: context.secondaryTextColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$_followersCount followers',
+                        style: context.bodySmall.copyWith(
+                          color: context.secondaryTextColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            if (locationLine.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Icon(Icons.location_on,
+                        size: 16, color: context.secondaryTextColor),
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      locationLine,
+                      style: context.bodyMedium.copyWith(
+                        color: context.secondaryTextColor,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 16,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.access_time,
+                        size: 16, color: context.secondaryTextColor),
+                    const SizedBox(width: 6),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          '$openText - $closeText',
+                          style: context.bodyMedium.copyWith(
+                            color: context.secondaryTextColor,
+                          ),
+                        ),
+                        if (showUserTime)
+                          Text(
+                            'Your time: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)}',
+                            style: context.bodySmall.copyWith(
+                              color: _isDark
+                                  ? Colors.blue[300]
+                                  : Colors.blue[700],
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isOpen
+                        ? Colors.green.withValues(alpha: 0.1)
+                        : Colors.red.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: isOpen ? Colors.green : Colors.red,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        isOpen ? 'Open Now' : 'Closed',
+                        style: context.bodySmall.copyWith(
+                          color: isOpen ? Colors.green : Colors.red,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------- service menu (same as the owner dashboard) ----------------
+
+  Widget _buildViewServiceMenuSection() {
+    final isDark = _isDark;
+    const accent = Colors.green;
+    final paper = isDark ? const Color(0xFF17201A) : const Color(0xFFF6FBF6);
+
+    final horizontalMargin = _isWeb ? 16.0 : 0.0;
+    final horizontalPadding = _isWeb ? 20.0 : 10.0;
+    final cornerRadius = _isWeb ? 20.0 : 0.0;
+
+    return Container(
+      margin: EdgeInsets.symmetric(horizontal: horizontalMargin),
+      decoration: BoxDecoration(
+        color: paper,
+        borderRadius: BorderRadius.circular(cornerRadius),
+        border: _isWeb
+            ? Border.all(
+                color: accent.withValues(alpha: isDark ? 0.35 : 0.25),
+                width: 1.2,
+              )
+            : Border(
+                top: BorderSide(
+                  color: accent.withValues(alpha: isDark ? 0.3 : 0.2),
+                ),
+                bottom: BorderSide(
+                  color: accent.withValues(alpha: isDark ? 0.3 : 0.2),
+                ),
+              ),
+        boxShadow: _isWeb
+            ? [
+                BoxShadow(
+                  color: accent.withValues(alpha: isDark ? 0.12 : 0.14),
+                  blurRadius: 16.0,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
+      ),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          16,
+          horizontalPadding,
+          16,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: isDark ? 0.24 : 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.menu_book_rounded,
+                    size: 20,
+                    color: accent,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    'Service Menu',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 19,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.3,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Categories contain services. Services contain variants.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11.5,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Divider(
+                    color: accent.withValues(alpha: 0.35),
+                    height: 1,
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  child: Icon(
+                    Icons.auto_awesome,
+                    size: 13,
+                    color: accent.withValues(alpha: 0.7),
+                  ),
+                ),
+                Expanded(
+                  child: Divider(
+                    color: accent.withValues(alpha: 0.35),
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            ServiceMenuEditor(
+              key: ValueKey('service_menu_${widget.salonId}'),
+              salonId: widget.salonId,
+              showHeader: false,
+              accentColor: accent,
+              onSaved: _onServicesSaved,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------- about / details / contact ----------------
+
+  Widget _buildViewAboutSection() {
+    final description = _descriptionController.text.trim();
+    if (description.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'About',
+            style: context.titleLarge.copyWith(color: context.textColor),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: context.cardColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: context.dividerColor),
+            ),
+            child: Text(
+              description,
+              style: context.bodyMedium.copyWith(
+                color: context.secondaryTextColor,
+                height: 1.5,
+              ),
+            ),
           ),
         ],
-        const SizedBox(height: 16),
+      ),
+    );
+  }
 
-        _buildInfoBanner(
-          'Viewing data exactly as saved in the database. Tap the Edit button to make changes.',
-          Icons.info_outline,
-          Colors.blue,
+  /// the saved data that is not part of the profile design above
+  Widget _buildViewDetailsSection() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: _buildViewInfoCard(
+        title: 'Business Details',
+        icon: Icons.store,
+        rows: [
+          _ViewRow(
+            label: 'Business Type',
+            value: _selectedBusinessTypeName ?? '—',
+          ),
+          _ViewRow(label: 'Country', value: '$_countryFlag $_countryName'),
+          _ViewRow(
+            label: _levelLabel(1, 'Province / State'),
+            value: _dash(_provinceController.text),
+          ),
+          _ViewRow(
+            label: _levelLabel(2, 'District'),
+            value: _dash(_districtController.text),
+          ),
+          _ViewRow(
+            label: _levelLabel(3, 'City / Town'),
+            value: _dash(_cityController.text),
+          ),
+          _ViewRow(
+            label: 'Business Timezone',
+            value: _getSalonTimezoneDisplay(),
+          ),
+          _ViewRow(
+            label: 'Currency',
+            value: '$_dbCurrencyCode ($_dbCurrencySymbol)',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildViewContactTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    VoidCallback? onTap,
+  }) {
+    return ListTile(
+      leading: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: context.primaryColor.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(12),
         ),
-
-        _buildViewInfoCard(
-          title: 'Basic Information',
-          icon: Icons.store,
-          rows: [
-            _ViewRow(label: 'Name', value: _nameController.text.trim()),
-            _ViewRow(
-              label: 'Business Type',
-              value: _selectedBusinessTypeName ?? '—',
-            ),
-            _ViewRow(
-              label: 'Description',
-              value: dash(_descriptionController.text),
-            ),
-          ],
+        child: Icon(icon, color: context.primaryColor, size: 22),
+      ),
+      title: Text(
+        title,
+        style: context.bodyMedium.copyWith(
+          fontWeight: FontWeight.w600,
+          color: context.textColor,
         ),
-        const SizedBox(height: 12),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: context.bodySmall.copyWith(color: context.secondaryTextColor),
+      ),
+      trailing: onTap == null
+          ? null
+          : Icon(Icons.chevron_right,
+              size: 20, color: context.secondaryTextColor),
+      onTap: onTap,
+    );
+  }
 
-        _buildViewInfoCard(
-          title: 'Location',
-          icon: Icons.location_on,
-          rows: [
-            _ViewRow(label: 'Country', value: '$_countryFlag $_countryName'),
-            _ViewRow(
-              label: 'Province / State',
-              value: dash(_provinceController.text),
-            ),
-            _ViewRow(label: 'District', value: dash(_districtController.text)),
-            _ViewRow(label: 'City / Town', value: dash(_cityController.text)),
-            _ViewRow(label: 'Address', value: dash(_addressController.text)),
-          ],
-        ),
-        const SizedBox(height: 12),
+  Widget _buildViewContactSection() {
+    final tiles = <Widget>[];
 
-        _buildViewInfoCard(
-          title: 'Contact Information',
+    if (_dbPhone.isNotEmpty) {
+      tiles.add(
+        _buildViewContactTile(
           icon: Icons.phone,
-          rows: [
-            _ViewRow(label: 'Phone', value: dash(_dbPhone)),
-            _ViewRow(label: 'Email', value: dash(_emailController.text)),
-          ],
+          title: 'Phone',
+          subtitle: _dbPhone,
         ),
-        const SizedBox(height: 12),
+      );
+    }
 
-        _buildViewInfoCard(
-          title: 'Business Hours',
-          icon: Icons.access_time,
-          rows: [
-            _ViewRow(
-              label: 'Open Time',
-              value: _openTimeSalonLocal?.format(context) ?? '—',
-            ),
-            _ViewRow(
-              label: 'Close Time',
-              value: _closeTimeSalonLocal?.format(context) ?? '—',
-            ),
-            _ViewRow(
-              label: 'Business Timezone',
-              value: _getSalonTimezoneDisplay(),
-            ),
-          ],
+    final email = _emailController.text.trim();
+    if (email.isNotEmpty) {
+      tiles.add(
+        _buildViewContactTile(
+          icon: Icons.email,
+          title: 'Email',
+          subtitle: email,
         ),
-        const SizedBox(height: 12),
+      );
+    }
 
-        _buildViewInfoCard(
-          title: 'Currency',
-          icon: Icons.currency_exchange,
-          rows: [
-            _ViewRow(label: 'Code', value: _dbCurrencyCode),
-            _ViewRow(label: 'Symbol', value: _dbCurrencySymbol),
-          ],
+    final address = _addressController.text.trim();
+    if (address.isNotEmpty) {
+      tiles.add(
+        _buildViewContactTile(
+          icon: Icons.location_on,
+          title: 'Address',
+          subtitle: address,
         ),
-        const SizedBox(height: 24),
-      ],
+      );
+    }
+
+    if (_hasMapLocation) {
+      tiles.add(
+        _buildViewContactTile(
+          icon: Icons.pin_drop,
+          title: 'Map Location',
+          subtitle: _mapLocationSummary(),
+          onTap: () async {
+            final ok = await MapLinkUtils.openLocation(
+              latitude: _latitude,
+              longitude: _longitude,
+              mapUrl: _mapUrlController.text,
+            );
+            if (!ok) _showSnackBar('Could not open the map', Colors.red);
+          },
+        ),
+      );
+    }
+
+    if (tiles.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Contact & Location',
+            style: context.titleLarge.copyWith(color: context.textColor),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: context.cardColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: context.dividerColor),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              borderRadius: BorderRadius.circular(16),
+              clipBehavior: Clip.antiAlias,
+              child: Column(children: tiles),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1790,136 +2554,36 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            ...rows.map(
-              (r) => Padding(
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SizedBox(
-                      width: 120,
-                      child: Text(
-                        r.label,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
+            ...rows.map((r) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(
+                        width: 120,
+                        child: Text(
+                          r.label,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isDark ? Colors.white60 : Colors.grey[600],
+                          ),
                         ),
                       ),
-                    ),
-                    Expanded(
-                      child: Text(
-                        r.value,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w500,
-                          color: isDark ? Colors.white : Colors.black87,
+                      Expanded(
+                        child: Text(
+                          r.value,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+                    ],
+                  ),
+                )),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildCoverSectionReadOnly() {
-    final isDesktop = _isWeb;
-    final isDark = _isDark;
-
-    return Container(
-      height: isDesktop ? 250 : 180,
-      width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 24),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.grey[800] : Colors.grey[200],
-        borderRadius: BorderRadius.circular(16),
-        image: (_currentCoverUrl != null)
-            ? DecorationImage(
-                image: NetworkImage(_currentCoverUrl!),
-                fit: BoxFit.cover,
-              )
-            : null,
-      ),
-      child: _currentCoverUrl == null
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.image_outlined,
-                    size: isDesktop ? 48 : 36,
-                    color: isDark ? Colors.white30 : Colors.grey[400],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'No cover photo',
-                    style: TextStyle(
-                      color: isDark ? Colors.white60 : Colors.grey[600],
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : null,
-    );
-  }
-
-  Widget _buildLogoSeparateReadOnly() {
-    final isDesktop = _isWeb;
-    final isDark = _isDark;
-
-    return Container(
-      margin: const EdgeInsets.only(left: 16, top: 0, bottom: 16),
-      child: Container(
-        width: isDesktop ? 100 : 80,
-        height: isDesktop ? 100 : 80,
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-          image: (_currentLogoUrl != null)
-              ? DecorationImage(
-                  image: NetworkImage(_currentLogoUrl!),
-                  fit: BoxFit.cover,
-                )
-              : null,
-        ),
-        child: _currentLogoUrl == null
-            ? Container(
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.grey[800] : Colors.grey[300],
-                  shape: BoxShape.circle,
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      Icons.store,
-                      size: isDesktop ? 30 : 24,
-                      color: isDark ? Colors.white70 : Colors.grey[600],
-                    ),
-                    SizedBox(height: isDesktop ? 4 : 2),
-                    Text(
-                      'No Logo',
-                      style: TextStyle(
-                        fontSize: isDesktop ? 10 : 8,
-                        color: isDark ? Colors.white70 : Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            : null,
       ),
     );
   }
@@ -1932,8 +2596,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final isDesktop = _isWeb;
     final isDark = _isDark;
 
-    final hasImage =
-        _coverFile != null ||
+    final hasImage = _coverFile != null ||
         _coverWebBytes != null ||
         _currentCoverUrl != null;
 
@@ -1972,7 +2635,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           Text(
                             'Tap to add cover photo',
                             style: TextStyle(
-                              color: isDark ? Colors.white60 : Colors.grey[600],
+                              color:
+                                  isDark ? Colors.white60 : Colors.grey[600],
                             ),
                           ),
                         ],
@@ -1988,10 +2652,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               child: GestureDetector(
                 onTap: _showCoverSourceDialog,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(20),
@@ -2027,8 +2689,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final isDesktop = _isWeb;
     final isDark = _isDark;
 
-    final hasImage =
-        _logoFile != null || _logoWebBytes != null || _currentLogoUrl != null;
+    final hasImage = _logoFile != null ||
+        _logoWebBytes != null ||
+        _currentLogoUrl != null;
 
     return Container(
       margin: const EdgeInsets.only(left: 16, top: 0, bottom: 16),
@@ -2143,10 +2806,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
             const Divider(),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: AppTheme.primary),
+              leading:
+                  const Icon(Icons.photo_library, color: AppTheme.primary),
               title: Text(
                 'Choose from Gallery',
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style:
+                    TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -2157,7 +2822,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
               title: Text(
                 'Take a Photo',
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style:
+                    TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -2171,9 +2837,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Logo',
-                  style: TextStyle(
-                    color: isDark ? Colors.red[300] : Colors.red,
-                  ),
+                  style:
+                      TextStyle(color: isDark ? Colors.red[300] : Colors.red),
                 ),
                 onTap: () {
                   Navigator.pop(sheetContext);
@@ -2213,10 +2878,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
             const Divider(),
             ListTile(
-              leading: const Icon(Icons.photo_library, color: AppTheme.primary),
+              leading:
+                  const Icon(Icons.photo_library, color: AppTheme.primary),
               title: Text(
                 'Choose from Gallery',
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style:
+                    TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -2227,7 +2894,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
               title: Text(
                 'Take a Photo',
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style:
+                    TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -2241,9 +2909,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Cover',
-                  style: TextStyle(
-                    color: isDark ? Colors.red[300] : Colors.red,
-                  ),
+                  style:
+                      TextStyle(color: isDark ? Colors.red[300] : Colors.red),
                 ),
                 onTap: () {
                   Navigator.pop(sheetContext);
@@ -2321,9 +2988,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               Expanded(
                 child: TextFormField(
                   controller: _phoneController,
-                  style: TextStyle(
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
+                  style:
+                      TextStyle(color: isDark ? Colors.white : Colors.black87),
                   keyboardType: TextInputType.phone,
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()]')),
@@ -2359,10 +3025,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(
-                        color: AppTheme.primary,
-                        width: 2,
-                      ),
+                      borderSide:
+                          const BorderSide(color: AppTheme.primary, width: 2),
                     ),
                     errorBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -2417,8 +3081,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     return cleaned
         .split(' ')
         .map(
-          (w) =>
-              w.isEmpty ? w : w[0].toUpperCase() + w.substring(1).toLowerCase(),
+          (w) => w.isEmpty
+              ? w
+              : w[0].toUpperCase() + w.substring(1).toLowerCase(),
         )
         .join(' ');
   }
@@ -2436,8 +3101,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     return parts.join(', ');
   }
 
-  String? _nullIfEmpty(String value) =>
-      value.trim().isEmpty ? null : value.trim();
+  String? _nullIfEmpty(String value) => value.trim().isEmpty ? null : value.trim();
 
   /// Country selector (looks like a text field, opens the country picker)
   Widget _buildCountryField() {
@@ -2654,9 +3318,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             selected: selected,
             showCheckmark: false,
             selectedColor: AppTheme.primary,
-            backgroundColor: isDark
-                ? const Color(0xFF2A2A2A)
-                : Colors.grey[100],
+            backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
             labelStyle: TextStyle(
               fontSize: 13,
               fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
@@ -2686,6 +3348,985 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           const SizedBox(height: 8),
           content,
         ],
+      ),
+    );
+  }
+
+
+  // ============================================================
+  // ✅ LOCATION HIERARCHY  (country → province → district → city)
+  //
+  // Data comes from the `locations` + `country_location_levels` tables.
+  //  - Level names come from the DB (LK: Province / District / City / Town).
+  //  - A country with no data (or a level with no rows) falls back to normal
+  //    text fields, so owners from ANY country can still register.
+  //  - The selected NAMES are stored in the text controllers, so saving,
+  //    view mode and the review step work exactly the same as before.
+  // ============================================================
+  Map<int, String> _levelLabels = {}; // level → label for the selected country
+  List<Map<String, dynamic>> _provinceOptions = [];
+  List<Map<String, dynamic>> _districtOptions = [];
+  List<Map<String, dynamic>> _cityOptions = [];
+  int? _provinceId;
+  int? _districtId;
+  bool _cityManual = false; // "Other (type manually)" chosen for the city
+  bool _isLoadingLocations = false;
+
+  String _levelLabel(int level, String fallback) =>
+      _levelLabels[level] ?? fallback;
+
+  /// Is this level asked for the selected country?
+  bool _levelVisible(int level) {
+    if (level == 3) return true; // city is always asked
+    if (_levelLabels.isEmpty) return true; // unknown country → free text
+    return _levelLabels.containsKey(level);
+  }
+
+  /// 'hidden' | 'text' | 'dropdown' | 'disabled'
+  String _provinceMode() {
+    if (!_levelVisible(1)) return 'hidden';
+    return _provinceOptions.isNotEmpty ? 'dropdown' : 'text';
+  }
+
+  String _districtMode() {
+    if (!_levelVisible(2)) return 'hidden';
+    if (_provinceMode() != 'dropdown') return 'text';
+    if (_provinceId == null) return 'disabled';
+    return _districtOptions.isNotEmpty ? 'dropdown' : 'text';
+  }
+
+  String _cityMode() {
+    final parentMode = _levelVisible(2) ? _districtMode() : _provinceMode();
+    if (parentMode == 'disabled') return 'disabled';
+    if (parentMode != 'dropdown') return 'text';
+    if (_cityParentId == null) return 'disabled';
+    if (_cityOptions.isEmpty || _cityManual) return 'text';
+    return 'dropdown';
+  }
+
+  /// the row the cities hang under (district, or province if the country
+  /// has no district level)
+  int? get _cityParentId => _levelVisible(2) ? _districtId : _provinceId;
+
+  int? _findIdByName(List<Map<String, dynamic>> list, String name) {
+    final n = name.trim().toLowerCase();
+    if (n.isEmpty) return null;
+    for (final o in list) {
+      if ((o['name'] as String).trim().toLowerCase() == n) {
+        return o['id'] as int;
+      }
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchLocations({
+    required String iso,
+    required int level,
+    int? parentId,
+  }) async {
+    var q = supabase
+        .from('locations')
+        .select('id, name')
+        .eq('country_code', iso)
+        .eq('level', level)
+        .eq('is_active', true);
+    if (parentId != null) q = q.eq('parent_id', parentId);
+    final data = await q.order('name', ascending: true);
+    return List<Map<String, dynamic>>.from(data as List);
+  }
+
+  /// Load the level names + provinces of the selected country.
+  /// restoreFromText = true (Edit screen): re-select the saved province /
+  /// district / city in the dropdowns by matching the saved names.
+  Future<void> _loadLocationConfig({bool restoreFromText = false}) async {
+    final iso = _countryIso;
+    if (mounted) setState(() => _isLoadingLocations = true);
+
+    try {
+      final lv = await supabase
+          .from('country_location_levels')
+          .select('level, label')
+          .eq('country_code', iso);
+
+      final labels = <int, String>{};
+      for (final r in List<Map<String, dynamic>>.from(lv as List)) {
+        labels[r['level'] as int] = r['label'] as String;
+      }
+
+      List<Map<String, dynamic>> provs = [];
+      if (labels.containsKey(1)) {
+        provs = await _fetchLocations(iso: iso, level: 1);
+      }
+
+      int? provId;
+      int? distId;
+      List<Map<String, dynamic>> dists = [];
+      List<Map<String, dynamic>> cities = [];
+      var manual = false;
+
+      if (restoreFromText && provs.isNotEmpty) {
+        provId = _findIdByName(provs, _provinceController.text);
+        if (provId != null) {
+          final hasDistrictLevel = labels.containsKey(2);
+          if (hasDistrictLevel) {
+            dists = await _fetchLocations(
+              iso: iso,
+              level: 2,
+              parentId: provId,
+            );
+            distId = _findIdByName(dists, _districtController.text);
+          }
+          final cityParent = hasDistrictLevel ? distId : provId;
+          if (cityParent != null) {
+            cities = await _fetchLocations(
+              iso: iso,
+              level: 3,
+              parentId: cityParent,
+            );
+            final typed = _cityController.text.trim();
+            manual = typed.isNotEmpty && _findIdByName(cities, typed) == null;
+          }
+        }
+      }
+
+      // the country was changed while loading → ignore this result
+      if (!mounted || iso != _countryIso) return;
+      setState(() {
+        _levelLabels = labels;
+        _provinceOptions = provs;
+        _provinceId = provId;
+        _districtOptions = dists;
+        _districtId = distId;
+        _cityOptions = cities;
+        _cityManual = manual;
+        _isLoadingLocations = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading locations: $e');
+      if (!mounted || iso != _countryIso) return;
+      // no data / no network → plain text fields
+      setState(() {
+        _levelLabels = {};
+        _provinceOptions = [];
+        _districtOptions = [];
+        _cityOptions = [];
+        _provinceId = null;
+        _districtId = null;
+        _cityManual = false;
+        _isLoadingLocations = false;
+      });
+    }
+  }
+
+  /// Country changed: the old province / district / city are meaningless
+  void _onCountryChanged() {
+    setState(() {
+      _provinceController.clear();
+      _districtController.clear();
+      _cityController.clear();
+      _provinceId = null;
+      _districtId = null;
+      _provinceOptions = [];
+      _districtOptions = [];
+      _cityOptions = [];
+      _cityManual = false;
+      _levelLabels = {};
+    });
+    _loadLocationConfig();
+  }
+
+  Future<void> _selectProvince(Map<String, dynamic> p) async {
+    final id = p['id'] as int;
+    setState(() {
+      _provinceId = id;
+      _provinceController.text = p['name'] as String;
+      _districtId = null;
+      _districtController.clear();
+      _districtOptions = [];
+      _cityOptions = [];
+      _cityController.clear();
+      _cityManual = false;
+    });
+
+    final iso = _countryIso;
+    try {
+      if (_levelVisible(2)) {
+        final d = await _fetchLocations(iso: iso, level: 2, parentId: id);
+        if (!mounted || _provinceId != id) return;
+        setState(() => _districtOptions = d);
+      } else {
+        final c = await _fetchLocations(iso: iso, level: 3, parentId: id);
+        if (!mounted || _provinceId != id) return;
+        setState(() => _cityOptions = c);
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading districts: $e');
+    }
+  }
+
+  Future<void> _selectDistrict(Map<String, dynamic> d) async {
+    final id = d['id'] as int;
+    setState(() {
+      _districtId = id;
+      _districtController.text = d['name'] as String;
+      _cityOptions = [];
+      _cityController.clear();
+      _cityManual = false;
+    });
+
+    try {
+      final c = await _fetchLocations(
+        iso: _countryIso,
+        level: 3,
+        parentId: id,
+      );
+      if (!mounted || _districtId != id) return;
+      setState(() => _cityOptions = c);
+    } catch (e) {
+      debugPrint('❌ Error loading cities: $e');
+    }
+  }
+
+  void _selectCity(Map<String, dynamic> c) {
+    setState(() {
+      _cityController.text = c['name'] as String;
+      _cityManual = false;
+    });
+  }
+
+  /// Searchable list (bottom sheet) for province / district / city
+  void _showLocationPicker({
+    required String title,
+    required List<Map<String, dynamic>> options,
+    required String currentName,
+    required void Function(Map<String, dynamic> option) onSelected,
+    VoidCallback? onOther,
+  }) {
+    final isDark = _isDark;
+    String query = '';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final q = query.trim().toLowerCase();
+          final list = options
+              .where((o) =>
+                  q.isEmpty || (o['name'] as String).toLowerCase().contains(q))
+              .toList();
+          final showOther = onOther != null && q.isEmpty;
+
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(ctx).size.height * 0.7,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: TextField(
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                        onChanged: (v) => setSheetState(() => query = v),
+                        decoration: InputDecoration(
+                          hintText: 'Search',
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.search,
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
+                          filled: true,
+                          fillColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[100],
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: list.length + (showOther ? 1 : 0),
+                        itemBuilder: (_, i) {
+                          if (i == list.length) {
+                            return ListTile(
+                              leading: const Icon(
+                                Icons.edit_location_alt,
+                                color: AppTheme.primary,
+                              ),
+                              title: const Text(
+                                'Other (type manually)',
+                                style: TextStyle(
+                                  color: AppTheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              onTap: () {
+                                Navigator.pop(sheetContext);
+                                onOther?.call();
+                              },
+                            );
+                          }
+                          final o = list[i];
+                          final name = o['name'] as String;
+                          final selected = name == currentName;
+                          return ListTile(
+                            title: Text(
+                              name,
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black87,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            trailing: selected
+                                ? const Icon(
+                                    Icons.check_circle,
+                                    color: AppTheme.primary,
+                                    size: 20,
+                                  )
+                                : null,
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              onSelected(o);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// A field that looks like a text field but opens a picker
+  Widget _buildPickerField({
+    required String label,
+    required IconData icon,
+    required String value,
+    required String hint,
+    required VoidCallback? onTap,
+  }) {
+    final isDark = _isDark;
+    final borderColor = isDark ? Colors.grey[700]! : Colors.grey[300]!;
+    final enabled = onTap != null;
+    final hasValue = value.trim().isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: InputDecorator(
+          decoration: InputDecoration(
+            labelText: label,
+            prefixIcon: Icon(
+              icon,
+              color: isDark ? Colors.white70 : Colors.grey,
+            ),
+            suffixIcon: Icon(
+              Icons.arrow_drop_down,
+              color: enabled
+                  ? (isDark ? Colors.white70 : Colors.grey[600])
+                  : Colors.grey[400],
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: borderColor),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: borderColor),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+            filled: true,
+          ),
+          child: Text(
+            hasValue ? value : hint,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 15,
+              color: hasValue
+                  ? (isDark ? Colors.white : Colors.black87)
+                  : (isDark ? Colors.white38 : Colors.grey[500]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Province → District → City (dropdowns, or text fields when there is
+  /// no data for the selected country)
+  Widget _buildLocationFields() {
+    final isDark = _isDark;
+    final pMode = _provinceMode();
+    final dMode = _districtMode();
+    final cMode = _cityMode();
+
+    final pLabel = _levelLabel(1, 'Province / State');
+    final dLabel = _levelLabel(2, 'District');
+    final cLabel = _levelLabel(3, 'City / Town');
+
+    final children = <Widget>[];
+
+    if (_isLoadingLocations) {
+      children.add(
+        const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: LinearProgressIndicator(minHeight: 2),
+        ),
+      );
+    }
+
+    // ---------- Province ----------
+    if (pMode == 'dropdown') {
+      children.add(
+        _buildPickerField(
+          label: pLabel,
+          icon: Icons.map,
+          value: _provinceController.text,
+          hint: 'Select ${pLabel.toLowerCase()}',
+          onTap: () => _showLocationPicker(
+            title: 'Select $pLabel',
+            options: _provinceOptions,
+            currentName: _provinceController.text,
+            onSelected: _selectProvince,
+          ),
+        ),
+      );
+      children.add(const SizedBox(height: 12));
+    } else if (pMode == 'text') {
+      children.add(
+        _buildTextField(
+          controller: _provinceController,
+          label: pLabel,
+          hint: 'Enter ${pLabel.toLowerCase()}',
+          icon: Icons.map,
+        ),
+      );
+      children.add(const SizedBox(height: 12));
+    }
+
+    // ---------- District ----------
+    if (dMode == 'dropdown' || dMode == 'disabled') {
+      children.add(
+        _buildPickerField(
+          label: dLabel,
+          icon: Icons.account_tree,
+          value: _districtController.text,
+          hint: dMode == 'disabled'
+              ? 'Select ${pLabel.toLowerCase()} first'
+              : 'Select ${dLabel.toLowerCase()}',
+          onTap: dMode == 'dropdown'
+              ? () => _showLocationPicker(
+                    title: 'Select $dLabel',
+                    options: _districtOptions,
+                    currentName: _districtController.text,
+                    onSelected: _selectDistrict,
+                  )
+              : null,
+        ),
+      );
+      children.add(const SizedBox(height: 12));
+    } else if (dMode == 'text') {
+      children.add(
+        _buildTextField(
+          controller: _districtController,
+          label: dLabel,
+          hint: 'Enter ${dLabel.toLowerCase()}',
+          icon: Icons.account_tree,
+        ),
+      );
+      children.add(const SizedBox(height: 12));
+    }
+
+    // ---------- City (required) ----------
+    if (cMode == 'dropdown' || cMode == 'disabled') {
+      final upperLabel = _levelVisible(2) ? dLabel : pLabel;
+      children.add(
+        _buildPickerField(
+          label: '$cLabel *',
+          icon: Icons.location_city,
+          value: _cityController.text,
+          hint: cMode == 'disabled'
+              ? 'Select ${upperLabel.toLowerCase()} first'
+              : 'Select ${cLabel.toLowerCase()}',
+          onTap: cMode == 'dropdown'
+              ? () => _showLocationPicker(
+                    title: 'Select $cLabel',
+                    options: _cityOptions,
+                    currentName: _cityController.text,
+                    onSelected: _selectCity,
+                    onOther: () => setState(() {
+                      _cityManual = true;
+                      _cityController.clear();
+                    }),
+                  )
+              : null,
+        ),
+      );
+    } else {
+      children.add(
+        _buildTextField(
+          controller: _cityController,
+          label: '$cLabel *',
+          hint: 'Enter ${cLabel.toLowerCase()}',
+          icon: Icons.location_city,
+          rebuildOnChange: true,
+        ),
+      );
+      if (_cityManual && _cityOptions.isNotEmpty) {
+        children.add(
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() {
+                _cityManual = false;
+                _cityController.clear();
+              }),
+              icon: const Icon(Icons.list, size: 16),
+              label: const Text('Choose from list'),
+              style: TextButton.styleFrom(
+                foregroundColor: isDark ? Colors.teal[300] : Colors.teal[700],
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
+  }
+
+  // ============================================================
+  // ✅ MAP LOCATION  (current location OR a pasted map link)
+  //
+  //  - Source of truth = latitude / longitude (+ optional map_url).
+  //  - ONE source at a time: using GPS clears the link, pasting a link
+  //    replaces the coordinates (taken from the link when it has them).
+  //  - The link is checked with MapLinkUtils (allow-list, https only,
+  //    no look-alike hosts ...). The database trigger repeats the same
+  //    check, so nobody can skip it by calling the API directly.
+  // ============================================================
+  final TextEditingController _mapUrlController = TextEditingController();
+  double? _latitude;
+  double? _longitude;
+  bool _isGettingLocation = false;
+  String? _mapUrlError;
+
+  bool get _hasMapLocation =>
+      MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ||
+      (_mapUrlError == null && MapLinkUtils.check(_mapUrlController.text).uri != null);
+
+  /// normalised link for the DB (null when empty / invalid)
+  String? _mapUrlForSave() {
+    final c = MapLinkUtils.check(_mapUrlController.text);
+    return (c.ok && c.uri != null) ? c.uri.toString() : null;
+  }
+
+  /// coordinates only when both are valid
+  double? get _latitudeForSave =>
+      MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ? _latitude : null;
+
+  double? get _longitudeForSave =>
+      MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ? _longitude : null;
+
+  String _mapLocationSummary() {
+    if (MapLinkUtils.hasValidCoordinates(_latitude, _longitude)) {
+      return '${MapLinkUtils.formatCoordinate(_latitude!)}, '
+          '${MapLinkUtils.formatCoordinate(_longitude!)}';
+    }
+    final c = MapLinkUtils.check(_mapUrlController.text);
+    if (c.ok && c.uri != null) return 'Map link added (${c.uri!.host})';
+    return 'Not set';
+  }
+
+  void _onMapUrlChanged(String value) {
+    final c = MapLinkUtils.check(value);
+    setState(() {
+      if (value.trim().isEmpty) {
+        _mapUrlError = null;
+        _latitude = null;
+        _longitude = null;
+      } else if (!c.ok) {
+        _mapUrlError = c.error;
+        _latitude = null;
+        _longitude = null;
+      } else {
+        _mapUrlError = null;
+        // coordinates found inside the link (short links have none)
+        _latitude = c.latitude;
+        _longitude = c.longitude;
+      }
+    });
+  }
+
+  void _clearMapLocation() {
+    setState(() {
+      _mapUrlController.clear();
+      _mapUrlError = null;
+      _latitude = null;
+      _longitude = null;
+    });
+  }
+
+  Future<void> _useCurrentLocation() async {
+    if (_isGettingLocation) return;
+
+    // Explain first: the owner must be AT the business
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Use current location?'),
+        content: const Text(
+          'Your phone\'s current position will be saved as the location of '
+          'this business. Do this only while you are at the business.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Use my location'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
+
+    setState(() => _isGettingLocation = true);
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        _showSnackBar('Turn on location services and try again', Colors.orange);
+        return;
+      }
+
+      // permission is asked only now (when the button is tapped)
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        _showSnackBar(
+          'Location permission is needed. You can also paste a map link.',
+          Colors.orange,
+        );
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
+        ),
+      );
+
+      if (!MapLinkUtils.hasValidCoordinates(pos.latitude, pos.longitude)) {
+        _showSnackBar('Could not read a valid location', Colors.red);
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _latitude = double.parse(pos.latitude.toStringAsFixed(6));
+        _longitude = double.parse(pos.longitude.toStringAsFixed(6));
+        // one source at a time: GPS replaces any pasted link
+        _mapUrlController.clear();
+        _mapUrlError = null;
+      });
+    } catch (e) {
+      debugPrint('❌ Error getting location: $e');
+      _showSnackBar(
+        'Could not get your location. Try again or paste a map link.',
+        Colors.red,
+      );
+    } finally {
+      if (mounted) setState(() => _isGettingLocation = false);
+    }
+  }
+
+  Widget _buildMapLocationSection() {
+    final isDark = _isDark;
+    final borderColor = isDark ? Colors.grey[700]! : Colors.grey[300]!;
+    final hasCoords =
+        MapLinkUtils.hasValidCoordinates(_latitude, _longitude);
+    final linkCheck = MapLinkUtils.check(_mapUrlController.text);
+    final hasLink = linkCheck.ok && linkCheck.uri != null;
+
+    return Card(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Map Location',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Optional. Customers can open your business in Google Maps.',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ---------- Use current location ----------
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _isGettingLocation ? null : _useCurrentLocation,
+                icon: _isGettingLocation
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location, size: 18),
+                label: Text(
+                  _isGettingLocation
+                      ? 'Getting location...'
+                      : 'Use my current location',
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  side: BorderSide(color: borderColor),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: Divider(color: borderColor)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    'or paste a map link',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                  ),
+                ),
+                Expanded(child: Divider(color: borderColor)),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // ---------- Paste a link ----------
+            TextFormField(
+              controller: _mapUrlController,
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              enableSuggestions: false,
+              maxLength: MapLinkUtils.maxUrlLength,
+              onChanged: _onMapUrlChanged,
+              decoration: InputDecoration(
+                labelText: 'Google Maps / WhatsApp location link',
+                hintText: 'https://maps.app.goo.gl/...',
+                hintStyle:
+                    TextStyle(color: isDark ? Colors.white70 : Colors.grey),
+                prefixIcon: Icon(
+                  Icons.link,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                suffixIcon: _mapUrlController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.clear),
+                        tooltip: 'Clear',
+                        onPressed: _clearMapLocation,
+                      ),
+                counterText: '',
+                errorText: _mapUrlError,
+                errorMaxLines: 3,
+                errorStyle:
+                    TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: borderColor),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: borderColor),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: AppTheme.primary, width: 2),
+                ),
+                errorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Colors.red, width: 1),
+                ),
+                focusedErrorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Colors.red, width: 2),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                filled: true,
+              ),
+            ),
+
+            // ---------- Status + test ----------
+            if (hasCoords || hasLink) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border:
+                      Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.check_circle,
+                            size: 16, color: Colors.green),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            hasCoords
+                                ? 'Location set: ${MapLinkUtils.formatCoordinate(_latitude!)}, ${MapLinkUtils.formatCoordinate(_longitude!)}'
+                                : 'Map link accepted (${linkCheck.uri!.host})',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isDark
+                                  ? Colors.green[300]
+                                  : Colors.green[800],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (!hasCoords && hasLink) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'This link has no coordinates inside it. It will still '
+                        'open in Maps.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        OpenInMapsButton(
+                          latitude: _latitude,
+                          longitude: _longitude,
+                          mapUrl: _mapUrlController.text,
+                          label: 'Test in Maps',
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton.icon(
+                          onPressed: _clearMapLocation,
+                          icon: const Icon(Icons.delete_outline, size: 16),
+                          label: const Text('Remove'),
+                          style: TextButton.styleFrom(
+                            foregroundColor:
+                                isDark ? Colors.red[300] : Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.shield_outlined,
+                  size: 12,
+                  color: isDark ? Colors.white38 : Colors.grey[500],
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Only Google Maps, Apple Maps, OpenStreetMap and Waze '
+                    'links are accepted.',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isDark ? Colors.white38 : Colors.grey[500],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2721,10 +4362,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               runSpacing: 8,
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
                     color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
@@ -2732,11 +4371,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(
-                        Icons.public,
-                        size: 14,
-                        color: AppTheme.primary,
-                      ),
+                      const Icon(Icons.public,
+                          size: 14, color: AppTheme.primary),
                       const SizedBox(width: 6),
                       Text(
                         'Business: ${_getSalonTimezoneDisplay()}',
@@ -2751,10 +4387,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 ),
                 if (showUserTime)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
                       color: Colors.teal.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
@@ -2762,11 +4396,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
-                          Icons.person_pin_circle,
-                          size: 14,
-                          color: Colors.teal,
-                        ),
+                        const Icon(Icons.person_pin_circle,
+                            size: 14, color: Colors.teal),
                         const SizedBox(width: 6),
                         Text(
                           'You: ${_getUserTimezoneDisplay()}',
@@ -2825,11 +4456,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.info_outline,
-                    size: 14,
-                    color: isDark ? Colors.white70 : Colors.grey,
-                  ),
+                  Icon(Icons.info_outline,
+                      size: 14, color: isDark ? Colors.white70 : Colors.grey),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -2888,10 +4516,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 ),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.teal.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
@@ -2899,18 +4525,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        Icons.auto_awesome,
-                        size: 10,
-                        color: isDark ? Colors.teal[300] : Colors.teal[700],
-                      ),
+                      Icon(Icons.auto_awesome,
+                          size: 10,
+                          color:
+                              isDark ? Colors.teal[300] : Colors.teal[700]),
                       const SizedBox(width: 4),
                       Text(
                         'Auto',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.teal[300] : Colors.teal[700],
+                          color:
+                              isDark ? Colors.teal[300] : Colors.teal[700],
                         ),
                       ),
                     ],
@@ -3063,9 +4689,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-        ),
+        border:
+            Border.all(color: isDark ? Colors.grey[700]! : Colors.grey[200]!),
       ),
       child: Row(
         children: [
@@ -3082,21 +4707,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isDark ? Colors.white60 : Colors.grey[600],
-                  ),
-                ),
+                Text(title,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.white60 : Colors.grey[600])),
                 const SizedBox(height: 2),
                 Text(
                   value,
                   style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : Colors.black87),
                 ),
               ],
             ),
@@ -3137,6 +4758,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           value: _composeFullAddress().isEmpty
               ? 'Not set'
               : _composeFullAddress(),
+          onEdit: () => _goToStep(0),
+        ),
+        _buildReviewTile(
+          icon: Icons.pin_drop,
+          title: 'Map Location',
+          value: _mapLocationSummary(),
           onEdit: () => _goToStep(0),
         ),
         _buildReviewTile(
@@ -3183,17 +4810,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _buildCoverSection(),
         Transform.translate(
           offset: const Offset(16, -40),
-          child: Align(
-            alignment: Alignment.topLeft,
-            child: _buildLogoSeparate(),
-          ),
+          child:
+              Align(alignment: Alignment.topLeft, child: _buildLogoSeparate()),
         ),
         const SizedBox(height: 16),
         Card(
           color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -3202,10 +4826,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Text(
                   'Basic Information',
                   style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: _isDark ? Colors.white : Colors.black87,
-                  ),
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: _isDark ? Colors.white : Colors.black87),
                 ),
                 const SizedBox(height: 16),
                 _buildTextField(
@@ -3233,9 +4856,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         const SizedBox(height: 16),
         Card(
           color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -3244,35 +4866,16 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Text(
                   'Location',
                   style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: _isDark ? Colors.white : Colors.black87,
-                  ),
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: _isDark ? Colors.white : Colors.black87),
                 ),
                 const SizedBox(height: 16),
                 _buildCountryField(),
                 const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _provinceController,
-                  label: 'Province / State',
-                  hint: 'Enter province or state',
-                  icon: Icons.map,
-                ),
-                const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _districtController,
-                  label: 'District',
-                  hint: 'Enter district',
-                  icon: Icons.account_tree,
-                ),
-                const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _cityController,
-                  label: 'City / Town *',
-                  hint: 'Enter city or town',
-                  icon: Icons.location_city,
-                  rebuildOnChange: true,
-                ),
+                // ✅ Province → District → City (dropdowns from the locations
+                // table; plain text fields when a country has no data)
+                _buildLocationFields(),
                 const SizedBox(height: 12),
                 _buildTextField(
                   controller: _addressController,
@@ -3285,20 +4888,21 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Text(
                   'Country and city help customers find your business with filters',
                   style: TextStyle(
-                    fontSize: 11,
-                    color: _isDark ? Colors.white70 : Colors.grey[500],
-                  ),
+                      fontSize: 11,
+                      color: _isDark ? Colors.white70 : Colors.grey[500]),
                 ),
               ],
             ),
           ),
         ),
         const SizedBox(height: 16),
+        // ✅ Map location (current location or a pasted map link)
+        _buildMapLocationSection(),
+        const SizedBox(height: 16),
         Card(
           color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -3307,10 +4911,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Text(
                   'Contact Information',
                   style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: _isDark ? Colors.white : Colors.black87,
-                  ),
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: _isDark ? Colors.white : Colors.black87),
                 ),
                 const SizedBox(height: 16),
                 // ✅ Country code picker + phone number
@@ -3328,9 +4931,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Text(
                   'Phone and email are optional but recommended',
                   style: TextStyle(
-                    fontSize: 11,
-                    color: _isDark ? Colors.white70 : Colors.grey[500],
-                  ),
+                      fontSize: 11,
+                      color: _isDark ? Colors.white70 : Colors.grey[500]),
                 ),
               ],
             ),
@@ -3387,18 +4989,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
         padding: EdgeInsets.symmetric(
-          horizontal: isMobile ? 12 : 20,
-          vertical: isMobile ? 12 : 16,
-        ),
+            horizontal: isMobile ? 12 : 20, vertical: isMobile ? 12 : 16),
         child: Row(
           children: [
             for (int i = 0; i < _stepMeta.length; i++) ...[
-              _buildStepCircle(
-                i,
-                _stepMeta[i]['label'] as String,
-                _stepMeta[i]['icon'] as IconData,
-                isMobile,
-              ),
+              _buildStepCircle(i, _stepMeta[i]['label'] as String,
+                  _stepMeta[i]['icon'] as IconData, isMobile),
               if (i != _stepMeta.length - 1)
                 Container(
                   width: isMobile ? 18 : 30,
@@ -3415,11 +5011,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   Widget _buildStepCircle(
-    int step,
-    String label,
-    IconData icon,
-    bool isMobile,
-  ) {
+      int step, String label, IconData icon, bool isMobile) {
     final isActive = _currentStep == step;
     final isCompleted = _furthestStep > step;
     final isDark = _isDark;
@@ -3440,8 +5032,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               color: isCompleted
                   ? AppTheme.primary
                   : (isActive
-                        ? AppTheme.primary.withValues(alpha: 0.1)
-                        : (isDark ? Colors.grey[800] : Colors.grey[200])),
+                      ? AppTheme.primary.withValues(alpha: 0.1)
+                      : (isDark ? Colors.grey[800] : Colors.grey[200])),
               border: Border.all(
                 color: isActive
                     ? AppTheme.primary
@@ -3452,11 +5044,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             child: Center(
               child: isCompleted
                   ? Icon(Icons.check, size: iconSize, color: Colors.white)
-                  : Icon(
-                      icon,
+                  : Icon(icon,
                       size: iconSize,
-                      color: isActive ? AppTheme.primary : Colors.grey[500],
-                    ),
+                      color: isActive ? AppTheme.primary : Colors.grey[500]),
             ),
           ),
           if (!isMobile) ...[
@@ -3495,7 +5085,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             if (_currentStep > 0) ...[
               Expanded(
                 child: OutlinedButton(
-                  onPressed: busy ? null : () => setState(() => _currentStep--),
+                  onPressed:
+                      busy ? null : () => setState(() => _currentStep--),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     side: BorderSide(
@@ -3649,10 +5240,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: CircularProgressIndicator(),
-                ),
+                    width: 40,
+                    height: 40,
+                    child: CircularProgressIndicator()),
                 SizedBox(height: 16),
                 Text('Loading business data...'),
               ],
@@ -3664,13 +5254,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
-      appBar: AppBar(
+      appBar: _isEditMode
+          ? AppBar(
         title: Text(
-          _isEditMode ? 'Edit Business' : 'Business Details',
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-          ),
+          'Edit Business',
+          style:
+              const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
         backgroundColor: AppTheme.primary,
         foregroundColor: Colors.white,
@@ -3682,50 +5271,39 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           tooltip: 'Back',
         ),
         actions: [
-          if (!_isEditMode) ...[
-            IconButton(
-              icon: const Icon(Icons.edit, color: Colors.white),
-              tooltip: 'Edit',
-              onPressed: _enterEditMode,
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_outline, color: Colors.white),
-              onPressed: _isDeleting ? null : _deleteSalon,
-              tooltip: 'Delete Business',
-            ),
-          ] else ...[
-            IconButton(
-              icon: const Icon(Icons.close, color: Colors.white),
-              tooltip: 'Cancel',
-              onPressed: _isSaving ? null : _cancelEditMode,
-            ),
-            IconButton(
-              icon: const Icon(Icons.save, color: Colors.white),
-              tooltip: 'Save',
-              onPressed: _isSaving ? null : _onSavePressed,
-            ),
-          ],
+          IconButton(
+            icon: const Icon(Icons.close, color: Colors.white),
+            tooltip: 'Cancel',
+            onPressed: _isSaving ? null : _cancelEditMode,
+          ),
+          IconButton(
+            icon: const Icon(Icons.save, color: Colors.white),
+            tooltip: 'Save',
+            onPressed: _isSaving ? null : _onSavePressed,
+          ),
         ],
-      ),
+            )
+          : null,
       body: SafeArea(
+        top: _isEditMode,
         child: Container(
           color: isDark ? const Color(0xFF121212) : Colors.grey[50],
           child: Center(
             child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: isWeb ? 1000 : double.infinity,
-              ),
+              constraints:
+                  BoxConstraints(maxWidth: isWeb ? 1000 : double.infinity),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     if (_isEditMode) _buildStepIndicatorRow(),
-                    Padding(
-                      padding: EdgeInsets.all(isWeb ? 32 : 16),
-                      child: _isEditMode
-                          ? _buildStepContent()
-                          : _buildViewContent(),
-                    ),
+                    if (_isEditMode)
+                      Padding(
+                        padding: EdgeInsets.all(isWeb ? 32 : 16),
+                        child: _buildStepContent(),
+                      )
+                    else
+                      _buildViewContent(),
                     if (_isEditMode)
                       Padding(
                         padding: EdgeInsets.fromLTRB(

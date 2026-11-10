@@ -13,6 +13,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_cropper/image_cropper.dart';
 import '../../services/timezone_service.dart';
 import '../../utils/image_compression.dart';
+import '../../utils/map_link_utils.dart';
+import 'package:geolocator/geolocator.dart';
 
 // ====================================================================
 // CREATE SALON SCREEN — step-by-step wizard
@@ -279,11 +281,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       selectedIso: _countryIso,
       showDial: false,
       onSelected: (iso) {
+        if (iso == _countryIso) return;
         setState(() {
           _countryIso = iso;
           // phone empty නම් phone code එකත් country එකත් එක්ක sync කරන්න
           if (_phoneController.text.trim().isEmpty) _phoneIso = iso;
         });
+        // old province / district / city belong to the old country
+        _onCountryChanged();
       },
     );
   }
@@ -519,6 +524,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     _provinceController.dispose();
     _districtController.dispose();
     _cityController.dispose();
+    _mapUrlController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
     _descriptionController.dispose();
@@ -765,6 +771,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
 
       if (mounted) {
         setState(() => _isTimezoneLoaded = true);
+        // province / district / city lists of the detected country
+        _loadLocationConfig();
       }
     } catch (e) {
       debugPrint('❌ Error initializing timezone: $e');
@@ -778,6 +786,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
           _initializeBusinessHours();
           _isTimezoneLoaded = true;
         });
+        _loadLocationConfig();
       }
     }
   }
@@ -890,6 +899,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     switch (step) {
       case 0:
         return _isBusinessTypeValid &&
+            _mapUrlError == null &&
             _nameController.text.trim().isNotEmpty &&
             _cityController.text.trim().isNotEmpty &&
             _isPhoneValid &&
@@ -1480,6 +1490,980 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
           const SizedBox(height: 8),
           content,
         ],
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ LOCATION HIERARCHY  (country → province → district → city)
+  //
+  // Data comes from the `locations` + `country_location_levels` tables.
+  //  - Level names come from the DB (LK: Province / District / City / Town).
+  //  - A country with no data (or a level with no rows) falls back to normal
+  //    text fields, so owners from ANY country can still register.
+  //  - The selected NAMES are stored in the text controllers, so saving,
+  //    view mode and the review step work exactly the same as before.
+  // ============================================================
+  Map<int, String> _levelLabels = {}; // level → label for the selected country
+  List<Map<String, dynamic>> _provinceOptions = [];
+  List<Map<String, dynamic>> _districtOptions = [];
+  List<Map<String, dynamic>> _cityOptions = [];
+  int? _provinceId;
+  int? _districtId;
+  bool _cityManual = false; // "Other (type manually)" chosen for the city
+  bool _isLoadingLocations = false;
+
+  String _levelLabel(int level, String fallback) =>
+      _levelLabels[level] ?? fallback;
+
+  /// Is this level asked for the selected country?
+  bool _levelVisible(int level) {
+    if (level == 3) return true; // city is always asked
+    if (_levelLabels.isEmpty) return true; // unknown country → free text
+    return _levelLabels.containsKey(level);
+  }
+
+  /// 'hidden' | 'text' | 'dropdown' | 'disabled'
+  String _provinceMode() {
+    if (!_levelVisible(1)) return 'hidden';
+    return _provinceOptions.isNotEmpty ? 'dropdown' : 'text';
+  }
+
+  String _districtMode() {
+    if (!_levelVisible(2)) return 'hidden';
+    if (_provinceMode() != 'dropdown') return 'text';
+    if (_provinceId == null) return 'disabled';
+    return _districtOptions.isNotEmpty ? 'dropdown' : 'text';
+  }
+
+  String _cityMode() {
+    final parentMode = _levelVisible(2) ? _districtMode() : _provinceMode();
+    if (parentMode == 'disabled') return 'disabled';
+    if (parentMode != 'dropdown') return 'text';
+    if (_cityParentId == null) return 'disabled';
+    if (_cityOptions.isEmpty || _cityManual) return 'text';
+    return 'dropdown';
+  }
+
+  /// the row the cities hang under (district, or province if the country
+  /// has no district level)
+  int? get _cityParentId => _levelVisible(2) ? _districtId : _provinceId;
+
+  int? _findIdByName(List<Map<String, dynamic>> list, String name) {
+    final n = name.trim().toLowerCase();
+    if (n.isEmpty) return null;
+    for (final o in list) {
+      if ((o['name'] as String).trim().toLowerCase() == n) {
+        return o['id'] as int;
+      }
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchLocations({
+    required String iso,
+    required int level,
+    int? parentId,
+  }) async {
+    var q = supabase
+        .from('locations')
+        .select('id, name')
+        .eq('country_code', iso)
+        .eq('level', level)
+        .eq('is_active', true);
+    if (parentId != null) q = q.eq('parent_id', parentId);
+    final data = await q.order('name', ascending: true);
+    return List<Map<String, dynamic>>.from(data as List);
+  }
+
+  /// Load the level names + provinces of the selected country.
+  /// restoreFromText = true (Edit screen): re-select the saved province /
+  /// district / city in the dropdowns by matching the saved names.
+  Future<void> _loadLocationConfig({bool restoreFromText = false}) async {
+    final iso = _countryIso;
+    if (mounted) setState(() => _isLoadingLocations = true);
+
+    try {
+      final lv = await supabase
+          .from('country_location_levels')
+          .select('level, label')
+          .eq('country_code', iso);
+
+      final labels = <int, String>{};
+      for (final r in List<Map<String, dynamic>>.from(lv as List)) {
+        labels[r['level'] as int] = r['label'] as String;
+      }
+
+      List<Map<String, dynamic>> provs = [];
+      if (labels.containsKey(1)) {
+        provs = await _fetchLocations(iso: iso, level: 1);
+      }
+
+      int? provId;
+      int? distId;
+      List<Map<String, dynamic>> dists = [];
+      List<Map<String, dynamic>> cities = [];
+      var manual = false;
+
+      if (restoreFromText && provs.isNotEmpty) {
+        provId = _findIdByName(provs, _provinceController.text);
+        if (provId != null) {
+          final hasDistrictLevel = labels.containsKey(2);
+          if (hasDistrictLevel) {
+            dists = await _fetchLocations(
+              iso: iso,
+              level: 2,
+              parentId: provId,
+            );
+            distId = _findIdByName(dists, _districtController.text);
+          }
+          final cityParent = hasDistrictLevel ? distId : provId;
+          if (cityParent != null) {
+            cities = await _fetchLocations(
+              iso: iso,
+              level: 3,
+              parentId: cityParent,
+            );
+            final typed = _cityController.text.trim();
+            manual = typed.isNotEmpty && _findIdByName(cities, typed) == null;
+          }
+        }
+      }
+
+      // the country was changed while loading → ignore this result
+      if (!mounted || iso != _countryIso) return;
+      setState(() {
+        _levelLabels = labels;
+        _provinceOptions = provs;
+        _provinceId = provId;
+        _districtOptions = dists;
+        _districtId = distId;
+        _cityOptions = cities;
+        _cityManual = manual;
+        _isLoadingLocations = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading locations: $e');
+      if (!mounted || iso != _countryIso) return;
+      // no data / no network → plain text fields
+      setState(() {
+        _levelLabels = {};
+        _provinceOptions = [];
+        _districtOptions = [];
+        _cityOptions = [];
+        _provinceId = null;
+        _districtId = null;
+        _cityManual = false;
+        _isLoadingLocations = false;
+      });
+    }
+  }
+
+  /// Country changed: the old province / district / city are meaningless
+  void _onCountryChanged() {
+    setState(() {
+      _provinceController.clear();
+      _districtController.clear();
+      _cityController.clear();
+      _provinceId = null;
+      _districtId = null;
+      _provinceOptions = [];
+      _districtOptions = [];
+      _cityOptions = [];
+      _cityManual = false;
+      _levelLabels = {};
+    });
+    _loadLocationConfig();
+  }
+
+  Future<void> _selectProvince(Map<String, dynamic> p) async {
+    final id = p['id'] as int;
+    setState(() {
+      _provinceId = id;
+      _provinceController.text = p['name'] as String;
+      _districtId = null;
+      _districtController.clear();
+      _districtOptions = [];
+      _cityOptions = [];
+      _cityController.clear();
+      _cityManual = false;
+    });
+
+    final iso = _countryIso;
+    try {
+      if (_levelVisible(2)) {
+        final d = await _fetchLocations(iso: iso, level: 2, parentId: id);
+        if (!mounted || _provinceId != id) return;
+        setState(() => _districtOptions = d);
+      } else {
+        final c = await _fetchLocations(iso: iso, level: 3, parentId: id);
+        if (!mounted || _provinceId != id) return;
+        setState(() => _cityOptions = c);
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading districts: $e');
+    }
+  }
+
+  Future<void> _selectDistrict(Map<String, dynamic> d) async {
+    final id = d['id'] as int;
+    setState(() {
+      _districtId = id;
+      _districtController.text = d['name'] as String;
+      _cityOptions = [];
+      _cityController.clear();
+      _cityManual = false;
+    });
+
+    try {
+      final c = await _fetchLocations(
+        iso: _countryIso,
+        level: 3,
+        parentId: id,
+      );
+      if (!mounted || _districtId != id) return;
+      setState(() => _cityOptions = c);
+    } catch (e) {
+      debugPrint('❌ Error loading cities: $e');
+    }
+  }
+
+  void _selectCity(Map<String, dynamic> c) {
+    setState(() {
+      _cityController.text = c['name'] as String;
+      _cityManual = false;
+    });
+  }
+
+  /// Searchable list (bottom sheet) for province / district / city
+  void _showLocationPicker({
+    required String title,
+    required List<Map<String, dynamic>> options,
+    required String currentName,
+    required void Function(Map<String, dynamic> option) onSelected,
+    VoidCallback? onOther,
+  }) {
+    final isDark = _isDark;
+    String query = '';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final q = query.trim().toLowerCase();
+          final list = options
+              .where((o) =>
+                  q.isEmpty || (o['name'] as String).toLowerCase().contains(q))
+              .toList();
+          final showOther = onOther != null && q.isEmpty;
+
+          return SafeArea(
+            child: Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(ctx).size.height * 0.7,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: TextField(
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                        onChanged: (v) => setSheetState(() => query = v),
+                        decoration: InputDecoration(
+                          hintText: 'Search',
+                          hintStyle: TextStyle(
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
+                          prefixIcon: Icon(
+                            Icons.search,
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
+                          filled: true,
+                          fillColor: isDark
+                              ? const Color(0xFF2A2A2A)
+                              : Colors.grey[100],
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: list.length + (showOther ? 1 : 0),
+                        itemBuilder: (_, i) {
+                          if (i == list.length) {
+                            return ListTile(
+                              leading: const Icon(
+                                Icons.edit_location_alt,
+                                color: AppTheme.primary,
+                              ),
+                              title: const Text(
+                                'Other (type manually)',
+                                style: TextStyle(
+                                  color: AppTheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              onTap: () {
+                                Navigator.pop(sheetContext);
+                                onOther?.call();
+                              },
+                            );
+                          }
+                          final o = list[i];
+                          final name = o['name'] as String;
+                          final selected = name == currentName;
+                          return ListTile(
+                            title: Text(
+                              name,
+                              style: TextStyle(
+                                color: isDark ? Colors.white : Colors.black87,
+                                fontWeight: selected
+                                    ? FontWeight.w700
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            trailing: selected
+                                ? const Icon(
+                                    Icons.check_circle,
+                                    color: AppTheme.primary,
+                                    size: 20,
+                                  )
+                                : null,
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              onSelected(o);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// A field that looks like a text field but opens a picker
+  Widget _buildPickerField({
+    required String label,
+    required IconData icon,
+    required String value,
+    required String hint,
+    required VoidCallback? onTap,
+  }) {
+    final isDark = _isDark;
+    final borderColor = isDark ? Colors.grey[700]! : Colors.grey[300]!;
+    final enabled = onTap != null;
+    final hasValue = value.trim().isNotEmpty;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: InputDecorator(
+          decoration: InputDecoration(
+            labelText: label,
+            prefixIcon: Icon(
+              icon,
+              color: isDark ? Colors.white70 : Colors.grey,
+            ),
+            suffixIcon: Icon(
+              Icons.arrow_drop_down,
+              color: enabled
+                  ? (isDark ? Colors.white70 : Colors.grey[600])
+                  : Colors.grey[400],
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: borderColor),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(color: borderColor),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+            filled: true,
+          ),
+          child: Text(
+            hasValue ? value : hint,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 15,
+              color: hasValue
+                  ? (isDark ? Colors.white : Colors.black87)
+                  : (isDark ? Colors.white38 : Colors.grey[500]),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Province → District → City (dropdowns, or text fields when there is
+  /// no data for the selected country)
+  Widget _buildLocationFields() {
+    final isDark = _isDark;
+    final pMode = _provinceMode();
+    final dMode = _districtMode();
+    final cMode = _cityMode();
+
+    final pLabel = _levelLabel(1, 'Province / State');
+    final dLabel = _levelLabel(2, 'District');
+    final cLabel = _levelLabel(3, 'City / Town');
+
+    final children = <Widget>[];
+
+    if (_isLoadingLocations) {
+      children.add(
+        const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: LinearProgressIndicator(minHeight: 2),
+        ),
+      );
+    }
+
+    // ---------- Province ----------
+    if (pMode == 'dropdown') {
+      children.add(
+        _buildPickerField(
+          label: pLabel,
+          icon: Icons.map,
+          value: _provinceController.text,
+          hint: 'Select ${pLabel.toLowerCase()}',
+          onTap: () => _showLocationPicker(
+            title: 'Select $pLabel',
+            options: _provinceOptions,
+            currentName: _provinceController.text,
+            onSelected: _selectProvince,
+          ),
+        ),
+      );
+      children.add(const SizedBox(height: 12));
+    } else if (pMode == 'text') {
+      children.add(
+        _buildTextField(
+          controller: _provinceController,
+          label: pLabel,
+          hint: 'Enter ${pLabel.toLowerCase()}',
+          icon: Icons.map,
+        ),
+      );
+      children.add(const SizedBox(height: 12));
+    }
+
+    // ---------- District ----------
+    if (dMode == 'dropdown' || dMode == 'disabled') {
+      children.add(
+        _buildPickerField(
+          label: dLabel,
+          icon: Icons.account_tree,
+          value: _districtController.text,
+          hint: dMode == 'disabled'
+              ? 'Select ${pLabel.toLowerCase()} first'
+              : 'Select ${dLabel.toLowerCase()}',
+          onTap: dMode == 'dropdown'
+              ? () => _showLocationPicker(
+                    title: 'Select $dLabel',
+                    options: _districtOptions,
+                    currentName: _districtController.text,
+                    onSelected: _selectDistrict,
+                  )
+              : null,
+        ),
+      );
+      children.add(const SizedBox(height: 12));
+    } else if (dMode == 'text') {
+      children.add(
+        _buildTextField(
+          controller: _districtController,
+          label: dLabel,
+          hint: 'Enter ${dLabel.toLowerCase()}',
+          icon: Icons.account_tree,
+        ),
+      );
+      children.add(const SizedBox(height: 12));
+    }
+
+    // ---------- City (required) ----------
+    if (cMode == 'dropdown' || cMode == 'disabled') {
+      final upperLabel = _levelVisible(2) ? dLabel : pLabel;
+      children.add(
+        _buildPickerField(
+          label: '$cLabel *',
+          icon: Icons.location_city,
+          value: _cityController.text,
+          hint: cMode == 'disabled'
+              ? 'Select ${upperLabel.toLowerCase()} first'
+              : 'Select ${cLabel.toLowerCase()}',
+          onTap: cMode == 'dropdown'
+              ? () => _showLocationPicker(
+                    title: 'Select $cLabel',
+                    options: _cityOptions,
+                    currentName: _cityController.text,
+                    onSelected: _selectCity,
+                    onOther: () => setState(() {
+                      _cityManual = true;
+                      _cityController.clear();
+                    }),
+                  )
+              : null,
+        ),
+      );
+    } else {
+      children.add(
+        _buildTextField(
+          controller: _cityController,
+          label: '$cLabel *',
+          hint: 'Enter ${cLabel.toLowerCase()}',
+          icon: Icons.location_city,
+          rebuildOnChange: true,
+        ),
+      );
+      if (_cityManual && _cityOptions.isNotEmpty) {
+        children.add(
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() {
+                _cityManual = false;
+                _cityController.clear();
+              }),
+              icon: const Icon(Icons.list, size: 16),
+              label: const Text('Choose from list'),
+              style: TextButton.styleFrom(
+                foregroundColor: isDark ? Colors.teal[300] : Colors.teal[700],
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
+  }
+
+  // ============================================================
+  // ✅ MAP LOCATION  (current location OR a pasted map link)
+  //
+  //  - Source of truth = latitude / longitude (+ optional map_url).
+  //  - ONE source at a time: using GPS clears the link, pasting a link
+  //    replaces the coordinates (taken from the link when it has them).
+  //  - The link is checked with MapLinkUtils (allow-list, https only,
+  //    no look-alike hosts ...). The database trigger repeats the same
+  //    check, so nobody can skip it by calling the API directly.
+  // ============================================================
+  final TextEditingController _mapUrlController = TextEditingController();
+  double? _latitude;
+  double? _longitude;
+  bool _isGettingLocation = false;
+  String? _mapUrlError;
+
+  /// normalised link for the DB (null when empty / invalid)
+  String? _mapUrlForSave() {
+    final c = MapLinkUtils.check(_mapUrlController.text);
+    return (c.ok && c.uri != null) ? c.uri.toString() : null;
+  }
+
+  /// coordinates only when both are valid
+  double? get _latitudeForSave =>
+      MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ? _latitude : null;
+
+  double? get _longitudeForSave =>
+      MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ? _longitude : null;
+
+  String _mapLocationSummary() {
+    if (MapLinkUtils.hasValidCoordinates(_latitude, _longitude)) {
+      return '${MapLinkUtils.formatCoordinate(_latitude!)}, '
+          '${MapLinkUtils.formatCoordinate(_longitude!)}';
+    }
+    final c = MapLinkUtils.check(_mapUrlController.text);
+    if (c.ok && c.uri != null) return 'Map link added (${c.uri!.host})';
+    return 'Not set';
+  }
+
+  void _onMapUrlChanged(String value) {
+    final c = MapLinkUtils.check(value);
+    setState(() {
+      if (value.trim().isEmpty) {
+        _mapUrlError = null;
+        _latitude = null;
+        _longitude = null;
+      } else if (!c.ok) {
+        _mapUrlError = c.error;
+        _latitude = null;
+        _longitude = null;
+      } else {
+        _mapUrlError = null;
+        // coordinates found inside the link (short links have none)
+        _latitude = c.latitude;
+        _longitude = c.longitude;
+      }
+    });
+  }
+
+  void _clearMapLocation() {
+    setState(() {
+      _mapUrlController.clear();
+      _mapUrlError = null;
+      _latitude = null;
+      _longitude = null;
+    });
+  }
+
+  Future<void> _useCurrentLocation() async {
+    if (_isGettingLocation) return;
+
+    // Explain first: the owner must be AT the business
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Use current location?'),
+        content: const Text(
+          'Your phone\'s current position will be saved as the location of '
+          'this business. Do this only while you are at the business.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Use my location'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true || !mounted) return;
+
+    setState(() => _isGettingLocation = true);
+    try {
+      final enabled = await Geolocator.isLocationServiceEnabled();
+      if (!enabled) {
+        _showSnackBar('Turn on location services and try again', Colors.orange);
+        return;
+      }
+
+      // permission is asked only now (when the button is tapped)
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        _showSnackBar(
+          'Location permission is needed. You can also paste a map link.',
+          Colors.orange,
+        );
+        return;
+      }
+
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 20),
+        ),
+      );
+
+      if (!MapLinkUtils.hasValidCoordinates(pos.latitude, pos.longitude)) {
+        _showSnackBar('Could not read a valid location', Colors.red);
+        return;
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _latitude = double.parse(pos.latitude.toStringAsFixed(6));
+        _longitude = double.parse(pos.longitude.toStringAsFixed(6));
+        // one source at a time: GPS replaces any pasted link
+        _mapUrlController.clear();
+        _mapUrlError = null;
+      });
+    } catch (e) {
+      debugPrint('❌ Error getting location: $e');
+      _showSnackBar(
+        'Could not get your location. Try again or paste a map link.',
+        Colors.red,
+      );
+    } finally {
+      if (mounted) setState(() => _isGettingLocation = false);
+    }
+  }
+
+  Widget _buildMapLocationSection() {
+    final isDark = _isDark;
+    final borderColor = isDark ? Colors.grey[700]! : Colors.grey[300]!;
+    final hasCoords =
+        MapLinkUtils.hasValidCoordinates(_latitude, _longitude);
+    final linkCheck = MapLinkUtils.check(_mapUrlController.text);
+    final hasLink = linkCheck.ok && linkCheck.uri != null;
+
+    return Card(
+      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Map Location',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black87,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Optional. Customers can open your business in Google Maps.',
+              style: TextStyle(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.grey[600],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // ---------- Use current location ----------
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _isGettingLocation ? null : _useCurrentLocation,
+                icon: _isGettingLocation
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.my_location, size: 18),
+                label: Text(
+                  _isGettingLocation
+                      ? 'Getting location...'
+                      : 'Use my current location',
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  side: BorderSide(color: borderColor),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(child: Divider(color: borderColor)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  child: Text(
+                    'or paste a map link',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white60 : Colors.grey[600],
+                    ),
+                  ),
+                ),
+                Expanded(child: Divider(color: borderColor)),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // ---------- Paste a link ----------
+            TextFormField(
+              controller: _mapUrlController,
+              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              keyboardType: TextInputType.url,
+              autocorrect: false,
+              enableSuggestions: false,
+              maxLength: MapLinkUtils.maxUrlLength,
+              onChanged: _onMapUrlChanged,
+              decoration: InputDecoration(
+                labelText: 'Google Maps / WhatsApp location link',
+                hintText: 'https://maps.app.goo.gl/...',
+                hintStyle:
+                    TextStyle(color: isDark ? Colors.white70 : Colors.grey),
+                prefixIcon: Icon(
+                  Icons.link,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+                suffixIcon: _mapUrlController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.clear),
+                        tooltip: 'Clear',
+                        onPressed: _clearMapLocation,
+                      ),
+                counterText: '',
+                errorText: _mapUrlError,
+                errorMaxLines: 3,
+                errorStyle:
+                    TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: borderColor),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: borderColor),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide:
+                      const BorderSide(color: AppTheme.primary, width: 2),
+                ),
+                errorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Colors.red, width: 1),
+                ),
+                focusedErrorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: const BorderSide(color: Colors.red, width: 2),
+                ),
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                filled: true,
+              ),
+            ),
+
+            // ---------- Status + test ----------
+            if (hasCoords || hasLink) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border:
+                      Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.check_circle,
+                            size: 16, color: Colors.green),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            hasCoords
+                                ? 'Location set: ${MapLinkUtils.formatCoordinate(_latitude!)}, ${MapLinkUtils.formatCoordinate(_longitude!)}'
+                                : 'Map link accepted (${linkCheck.uri!.host})',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: isDark
+                                  ? Colors.green[300]
+                                  : Colors.green[800],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (!hasCoords && hasLink) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'This link has no coordinates inside it. It will still '
+                        'open in Maps.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        OpenInMapsButton(
+                          latitude: _latitude,
+                          longitude: _longitude,
+                          mapUrl: _mapUrlController.text,
+                          label: 'Test in Maps',
+                        ),
+                        const SizedBox(width: 8),
+                        TextButton.icon(
+                          onPressed: _clearMapLocation,
+                          icon: const Icon(Icons.delete_outline, size: 16),
+                          label: const Text('Remove'),
+                          style: TextButton.styleFrom(
+                            foregroundColor:
+                                isDark ? Colors.red[300] : Colors.red,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+
+            const SizedBox(height: 8),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.shield_outlined,
+                  size: 12,
+                  color: isDark ? Colors.white38 : Colors.grey[500],
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Only Google Maps, Apple Maps, OpenStreetMap and Waze '
+                    'links are accepted.',
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: isDark ? Colors.white38 : Colors.grey[500],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2627,6 +3611,12 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
           onEdit: () => _goToStep(0),
         ),
         _buildReviewTile(
+          icon: Icons.pin_drop,
+          title: 'Map Location',
+          value: _mapLocationSummary(),
+          onEdit: () => _goToStep(0),
+        ),
+        _buildReviewTile(
           icon: Icons.phone,
           title: 'Phone',
           value: phoneE164 ?? 'Not set',
@@ -2766,6 +3756,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         'address': _nullIfEmpty(_addressController.text),
         // structured location (used for filters)
         'country_code': _countryIso,
+        // map location (coordinates + optional link). The link is checked
+        // again by the database trigger validate_salon_map_url.
+        'latitude': _latitudeForSave,
+        'longitude': _longitudeForSave,
+        'map_url': _mapUrlForSave(),
         'province': _nullIfEmpty(_titleCase(_provinceController.text)),
         'district': _nullIfEmpty(_titleCase(_districtController.text)),
         'city': _nullIfEmpty(_titleCase(_cityController.text)),
@@ -2970,27 +3965,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                 const SizedBox(height: 16),
                 _buildCountryField(),
                 const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _provinceController,
-                  label: 'Province / State',
-                  hint: 'Enter province or state',
-                  icon: Icons.map,
-                ),
-                const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _districtController,
-                  label: 'District',
-                  hint: 'Enter district',
-                  icon: Icons.account_tree,
-                ),
-                const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _cityController,
-                  label: 'City / Town *',
-                  hint: 'Enter city or town',
-                  icon: Icons.location_city,
-                  rebuildOnChange: true,
-                ),
+                // ✅ Province → District → City (dropdowns from the locations
+                // table; plain text fields when a country has no data)
+                _buildLocationFields(),
                 const SizedBox(height: 12),
                 _buildTextField(
                   controller: _addressController,
@@ -3011,6 +3988,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
             ),
           ),
         ),
+        const SizedBox(height: 16),
+        // ✅ Map location (current location or a pasted map link)
+        _buildMapLocationSection(),
         const SizedBox(height: 16),
         Card(
           color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
