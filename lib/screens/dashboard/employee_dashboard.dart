@@ -25,7 +25,7 @@ import 'package:intl/intl.dart';
 /// Backward-compatible alias: other files that imported `routeObserver`
 /// from this file keep working, but it now points to the shared observer
 /// that is registered in the router (same one the customer dashboard uses).
-final RouteObserver<ModalRoute<void>> routeObserver = dashboardRouteObserver;
+final routeObserver = ownerdashboardRouteObs;
 
 class EmployeeDashboard extends StatefulWidget {
   const EmployeeDashboard({super.key});
@@ -182,7 +182,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
     if (route is PageRoute) {
-      dashboardRouteObserver.subscribe(this, route);
+      customerdashboardRouteObs.subscribe(this, route);
     }
     // ✅ FIX: Defer setState to next frame (avoid setState-during-build)
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -217,7 +217,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
 
   @override
   void dispose() {
-    dashboardRouteObserver.unsubscribe(this);
+    customerdashboardRouteObs.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
     _onMessageSub?.cancel();
     _scrollController.dispose();

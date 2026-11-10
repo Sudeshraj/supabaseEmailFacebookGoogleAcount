@@ -27,7 +27,7 @@ import '../../services/session_manager.dart';
 /// Backward-compatible alias: other files that imported `routeObserver`
 /// from this file keep working, but it now points to the shared observer
 /// that is registered in the router (same one the customer dashboard uses).
-final RouteObserver<ModalRoute<void>> routeObserver = dashboardRouteObserver;
+final routeObserver = ownerdashboardRouteObs;
 
 class OwnerDashboard extends StatefulWidget {
   const OwnerDashboard({super.key});
@@ -194,7 +194,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
     super.didChangeDependencies();
     final route = ModalRoute.of(context);
     if (route is PageRoute) {
-      dashboardRouteObserver.subscribe(this, route);
+      ownerdashboardRouteObs.subscribe(this, route);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _checkScreenSize();
@@ -239,7 +239,7 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
   @override
   void dispose() {
-    dashboardRouteObserver.unsubscribe(this);
+    ownerdashboardRouteObs.unsubscribe(this);
     WidgetsBinding.instance.removeObserver(this);
     _onMessageSub?.cancel();
     _onOpenedSub?.cancel();

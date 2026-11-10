@@ -158,7 +158,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     super.didChangeDependencies();
         final route = ModalRoute.of(context);
     if (route is PageRoute) {
-      dashboardRouteObserver.subscribe(this, route);
+      customerdashboardRouteObs.subscribe(this, route);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _checkScreenSize();
@@ -177,7 +177,7 @@ class _CustomerDashboardState extends State<CustomerDashboard>
 
   @override
   void dispose() {
-     dashboardRouteObserver.unsubscribe(this);
+     customerdashboardRouteObs.unsubscribe(this);
     _pulseCtrl.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();

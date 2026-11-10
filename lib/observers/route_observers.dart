@@ -16,14 +16,14 @@ import 'package:flutter/material.dart';
 
 /// Used by CustomerDashboard to auto-refresh when returning
 /// from child routes (Settings, Bookings, Salon Profile, etc.)
-final RouteObserver<ModalRoute<void>> dashboardRouteObserver =
+final RouteObserver<ModalRoute<void>> customerdashboardRouteObs =
     RouteObserver<ModalRoute<void>>();
 
 // ============================================================
 // FUTURE OBSERVERS (add here as needed)
 // ------------------------------------------------------------
-// final RouteObserver<ModalRoute<void>> ownerRouteObserver =
-//     RouteObserver<ModalRoute<void>>();
+final RouteObserver<PageRoute<void>> ownerdashboardRouteObs =
+    RouteObserver<PageRoute<void>>();
 //
 // final RouteObserver<ModalRoute<void>> barberRouteObserver =
 //     RouteObserver<ModalRoute<void>>();

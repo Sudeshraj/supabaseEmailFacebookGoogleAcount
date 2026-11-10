@@ -743,7 +743,7 @@ GoRouter _createRouter() {
     refreshListenable: appState,
     initialLocation: '/',
     debugLogDiagnostics: kDebugMode,
-    observers: [if (kDebugMode) MyRouteObserver(), dashboardRouteObserver],
+    observers: [if (kDebugMode) MyRouteObserver(), customerdashboardRouteObs,ownerdashboardRouteObs],
     redirect: (context, state) async {
       final path = state.matchedLocation;
       final queryParams = state.uri.queryParameters;
