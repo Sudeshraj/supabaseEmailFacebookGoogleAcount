@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/alertBox/show_custom_alert.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
@@ -47,6 +48,11 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
   // ==================== DATA ====================
   List<Map<String, dynamic>> _genders = [];
   List<Map<String, dynamic>> _ageCategories = [];
+
+  // Suggestion sources. Category rows keep description/icon/color so picking
+  // a suggestion can auto-fill them.
+  List<Map<String, dynamic>> _globalCategories = [];
+  List<String> _globalAgeNames = [];
 
   // Local tree: each category has services, each service has variants
   final List<Map<String, dynamic>> _categories = [];
@@ -134,6 +140,64 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
   String get _salonCurrencySymbol =>
       _currencyService.getSymbol(_salonCurrencyCode);
 
+  bool get _currencyUsesDecimals =>
+      _currencyService.getInfo(_salonCurrencyCode).decimals > 0;
+
+  /// Price input: digits (+ one decimal point when the currency uses decimals).
+  /// Max 8 whole digits (DB column is DECIMAL(10,2)) so a huge number can
+  /// never overflow the column.
+  List<TextInputFormatter> get _priceFormatters => _currencyUsesDecimals
+      ? [
+          FilteringTextInputFormatter.allow(RegExp(r'^\d{0,8}(\.\d{0,2})?')),
+          LengthLimitingTextInputFormatter(11),
+        ]
+      : [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(8),
+        ];
+
+  // ==================== SUGGESTION GETTERS ====================
+  List<String> get _categorySuggestions => {
+        ..._globalCategories.map((c) => (c['display_name'] ?? '').toString()),
+        ..._categories.map((c) => (c['display_name'] ?? '').toString()),
+      }.where((n) => n.isNotEmpty).toList();
+
+  List<String> get _serviceSuggestions => {
+        for (final c in _categories)
+          for (final s in (c['services'] as List)) (s['name'] ?? '').toString(),
+      }.where((n) => n.isNotEmpty).toList();
+
+  /// Description / icon / colour stored for a suggested category name.
+  /// Global master list first, then the salon's own categories.
+  Map<String, dynamic>? _categoryDefaults(String name) {
+    final key = name.trim().toLowerCase();
+    for (final c in [..._globalCategories, ..._categories]) {
+      if ((c['display_name'] ?? '').toString().trim().toLowerCase() == key) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  /// Description / icon stored for a suggested service name (salon services).
+  Map<String, dynamic>? _serviceDefaults(String name) {
+    final key = name.trim().toLowerCase();
+    for (final c in _categories) {
+      for (final s in (c['services'] as List)) {
+        if ((s['name'] ?? '').toString().trim().toLowerCase() == key) {
+          return s as Map<String, dynamic>;
+        }
+      }
+    }
+    return null;
+  }
+
+  bool _isKnownIcon(String? name) =>
+      name != null && _iconSuggestions.any((i) => i['name'] == name);
+
+  bool _isHexColor(String? hex) =>
+      hex != null && RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(hex);
+
   @override
   void initState() {
     super.initState();
@@ -192,9 +256,35 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
           .eq('is_active', true)
           .order('display_order');
 
+      // Global suggestion lists (optional — ignore if the tables are missing)
+      List<Map<String, dynamic>> globalCategories = [];
+      try {
+        final g = await supabase
+            .from('categories')
+            .select('display_name, description, icon_name, color')
+            .eq('is_active', true);
+        globalCategories = List<Map<String, dynamic>>.from(g);
+      } catch (e) {
+        debugPrint('Could not load global categories: $e');
+      }
+
+      List<String> globalAgeNames = [];
+      try {
+        final g = await supabase
+            .from('age_categories')
+            .select('display_name')
+            .eq('is_active', true);
+        globalAgeNames =
+            g.map<String>((e) => e['display_name'].toString()).toList();
+      } catch (e) {
+        debugPrint('Could not load global age categories: $e');
+      }
+
       if (!mounted) return; // ✅ guard
       setState(() {
         _ageCategories = List<Map<String, dynamic>>.from(ageResponse);
+        _globalCategories = globalCategories;
+        _globalAgeNames = globalAgeNames;
       });
 
       // Load services for this salon
@@ -213,7 +303,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         variantsResponse = await supabase
             .from('service_variants')
             .select(
-                'id, service_id, price, duration, salon_gender_id, salon_age_category_id')
+                'id, service_id, name, price, duration, salon_gender_id, salon_age_category_id')
             .inFilter('service_id', serviceIds)
             .eq('is_active', true);
       }
@@ -264,6 +354,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
           'price': priceNum ?? 0.0,
           'price_set': priceNum != null,
           'duration': (v['duration'] as num?)?.toInt() ?? 0,
+          'name': (v['name'] ?? '').toString().trim(),
           'variant_id': v['id'],
           'from_db': true,
         });
@@ -299,8 +390,6 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         });
       }
 
-      // ✅ FIX: this was the setState() at service_menu_editor.dart:305
-      // that ran after the widget had been disposed.
       if (!mounted) return;
       setState(() {
         _categories
@@ -359,6 +448,98 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     return found['icon'] as IconData;
   }
 
+  // ============================================
+  // TEXT LIMITS + SANITISING (same limits are enforced again in the DB)
+  // ============================================
+  static const int _maxCategoryName = 40;
+  static const int _maxServiceName = 60;
+  static const int _maxVariantName = 50;
+  static const int _maxAgeName = 30;
+  static const int _maxDescription = 200;
+
+  // Invisible / control characters: C0 controls, DEL, zero-width chars,
+  // bidi overrides (used to spoof text) and the BOM.
+  static final RegExp _badCharsSingleLine = RegExp(
+      r'[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]');
+  // Same, but a description may keep line breaks (\n = \u000A).
+  static final RegExp _badCharsMultiLine = RegExp(
+      r'[\u0000-\u0009\u000B-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]');
+
+  /// Blocks bad characters and over-long text while typing / pasting.
+  List<TextInputFormatter> _textFormatters(int max,
+      {bool multiLine = false}) {
+    return [
+      FilteringTextInputFormatter.deny(
+          multiLine ? _badCharsMultiLine : _badCharsSingleLine),
+      LengthLimitingTextInputFormatter(max),
+    ];
+  }
+
+  /// Final clean-up before a value is stored: removes bad characters,
+  /// collapses repeated spaces, trims and cuts to [max].
+  String _cleanText(String input, int max, {bool multiLine = false}) {
+    var t = input.replaceAll(
+        multiLine ? _badCharsMultiLine : _badCharsSingleLine, '');
+    if (multiLine) {
+      t = t
+          .split('\n')
+          .map((l) => l.replaceAll(RegExp(r'[ \t]+'), ' ').trim())
+          .join('\n')
+          .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+          .trim();
+    } else {
+      t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+    }
+    return t.length > max ? t.substring(0, max).trim() : t;
+  }
+
+  /// Gender / age / duration parts that are actually set (no "Any").
+  List<String> _variantDetailParts(Map<String, dynamic> v) {
+    final parts = <String>[];
+    final gender = (v['gender_name'] ?? '').toString();
+    final age = (v['age_category_name'] ?? '').toString();
+    final duration = (v['duration'] as num?)?.toInt() ?? 0;
+    if (gender.isNotEmpty && gender != 'Any') parts.add(gender);
+    if (age.isNotEmpty && age != 'Any') parts.add(age);
+    if (duration > 0) parts.add(_formatDuration(duration));
+    return parts;
+  }
+
+  /// 45 → "45 min", 60 → "1 hr", 90 → "1 hr 30 min", 120 → "2 hrs".
+  String _formatDuration(int minutes) {
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (h == 0) return '$m min';
+    final hText = h == 1 ? '1 hr' : '$h hrs';
+    return m == 0 ? hText : '$hText $m min';
+  }
+
+  /// Main line of a variant row: its name, or (no name) the set details.
+  String _variantTitle(Map<String, dynamic> v) {
+    final vName = (v['name'] ?? '').toString().trim();
+    if (vName.isNotEmpty) return vName;
+    final parts = _variantDetailParts(v);
+    return parts.isEmpty ? 'Standard' : parts.join(' • ');
+  }
+
+  /// Second line of a variant row. Only when a name is shown as the title,
+  /// the details move down here; otherwise they are already in the title.
+  List<String> _variantSubtitleParts(Map<String, dynamic> v) {
+    final vName = (v['name'] ?? '').toString().trim();
+    return vName.isNotEmpty ? _variantDetailParts(v) : <String>[];
+  }
+
+  /// Readable variant summary that skips anything that isn't set:
+  /// "Beard Trim • Male • Adult (18-60 yrs) • 30 min". No "Any" or dashes.
+  String _variantLabel(Map<String, dynamic> v) {
+    final vName = (v['name'] ?? '').toString().trim();
+    final parts = <String>[
+      if (vName.isNotEmpty) vName,
+      ..._variantDetailParts(v),
+    ];
+    return parts.isEmpty ? 'Standard' : parts.join(' • ');
+  }
+
   String _formatPriceDisplay(Map<String, dynamic> v) {
     final priceSet = v['price_set'] == true;
     final price = (v['price'] as num?)?.toDouble() ?? 0.0;
@@ -376,13 +557,92 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
   }
 
   // ============================================
+  // SUGGESTION TEXT FIELD
+  // Shows suggestions while typing. Typing never changes other fields; only
+  // when a suggestion is actually picked, [onPicked] runs (the dialogs use it
+  // to auto-fill description / icon / colour).
+  // ============================================
+  Widget _suggestField({
+    Key? fieldKey,
+    required TextEditingController controller,
+    required List<String> suggestions,
+    required String label,
+    required String hint,
+    required IconData icon,
+    required bool isDark,
+    String? errorText,
+    ValueChanged<String>? onChanged,
+    ValueChanged<String>? onPicked,
+    int maxLength = 60,
+  }) {
+    return Autocomplete<String>(
+      key: fieldKey,
+      initialValue: TextEditingValue(text: controller.text),
+      optionsBuilder: (TextEditingValue v) {
+        final q = v.text.trim().toLowerCase();
+        if (q.isEmpty) return const Iterable<String>.empty();
+        return suggestions.where((o) {
+          final l = o.toLowerCase();
+          return l.contains(q) && l != q;
+        });
+      },
+      onSelected: (String s) {
+        controller.text = s;
+        onChanged?.call(s);
+        onPicked?.call(s);
+      },
+      fieldViewBuilder: (context, tc, focusNode, onFieldSubmitted) {
+        return TextFormField(
+          controller: tc,
+          focusNode: focusNode,
+          inputFormatters: _textFormatters(maxLength),
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          onChanged: (v) {
+            controller.text = v;
+            onChanged?.call(v);
+          },
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: hint,
+            counterText: '',
+            errorText: errorText,
+            errorMaxLines: 2,
+            prefixIcon: Icon(icon,
+                size: 18, color: isDark ? Colors.white70 : Colors.grey),
+            suffixIcon: suggestions.isNotEmpty
+                ? Icon(Icons.arrow_drop_down,
+                    color: isDark ? Colors.white70 : Colors.grey)
+                : null,
+            border:
+                OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide:
+                  const BorderSide(color: AppTheme.primary, width: 2),
+            ),
+            filled: true,
+            fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+        );
+      },
+    );
+  }
+
+  // ============================================
   // FRIENDLY ERRORS + DUPLICATE CHECKS
   // ============================================
   String _friendlyError(Object e) {
     if (e is PostgrestException) {
       switch (e.code) {
         case '23505':
-          return 'Two items are exactly the same (for example a service with the same gender, age category and duration). Please remove or change the duplicate.';
+          return 'Two items are exactly the same (for example a service with the same name, gender, age category and duration). Please remove or change the duplicate.';
         case '23503':
           return "Some of these services are already linked to other records (like bookings), so they can't be replaced right now.";
         case '42501':
@@ -404,13 +664,16 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     required int? gender,
     required int? age,
     required int duration,
+    String name = '',
     int? ignoreIndex,
   }) {
+    final n = name.trim().toLowerCase();
     for (int i = 0; i < variants.length; i++) {
       if (i == ignoreIndex) continue;
       final v = variants[i];
       if (v['gender_id'] == gender &&
           v['age_category_id'] == age &&
+          (v['name'] ?? '').toString().trim().toLowerCase() == n &&
           ((v['duration'] as num?)?.toInt() ?? 0) == duration) {
         return true;
       }
@@ -426,6 +689,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         gender: v['gender_id'] as int?,
         age: v['age_category_id'] as int?,
         duration: (v['duration'] as num?)?.toInt() ?? 0,
+        name: (v['name'] ?? '').toString(),
         ignoreIndex: i,
       )) {
         return true;
@@ -495,44 +759,35 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      TextFormField(
+                      _suggestField(
                         controller: nameController,
-                        style: TextStyle(
-                            color:
-                                isDark ? Colors.white : Colors.black87),
-                        decoration: InputDecoration(
-                          labelText: 'Category Name *',
-                          hintText: 'e.g., Hair, Nails, Spa',
-                          prefixIcon: Icon(Icons.category,
-                              size: 18,
-                              color:
-                                  isDark ? Colors.white70 : Colors.grey),
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(
-                                color: isDark
-                                    ? Colors.grey[700]!
-                                    : Colors.grey[300]!),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                                color: AppTheme.primary, width: 2),
-                          ),
-                          filled: true,
-                          fillColor: isDark
-                              ? const Color(0xFF2A2A2A)
-                              : Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 10),
-                        ),
+                        suggestions: _categorySuggestions,
+                        label: 'Category Name *',
+                        maxLength: _maxCategoryName,
+                        hint: 'e.g., Hair, Nails, Spa',
+                        icon: Icons.category,
+                        isDark: isDark,
+                        // Picking a suggestion fills description, icon, colour
+                        onPicked: (picked) {
+                          final d = _categoryDefaults(picked);
+                          if (d == null) return;
+                          setDialogState(() {
+                            descController.text =
+                                (d['description'] ?? '').toString();
+                            final icon = d['icon_name']?.toString();
+                            if (_isKnownIcon(icon)) selectedIcon = icon!;
+                            final color = d['color']?.toString();
+                            if (_isHexColor(color)) selectedColorHex = color!;
+                          });
+                        },
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: descController,
                         maxLines: 2,
+                        maxLength: _maxDescription,
+                        inputFormatters:
+                            _textFormatters(_maxDescription, multiLine: true),
                         style: TextStyle(
                             color:
                                 isDark ? Colors.white : Colors.black87),
@@ -705,12 +960,15 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    final name = nameController.text.trim();
+                    final name =
+                        _cleanText(nameController.text, _maxCategoryName);
                     if (name.isEmpty) return;
 
                     Navigator.pop(dialogContext, {
                       'display_name': name,
-                      'description': descController.text.trim(),
+                      'description': _cleanText(
+                          descController.text, _maxDescription,
+                          multiLine: true),
                       'icon_name': selectedIcon,
                       'color': selectedColorHex,
                     });
@@ -839,44 +1097,33 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      TextFormField(
+                      _suggestField(
                         controller: nameController,
-                        style: TextStyle(
-                            color:
-                                isDark ? Colors.white : Colors.black87),
-                        decoration: InputDecoration(
-                          labelText: 'Service Name *',
-                          hintText: 'e.g., Hair Cut, Facial',
-                          prefixIcon: Icon(Icons.build,
-                              size: 18,
-                              color:
-                                  isDark ? Colors.white70 : Colors.grey),
-                          border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: BorderSide(
-                                color: isDark
-                                    ? Colors.grey[700]!
-                                    : Colors.grey[300]!),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            borderSide: const BorderSide(
-                                color: AppTheme.primary, width: 2),
-                          ),
-                          filled: true,
-                          fillColor: isDark
-                              ? const Color(0xFF2A2A2A)
-                              : Colors.grey[50],
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 10),
-                        ),
+                        suggestions: _serviceSuggestions,
+                        label: 'Service Name *',
+                        maxLength: _maxServiceName,
+                        hint: 'e.g., Hair Cut, Facial',
+                        icon: Icons.build,
+                        isDark: isDark,
+                        // Picking a suggestion fills description and icon
+                        onPicked: (picked) {
+                          final d = _serviceDefaults(picked);
+                          if (d == null) return;
+                          setDialogState(() {
+                            descController.text =
+                                (d['description'] ?? '').toString();
+                            final icon = d['icon_name']?.toString();
+                            if (_isKnownIcon(icon)) selectedIcon = icon!;
+                          });
+                        },
                       ),
                       const SizedBox(height: 12),
                       TextFormField(
                         controller: descController,
                         maxLines: 2,
+                        maxLength: _maxDescription,
+                        inputFormatters:
+                            _textFormatters(_maxDescription, multiLine: true),
                         style: TextStyle(
                             color:
                                 isDark ? Colors.white : Colors.black87),
@@ -1001,12 +1248,15 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                 ),
                 ElevatedButton(
                   onPressed: () {
-                    final name = nameController.text.trim();
+                    final name =
+                        _cleanText(nameController.text, _maxServiceName);
                     if (name.isEmpty) return;
 
                     Navigator.pop(dialogContext, {
                       'name': name,
-                      'description': descController.text.trim(),
+                      'description': _cleanText(
+                          descController.text, _maxDescription,
+                          multiLine: true),
                       'icon_name': selectedIcon,
                     });
                   },
@@ -1071,12 +1321,21 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     int? selectedAgeId = existing?['age_category_id'] as int?;
     final priceController = TextEditingController(
       text: existing != null && existing['price_set'] == true
-          ? (existing['price'] as double).toString()
+          ? (_currencyUsesDecimals
+              ? (existing['price'] as double).toString()
+              : (existing['price'] as double).toInt().toString())
           : '',
     );
-    final durationController = TextEditingController(
-      text: existing != null && (existing['duration'] as int) > 0
-          ? (existing['duration'] as int).toString()
+    // Duration is typed as hours + minutes and stored as total minutes.
+    final existingTotal = existing != null
+        ? ((existing['duration'] as num?)?.toInt() ?? 0)
+        : 0;
+    final hoursController = TextEditingController(
+      text: existingTotal >= 60 ? (existingTotal ~/ 60).toString() : '',
+    );
+    final minutesController = TextEditingController(
+      text: existingTotal > 0 && existingTotal % 60 > 0
+          ? (existingTotal % 60).toString()
           : '',
     );
 
@@ -1085,10 +1344,239 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     final newAgeMinController = TextEditingController(text: '0');
     final newAgeMaxController = TextEditingController(text: '100');
     bool showNewAgeForm = false;
+    int ageFormResetCounter = 0; // rebuilds the suggestion field after clear
+    final nameController =
+        TextEditingController(text: (existing?['name'] ?? '').toString());
+    String? nameError;
     String? variantError;
     String? durationError;
+    String? priceError;
+    String? ageNameError;
+    String? ageMinError;
+    String? ageMaxError;
+
+    // Optional sections stay hidden until opened with the arrow. Edit mode
+    // opens a section automatically when the variant already has a value.
+    bool genderOpen = existing?['gender_id'] != null;
+    bool ageOpen = existing?['age_category_id'] != null;
+    bool priceOpen = existing != null && existing['price_set'] == true;
 
     final isDark = _isDark;
+
+    // ── Duration helpers (hours + minutes → total minutes) ──
+    String? validateDuration(String hText, String mText) {
+      final h = hText.trim(), m = mText.trim();
+      if (h.isEmpty && m.isEmpty) return 'Duration is required';
+      final hours = h.isEmpty ? 0 : int.tryParse(h);
+      final mins = m.isEmpty ? 0 : int.tryParse(m);
+      if (hours == null || mins == null) return 'Enter numbers only';
+      if (hours > 23) return 'Hours must be between 0 and 23';
+      if (mins > 59) return 'Minutes must be between 0 and 59';
+      if (hours * 60 + mins <= 0) return 'Duration must be greater than 0';
+      return null;
+    }
+
+    /// Total minutes, or null while the input is empty / invalid.
+    int? parseDuration(String hText, String mText) {
+      if (validateDuration(hText, mText) != null) return null;
+      final h = hText.trim().isEmpty ? 0 : int.parse(hText.trim());
+      final m = mText.trim().isEmpty ? 0 : int.parse(mText.trim());
+      return h * 60 + m;
+    }
+
+    Widget durationInput({
+      required TextEditingController controller,
+      required String hint,
+      required String suffix,
+      required void Function(VoidCallback) setDialogState,
+      IconData? icon,
+    }) {
+      return TextFormField(
+        controller: controller,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(2),
+        ],
+        keyboardType: TextInputType.number,
+        onChanged: (_) {
+          setDialogState(() {
+            variantError = null;
+            // Show a message while typing, but stay quiet while both empty
+            durationError =
+                hoursController.text.trim().isEmpty &&
+                        minutesController.text.trim().isEmpty
+                    ? null
+                    : validateDuration(
+                        hoursController.text, minutesController.text);
+          });
+        },
+        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+        decoration: InputDecoration(
+          hintText: hint,
+          suffixText: suffix,
+          prefixIcon: icon != null
+              ? Icon(icon,
+                  size: 18, color: isDark ? Colors.white70 : Colors.grey)
+              : null,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(
+                color: durationError != null
+                    ? Colors.red
+                    : (isDark ? Colors.grey[700]! : Colors.grey[300]!)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+          ),
+          filled: true,
+          fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        ),
+      );
+    }
+
+    // Numbered section header. [open] == null → not collapsible (always shown).
+    Widget sectionHeader({
+      required int number,
+      required String title,
+      required String summary,
+      required Color color,
+      bool? open,
+      VoidCallback? onTap,
+      bool isRequired = false,
+      Widget? trailing,
+    }) {
+      final content = Row(
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              '$number',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    if (isRequired)
+                      Text(
+                        ' *',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red[300],
+                        ),
+                      ),
+                  ],
+                ),
+                if (summary.isNotEmpty)
+                  Text(
+                    summary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: isDark ? Colors.white54 : Colors.grey[600],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          ?trailing,
+          if (open != null)
+            AnimatedRotation(
+              turns: open ? 0.5 : 0,
+              duration: const Duration(milliseconds: 200),
+              child: Icon(
+                Icons.keyboard_arrow_down,
+                size: 22,
+                color: isDark ? Colors.white70 : Colors.grey[600],
+              ),
+            ),
+        ],
+      );
+
+      if (open == null) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: content,
+        );
+      }
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: content,
+        ),
+      );
+    }
+
+    // Validates the "new age category" mini form. Shows errors under the
+    // fields and returns true only when everything is valid.
+    bool validateAge(void Function(VoidCallback) set) {
+      final name = _cleanText(newAgeNameController.text, _maxAgeName);
+      final min = int.tryParse(newAgeMinController.text.trim());
+      final max = int.tryParse(newAgeMaxController.text.trim());
+
+      String? nameErr;
+      String? minErr;
+      String? maxErr;
+
+      if (name.isEmpty) {
+        nameErr = 'Name is required';
+      } else if (_ageCategories.any((a) =>
+          a['display_name'].toString().toLowerCase() == name.toLowerCase())) {
+        nameErr = 'This age category already exists';
+      }
+
+      if (min == null) {
+        minErr = 'Numbers only';
+      } else if (min < 0 || min > 150) {
+        minErr = 'Age must be 0-150';
+      }
+
+      if (max == null) {
+        maxErr = 'Numbers only';
+      } else if (max < 0 || max > 150) {
+        maxErr = 'Age must be 0-150';
+      } else if (min != null && max < min) {
+        maxErr = 'Max must be >= min';
+      }
+
+      set(() {
+        ageNameError = nameErr;
+        ageMinError = minErr;
+        ageMaxError = maxErr;
+      });
+
+      return nameErr == null && minErr == null && maxErr == null;
+    }
 
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -1149,15 +1637,19 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Gender
-                      Text(
-                        'Gender',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white70 : Colors.grey[700],
-                        ),
+                      // 1. Gender (optional, hidden until expanded)
+                      sectionHeader(
+                        number: 1,
+                        title: 'Gender',
+                        color: Colors.blue,
+                        open: genderOpen,
+                        summary: selectedGenderId != null
+                            ? _genderNameFromId(selectedGenderId)
+                            : 'Optional — tap the arrow to choose',
+                        onTap: () =>
+                            setDialogState(() => genderOpen = !genderOpen),
                       ),
+                      if (genderOpen) ...[
                       const SizedBox(height: 6),
                       Wrap(
                         spacing: 8,
@@ -1199,51 +1691,59 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                           );
                         }).toList(),
                       ),
+                      ],
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                         child: Divider(
                           height: 1,
                           color: isDark ? Colors.grey[800] : Colors.grey[200],
                         ),
                       ),
 
-                      // Age Category
-                      Row(
-                        children: [
-                          Text(
-                            'Age Category',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color:
-                                  isDark ? Colors.white70 : Colors.grey[700],
-                            ),
-                          ),
-                          const Spacer(),
-                          if (_ageCategories.isNotEmpty)
-                            TextButton.icon(
-                              onPressed: () => setDialogState(() {
-                                showNewAgeForm = !showNewAgeForm;
-                              }),
-                              icon: Icon(
-                                showNewAgeForm
-                                    ? Icons.close
-                                    : Icons.add_circle_outline,
-                                size: 14,
-                                color: Colors.green,
-                              ),
-                              label: Text(
-                                showNewAgeForm ? 'Cancel' : 'Add New',
-                                style: const TextStyle(
-                                    fontSize: 11, color: Colors.green),
-                              ),
-                              style: TextButton.styleFrom(
-                                padding: EdgeInsets.zero,
-                                minimumSize: Size.zero,
-                              ),
-                            ),
-                        ],
+                      // 2. Age Category (optional, hidden until expanded)
+                      sectionHeader(
+                        number: 2,
+                        title: 'Age Category',
+                        color: Colors.green,
+                        open: ageOpen,
+                        summary: selectedAgeId != null
+                            ? _getAgeCategoryDisplayName(
+                                _ageCategories.firstWhere(
+                                  (a) => a['id'] == selectedAgeId,
+                                  orElse: () => {'display_name': 'Selected'},
+                                ),
+                              )
+                            : 'Optional — tap the arrow to choose',
+                        onTap: () => setDialogState(() => ageOpen = !ageOpen),
+                        trailing: (ageOpen && _ageCategories.isNotEmpty)
+                            ? TextButton.icon(
+                                onPressed: () => setDialogState(() {
+                                  showNewAgeForm = !showNewAgeForm;
+                                  ageNameError = null;
+                                  ageMinError = null;
+                                  ageMaxError = null;
+                                }),
+                                icon: Icon(
+                                  showNewAgeForm
+                                      ? Icons.close
+                                      : Icons.add_circle_outline,
+                                  size: 14,
+                                  color: Colors.green,
+                                ),
+                                label: Text(
+                                  showNewAgeForm ? 'Cancel' : 'Add New',
+                                  style: const TextStyle(
+                                      fontSize: 11, color: Colors.green),
+                                ),
+                                style: TextButton.styleFrom(
+                                  padding:
+                                      const EdgeInsets.symmetric(horizontal: 6),
+                                  minimumSize: Size.zero,
+                                ),
+                              )
+                            : null,
                       ),
+                      if (ageOpen) ...[
                       if (_ageCategories.isEmpty) ...[
                         const SizedBox(height: 4),
                         Text(
@@ -1312,39 +1812,46 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                           ),
                           child: Column(
                             children: [
-                              TextFormField(
+                              _suggestField(
+                                fieldKey: ValueKey(
+                                    'age_name_$ageFormResetCounter'),
                                 controller: newAgeNameController,
-                                style: TextStyle(
-                                    color: isDark
-                                        ? Colors.white
-                                        : Colors.black87),
-                                decoration: InputDecoration(
-                                  labelText: 'Age Name *',
-                                  hintText: 'e.g., Adult',
-                                  isDense: true,
-                                  border: OutlineInputBorder(
-                                      borderRadius:
-                                          BorderRadius.circular(8)),
-                                  filled: true,
-                                  fillColor: isDark
-                                      ? const Color(0xFF1E1E1E)
-                                      : Colors.white,
-                                ),
+                                suggestions: _globalAgeNames,
+                                label: 'Age Name *',
+                                maxLength: _maxAgeName,
+                                hint: 'e.g., Adult',
+                                icon: Icons.visibility,
+                                isDark: isDark,
+                                errorText: ageNameError,
+                                onChanged: (_) => setDialogState(
+                                    () => ageNameError = null),
                               ),
                               const SizedBox(height: 8),
                               Row(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
                                 children: [
                                   Expanded(
                                     child: TextFormField(
                                       controller: newAgeMinController,
                                       keyboardType:
                                           TextInputType.number,
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter
+                                            .digitsOnly,
+                                      ],
+                                      maxLength: 3,
+                                      onChanged: (_) => setDialogState(
+                                          () => ageMinError = null),
                                       style: TextStyle(
                                           color: isDark
                                               ? Colors.white
                                               : Colors.black87),
                                       decoration: InputDecoration(
                                         labelText: 'Min',
+                                        counterText: '',
+                                        errorText: ageMinError,
+                                        errorMaxLines: 2,
                                         isDense: true,
                                         border: OutlineInputBorder(
                                             borderRadius:
@@ -1362,12 +1869,22 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                                       controller: newAgeMaxController,
                                       keyboardType:
                                           TextInputType.number,
+                                      inputFormatters: [
+                                        FilteringTextInputFormatter
+                                            .digitsOnly,
+                                      ],
+                                      maxLength: 3,
+                                      onChanged: (_) => setDialogState(
+                                          () => ageMaxError = null),
                                       style: TextStyle(
                                           color: isDark
                                               ? Colors.white
                                               : Colors.black87),
                                       decoration: InputDecoration(
                                         labelText: 'Max',
+                                        counterText: '',
+                                        errorText: ageMaxError,
+                                        errorMaxLines: 2,
                                         isDense: true,
                                         border: OutlineInputBorder(
                                             borderRadius:
@@ -1386,18 +1903,17 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                                 width: double.infinity,
                                 child: ElevatedButton.icon(
                                   onPressed: () async {
-                                    final name = newAgeNameController.text
-                                        .trim();
-                                    final min = int.tryParse(
-                                        newAgeMinController.text.trim());
-                                    final max = int.tryParse(
-                                        newAgeMaxController.text.trim());
-                                    if (name.isEmpty ||
-                                        min == null ||
-                                        max == null ||
-                                        min > max) {
+                                    if (!validateAge(setDialogState)) {
                                       return;
                                     }
+
+                                    final name = _cleanText(
+                                        newAgeNameController.text,
+                                        _maxAgeName);
+                                    final min = int.parse(
+                                        newAgeMinController.text.trim());
+                                    final max = int.parse(
+                                        newAgeMaxController.text.trim());
 
                                     try {
                                       final inserted = await supabase
@@ -1431,10 +1947,18 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                                         newAgeNameController.clear();
                                         newAgeMinController.text = '0';
                                         newAgeMaxController.text = '100';
+                                        ageFormResetCounter++;
+                                        ageNameError = null;
+                                        ageMinError = null;
+                                        ageMaxError = null;
                                         showNewAgeForm = false;
                                       });
                                     } catch (e) {
                                       debugPrint('Error adding age: $e');
+                                      if (mounted) {
+                                        _showSnackBar(
+                                            _friendlyError(e), Colors.red);
+                                      }
                                     }
                                   },
                                   icon: const Icon(Icons.save, size: 14),
@@ -1455,30 +1979,47 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                           ),
                         ),
                       ],
+                      ],
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                         child: Divider(
                           height: 1,
                           color: isDark ? Colors.grey[800] : Colors.grey[200],
                         ),
                       ),
 
-                      // Price
-                      Text(
-                        'Price',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white70 : Colors.grey[700],
-                        ),
+                      // 3. Price (optional, hidden until expanded)
+                      sectionHeader(
+                        number: 3,
+                        title: 'Price',
+                        color: Colors.teal,
+                        open: priceOpen,
+                        summary: priceController.text.trim().isNotEmpty
+                            ? '$_salonCurrencySymbol ${priceController.text.trim()}'
+                            : 'Optional — tap the arrow to set',
+                        onTap: () =>
+                            setDialogState(() => priceOpen = !priceOpen),
                       ),
+                      if (priceOpen) ...[
                       const SizedBox(height: 6),
                       TextFormField(
                         controller: priceController,
-                        onChanged: (_) {
-                          if (variantError != null) {
-                            setDialogState(() => variantError = null);
-                          }
+                        inputFormatters: _priceFormatters,
+                        onChanged: (v) {
+                          final t = v.trim();
+                          final p = double.tryParse(t);
+                          setDialogState(() {
+                            variantError = null;
+                            if (t.isEmpty) {
+                              priceError = null;
+                            } else if (p == null) {
+                              priceError = 'Enter a valid price';
+                            } else if (p < 0) {
+                              priceError = 'Price cannot be negative';
+                            } else {
+                              priceError = null;
+                            }
+                          });
                         },
                         keyboardType:
                             const TextInputType.numberWithOptions(
@@ -1487,6 +2028,8 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                             color: isDark ? Colors.white : Colors.black87),
                         decoration: InputDecoration(
                           hintText: 'Leave empty to set later',
+                          errorText: priceError,
+                          errorMaxLines: 2,
                           prefixIcon: Padding(
                             padding:
                                 const EdgeInsets.symmetric(horizontal: 12),
@@ -1519,6 +2062,10 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                             borderSide: const BorderSide(
                                 color: AppTheme.primary, width: 2),
                           ),
+                          errorBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(color: Colors.red),
+                          ),
                           filled: true,
                           fillColor: isDark
                               ? const Color(0xFF2A2A2A)
@@ -1527,53 +2074,111 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                               horizontal: 12, vertical: 10),
                         ),
                       ),
+                      ],
                       Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                         child: Divider(
                           height: 1,
                           color: isDark ? Colors.grey[800] : Colors.grey[200],
                         ),
                       ),
-                      // Duration
+                      // 4. Duration (always shown, required)
+                      sectionHeader(
+                        number: 4,
+                        title: 'Duration',
+                        color: Colors.orange,
+                        isRequired: true,
+                        summary: 'Required — hours and minutes',
+                      ),
+                      const SizedBox(height: 6),
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'Duration',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color:
-                                  isDark ? Colors.white70 : Colors.grey[700],
+                          Expanded(
+                            child: durationInput(
+                              controller: hoursController,
+                              hint: '0',
+                              suffix: 'hrs',
+                              icon: Icons.timer,
+                              setDialogState: setDialogState,
                             ),
                           ),
-                          Text(
-                            ' *',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.red[300],
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: durationInput(
+                              controller: minutesController,
+                              hint: '30',
+                              suffix: 'mins',
+                              setDialogState: setDialogState,
                             ),
                           ),
                         ],
                       ),
+                      if (durationError != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6, left: 4),
+                          child: Text(
+                            durationError!,
+                            style: const TextStyle(
+                                fontSize: 12, color: Colors.red),
+                          ),
+                        )
+                      else if (parseDuration(hoursController.text,
+                              minutesController.text) !=
+                          null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6, left: 4),
+                          child: Text(
+                            'Total: ${_formatDuration(parseDuration(hoursController.text, minutesController.text)!)}',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              color: isDark
+                                  ? Colors.white54
+                                  : Colors.grey[600],
+                            ),
+                          ),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        child: Divider(
+                          height: 1,
+                          color: isDark ? Colors.grey[800] : Colors.grey[200],
+                        ),
+                      ),
+
+                      // 5. Variant name (optional; required when only the
+                      // duration is set — no gender and no age)
+                      sectionHeader(
+                        number: 5,
+                        title: 'Variant name',
+                        color: Colors.indigo,
+                        isRequired:
+                            selectedGenderId == null && selectedAgeId == null,
+                        summary: (selectedGenderId == null &&
+                                selectedAgeId == null)
+                            ? 'Required — no gender or age is set'
+                            : 'Optional — e.g., Short hair, Long hair',
+                      ),
                       const SizedBox(height: 6),
                       TextFormField(
-                        controller: durationController,
+                        controller: nameController,
+                        maxLength: _maxVariantName,
+                        inputFormatters: _textFormatters(_maxVariantName),
+                        textCapitalization: TextCapitalization.sentences,
                         onChanged: (_) {
-                          if (variantError != null) {
-                            setDialogState(() => variantError = null);
-                          }
-                          if (durationError != null) {
-                            setDialogState(() => durationError = null);
-                          }
+                          setDialogState(() {
+                            variantError = null;
+                            nameError = null;
+                          });
                         },
-                        keyboardType: TextInputType.number,
                         style: TextStyle(
                             color: isDark ? Colors.white : Colors.black87),
                         decoration: InputDecoration(
-                          hintText: 'e.g., 30',
-                          suffixText: 'mins',
-                          prefixIcon: Icon(Icons.timer,
+                          hintText: 'e.g., Short hair',
+                          counterText: '',
+                          errorText: nameError,
+                          errorMaxLines: 2,
+                          prefixIcon: Icon(Icons.label_outline,
                               size: 18,
                               color: isDark ? Colors.white70 : Colors.grey),
                           border: OutlineInputBorder(
@@ -1600,7 +2205,6 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                               : Colors.grey[50],
                           contentPadding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 10),
-                          errorText: durationError,
                         ),
                       ),
                       if (variantError != null) ...[
@@ -1647,19 +2251,40 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                 ElevatedButton(
                   onPressed: () {
                     final priceText = priceController.text.trim();
-                    final durationText = durationController.text.trim();
+
+                    // Price is optional, but when typed it must be a valid
+                    // non-negative number.
+                    if (priceText.isNotEmpty) {
+                      final p = double.tryParse(priceText);
+                      if (p == null || p < 0) {
+                        setDialogState(() {
+                          priceError = 'Enter a valid price';
+                        });
+                        return;
+                      }
+                    }
 
                     // Duration is the only required field for a variant.
-                    if (durationText.isEmpty) {
-                      setDialogState(() {
-                        durationError = 'Duration is required';
-                      });
+                    final durErr = validateDuration(
+                        hoursController.text, minutesController.text);
+                    if (durErr != null) {
+                      setDialogState(() => durationError = durErr);
                       return;
                     }
-                    final duration = int.tryParse(durationText);
-                    if (duration == null || duration <= 0) {
+                    // Stored as total minutes (all calculations use minutes)
+                    final duration = parseDuration(
+                        hoursController.text, minutesController.text)!;
+
+                    // Name is optional, but mandatory when only the duration
+                    // is set (no gender and no age).
+                    final variantName =
+                        _cleanText(nameController.text, _maxVariantName);
+                    if (variantName.isEmpty &&
+                        selectedGenderId == null &&
+                        selectedAgeId == null) {
                       setDialogState(() {
-                        durationError = 'Enter a valid duration in minutes';
+                        nameError =
+                            'Name is required when only duration is set (no gender or age)';
                       });
                       return;
                     }
@@ -1674,11 +2299,12 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                       gender: selectedGenderId,
                       age: selectedAgeId,
                       duration: duration,
+                      name: variantName,
                       ignoreIndex: editVariantIndex,
                     )) {
                       setDialogState(() {
                         variantError =
-                            'This service already has a variant with the same gender, age category and duration. Change one of them, or edit the existing variant instead.';
+                            'This service already has a variant with the same name, gender, age category and duration. Change one of them, or edit the existing variant instead.';
                       });
                       return;
                     }
@@ -1697,6 +2323,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                       'price': price,
                       'price_set': priceSet,
                       'duration': duration,
+                      'name': variantName,
                     });
                   },
                   style: ElevatedButton.styleFrom(
@@ -1823,7 +2450,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
             context: context,
             title: 'Duplicate variants',
             message:
-                '"${svc['name']}" (${cat['display_name']}) has two variants with the same gender, age category and duration. Please remove or change one of them.',
+                '"${svc['name']}" (${cat['display_name']}) has two variants with the same name, gender, age category and duration. Please remove or change one of them.',
             isError: true,
           );
           return;
@@ -1983,13 +2610,20 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
       final failedUpdates = <String>[];
       for (int ci = 0; ci < _categories.length; ci++) {
         final cat = _categories[ci];
+        // Defence in depth: clean every text again right before it is sent.
+        final catDesc = _cleanText(
+            (cat['description'] ?? '').toString(), _maxDescription,
+            multiLine: true);
         final catData = <String, dynamic>{
-          'display_name': cat['display_name'],
-          'description': (cat['description'] as String).isEmpty
-              ? null
-              : cat['description'],
-          'icon_name': cat['icon_name'],
-          'color': cat['color'],
+          'display_name': _cleanText(
+              (cat['display_name'] ?? '').toString(), _maxCategoryName),
+          'description': catDesc.isEmpty ? null : catDesc,
+          'icon_name': _isKnownIcon(cat['icon_name']?.toString())
+              ? cat['icon_name']
+              : 'content_cut',
+          'color': _isHexColor(cat['color']?.toString())
+              ? cat['color']
+              : '#FF6B8B',
           'display_order': ci,
           'is_active': true,
         };
@@ -2015,13 +2649,17 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         }
 
         for (final svc in (cat['services'] as List)) {
+          final svcDesc = _cleanText(
+              (svc['description'] ?? '').toString(), _maxDescription,
+              multiLine: true);
           final svcData = <String, dynamic>{
-            'name': svc['name'],
-            'description': (svc['description'] as String).isEmpty
-                ? null
-                : svc['description'],
+            'name':
+                _cleanText((svc['name'] ?? '').toString(), _maxServiceName),
+            'description': svcDesc.isEmpty ? null : svcDesc,
             'category_id': catId,
-            'icon_name': svc['icon_name'],
+            'icon_name': _isKnownIcon(svc['icon_name']?.toString())
+                ? svc['icon_name']
+                : 'content_cut',
             'is_active': true,
           };
 
@@ -2058,9 +2696,12 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                 ? null
                 : genderIdByName[genderName.toLowerCase()];
 
+            final cleanVariantName =
+                _cleanText((v['name'] ?? '').toString(), _maxVariantName);
             final variantData = <String, dynamic>{
               'salon_gender_id': resolvedGenderId,
               'salon_age_category_id': v['age_category_id'],
+              'name': cleanVariantName.isEmpty ? null : cleanVariantName,
               'price': v['price_set'] == true ? v['price'] : null,
               'duration': ((v['duration'] as num?)?.toInt() ?? 0) == 0
                   ? null
@@ -2076,7 +2717,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                   .select('id');
               if (updated.isEmpty) {
                 failedUpdates.add(
-                    'a variant of "${svc['name']}" (${v['gender_name']} • ${v['age_category_name']})');
+                    'a variant of "${svc['name']}" (${_variantLabel(v)})');
               }
             } else {
               await supabase
@@ -2324,16 +2965,17 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
 
                 for (int vi = 0; vi < variants.length; vi++) {
                   final v = variants[vi];
-                  final duration = (v['duration'] as num?)?.toInt() ?? 0;
                   widgets.add(_buildTreeLine(
                     isDark: isDark,
                     prefix: '│  │  ├─ ${_toCircledNumber(vi + 1)}',
                     icon: Icons.tune,
                     iconColor: Colors.purple,
-                    label:
-                        '${v['gender_name']} • ${v['age_category_name']} • ${duration == 0 ? '—' : '$duration min'}',
-                    trailingText: _formatPriceDisplay(v),
-                    trailingMuted: v['price_set'] != true,
+                    // Only values that are set are shown. Long names wrap;
+                    // details + price go on the line below.
+                    label: _variantTitle(v),
+                    details: _variantSubtitleParts(v),
+                    trailingText:
+                        v['price_set'] == true ? _formatPriceDisplay(v) : null,
                     onEdit: () => _openVariantDialog(
                       categoryIndex: catIndex,
                       serviceIndex: si,
@@ -2343,7 +2985,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                       final ok = await _confirmDelete(
                         title: 'Delete Variant?',
                         message:
-                            'Remove this variant (${v['gender_name']} • ${v['age_category_name']})?',
+                            'Remove this variant (${_variantLabel(v)})?',
                       );
                       if (ok && mounted) {
                         // ✅ guard
@@ -2462,14 +3104,18 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
     IconData? icon,
     Color? iconColor,
     required String label,
+    List<String> details = const [],
     String? trailingText,
     bool trailingMuted = false,
     VoidCallback? onEdit,
     VoidCallback? onDelete,
   }) {
+    final detailColor = isDark ? Colors.white54 : Colors.grey[600];
+    final hasSecondLine = details.isNotEmpty || trailingText != null;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             prefix,
@@ -2482,32 +3128,67 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
           ),
           const SizedBox(width: 6),
           if (icon != null) ...[
-            Icon(icon, size: 13, color: iconColor),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Icon(icon, size: 13, color: iconColor),
+            ),
             const SizedBox(width: 4),
           ],
           Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 11.5,
-                color: isDark ? Colors.white70 : Colors.grey[800],
-              ),
-              overflow: TextOverflow.ellipsis,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Name: wraps to 2 lines, then "…"
+                Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: isDark ? Colors.white70 : Colors.grey[800],
+                  ),
+                ),
+                // Details + price always get their own line, so they can
+                // never be pushed off a narrow phone screen.
+                if (hasSecondLine)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          if (details.isNotEmpty)
+                            TextSpan(
+                              text: details.join(' • '),
+                              style: TextStyle(
+                                  fontSize: 10.5, color: detailColor),
+                            ),
+                          if (details.isNotEmpty && trailingText != null)
+                            TextSpan(
+                              text: ' • ',
+                              style: TextStyle(
+                                  fontSize: 10.5, color: detailColor),
+                            ),
+                          if (trailingText != null)
+                            TextSpan(
+                              text: trailingText,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: trailingMuted
+                                    ? (isDark
+                                        ? Colors.white38
+                                        : Colors.grey[500])
+                                    : Colors.teal,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
-          if (trailingText != null) ...[
-            Text(
-              trailingText,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: trailingMuted
-                    ? (isDark ? Colors.white38 : Colors.grey[500])
-                    : Colors.teal,
-              ),
-            ),
-            const SizedBox(width: 6),
-          ],
+          const SizedBox(width: 6),
           if (onEdit != null)
             _iconAction(
               icon: Icons.edit_outlined,
