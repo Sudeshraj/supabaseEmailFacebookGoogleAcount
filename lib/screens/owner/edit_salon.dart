@@ -28,9 +28,10 @@ import 'package:geolocator/geolocator.dart';
 // EDIT MODE:
 //  - Step-by-step wizard (mirrors CreateSalonScreen).
 //  Steps:
-//   0. Basic (name, business type) + Location + Contact Info (+ logo/cover)
-//   1. Business Hours + Currency
-//   2. Review & Save
+//   0. Basic (name, business type) + Contact Info (+ logo/cover)
+//   1. Location (address + map location)
+//   2. Business Hours + Currency
+//   3. Review & Save
 //  - When editing, business hours are converted to the USER's local
 //    timezone so the picker feels natural. On save they are converted
 //    back to the business's timezone and stored as UTC.
@@ -63,7 +64,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ==================== STEP MANAGEMENT ====================
   int _currentStep = 0;
   int _furthestStep = 0;
-  static const int _totalSteps = 3;
+  static const int _totalSteps = 4;
 
   // Basic info controllers
   final TextEditingController _nameController = TextEditingController();
@@ -554,13 +555,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _canProceedFromStep(int step) {
     switch (step) {
       case 0:
+        // Basic + Contact
         return _isBusinessTypeValid &&
-            _mapUrlError == null &&
             _nameController.text.trim().isNotEmpty &&
-            _cityController.text.trim().isNotEmpty &&
             _isPhoneValid &&
             _isEmailValid;
       case 1:
+        // Location: city is required, the map link must be valid if given
+        return _cityController.text.trim().isNotEmpty && _mapUrlError == null;
+      case 2:
         return _openTimeLocal != null && _closeTimeLocal != null;
       default:
         return true;
@@ -570,8 +573,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   String _stepRequirementMessage(int step) {
     switch (step) {
       case 0:
-        return 'Please select a business type, enter a business name and city (and a valid phone/email if provided)';
+        return 'Please select a business type and enter a business name (and a valid phone/email if provided)';
       case 1:
+        return 'Please enter the city (and a valid map link if provided)';
+      case 2:
         return 'Please set business hours';
       default:
         return '';
@@ -1162,7 +1167,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
 
   Future<void> _onSavePressed() async {
-    for (int step = 0; step <= 2; step++) {
+    for (int step = 0; step < _totalSteps; step++) {
       if (!_canProceedFromStep(step)) {
         _goToStep(step);
         _showSnackBar(_stepRequirementMessage(step), Colors.orange);
@@ -4758,13 +4763,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           value: _composeFullAddress().isEmpty
               ? 'Not set'
               : _composeFullAddress(),
-          onEdit: () => _goToStep(0),
+          onEdit: () => _goToStep(1),
         ),
         _buildReviewTile(
           icon: Icons.pin_drop,
           title: 'Map Location',
           value: _mapLocationSummary(),
-          onEdit: () => _goToStep(0),
+          onEdit: () => _goToStep(1),
         ),
         _buildReviewTile(
           icon: Icons.phone,
@@ -4777,13 +4782,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           title: 'Business Hours & Currency',
           value:
               '${_openTimeLocal?.format(context) ?? '—'} - ${_closeTimeLocal?.format(context) ?? '—'} ($_userTimezone) · $_salonCurrencyCode ($_salonCurrencySymbol)',
-          onEdit: () => _goToStep(1),
+          onEdit: () => _goToStep(2),
         ),
         _buildReviewTile(
           icon: Icons.public,
           title: 'Business Timezone',
           value: _getSalonTimezoneDisplay(),
-          onEdit: () => _goToStep(1),
+          onEdit: () => _goToStep(2),
         ),
         const SizedBox(height: 8),
         _buildInfoBanner(
@@ -4864,6 +4869,60 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
+                  'Contact Information',
+                  style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: _isDark ? Colors.white : Colors.black87),
+                ),
+                const SizedBox(height: 16),
+                // ✅ Country code picker + phone number
+                _buildPhoneField(),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _emailController,
+                  label: 'Email Address',
+                  hint: 'Enter email address (e.g., business@example.com)',
+                  icon: Icons.email,
+                  keyboardType: TextInputType.emailAddress,
+                  isEmail: true,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Phone and email are optional but recommended',
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: _isDark ? Colors.white70 : Colors.grey[500]),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ============================================
+  // STEP 1: LOCATION  (address + map location)
+  // ============================================
+  Widget _buildStepLocation() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildStepHeader(
+          'Location',
+          'Where is your business? Customers use this to find you.',
+        ),
+        Card(
+          color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
                   'Location',
                   style: TextStyle(
                       fontSize: 18,
@@ -4898,46 +4957,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         const SizedBox(height: 16),
         // ✅ Map location (current location or a pasted map link)
         _buildMapLocationSection(),
-        const SizedBox(height: 16),
-        Card(
-          color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Contact Information',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _isDark ? Colors.white : Colors.black87),
-                ),
-                const SizedBox(height: 16),
-                // ✅ Country code picker + phone number
-                _buildPhoneField(),
-                const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _emailController,
-                  label: 'Email Address',
-                  hint: 'Enter email address (e.g., business@example.com)',
-                  icon: Icons.email,
-                  keyboardType: TextInputType.emailAddress,
-                  isEmail: true,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Phone and email are optional but recommended',
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: _isDark ? Colors.white70 : Colors.grey[500]),
-                ),
-              ],
-            ),
-          ),
-        ),
       ],
     );
   }
@@ -4962,8 +4981,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       case 0:
         return _buildStep0();
       case 1:
-        return _buildStep1();
+        return _buildStepLocation();
       case 2:
+        return _buildStep1();
+      case 3:
         return _buildReviewStep();
       default:
         return const SizedBox();
@@ -4976,6 +4997,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   static const List<Map<String, dynamic>> _stepMeta = [
     {'label': 'Basic', 'icon': Icons.store},
+    {'label': 'Location', 'icon': Icons.location_on},
     {'label': 'Hours', 'icon': Icons.access_time},
     {'label': 'Review', 'icon': Icons.check_circle},
   ];
@@ -5073,7 +5095,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Widget _buildStepActions() {
     final isDark = _isDark;
-    final isLastStep = _currentStep == 2;
+    final isLastStep = _currentStep == _totalSteps - 1;
     final canProceed = _canProceedFromStep(_currentStep);
     final busy = _isSaving || _isUploadingLogo || _isUploadingCover;
 
