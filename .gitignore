@@ -118,6 +118,7 @@ GoogleService-Info.plist
 .env.staging
 .env.development
 .env.test
+ env.*
 
 # macOS
 .DS_Store

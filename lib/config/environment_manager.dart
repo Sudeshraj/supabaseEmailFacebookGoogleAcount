@@ -14,16 +14,16 @@ class EnvironmentManager {
 
     switch (flavor) {
       case 'production':
-        envFile = '.env.production';
+        envFile = 'env.production';
         break;
       case 'staging':
-        envFile = '.env.staging';
+        envFile = 'env.staging';
         break;
       case 'test':
-        envFile = '.env.test';
+        envFile = 'env.test';
         break;
       default:
-        envFile = '.env.development';
+        envFile = 'env.development';
     }
 
     // 'flutter run'	= 'development' -->	.env
@@ -37,14 +37,13 @@ class EnvironmentManager {
       ); // 2 .name ekata adala file eka load karanava pasuva eke thiyena varible access krnva
       if (debugMode) debugPrint('✅ Loaded environment: $flavor from $envFile');
     } catch (e) {
-      // Fallback to default .env
-      try {
-        await dotenv.load(fileName: '.env');
-        if (debugMode) debugPrint('⚠️  Using default .env file');
-      } catch (e2) {
-        throw Exception('Failed to load any environment file: $e2');
-      }
-    }
+  debugPrint('❌ Failed to load $envFile: $e');
+  try {
+    await dotenv.load(fileName: 'development.env');
+  } catch (e2) {
+    throw Exception('Failed to load any environment file: $e2');
+  }
+}
   }
 
   // ========== REQUIRED CONFIGURATION ==========
