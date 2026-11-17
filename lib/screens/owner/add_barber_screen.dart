@@ -40,7 +40,17 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   // Salons I own (only the owner may give cashier / admin roles).
   // The list above also contains salons where I am an admin (manage_barbers).
   final Set<String> _ownedSalonIds = {};
-  String _selectedStaffRole = 'barber'; // barber | cashier | admin
+  // Role check boxes: a person can be a barber, a cashier, an admin or a mix.
+  //  * Barber ticked  -> takes appointments (services are required)
+  //  * Barber unticked -> desk-only employee (no services, no schedule,
+  //    not shown to customers as a barber)
+  //  * Admin includes everything Cashier can do.
+  bool _isBarber = true;
+  // Role of the selected person in the selected salon (null = not added yet)
+  String? _existingRole;
+  bool? _existingTakes;
+  bool _isCashier = false;
+  bool _isAdmin = false;
 
   final Map<String, List<int>> _selectedItems = {};
 
@@ -419,19 +429,27 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         setState(() {
           _barberAssignedVariantIds = {};
           _barberAssignedServiceIds = {};
+          _existingRole = null;
+          _existingTakes = null;
         });
       }
       return;
     }
 
-    if (mounted) setState(() => _isLoadingBarberServices = true);
+    if (mounted) {
+      setState(() {
+        _isLoadingBarberServices = true;
+        _existingRole = null;
+        _existingTakes = null;
+      });
+    }
 
     try {
       final salonIdInt = int.parse(_selectedSalonId!);
 
       final salonBarberResponse = await supabase
           .from('salon_barbers')
-          .select('id')
+          .select('id, staff_role, takes_appointments')
           .eq('salon_id', salonIdInt)
           .eq('barber_id', barberId)
           .maybeSingle();
@@ -442,9 +460,17 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           _barberAssignedVariantIds = {};
           _barberAssignedServiceIds = {};
           _isLoadingBarberServices = false;
+          // new person: default role = Barber
+          _isBarber = true;
+          _isCashier = false;
+          _isAdmin = false;
         });
         return;
       }
+
+      // Already in this salon: show the CURRENT role in the check boxes
+      final exRole = (salonBarberResponse['staff_role'] ?? 'barber').toString();
+      final exTakes = salonBarberResponse['takes_appointments'] != false;
 
       final salonBarberId = salonBarberResponse['id'];
 
@@ -469,6 +495,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         _barberAssignedVariantIds = variantIds;
         _barberAssignedServiceIds = fullServiceIds;
         _isLoadingBarberServices = false;
+        _existingRole = exRole;
+        _existingTakes = exTakes;
+        _isBarber = exTakes;
+        _isAdmin = exRole == 'admin';
+        _isCashier = exRole == 'admin' || exRole == 'cashier';
       });
     } catch (e) {
       debugPrint('❌ Error loading barber assigned services: $e');
@@ -1134,7 +1165,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   void _resetAfterAdd() {
     setState(() {
       _selectedBarberId = null;
-      _selectedStaffRole = 'barber';
+      _existingRole = null;
+      _existingTakes = null;
+      _isBarber = true;
+      _isCashier = false;
+      _isAdmin = false;
       _selectedItems.clear();
       _expandedServices
         ..clear()
@@ -1163,7 +1198,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       _showSnackBar('Please select a salon', context.errorColor);
       return;
     }
-    if (_totalSelectedItems == 0) {
+    if (_takesAppointments && _createsSchedule && _totalSelectedItems == 0) {
       _showSnackBar('Please select at least one service', context.errorColor);
       return;
     }
@@ -1174,25 +1209,123 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     await _submitAddBarber();
   }
 
+  Future<int> _countUpcomingAppointments() async {
+    try {
+      final today = DateTime.now().toIso8601String().substring(0, 10);
+      final rows = await supabase
+          .from('appointments')
+          .select('id')
+          .eq('salon_id', int.parse(_selectedSalonId!))
+          .eq('barber_id', _selectedBarberId!)
+          .gte('appointment_date', today)
+          .inFilter('status', ['pending', 'confirmed', 'in_progress']);
+      return (rows as List).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<bool?> _confirmDeskOnly(int upcoming) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        scrollable: true,
+        backgroundColor: dialogContext.cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Stop taking new bookings?',
+          style: TextStyle(
+            color: dialogContext.textColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          'This person has $upcoming upcoming appointment(s).\n\n'
+          '• Customers will no longer see them in the barber list (no new bookings)\n'
+          '• The existing $upcoming appointment(s) stay with them and must be finished, moved or cancelled as usual',
+          style: TextStyle(color: dialogContext.secondaryTextColor),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _submitAddBarber() async {
     setState(() => _isLoading = true);
 
     try {
       final barberName = _getBarberName();
 
+      // Existing member whose role changed (not desk-only -> barber, that goes
+      // through add_barber_to_salon because it needs services + schedule)
+      final bool viaSetRole = _roleChangedForExisting &&
+          !(_existingTakes == false && _takesAppointments);
+      if (viaSetRole) {
+        // barber -> desk-only with upcoming appointments: warn, don't block
+        if (_existingTakes == true && !_takesAppointments) {
+          final upcoming = await _countUpcomingAppointments();
+          if (upcoming > 0) {
+            if (!mounted) return;
+            final ok = await _confirmDeskOnly(upcoming);
+            if (ok != true) {
+              if (mounted) setState(() => _isLoading = false);
+              return;
+            }
+          }
+        }
+        final roleRes = await supabase.rpc(
+          'set_staff_role',
+          params: {
+            'p_salon_id': int.parse(_selectedSalonId!),
+            'p_barber_id': _selectedBarberId!,
+            'p_staff_role': _staffRole,
+            'p_takes_appointments': _takesAppointments,
+          },
+        );
+        final rr = Map<String, dynamic>.from(roleRes as Map);
+        if (!mounted) return;
+        if (rr['success'] != true) {
+          _showSnackBar(
+            rr['message']?.toString() ?? 'Could not change the role',
+            context.errorColor,
+          );
+          return;
+        }
+        // role only (no services to add) -> done
+        if (!_takesAppointments || _totalSelectedItems == 0) {
+          _showSnackBar(
+            'Role updated: $_roleSummary',
+            context.successColor,
+          );
+          _resetAfterAdd();
+          return;
+        }
+      }
+
       final result = await supabase.rpc(
         'add_barber_to_salon',
         params: {
           'p_salon_id': int.parse(_selectedSalonId!),
           'p_barber_id': _selectedBarberId!,
-          'p_services': _buildServicesPayload(),
+          'p_services': _takesAppointments ? _buildServicesPayload() : [],
           'p_meta': {
             'barber_name': barberName,
             'device_timezone': _deviceTimezone,
-            'selected_services_count': _totalSelectedItems,
-            'selected_services': _buildSelectedServicesLog(),
+            'selected_services_count': _takesAppointments ? _totalSelectedItems : 0,
+            'selected_services': _takesAppointments ? _buildSelectedServicesLog() : [],
           },
           'p_ip': _currentIp,
+          'p_takes_appointments': _takesAppointments,
+          'p_staff_role': _canSetStaffRole ? _staffRole : 'barber',
         },
       );
 
@@ -1211,37 +1344,26 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       final services = res['services_added'] ?? 0;
       final variants = res['variants_added'] ?? 0;
 
-      // ✅ Staff role (owner only). 'barber' is the default and needs no call.
-      String roleNote = '';
-      if (_canSetStaffRole && _selectedStaffRole != 'barber') {
-        try {
-          final roleRes = await supabase.rpc(
-            'set_staff_role',
-            params: {
-              'p_salon_id': int.parse(_selectedSalonId!),
-              'p_barber_id': _selectedBarberId!,
-              'p_staff_role': _selectedStaffRole,
-            },
-          );
-          final rr = Map<String, dynamic>.from(roleRes as Map);
-          roleNote = rr['success'] == true
-              ? '• Role: ${_staffRoleLabel(_selectedStaffRole)}\n'
-              : '• Role NOT set: ${rr['message']}\n';
-        } catch (e) {
-          roleNote = '• Role NOT set: $e\n';
-        }
+      final msg = StringBuffer(
+        _isExistingMember
+            ? 'Saved successfully!\n'
+            : (_takesAppointments
+                ? 'Barber added successfully!\n'
+                : 'Staff member added successfully!\n'),
+      );
+      if (_takesAppointments && _createsSchedule) {
+        msg.write(
+          '• ${res['schedules'] ?? 7} schedules configured\n'
+          '• Lunch breaks configured\n'
+          '• $services services, $variants variants added\n',
+        );
       }
- if (!mounted) return;
-      _showSnackBar(
-        'Barber added successfully!\n'
-        '• ${res['schedules'] ?? 7} schedules configured\n'
-        '• Lunch breaks configured\n'
-        '• $services services, $variants variants added\n'
-        '$roleNote'
+      if (_canSetStaffRole) msg.write('• Role: $_roleSummary\n');
+      msg.write(
         '• Salon timezone: ${_salonTimezone.split('/').last}\n'
         '• Currency: $_salonCurrencyCode ($_salonCurrencySymbol)',
-        context.successColor,
       );
+      _showSnackBar(msg.toString(), context.successColor);
 
       _resetAfterAdd();
     } on PostgrestException catch (e) {
@@ -1343,7 +1465,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
-                                    'Add ${_getBarberName()} to ${_selectedSalonDetails?['name'] ?? 'salon'}?',
+                                    '${_isExistingMember ? 'Update' : 'Add'} ${_getBarberName()} ${_isExistingMember ? 'in' : 'to'} ${_selectedSalonDetails?['name'] ?? 'salon'}?',
                                     style: TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.w500,
@@ -1355,56 +1477,58 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                             ),
                           ),
                           const SizedBox(height: 16),
-                          _buildInfoBox(
-                            icon: Icons.schedule,
-                            color: Colors.green,
-                            title: 'Auto Schedule',
-                            subtitle:
-                                'All days (Mon-Sun) will be set as working days with salon hours',
-                          ),
-                          const SizedBox(height: 12),
-                          _buildInfoBox(
-                            icon: Icons.restaurant,
-                            color: Colors.orange,
-                            title: 'Lunch Break',
-                            subtitle:
-                                'Loaded from: Special → Regular → Default (12-1 PM)',
-                          ),
-                          const SizedBox(height: 12),
-                          _buildInfoBox(
-                            icon: Icons.access_time,
-                            color: Colors.blue,
-                            title: 'Timezone',
-                            subtitle:
-                                'Business hours saved in UTC. Salon: ${_salonTimezone.split('/').last}',
-                          ),
-                          if (_canSetStaffRole &&
-                              _selectedStaffRole != 'barber') ...[
+                          if (_createsSchedule) ...[
+                            _buildInfoBox(
+                              icon: Icons.schedule,
+                              color: Colors.green,
+                              title: 'Auto Schedule',
+                              subtitle:
+                                  'All days (Mon-Sun) will be set as working days with salon hours',
+                            ),
                             const SizedBox(height: 12),
+                            _buildInfoBox(
+                              icon: Icons.restaurant,
+                              color: Colors.orange,
+                              title: 'Lunch Break',
+                              subtitle:
+                                  'Loaded from: Special → Regular → Default (12-1 PM)',
+                            ),
+                            const SizedBox(height: 12),
+                            _buildInfoBox(
+                              icon: Icons.access_time,
+                              color: Colors.blue,
+                              title: 'Timezone',
+                              subtitle:
+                                  'Business hours saved in UTC. Salon: ${_salonTimezone.split('/').last}',
+                            ),
+                          ],
+                          if (_canSetStaffRole &&
+                              (_isCashier || _isAdmin || !_isBarber)) ...[
+                            if (_createsSchedule) const SizedBox(height: 12),
                             _buildInfoBox(
                               icon: Icons.badge_outlined,
                               color: Colors.purple,
-                              title: _staffRoleLabel(_selectedStaffRole),
-                              subtitle: _staffRoleDescription(
-                                _selectedStaffRole,
-                              ),
+                              title: _roleSummary,
+                              subtitle: _roleDescription,
                             ),
                           ],
-                          const SizedBox(height: 20),
-                          Text(
-                            'Selected Services:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                              color: textColor,
+                          if (_takesAppointments && _totalSelectedItems > 0) ...[
+                            const SizedBox(height: 20),
+                            Text(
+                              'Selected Services:',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                                color: textColor,
+                              ),
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: _buildSelectedServicesList(),
-                          ),
+                            const SizedBox(height: 12),
+                            Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: _buildSelectedServicesList(),
+                            ),
+                          ],
                           const SizedBox(height: 16),
                         ],
                       ),
@@ -2753,28 +2877,74 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   bool get _canSetStaffRole =>
       _selectedSalonId != null && _ownedSalonIds.contains(_selectedSalonId);
 
-  /// Every role is still a normal barber (own appointments + services).
-  /// Cashier / Admin only ADD extra access on top.
-  String _staffRoleLabel(String role) {
-    switch (role) {
-      case 'cashier':
-        return 'Barber + Cashier';
-      case 'admin':
-        return 'Barber + Admin';
-      default:
-        return 'Barber only';
+  bool get _takesAppointments => _canSetStaffRole ? _isBarber : true;
+
+  /// What is stored: admin > cashier > barber
+  String get _staffRole => _isAdmin ? 'admin' : (_isCashier ? 'cashier' : 'barber');
+
+  bool get _isExistingMember => _existingTakes != null;
+
+  /// Owner changed the role of a person who is already in this salon.
+  bool get _roleChangedForExisting =>
+      _isExistingMember &&
+      _canSetStaffRole &&
+      (_staffRole != _existingRole || _takesAppointments != _existingTakes);
+
+  /// A work schedule will be created (new barber, or desk-only -> barber).
+  bool get _createsSchedule => _takesAppointments && _existingTakes != true;
+
+  /// True when the Add / Save button may be shown.
+  bool get _readyToAdd {
+    if (_selectedBarberId == null || _selectedSalonId == null) return false;
+    final items = _totalSelectedItems;
+    if (!_isExistingMember) return !_takesAppointments || items > 0;
+    if (_existingTakes == false) {
+      // desk-only person: -> barber needs services, otherwise only a role change
+      return _takesAppointments ? items > 0 : _roleChangedForExisting;
     }
+    // existing barber: add services and/or change the role
+    return _takesAppointments
+        ? (items > 0 || _roleChangedForExisting)
+        : _roleChangedForExisting;
   }
 
-  String _staffRoleDescription(String role) {
-    switch (role) {
-      case 'cashier':
-        return 'Works as a barber AND sees all barbers\' appointments, takes payments and books for walk-in customers. Needs your salon on Silver or higher.';
-      case 'admin':
-        return 'Works as a barber AND has cashier access plus services, barbers, offers, holidays, revenue and reports. Needs your salon on Silver or higher.';
-      default:
-        return 'Works as a barber with his / her own appointments only. No extra access.';
+  String get _roleSummary {
+    final extra = _isAdmin ? 'Admin' : (_isCashier ? 'Cashier' : '');
+    if (_isBarber && extra.isEmpty) return 'Barber only';
+    if (_isBarber) return 'Barber + $extra';
+    return '$extra (desk only)';
+  }
+
+  String get _roleDescription {
+    final extra = _isAdmin
+        ? 'Admin: cashier access + services, barbers, offers, holidays, revenue and reports.'
+        : 'Cashier: sees all barbers\' appointments, takes payments, books for walk-in customers.';
+    final plan = ' Extra access works while your salon is on Silver or higher.';
+    if (_isBarber) {
+      return 'Also takes his / her own appointments. $extra$plan';
     }
+    return 'Works at the desk only: no services or schedule needed, and customers will not see this person as a barber. $extra$plan';
+  }
+
+  void _toggleRole(String role, bool value) {
+    setState(() {
+      switch (role) {
+        case 'barber':
+          _isBarber = value;
+          // keep at least one role ticked
+          if (!_isBarber && !_isCashier && !_isAdmin) _isCashier = true;
+          break;
+        case 'cashier':
+          if (!value && _isAdmin) return; // admin includes cashier
+          if (!value && !_isBarber) return; // keep at least one role
+          _isCashier = value;
+          break;
+        case 'admin':
+          _isAdmin = value;
+          if (value) _isCashier = true; // admin includes cashier
+          break;
+      }
+    });
   }
 
   Widget _buildStaffRoleSelector() {
@@ -2785,6 +2955,31 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     final textColor = context.textColor;
     final secondaryTextColor = context.secondaryTextColor;
     final cardColor = context.cardColor;
+
+    Widget roleBox({
+      required String role,
+      required String title,
+      required String subtitle,
+      required bool value,
+      bool enabled = true,
+    }) {
+      return CheckboxListTile(
+        value: value,
+        onChanged: enabled ? (v) => _toggleRole(role, v ?? false) : null,
+        activeColor: primaryColor,
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: Text(
+          title,
+          style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: TextStyle(fontSize: 12, color: secondaryTextColor),
+        ),
+      );
+    }
 
     return Container(
       width: double.infinity,
@@ -2802,7 +2997,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               Icon(Icons.badge_outlined, color: primaryColor, size: 20),
               const SizedBox(width: 8),
               Text(
-                'Extra access (optional)',
+                'Role in this salon',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 15,
@@ -2811,24 +3006,36 @@ class _AddBarberScreenState extends State<AddBarberScreen>
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              for (final role in const ['barber', 'cashier', 'admin'])
-                ChoiceChip(
-                  label: Text(_staffRoleLabel(role)),
-                  selected: _selectedStaffRole == role,
-                  selectedColor: primaryColor.withValues(alpha: 0.2),
-                  onSelected: (_) => setState(() => _selectedStaffRole = role),
-                ),
-            ],
+          const SizedBox(height: 4),
+          roleBox(
+            role: 'barber',
+            title: 'Barber',
+            subtitle: 'Takes customer appointments (services required)',
+            value: _isBarber,
           ),
-          const SizedBox(height: 10),
+          roleBox(
+            role: 'cashier',
+            title: 'Cashier',
+            subtitle: 'Front desk: all appointments, payments, Book / VIP',
+            value: _isCashier,
+            enabled: !_isAdmin,
+          ),
+          roleBox(
+            role: 'admin',
+            title: 'Admin',
+            subtitle: 'Cashier + services, barbers, offers, revenue, reports',
+            value: _isAdmin,
+          ),
+          const SizedBox(height: 6),
           Text(
-            _staffRoleDescription(_selectedStaffRole),
-            style: TextStyle(fontSize: 12, color: secondaryTextColor),
+            _isBarber
+                ? 'Selected: $_roleSummary'
+                : 'Selected: $_roleSummary - no services needed.',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: primaryColor,
+            ),
           ),
         ],
       ),
@@ -2889,7 +3096,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                   const SizedBox(width: 8),
                   Flexible(
                     child: Text(
-                      isWeb ? 'Add Barber to Selected Salon' : 'Add Barber',
+                      _isExistingMember
+                          ? (_roleChangedForExisting && _totalSelectedItems == 0
+                              ? 'Save Role'
+                              : 'Save Changes')
+                          : (isWeb ? 'Add Barber to Selected Salon' : 'Add Barber'),
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -2972,10 +3183,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 ],
               ),
             ),
-          if (_selectedBarberId != null &&
-              _selectedSalonId != null &&
-              _totalSelectedItems > 0 &&
-              !isLoading)
+          if (_readyToAdd && !isLoading)
             IconButton(
               icon: const Icon(Icons.check, color: Colors.white),
               onPressed: _isLoading ? null : _addBarber,
@@ -3051,12 +3259,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                       const SizedBox(height: 24),
                     ],
                   ],
-                  _buildServicesSection(),
+                  if (_takesAppointments) _buildServicesSection(),
                   const SizedBox(height: 24),
-                  if (_selectedBarberId != null &&
-                      _selectedSalonId != null &&
-                      _totalSelectedItems > 0)
-                    _buildAddButton(),
+                  if (_readyToAdd) _buildAddButton(),
                   const SizedBox(height: 40),
                 ],
               ),
@@ -3089,12 +3294,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 const SizedBox(height: 24),
               ],
             ],
-            _buildServicesSection(),
+            if (_takesAppointments) _buildServicesSection(),
             const SizedBox(height: 24),
-            if (_selectedBarberId != null &&
-                _selectedSalonId != null &&
-                _totalSelectedItems > 0)
-              _buildAddButton(),
+            if (_readyToAdd) _buildAddButton(),
             const SizedBox(height: 32),
           ],
         ),

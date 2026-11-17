@@ -72,6 +72,16 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   final Map<String, Set<int>> _selectedVariants = {};
   int? _salonBarberId;
 
+  // ==================== ✅ ROLE (owner only) ====================
+  // What is stored now ...
+  bool _canSetRole = false; // true only for the salon OWNER
+  String _currentRole = 'barber'; // barber | cashier | admin
+  bool _currentTakes = true; // false = desk-only (no appointments)
+  // ... and what the check boxes show now (can be edited)
+  bool _isBarber = true;
+  bool _isCashier = false;
+  bool _isAdmin = false;
+
   // ==================== ✅ CURRENCY STATE ====================
   String _salonCurrencyCode = 'LKR';
 
@@ -238,23 +248,37 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       }
 
       // ==================== STEP 3: Get salon_barber_id ====================
-      if (widget.salonBarberId == null) {
-        final salonBarberResponse = await supabase
-            .from('salon_barbers')
-            .select('id')
-            .eq('barber_id', widget.barberId)
-            .eq('salon_id', salonIdInt)
-            .eq('status', 'active')
-            .maybeSingle();
+      final salonBarberResponse = await supabase
+          .from('salon_barbers')
+          .select('id, takes_appointments, staff_role')
+          .eq('barber_id', widget.barberId)
+          .eq('salon_id', salonIdInt)
+          .eq('status', 'active')
+          .maybeSingle();
 
-        if (salonBarberResponse != null) {
-          _salonBarberId = salonBarberResponse['id'] as int;
-        } else {
-          throw BarberNotInSalonException('Barber not found in this salon');
-        }
-      } else {
-        _salonBarberId = widget.salonBarberId;
+      if (salonBarberResponse == null) {
+        throw BarberNotInSalonException('Barber not found in this salon');
       }
+
+      _salonBarberId =
+          widget.salonBarberId ?? (salonBarberResponse['id'] as int);
+
+      // ✅ Current role + is the logged-in user the salon OWNER?
+      //    (only the owner may change roles; an admin employee may not)
+      _currentTakes = salonBarberResponse['takes_appointments'] != false;
+      _currentRole = (salonBarberResponse['staff_role'] ?? 'barber').toString();
+      _isBarber = _currentTakes;
+      _isAdmin = _currentRole == 'admin';
+      _isCashier = _currentRole == 'cashier' || _isAdmin;
+
+      final ownerRow = await supabase
+          .from('salons')
+          .select('owner_id')
+          .eq('id', salonIdInt)
+          .maybeSingle();
+      _canSetRole =
+          ownerRow != null &&
+          ownerRow['owner_id'] == supabase.auth.currentUser?.id;
 
       // ==================== STEP 4: Load genders ====================
       final gendersResponse = await supabase
@@ -479,6 +503,51 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     }
   }
 
+  // ============================================================
+  // ✅ ROLE HELPERS
+  // ============================================================
+
+  /// admin > cashier > barber
+  String get _staffRoleNow =>
+      _isAdmin ? 'admin' : (_isCashier ? 'cashier' : 'barber');
+
+  bool get _roleChanged =>
+      _canSetRole &&
+      (_staffRoleNow != _currentRole || _isBarber != _currentTakes);
+
+  /// Services list is only shown for people who take appointments.
+  bool get _showServices => _canSetRole ? _isBarber : _currentTakes;
+
+  bool get _hasChanges => _roleChanged || _getSelectedCount() > 0;
+
+  String get _roleSummary {
+    final extra = _isAdmin ? 'Admin' : (_isCashier ? 'Cashier' : '');
+    if (_isBarber && extra.isEmpty) return 'Barber only';
+    if (_isBarber) return 'Barber + $extra';
+    return '$extra (desk only)';
+  }
+
+  void _toggleRole(String role, bool value) {
+    setState(() {
+      switch (role) {
+        case 'barber':
+          _isBarber = value;
+          // keep at least one role ticked
+          if (!_isBarber && !_isCashier && !_isAdmin) _isCashier = true;
+          break;
+        case 'cashier':
+          if (!value && _isAdmin) return; // admin includes cashier
+          if (!value && !_isBarber) return; // keep at least one role
+          _isCashier = value;
+          break;
+        case 'admin':
+          _isAdmin = value;
+          if (value) _isCashier = true; // admin includes cashier
+          break;
+      }
+    });
+  }
+
   void _toggleVariant(String serviceId, int variantId) {
     setState(() {
       if (!_selectedVariants.containsKey(serviceId)) {
@@ -544,8 +613,66 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   // ============================================================
   // ✅ SAVE SERVICES — Single batch insert
   // ============================================================
+  Future<int> _countUpcomingAppointments() async {
+    try {
+      final today = DateTime.now().toIso8601String().substring(0, 10);
+      final rows = await supabase
+          .from('appointments')
+          .select('id')
+          .eq('salon_id', int.parse(widget.salonId))
+          .eq('barber_id', widget.barberId)
+          .gte('appointment_date', today)
+          .inFilter('status', ['pending', 'confirmed', 'in_progress']);
+      return (rows as List).length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<bool?> _confirmDeskOnly(int upcoming) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        scrollable: true,
+        backgroundColor: dialogContext.cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Stop taking new bookings?',
+          style: TextStyle(
+            color: dialogContext.textColor,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Text(
+          'This person has $upcoming upcoming appointment(s).\n\n'
+          '• Customers will no longer see them in the barber list (no new bookings)\n'
+          '• The existing $upcoming appointment(s) stay with them and must be finished, moved or cancelled as usual',
+          style: TextStyle(color: dialogContext.secondaryTextColor),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _saveServices() async {
-    if (_selectedVariants.isEmpty) {
+    if (_salonBarberId == null) {
+      _showSnackBar('Barber not found in this salon', context.errorColor);
+      return;
+    }
+
+    final hasServices = _selectedVariants.isNotEmpty;
+    final roleChanged = _roleChanged;
+
+    if (!roleChanged && !hasServices) {
       _showSnackBar(
         'Please select at least one service',
         context.warningColor,
@@ -553,58 +680,125 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       return;
     }
 
-    if (_salonBarberId == null) {
-      _showSnackBar('Barber not found in this salon', context.errorColor);
+    // desk-only -> barber needs services (and a schedule, made by the server)
+    final becomesBarber = _canSetRole && _isBarber && !_currentTakes;
+    if (becomesBarber && !hasServices) {
+      _showSnackBar(
+        'Select at least one service to make this person a barber',
+        context.warningColor,
+      );
       return;
     }
 
     setState(() => _isSaving = true);
 
     try {
-      // ✅ Build all rows first
-      final List<Map<String, dynamic>> rowsToInsert = [];
-
+      // ✅ Service rows: [{service_id, variant_id}]
+      //    (empty variant set = "full service")
+      final List<Map<String, dynamic>> serviceRows = [];
       for (var entry in _selectedVariants.entries) {
         final serviceId = int.tryParse(entry.key);
         if (serviceId == null) continue;
 
-        final variantIds = entry.value;
-
-        if (variantIds.isEmpty) {
-          // Full service selection
-          rowsToInsert.add({
-            'salon_barber_id': _salonBarberId!,
-            'service_id': serviceId,
-            'variant_id': null,
-          });
+        if (entry.value.isEmpty) {
+          serviceRows.add({'service_id': serviceId, 'variant_id': null});
         } else {
-          for (int variantId in variantIds) {
-            rowsToInsert.add({
-              'salon_barber_id': _salonBarberId!,
-              'service_id': serviceId,
-              'variant_id': variantId,
-            });
+          for (int variantId in entry.value) {
+            serviceRows.add({'service_id': serviceId, 'variant_id': variantId});
           }
         }
       }
 
-      if (rowsToInsert.isEmpty) {
-        _showSnackBar('No valid services to save', context.warningColor);
+      // ---- 1. desk-only -> barber: ONE atomic call (services + schedule + role)
+      if (becomesBarber) {
+        final result = await supabase.rpc(
+          'add_barber_to_salon',
+          params: {
+            'p_salon_id': int.parse(widget.salonId),
+            'p_barber_id': widget.barberId,
+            'p_services': serviceRows,
+            'p_meta': {
+              'barber_name': widget.barberName,
+              'source': 'add_services_screen',
+            },
+            'p_takes_appointments': true,
+            'p_staff_role': _staffRoleNow,
+          },
+        );
+        final res = Map<String, dynamic>.from(result as Map);
+        if (!mounted) return;
+        if (res['success'] != true) {
+          _showSnackBar(
+            res['message']?.toString() ?? 'Failed to save',
+            context.errorColor,
+          );
+          return;
+        }
+        _showSnackBar(
+          'Saved: $_roleSummary, ${serviceRows.length} service(s) added',
+          context.successColor,
+        );
+        Navigator.pop(context, true);
         return;
       }
 
-      // ✅ Single batch insert
-      await supabase.from('barber_services').insert(rowsToInsert);
+      // ---- 2. role / desk-only change (owner only)
+      if (roleChanged) {
+        // barber -> desk-only with upcoming appointments: warn, don't block
+        if (_currentTakes && !_isBarber) {
+          final upcoming = await _countUpcomingAppointments();
+          if (upcoming > 0) {
+            if (!mounted) return;
+            final ok = await _confirmDeskOnly(upcoming);
+            if (ok != true) return;
+          }
+        }
+        final roleRes = await supabase.rpc(
+          'set_staff_role',
+          params: {
+            'p_salon_id': int.parse(widget.salonId),
+            'p_barber_id': widget.barberId,
+            'p_staff_role': _staffRoleNow,
+            'p_takes_appointments': _isBarber,
+          },
+        );
+        final rr = Map<String, dynamic>.from(roleRes as Map);
+        if (!mounted) return;
+        if (rr['success'] != true) {
+          _showSnackBar(
+            rr['message']?.toString() ?? 'Could not change the role',
+            context.errorColor,
+          );
+          return;
+        }
+        _currentRole = _staffRoleNow;
+        _currentTakes = _isBarber;
+      }
+
+      // ---- 3. services (only for people who take appointments)
+      int added = 0;
+      if (_showServices && serviceRows.isNotEmpty) {
+        final rowsToInsert = serviceRows
+            .map((r) => {...r, 'salon_barber_id': _salonBarberId!})
+            .toList();
+
+        // ✅ Single batch insert
+        await supabase.from('barber_services').insert(rowsToInsert);
+        added = rowsToInsert.length;
+      }
 
       if (!mounted) return;
 
       _showSnackBar(
-        'Successfully added ${rowsToInsert.length} service(s)',
+        [
+          if (roleChanged) 'Role: $_roleSummary',
+          if (added > 0) 'Successfully added $added service(s)',
+        ].join(' • '),
         context.successColor,
       );
       Navigator.pop(context, true);
     } catch (e) {
-      debugPrint('❌ Error saving services: $e');
+      debugPrint('❌ Error saving: $e');
       if (!mounted) return;
 
       // ✅ Handle duplicate key violation gracefully
@@ -615,7 +809,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           context.warningColor,
         );
       } else {
-        _showSnackBar('Error saving services: $e', context.errorColor);
+        _showSnackBar('Error saving: $e', context.errorColor);
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -831,7 +1025,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                 ],
               ),
             ),
-          if (selectedCount > 0)
+          if (_hasChanges)
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: _isSaving
@@ -856,18 +1050,22 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
             ? Center(child: CircularProgressIndicator(color: primaryColor))
             : Column(
                 children: [
-                  _buildSearchAndFilterBar(padding),
-                  Expanded(
-                    child: _filteredServices.isEmpty
-                        ? _buildEmptyState()
-                        : _isWeb
-                            ? _buildWebView(padding, selectedCount)
-                            : _buildMobileView(padding, selectedCount),
-                  ),
+                  if (_canSetRole) _buildRoleCard(padding),
+                  if (_showServices) ...[
+                    _buildSearchAndFilterBar(padding),
+                    Expanded(
+                      child: _filteredServices.isEmpty
+                          ? _buildEmptyState()
+                          : _isWeb
+                              ? _buildWebView(padding, selectedCount)
+                              : _buildMobileView(padding, selectedCount),
+                    ),
+                  ] else
+                    Expanded(child: _buildDeskOnlyInfo(padding)),
                 ],
               ),
       ),
-      floatingActionButton: selectedCount > 0 && !_isWeb
+      floatingActionButton: _hasChanges && !_isWeb
           ? FloatingActionButton.extended(
               onPressed: _isSaving ? null : _saveServices,
               backgroundColor: primaryColor,
@@ -883,10 +1081,152 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                     )
                   : const Icon(Icons.save),
               label: Text(
-                _isSaving ? 'Saving...' : 'Save ($selectedCount)',
+                _isSaving
+                    ? 'Saving...'
+                    : (selectedCount > 0 ? 'Save ($selectedCount)' : 'Save role'),
               ),
             )
           : null,
+    );
+  }
+
+  // ============================================================
+  // ✅ ROLE CARD (owner only): barber / cashier / admin check boxes
+  // ============================================================
+  Widget _buildRoleCard(double padding) {
+    final primaryColor = context.primaryColor;
+    final textColor = context.textColor;
+    final secondaryTextColor = context.secondaryTextColor;
+    final cardColor = context.cardColor;
+    final borderColor = context.dividerColor;
+
+    Widget roleBox({
+      required String role,
+      required String title,
+      required String subtitle,
+      required bool value,
+      bool enabled = true,
+    }) {
+      return CheckboxListTile(
+        value: value,
+        onChanged: enabled ? (v) => _toggleRole(role, v ?? false) : null,
+        activeColor: primaryColor,
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: Text(
+          title,
+          style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
+        ),
+        subtitle: Text(
+          subtitle,
+          style: TextStyle(fontSize: 12, color: secondaryTextColor),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: EdgeInsets.fromLTRB(padding, padding, padding, 0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: _roleChanged ? primaryColor : borderColor,
+            width: _roleChanged ? 2 : 1,
+          ),
+        ),
+        child: Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            leading: Icon(Icons.badge_outlined, color: primaryColor),
+            title: Text(
+              'Role in this salon',
+              style: TextStyle(fontWeight: FontWeight.bold, color: textColor),
+            ),
+            subtitle: Text(
+              _roleChanged ? '$_roleSummary (not saved yet)' : _roleSummary,
+              style: TextStyle(
+                fontSize: 12,
+                color: _roleChanged ? primaryColor : secondaryTextColor,
+              ),
+            ),
+            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            children: [
+              roleBox(
+                role: 'barber',
+                title: 'Barber',
+                subtitle: 'Takes customer appointments (services required)',
+                value: _isBarber,
+              ),
+              roleBox(
+                role: 'cashier',
+                title: 'Cashier',
+                subtitle: 'Front desk: all appointments, payments, Book / VIP',
+                value: _isCashier,
+                enabled: !_isAdmin,
+              ),
+              roleBox(
+                role: 'admin',
+                title: 'Admin',
+                subtitle: 'Cashier + services, barbers, offers, revenue, reports',
+                value: _isAdmin,
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Cashier / Admin access works while your salon is on Silver or higher. Press Save to apply.',
+                  style: TextStyle(fontSize: 11, color: secondaryTextColor),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // ✅ DESK-ONLY INFO (shown instead of the services list)
+  // ============================================================
+  Widget _buildDeskOnlyInfo(double padding) {
+    final secondaryTextColor = context.secondaryTextColor;
+    final textColor = context.textColor;
+    return Center(
+      child: Padding(
+        padding: EdgeInsets.all(padding + 8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.point_of_sale,
+              size: _isWeb ? 72 : 56,
+              color: secondaryTextColor.withValues(alpha: 0.6),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Desk only - no services needed',
+              style: TextStyle(
+                fontSize: _isWeb ? 20 : 17,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _canSetRole
+                  ? 'This person does not take appointments, so there is nothing to assign here. Tick "Barber" above to make this person a barber too.'
+                  : 'This person does not take appointments, so services can not be assigned.',
+              style: TextStyle(
+                fontSize: _isWeb ? 15 : 13,
+                color: secondaryTextColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
     );
   }
 

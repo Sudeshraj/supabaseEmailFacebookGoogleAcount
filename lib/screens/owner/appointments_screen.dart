@@ -191,7 +191,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
           .from('salon_barbers')
           .select('barber_id')
           .eq('salon_id', salonId)
-          .eq('status', 'active');
+          .eq('status', 'active')
+          // ✅ desk-only (cashier/admin) staff have no appointments
+          .eq('takes_appointments', true);
       final ids = (sb as List).map((e) => e['barber_id'] as String).toList();
       if (ids.isEmpty) {
         _allBarbers = [];

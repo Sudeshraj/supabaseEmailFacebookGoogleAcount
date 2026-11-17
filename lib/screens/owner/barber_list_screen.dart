@@ -74,6 +74,44 @@ class _BarberListScreenState extends State<BarberListScreen> {
     return n.isEmpty ? '?' : n[0].toUpperCase();
   }
 
+  /// null for a plain barber, otherwise e.g. "Cashier (desk only)" / "Admin + Barber"
+  String? _roleLabel(Map<String, dynamic> barber) {
+    final role = (barber['staff_role'] ?? 'barber').toString();
+    if (role == 'barber') return null;
+    final name = role == 'admin' ? 'Admin' : 'Cashier';
+    return barber['takes_appointments'] == false
+        ? '$name (desk only)'
+        : '$name + Barber';
+  }
+
+  Widget _buildRoleChip(String label) {
+    final isDark = context.isDarkMode;
+    final color = Colors.deepPurple;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.18 : 0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.badge, color: isDark ? Colors.deepPurple[200] : color, size: 12),
+          const SizedBox(width: 4),
+          Text(
+            label,
+            style: TextStyle(
+              color: isDark ? Colors.deepPurple[200] : color,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   String? _avatarUrl(Map<String, dynamic> barber) {
     final a = barber['avatar'];
     if (a is String && a.trim().isNotEmpty) return a;
@@ -159,7 +197,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
     try {
       final salonBarbersResponse = await supabase
           .from('salon_barbers')
-          .select('id, barber_id, status, joined_at')
+          .select('id, barber_id, status, joined_at, staff_role, takes_appointments')
           .eq('salon_id', salonIdInt)
           .order('joined_at', ascending: false);
 
@@ -253,6 +291,8 @@ class _BarberListScreenState extends State<BarberListScreen> {
           'avatar': profile['avatar_url'],
           'created_at': profile['created_at'],
           'service_count': serviceCountMap[barberId] ?? 0,
+          'staff_role': sb['staff_role'] ?? 'barber',
+          'takes_appointments': sb['takes_appointments'] != false,
         });
       }
 
@@ -1147,6 +1187,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
+                      if (_roleLabel(barber) != null) ...[
+                        const SizedBox(height: 4),
+                        _buildRoleChip(_roleLabel(barber)!),
+                      ],
                     ],
                   ),
                 ),
@@ -1189,7 +1233,9 @@ class _BarberListScreenState extends State<BarberListScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  '${barber['service_count']}',
+                  barber['takes_appointments'] == false
+                      ? '—'
+                      : '${barber['service_count']}',
                   style: TextStyle(
                     color: context.isDarkMode
                         ? Colors.blue[300]
@@ -1247,7 +1293,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                 _buildDesktopActionButton(
                   icon: Icons.edit,
                   color: Colors.blue,
-                  tooltip: 'Services',
+                  tooltip: 'Role & Services',
                   onTap: () => _editBarberServices(barber),
                 ),
                 _buildDesktopActionButton(
@@ -1582,7 +1628,10 @@ class _BarberListScreenState extends State<BarberListScreen> {
                                     statusIcon,
                                     statusText,
                                   ),
-                                  _buildServiceChip(barber['service_count']),
+                                  if (_roleLabel(barber) != null)
+                                    _buildRoleChip(_roleLabel(barber)!),
+                                  if (barber['takes_appointments'] != false)
+                                    _buildServiceChip(barber['service_count']),
                                 ],
                               ),
                             ],
@@ -1661,7 +1710,7 @@ class _BarberListScreenState extends State<BarberListScreen> {
                       children: [
                         _buildActionChip(
                           icon: Icons.edit,
-                          label: 'Services',
+                          label: 'Role / Services',
                           color: Colors.blue,
                           onTap: () => _editBarberServices(barber),
                         ),

@@ -853,6 +853,8 @@ class _BarberLeavesScreenState extends State<BarberLeavesScreen> {
         ''')
           .eq('salon_id', salonIdInt)
           .eq('status', 'active')
+          // ✅ desk-only (cashier/admin) staff never take appointments
+          .eq('takes_appointments', true)
           .eq('profiles.user_roles.role_id', 2)
           .eq('profiles.user_roles.status', 'active');
 
