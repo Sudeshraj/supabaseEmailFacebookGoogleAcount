@@ -10,12 +10,15 @@ import 'package:flutter_application_1/services/session_manager.dart';
 import 'package:flutter_application_1/services/currency_service.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
+import 'package:flutter_application_1/widgets/staff_tools.dart';
+import 'package:flutter_application_1/services/staff_access_provider.dart';
 import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
 import 'package:flutter_application_1/widgets/booking_tile.dart';
 import 'package:flutter_application_1/widgets/section_header.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:universal_platform/universal_platform.dart';
 import '../../services/timezone_service.dart';
@@ -168,6 +171,7 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
 
     if (_isActive) {
       await _loadAssignedSalons();
+      await _loadStaffAccess();
       await _loadData();
       _setupNotificationListeners();
     }
@@ -235,12 +239,27 @@ void didPopNext() {
   () async {
     try {
       await _loadAssignedSalons();
+      await _loadStaffAccess();
       await _loadData(showLoading: false);
     } finally {
       _isReloading = false;
     }
   }();
 }
+
+  // ==================== STAFF ACCESS (cashier / admin) ====================
+
+  /// Reloads which extra permissions (if any) this employee has per salon.
+  /// The server checks the salon owner's live plan, so a plan change shows
+  /// up here after the next refresh.
+  Future<void> _loadStaffAccess() async {
+    if (!mounted) return;
+    try {
+      await context.read<StaffAccessProvider>().load();
+    } catch (e) {
+      debugPrint('⚠️ Staff access load failed (non-critical): $e');
+    }
+  }
 
   // ==================== TIMEZONE INITIALIZATION ====================
 
@@ -2362,6 +2381,23 @@ Future<void> _loadNotificationCount() async {
       children: [
         // ✅ Salon selector chip — CENTERED at top of body
         if (_assignedSalons.isNotEmpty) _buildSalonSelectorChip(),
+
+        // ✅ STAFF TOOLS (cashier / admin only). Plain barbers see nothing here.
+        //    Book / VIP buttons + owner-screen tiles for the selected salon.
+        //    The barber's own "My Appointments" below stays unchanged.
+        Consumer<StaffAccessProvider>(
+          builder: (context, staff, _) {
+            final salons = staff.staffSalons
+                .where((s) => s.salonId.toString() == _selectedSalonId)
+                .toList();
+            if (salons.isEmpty) return const SizedBox.shrink();
+            return StaffToolsSection(
+              key: ValueKey('staff_tools_${salons.first.salonId}'),
+              salons: salons,
+              onBooked: () => _loadData(showLoading: false),
+            );
+          },
+        ),
 
         if (_showPermissionCard && !_hasPermission)
           PermissionCard(

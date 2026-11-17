@@ -11,6 +11,7 @@ import 'package:flutter_application_1/services/timezone_service.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/service_menu_editor.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
+import 'package:flutter_application_1/widgets/staff_tools.dart';
 import 'package:flutter_application_1/widgets/dashboard_stat_card.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
@@ -2814,6 +2815,27 @@ Future<void> _loadNotificationCount() async {
           ),
 
         const SizedBox(height: 8),
+
+        // ✅ BOOK / VIP for a customer who comes in (reuses the customer screens)
+        //    Book: every plan. VIP: Silver+ (locked button -> upgrade dialog).
+        if (_ownerSalons.isNotEmpty &&
+            _selectedSalonId != null &&
+            !_isSwitchingSalon) ...[
+          Consumer<SubscriptionProvider>(
+            builder: (context, sub, _) => StaffBookButtons(
+              salonId: int.parse(_selectedSalonId!),
+              showBook: true,
+              showVip: true,
+              vipLocked: sub.currentPlanRank < 2,
+              onVipLocked: () => _showUpgradeDialog(
+                featureName: 'VIP Booking',
+                requiredPlan: 'Silver',
+              ),
+              onBooked: _refreshAllData,
+            ),
+          ),
+          const SizedBox(height: 12),
+        ],
 
         if (_completedSteps < _totalSteps) _buildStepFlow(),
 

@@ -11,6 +11,7 @@ import 'package:flutter_application_1/observers/route_observers.dart';
 import 'package:flutter_application_1/screens/settings/currency_settings_screen.dart';
 import 'package:flutter_application_1/screens/subscription/providers/customer_pro_provider.dart';
 import 'package:flutter_application_1/screens/subscription/providers/subscription_provider.dart';
+import 'package:flutter_application_1/services/staff_access_provider.dart';
 import 'package:flutter_application_1/screens/authantication/command/auth_callback_handler.dart';
 import 'package:flutter_application_1/screens/authantication/command/clear_data_screen.dart';
 import 'package:flutter_application_1/screens/authantication/command/help_screen.dart';
@@ -996,6 +997,18 @@ GoRouter _createRouter() {
       if (isCustomerRoute) {
         debugPrint('🛍️ Customer route accessed: $path');
 
+        // ✅ STAFF BOOKING: the owner and employees (cashier / admin) open the
+        // existing customer Book / VIP screens from their own dashboards to
+        // book for a customer who walks in. Server side checks still apply.
+        final isStaffBookingRoute =
+            path == '/customer/booking-flow' || path == '/customer/vip-booking';
+        if (isStaffBookingRoute &&
+            (appState.currentRole == 'owner' ||
+                appState.currentRole == 'barber')) {
+          debugPrint('✅ Staff booking route access granted: $path');
+          return null;
+        }
+
         if (appState.currentRole != 'customer' &&
             !appState.roles.contains('customer')) {
           debugPrint('❌ Not a customer role, redirecting...');
@@ -1032,6 +1045,34 @@ GoRouter _createRouter() {
       // the missing GoRoute entries for those screens, or remove
       // navigation calls that target them.
       final isOwnerRoute = path.startsWith('/owner');
+
+      // ✅ STAFF TOOLS: an employee (cashier / admin) reuses these owner
+      // screens. The route is only the door - what the employee can see or
+      // change is decided by the database (RLS + auth_has_permission, which
+      // also checks the owner's live subscription plan).
+      const staffOwnerRoutes = <String>[
+        '/owner/appointments',
+        '/owner/customers',
+        '/owner/services',
+        '/owner/add-barber',
+        '/owner/barber-schedule',
+        '/owner/barber-leaves',
+        '/owner/barbers',
+        '/owner/edit-barber-services',
+        '/owner/salon/holidays',
+        '/owner/offers',
+        '/owner/revenue',
+        '/owner/reports',
+        '/owner/analytics',
+      ];
+      final isStaffOwnerRoute =
+          staffOwnerRoutes.any((r) => path == r || path.startsWith('$r/')) ||
+          (path.startsWith('/owner/salon/') && path.endsWith('/add-service'));
+
+      if (isOwnerRoute && isStaffOwnerRoute && appState.currentRole == 'barber') {
+        debugPrint('✅ Staff (barber role) owner-screen access: $path');
+        return null;
+      }
 
       if (isOwnerRoute) {
         debugPrint('👑 Owner route accessed: $path');
@@ -1345,7 +1386,8 @@ GoRouter _createRouter() {
         name: 'addBarber',
         builder: (context, state) {
           final refresh = state.uri.queryParameters['refresh'] == 'true';
-          return AddBarberScreen(refresh: refresh);
+          final salonId = state.uri.queryParameters['salonId'];
+          return AddBarberScreen(refresh: refresh, salonId: salonId);
         },
       ),
       GoRoute(
@@ -1826,6 +1868,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         // ✅ Subscription provider — app එකේ හැම තැනකම access කරන්න පුළුවන්
         ChangeNotifierProvider(create: (_) => SubscriptionProvider()),
         ChangeNotifierProvider(create: (_) => CustomerProProvider()),
+        // ✅ Staff roles (cashier / admin) - loads itself on sign-in, clears on sign-out
+        ChangeNotifierProvider(create: (_) => StaffAccessProvider()),
       ],
       child: MaterialApp.router(
         routerConfig: router,

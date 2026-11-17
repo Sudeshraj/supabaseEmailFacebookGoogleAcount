@@ -14,7 +14,10 @@ final RouteObserver<ModalRoute<void>> routeObserver =
 class AddBarberScreen extends StatefulWidget {
   final bool refresh;
 
-  const AddBarberScreen({super.key, this.refresh = false});
+  /// Optional: salon to preselect (the dashboards pass ?salonId=)
+  final String? salonId;
+
+  const AddBarberScreen({super.key, this.refresh = false, this.salonId});
 
   @override
   State<AddBarberScreen> createState() => _AddBarberScreenState();
@@ -32,6 +35,12 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   List<Map<String, dynamic>> _searchResults = [];
   List<Map<String, dynamic>> _ownerSalons = [];
   List<Map<String, dynamic>> _services = [];
+
+  // ==================== STAFF ROLE ====================
+  // Salons I own (only the owner may give cashier / admin roles).
+  // The list above also contains salons where I am an admin (manage_barbers).
+  final Set<String> _ownedSalonIds = {};
+  String _selectedStaffRole = 'barber'; // barber | cashier | admin
 
   final Map<String, List<int>> _selectedItems = {};
 
@@ -311,26 +320,73 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         return;
       }
 
+      const salonCols =
+          'id, name, address, logo_url, is_active, open_time, close_time, timezone, currency_code';
+
       final response = await supabase
           .from('salons')
-          .select(
-            'id, name, address, logo_url, is_active, open_time, close_time, timezone, currency_code',
-          )
+          .select(salonCols)
           .eq('owner_id', userId)
           .eq('is_active', true)
           .order('name');
 
+      final salons = List<Map<String, dynamic>>.from(response);
+      final ownedIds = salons.map((s) => s['id'].toString()).toSet();
+
+      // ✅ Salons where I am an admin employee (permission manage_barbers,
+      //    which the server only grants while the owner is on Silver+).
+      try {
+        final access = await supabase.rpc('get_my_staff_access');
+        final staffIds = (access as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .where(
+              (a) =>
+                  a['access'] == 'staff' &&
+                  ((a['permissions'] as List?) ?? const []).contains(
+                    'manage_barbers',
+                  ),
+            )
+            .map((a) => (a['salon_id'] as num).toInt())
+            .toList();
+
+        if (staffIds.isNotEmpty) {
+          final extra = await supabase
+              .from('salons')
+              .select(salonCols)
+              .inFilter('id', staffIds)
+              .eq('is_active', true)
+              .order('name');
+          salons.addAll(List<Map<String, dynamic>>.from(extra));
+        }
+      } catch (e) {
+        debugPrint('⚠️ Staff salons load failed (non-critical): $e');
+      }
+
       if (!mounted) return;
 
       setState(() {
-        _ownerSalons = List<Map<String, dynamic>>.from(response);
+        _ownerSalons = salons;
+        _ownedSalonIds
+          ..clear()
+          ..addAll(ownedIds);
         _isLoadingSalons = false;
       });
 
       // ✅ Load salon data AFTER setState (not inside it)
       if (_ownerSalons.isNotEmpty) {
-        _selectedSalonId = _ownerSalons[0]['id'].toString();
-        _selectedSalonDetails = _ownerSalons[0];
+        // keep the current salon if it is still there, else the one passed
+        // in the route (?salonId=), else the first one
+        int idx = _ownerSalons.indexWhere(
+          (s) => s['id'].toString() == _selectedSalonId,
+        );
+        if (idx < 0 && widget.salonId != null) {
+          idx = _ownerSalons.indexWhere(
+            (s) => s['id'].toString() == widget.salonId,
+          );
+        }
+        if (idx < 0) idx = 0;
+        _selectedSalonId = _ownerSalons[idx]['id'].toString();
+        _selectedSalonDetails = _ownerSalons[idx];
         await _loadSalonTimezoneAndHours();
         if (mounted) await _loadSalonSpecificData();
       } else {
@@ -1078,6 +1134,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   void _resetAfterAdd() {
     setState(() {
       _selectedBarberId = null;
+      _selectedStaffRole = 'barber';
       _selectedItems.clear();
       _expandedServices
         ..clear()
@@ -1154,11 +1211,33 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       final services = res['services_added'] ?? 0;
       final variants = res['variants_added'] ?? 0;
 
+      // ✅ Staff role (owner only). 'barber' is the default and needs no call.
+      String roleNote = '';
+      if (_canSetStaffRole && _selectedStaffRole != 'barber') {
+        try {
+          final roleRes = await supabase.rpc(
+            'set_staff_role',
+            params: {
+              'p_salon_id': int.parse(_selectedSalonId!),
+              'p_barber_id': _selectedBarberId!,
+              'p_staff_role': _selectedStaffRole,
+            },
+          );
+          final rr = Map<String, dynamic>.from(roleRes as Map);
+          roleNote = rr['success'] == true
+              ? '• Role: ${_staffRoleLabel(_selectedStaffRole)}\n'
+              : '• Role NOT set: ${rr['message']}\n';
+        } catch (e) {
+          roleNote = '• Role NOT set: $e\n';
+        }
+      }
+ if (!mounted) return;
       _showSnackBar(
         'Barber added successfully!\n'
         '• ${res['schedules'] ?? 7} schedules configured\n'
         '• Lunch breaks configured\n'
         '• $services services, $variants variants added\n'
+        '$roleNote'
         '• Salon timezone: ${_salonTimezone.split('/').last}\n'
         '• Currency: $_salonCurrencyCode ($_salonCurrencySymbol)',
         context.successColor,
@@ -1299,6 +1378,18 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                             subtitle:
                                 'Business hours saved in UTC. Salon: ${_salonTimezone.split('/').last}',
                           ),
+                          if (_canSetStaffRole &&
+                              _selectedStaffRole != 'barber') ...[
+                            const SizedBox(height: 12),
+                            _buildInfoBox(
+                              icon: Icons.badge_outlined,
+                              color: Colors.purple,
+                              title: _staffRoleLabel(_selectedStaffRole),
+                              subtitle: _staffRoleDescription(
+                                _selectedStaffRole,
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 20),
                           Text(
                             'Selected Services:',
@@ -2655,85 +2746,104 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     );
   }
 
-  Widget _buildSelectedBarber() {
-    final isWeb = context.isWeb;
+  // ============================================================
+  // STAFF ROLE SELECTOR (barber / cashier / admin)
+  // ============================================================
+
+  bool get _canSetStaffRole =>
+      _selectedSalonId != null && _ownedSalonIds.contains(_selectedSalonId);
+
+  /// Every role is still a normal barber (own appointments + services).
+  /// Cashier / Admin only ADD extra access on top.
+  String _staffRoleLabel(String role) {
+    switch (role) {
+      case 'cashier':
+        return 'Barber + Cashier';
+      case 'admin':
+        return 'Barber + Admin';
+      default:
+        return 'Barber only';
+    }
+  }
+
+  String _staffRoleDescription(String role) {
+    switch (role) {
+      case 'cashier':
+        return 'Works as a barber AND sees all barbers\' appointments, takes payments and books for walk-in customers. Needs your salon on Silver or higher.';
+      case 'admin':
+        return 'Works as a barber AND has cashier access plus services, barbers, offers, holidays, revenue and reports. Needs your salon on Silver or higher.';
+      default:
+        return 'Works as a barber with his / her own appointments only. No extra access.';
+    }
+  }
+
+  Widget _buildStaffRoleSelector() {
+    if (_selectedBarberId == null || !_canSetStaffRole) {
+      return const SizedBox.shrink();
+    }
     final primaryColor = context.primaryColor;
     final textColor = context.textColor;
     final secondaryTextColor = context.secondaryTextColor;
-
-    final barber = _searchResults.firstWhere(
-      (b) => b['id'] == _selectedBarberId,
-      orElse: () => {},
-    );
+    final cardColor = context.cardColor;
 
     return Container(
-      padding: EdgeInsets.all(isWeb ? 20 : 16),
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: primaryColor.withValues(alpha: 0.1),
+        color: cardColor,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: primaryColor, width: 1.5),
+        border: Border.all(color: context.dividerColor),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: isWeb ? 32 : 28,
-            backgroundColor: primaryColor,
-            backgroundImage: barber['avatar_url'] != null
-                ? NetworkImage(barber['avatar_url'])
-                : null,
-            child: barber['avatar_url'] == null
-                ? Text(
-                    barber['full_name']?[0]?.toUpperCase() ?? '?',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: isWeb ? 20 : 16,
-                    ),
-                  )
-                : null,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Selected Barber',
-                  style: TextStyle(fontSize: 12, color: secondaryTextColor),
+          Row(
+            children: [
+              Icon(Icons.badge_outlined, color: primaryColor, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Extra access (optional)',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15,
+                  color: textColor,
                 ),
-                Text(
-                  barber['full_name'] ?? 'Unknown',
-                  style: TextStyle(
-                    fontSize: isWeb ? 20 : 18,
-                    fontWeight: FontWeight.bold,
-                    color: textColor,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                Text(
-                  barber['email'] ?? '',
-                  style: TextStyle(
-                    fontSize: isWeb ? 14 : 12,
-                    color: secondaryTextColor,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-            ),
-          ),
-          if (_isLoadingBarberServices)
-            SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                color: primaryColor,
               ),
-            ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final role in const ['barber', 'cashier', 'admin'])
+                ChoiceChip(
+                  label: Text(_staffRoleLabel(role)),
+                  selected: _selectedStaffRole == role,
+                  selectedColor: primaryColor.withValues(alpha: 0.2),
+                  onSelected: (_) => setState(() => _selectedStaffRole = role),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _staffRoleDescription(_selectedStaffRole),
+            style: TextStyle(fontSize: 12, color: secondaryTextColor),
+          ),
         ],
+      ),
+    );
+  }
+
+  /// Small bar shown while the barber's already-assigned services load
+  /// (replaces the spinner that lived in the old profile card).
+  Widget _buildBarberServicesLoading() {
+    if (!_isLoadingBarberServices) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(4),
+        child: const LinearProgressIndicator(minHeight: 3),
       ),
     );
   }
@@ -2932,11 +3042,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (_selectedBarberId != null) ...[
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 700),
-                      child: _buildSelectedBarber(),
-                    ),
-                    const SizedBox(height: 24),
+                    _buildBarberServicesLoading(),
+                    if (_canSetStaffRole) ...[
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 700),
+                        child: _buildStaffRoleSelector(),
+                      ),
+                      const SizedBox(height: 24),
+                    ],
                   ],
                   _buildServicesSection(),
                   const SizedBox(height: 24),
@@ -2969,8 +3082,13 @@ class _AddBarberScreenState extends State<AddBarberScreen>
             const SizedBox(height: 24),
             _buildSearchSection(),
             const SizedBox(height: 24),
-            if (_selectedBarberId != null) _buildSelectedBarber(),
-            const SizedBox(height: 24),
+            if (_selectedBarberId != null) ...[
+              _buildBarberServicesLoading(),
+              if (_canSetStaffRole) ...[
+                _buildStaffRoleSelector(),
+                const SizedBox(height: 24),
+              ],
+            ],
             _buildServicesSection(),
             const SizedBox(height: 24),
             if (_selectedBarberId != null &&
