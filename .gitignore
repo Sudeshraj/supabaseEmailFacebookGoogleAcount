@@ -113,12 +113,7 @@ google-services.json
 GoogleService-Info.plist
 
 # Env files - මේක ඉතා වැදගත්!
-.env.*.local
-.env.production
-.env.staging
-.env.development
-.env.test
- env.*
+env.*
 
 # macOS
 .DS_Store
