@@ -90,7 +90,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   String _searchQuery = '';
   String _selectedCategory = 'all';
 
-  // For expansion state
+  // For expansion state (all services with variants start expanded)
   final Set<String> _expandedServices = {};
 
   // Maps for lookups
@@ -452,6 +452,14 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       if (!mounted) return;
       setState(() {
         _services = processedServices;
+
+        // ✅ UI: all services that have variants start expanded
+        _expandedServices.clear();
+        for (var s in processedServices) {
+          if (s['hasVariants'] == true) {
+            _expandedServices.add(s['id_str'] as String);
+          }
+        }
       });
     } on BarberInactiveException catch (e) {
       debugPrint('❌ Barber inactive: ${e.message}');
@@ -960,42 +968,13 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         backgroundColor: primaryColor,
         foregroundColor: Colors.white,
         centerTitle: _isWeb,
+        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
           tooltip: 'Back',
         ),
         actions: [
-          // ✅ Currency badge
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 12),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _salonCurrencySymbol,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  _salonCurrencyCode,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
-          ),
           if (selectedCount > 0)
             Container(
               margin: const EdgeInsets.only(right: 8),
@@ -1048,50 +1027,62 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       body: SafeArea(
         child: _isLoading
             ? Center(child: CircularProgressIndicator(color: primaryColor))
-            : Column(
-                children: [
-                  if (_canSetRole) _buildRoleCard(padding),
-                  if (_showServices) ...[
-                    _buildSearchAndFilterBar(padding),
-                    Expanded(
-                      child: _filteredServices.isEmpty
-                          ? _buildEmptyState()
-                          : _isWeb
-                              ? _buildWebView(padding, selectedCount)
-                              : _buildMobileView(padding, selectedCount),
-                    ),
-                  ] else
-                    Expanded(child: _buildDeskOnlyInfo(padding)),
-                ],
+            : Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  // ✅ Role card, search bar and cards share ONE container,
+                  //    so cards start exactly where the search bar starts
+                  //    (same as ServiceManagement)
+                  constraints: const BoxConstraints(maxWidth: 1200),
+                  child: Column(
+                    children: [
+                      if (_canSetRole) _buildRoleCard(padding),
+                      if (_showServices) ...[
+                        _buildSearchAndFilterBar(padding),
+                        Expanded(
+                          child: _filteredServices.isEmpty
+                              ? _buildEmptyState()
+                              : _buildServicesList(padding, selectedCount),
+                        ),
+                      ] else
+                        Expanded(child: _buildDeskOnlyInfo(padding)),
+                    ],
+                  ),
+                ),
               ),
       ),
       floatingActionButton: _hasChanges && !_isWeb
-          ? FloatingActionButton.extended(
+          ? FloatingActionButton(
               onPressed: _isSaving ? null : _saveServices,
               backgroundColor: primaryColor,
               foregroundColor: Colors.white,
-              icon: _isSaving
+              shape: const CircleBorder(),
+              tooltip: selectedCount > 0 ? 'Save ($selectedCount)' : 'Save role',
+              child: _isSaving
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
+                      width: 22,
+                      height: 22,
                       child: CircularProgressIndicator(
                         color: Colors.white,
                         strokeWidth: 2,
                       ),
                     )
-                  : const Icon(Icons.save),
-              label: Text(
-                _isSaving
-                    ? 'Saving...'
-                    : (selectedCount > 0 ? 'Save ($selectedCount)' : 'Save role'),
-              ),
+                  : Badge(
+                      isLabelVisible: selectedCount > 0,
+                      label: Text('$selectedCount'),
+                      backgroundColor: Colors.white,
+                      textColor: primaryColor,
+                      offset: const Offset(10, -10),
+                      child: const Icon(Icons.save),
+                    ),
             )
           : null,
     );
   }
 
   // ============================================================
-  // ✅ ROLE CARD (owner only): barber / cashier / admin check boxes
+  // ✅ ROLE CARD (owner only) — expanded by default
+  //    Web: 3 tiles in a row | Mobile: tiles stacked
   // ============================================================
   Widget _buildRoleCard(double padding) {
     final primaryColor = context.primaryColor;
@@ -1102,35 +1093,107 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
 
     Widget roleBox({
       required String role,
+      required IconData icon,
       required String title,
       required String subtitle,
       required bool value,
       bool enabled = true,
     }) {
-      return CheckboxListTile(
-        value: value,
-        onChanged: enabled ? (v) => _toggleRole(role, v ?? false) : null,
-        activeColor: primaryColor,
-        contentPadding: EdgeInsets.zero,
-        dense: true,
-        controlAffinity: ListTileControlAffinity.leading,
-        title: Text(
-          title,
-          style: TextStyle(fontWeight: FontWeight.w600, color: textColor),
-        ),
-        subtitle: Text(
-          subtitle,
-          style: TextStyle(fontSize: 12, color: secondaryTextColor),
+      return Opacity(
+        opacity: enabled ? 1.0 : 0.6,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: enabled ? () => _toggleRole(role, !value) : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+            decoration: BoxDecoration(
+              color: value
+                  ? primaryColor.withValues(alpha: 0.08)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: value ? primaryColor : borderColor,
+                width: value ? 1.5 : 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                Checkbox(
+                  value: value,
+                  onChanged:
+                      enabled ? (v) => _toggleRole(role, v ?? false) : null,
+                  activeColor: primaryColor,
+                  visualDensity: VisualDensity.compact,
+                ),
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: primaryColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, size: 18, color: primaryColor),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: secondaryTextColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     }
+
+    final barberBox = roleBox(
+      role: 'barber',
+      icon: Icons.content_cut,
+      title: 'Barber',
+      subtitle: 'Takes customer appointments (services required)',
+      value: _isBarber,
+    );
+    final cashierBox = roleBox(
+      role: 'cashier',
+      icon: Icons.point_of_sale,
+      title: 'Cashier',
+      subtitle: 'Front desk: all appointments, payments, Book / VIP',
+      value: _isCashier,
+      enabled: !_isAdmin,
+    );
+    final adminBox = roleBox(
+      role: 'admin',
+      icon: Icons.admin_panel_settings_outlined,
+      title: 'Admin',
+      subtitle: 'Cashier + services, barbers, offers, revenue, reports',
+      value: _isAdmin,
+    );
 
     return Padding(
       padding: EdgeInsets.fromLTRB(padding, padding, padding, 0),
       child: Container(
         decoration: BoxDecoration(
           color: cardColor,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _roleChanged ? primaryColor : borderColor,
             width: _roleChanged ? 2 : 1,
@@ -1139,6 +1202,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
+            initiallyExpanded: true, // ✅ default expanded
             leading: Icon(Icons.badge_outlined, color: primaryColor),
             title: Text(
               'Role in this salon',
@@ -1151,32 +1215,51 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                 color: _roleChanged ? primaryColor : secondaryTextColor,
               ),
             ),
-            childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             children: [
-              roleBox(
-                role: 'barber',
-                title: 'Barber',
-                subtitle: 'Takes customer appointments (services required)',
-                value: _isBarber,
-              ),
-              roleBox(
-                role: 'cashier',
-                title: 'Cashier',
-                subtitle: 'Front desk: all appointments, payments, Book / VIP',
-                value: _isCashier,
-                enabled: !_isAdmin,
-              ),
-              roleBox(
-                role: 'admin',
-                title: 'Admin',
-                subtitle: 'Cashier + services, barbers, offers, revenue, reports',
-                value: _isAdmin,
-              ),
+              if (_isWeb)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: barberBox),
+                    const SizedBox(width: 12),
+                    Expanded(child: cashierBox),
+                    const SizedBox(width: 12),
+                    Expanded(child: adminBox),
+                  ],
+                )
+              else
+                Column(
+                  children: [
+                    barberBox,
+                    const SizedBox(height: 8),
+                    cashierBox,
+                    const SizedBox(height: 8),
+                    adminBox,
+                  ],
+                ),
+              const SizedBox(height: 10),
               Align(
                 alignment: Alignment.centerLeft,
-                child: Text(
-                  'Cashier / Admin access works while your salon is on Silver or higher. Press Save to apply.',
-                  style: TextStyle(fontSize: 11, color: secondaryTextColor),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 14,
+                      color: secondaryTextColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Cashier / Admin access works while your salon is on Silver or higher. Press Save to apply.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: secondaryTextColor,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -1193,10 +1276,10 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     final secondaryTextColor = context.secondaryTextColor;
     final textColor = context.textColor;
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: EdgeInsets.all(padding + 8),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               Icons.point_of_sale,
@@ -1346,10 +1429,10 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
         _searchQuery.isNotEmpty || _selectedCategory != 'all';
 
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               hasFilters ? Icons.search_off : Icons.inbox_outlined,
@@ -1405,90 +1488,147 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   }
 
   // ============================================================
-  // ✅ WEB VIEW — Wrap instead of GridView (no overflow)
+  // ✅ SERVICES LIST — responsive
+  //    Web: 2-3 column grid (Wrap) | Mobile: single column list
   // ============================================================
-  Widget _buildWebView(double padding, int selectedCount) {
+  Widget _buildServicesList(double padding, int selectedCount) {
+    final filtered = _filteredServices;
+
+    if (_isWeb) {
+      return SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(padding, 0, padding, padding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (selectedCount > 0) ...[
+              _buildSelectionBar(selectedCount),
+              const SizedBox(height: 16),
+            ],
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const double spacing = 16;
+                // Same idea as ServiceManagement's maxCrossAxisExtent: 400
+                int cols = (constraints.maxWidth / 400).ceil();
+                if (cols < 1) cols = 1;
+
+                // ✅ Fixed column grid: every row has `cols` slots, cards fill
+                //    slots from the LEFT; empty slots stay blank on the right.
+                //    (1 filtered service = 1st slot, never centered)
+                final List<Widget> rows = [];
+                for (int i = 0; i < filtered.length; i += cols) {
+                  final List<Widget> rowChildren = [];
+                  for (int j = 0; j < cols; j++) {
+                    if (j > 0) rowChildren.add(const SizedBox(width: spacing));
+                    final int idx = i + j;
+                    rowChildren.add(
+                      Expanded(
+                        child: idx < filtered.length
+                            ? _buildServiceCard(filtered[idx], idx)
+                            : const SizedBox.shrink(),
+                      ),
+                    );
+                  }
+                  rows.add(
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: spacing),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: rowChildren,
+                      ),
+                    ),
+                  );
+                }
+
+                return SizedBox(
+                  width: double.infinity,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: rows,
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Mobile / tablet-portrait
+    return ListView.builder(
+      padding: EdgeInsets.fromLTRB(
+        padding,
+        0,
+        padding,
+        _hasChanges ? 96 : padding, // space for the FAB
+      ),
+      itemCount: filtered.length,
+      itemBuilder: (context, index) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: _buildServiceCard(filtered[index], index),
+        );
+      },
+    );
+  }
+
+  // ✅ Selected summary + Save button (web only; mobile uses the FAB)
+  Widget _buildSelectionBar(int selectedCount) {
     final primaryColor = context.primaryColor;
     final cardColor = context.cardColor;
 
-    return Center(
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 1200),
-        child: SingleChildScrollView(
-          padding: EdgeInsets.all(padding),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (selectedCount > 0) ...[
-                Card(
-                  color: cardColor,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: primaryColor),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      children: [
-                        Icon(Icons.info_outline, color: primaryColor),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            '$selectedCount service${selectedCount > 1 ? 's' : ''} selected',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                              color: context.textColor,
-                            ),
-                          ),
-                        ),
-                        ElevatedButton.icon(
-                          onPressed: _isSaving ? null : _saveServices,
-                          icon: _isSaving
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
-                                  ),
-                                )
-                              : const Icon(Icons.save),
-                          label:
-                              Text(_isSaving ? 'Saving...' : 'Save Now'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: primaryColor,
-                            foregroundColor: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+    return Card(
+      margin: EdgeInsets.zero,
+      color: cardColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: primaryColor),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.info_outline, color: primaryColor),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                '$selectedCount service${selectedCount > 1 ? 's' : ''} selected',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                  color: context.textColor,
                 ),
-                const SizedBox(height: 24),
-              ],
-              // ✅ Wrap instead of GridView — each card takes height it needs
-              Wrap(
-                spacing: 16,
-                runSpacing: 16,
-                children: _filteredServices.asMap().entries.map((entry) {
-                  return SizedBox(
-                    width: 380,
-                    child: _buildServiceCardWeb(entry.value, entry.key),
-                  );
-                }).toList(),
               ),
-            ],
-          ),
+            ),
+            ElevatedButton.icon(
+              onPressed: _isSaving ? null : _saveServices,
+              icon: _isSaving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.save),
+              label: Text(_isSaving ? 'Saving...' : 'Save Now'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryColor,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
   // ============================================================
-  // ✅ WEB SERVICE CARD — No more Expanded with nested ListView
+  // ✅ SERVICE CARD (same card for web + mobile)
+  //    Header: icon, name, category chip, variants count, price range
+  //    Body  : variants (expanded by default)
   // ============================================================
-  Widget _buildServiceCardWeb(Map<String, dynamic> service, int index) {
+  Widget _buildServiceCard(Map<String, dynamic> service, int index) {
     final primaryColor = context.primaryColor;
     final textColor = context.textColor;
     final secondaryTextColor = context.secondaryTextColor;
@@ -1497,26 +1637,28 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     final successColor = context.successColor;
     final isDark = context.isDarkMode;
 
-    final serviceId = service['id_str'];
+    final serviceId = service['id_str'] as String;
     final variants = service['variants'] as List;
     final hasVariants = variants.isNotEmpty;
     final isFullServiceAssigned = service['isFullServiceAssigned'] == true;
     final allVariantsAssigned = service['allVariantsAssigned'] == true;
     final isFullServiceSelected = _isFullServiceSelected(serviceId);
     final selectedVariantCount = _selectedVariants[serviceId]?.length ?? 0;
+    final isExpanded = _expandedServices.contains(serviceId);
     final categoryColor = _getCategoryColor(context, service['category_name']);
     final cardBgColor = _getCardColor(context, index);
+    final description = (service['description'] ?? '').toString();
 
-    final isCompletelyAssigned = !hasVariants
-        ? isFullServiceAssigned
-        : allVariantsAssigned;
-
+    final isCompletelyAssigned =
+        !hasVariants ? isFullServiceAssigned : allVariantsAssigned;
     final isSelected = isFullServiceSelected || selectedVariantCount > 0;
 
     return Opacity(
       opacity: isCompletelyAssigned ? 0.7 : 1.0,
       child: Card(
+        margin: EdgeInsets.zero,
         color: cardColor,
+        elevation: isSelected ? 4 : 2,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
           side: BorderSide(
@@ -1524,7 +1666,6 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
             width: isSelected ? 2 : 1,
           ),
         ),
-        elevation: isSelected ? 4 : 2,
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(16),
@@ -1535,153 +1676,186 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               // ==================== HEADER ====================
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.black.withValues(alpha: 0.2)
-                      : Colors.white.withValues(alpha: 0.4),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(16),
-                    topRight: Radius.circular(16),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: isDark ? cardColor : Colors.white,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Center(
-                        child: Icon(
-                          _getIconForName(service['icon_name']),
-                          color: primaryColor,
-                          size: 18,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            service['name'],
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                              color: textColor,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          const SizedBox(height: 2),
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: categoryColor.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  service['category_name'],
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: categoryColor,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ),
-                              if (hasVariants) ...[
-                                const SizedBox(width: 6),
-                                Text(
-                                  '${variants.length} variants',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: secondaryTextColor,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (!hasVariants)
-                      Checkbox(
-                        value: _selectedVariants.containsKey(serviceId),
-                        onChanged: isCompletelyAssigned
-                            ? null
-                            : (_) => _toggleFullService(serviceId),
-                        activeColor: primaryColor,
-                      ),
-                  ],
-                ),
-              ),
-
-              // ==================== CONTENT ====================
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (hasVariants && !isCompletelyAssigned) ...[
-                      Text(
-                        _formatPriceRange(
-                          service['minPrice'],
-                          service['maxPrice'],
-                        ),
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: secondaryTextColor,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-
-                    if (isCompletelyAssigned)
+              InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: hasVariants
+                    ? () => _toggleExpand(serviceId)
+                    : (isCompletelyAssigned
+                        ? null
+                        : () => _toggleFullService(serviceId)),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
+                        width: 40,
+                        height: 40,
                         decoration: BoxDecoration(
-                          color: successColor.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(4),
+                          color: isDark
+                              ? cardColor
+                              : Colors.white.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
+                        child: Center(
+                          child: Icon(
+                            _getIconForName(service['icon_name']),
+                            color: primaryColor,
+                            size: 20,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(
-                              Icons.check_circle,
-                              size: 12,
-                              color: successColor,
-                            ),
-                            const SizedBox(width: 4),
                             Text(
-                              'Already assigned',
+                              service['name'],
                               style: TextStyle(
-                                fontSize: 10,
-                                color: successColor,
-                                fontWeight: FontWeight.w500,
+                                fontWeight: isSelected
+                                    ? FontWeight.bold
+                                    : FontWeight.w600,
+                                fontSize: 15,
+                                color: isCompletelyAssigned
+                                    ? secondaryTextColor
+                                    : textColor,
                               ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 4,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color:
+                                        categoryColor.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    service['category_name'],
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: categoryColor,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                                if (hasVariants)
+                                  Text(
+                                    '${variants.length} variants',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: secondaryTextColor,
+                                    ),
+                                  ),
+                                if (hasVariants && !isCompletelyAssigned)
+                                  Text(
+                                    _formatPriceRange(
+                                      service['minPrice'],
+                                      service['maxPrice'],
+                                    ),
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: secondaryTextColor,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         ),
                       ),
+                      if (!hasVariants)
+                        Checkbox(
+                          value: _selectedVariants.containsKey(serviceId),
+                          onChanged: isCompletelyAssigned
+                              ? null
+                              : (_) => _toggleFullService(serviceId),
+                          activeColor: primaryColor,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      if (hasVariants)
+                        Icon(
+                          isExpanded
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                          size: 22,
+                          color: selectedVariantCount > 0
+                              ? primaryColor
+                              : secondaryTextColor,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
 
-                    if (!hasVariants && !isCompletelyAssigned) ...[
-                      const SizedBox(height: 8),
-                      Center(
+              // ==================== BODY ====================
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                alignment: Alignment.topCenter,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (description.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                        child: Text(
+                          description,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: secondaryTextColor,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+
+                    if (isCompletelyAssigned)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: successColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.check_circle,
+                                size: 12,
+                                color: successColor,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Already assigned',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: successColor,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                    if (!hasVariants && !isCompletelyAssigned)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                         child: Text(
                           'Full Service',
                           style: TextStyle(
@@ -1690,115 +1864,31 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
                           ),
                         ),
                       ),
-                    ],
 
-                    // ✅ Variants — Column instead of nested ListView
-                    if (hasVariants) ...[
-                      const SizedBox(height: 8),
-                      ...variants.map((variant) {
-                        final variantId = variant['id'] as int;
-                        final isAssigned = variant['isAssigned'] == true;
-                        final isVarSelected = _isVariantSelected(
-                          serviceId,
-                          variantId,
-                        );
-
-                        return GestureDetector(
-                          onTap: isAssigned || isCompletelyAssigned
-                              ? null
-                              : () =>
-                                  _toggleVariant(serviceId, variantId),
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: isVarSelected
-                                  ? primaryColor.withValues(alpha: 0.1)
-                                  : (isDark
-                                      ? cardColor.withValues(alpha: 0.5)
-                                      : Colors.white.withValues(alpha: 0.6)),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isVarSelected
-                                    ? primaryColor
-                                    : borderColor,
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  isVarSelected
-                                      ? Icons.check_circle
-                                      : Icons.circle_outlined,
-                                  size: 14,
-                                  color: isVarSelected
-                                      ? primaryColor
-                                      : secondaryTextColor,
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        variant['display_text'],
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          fontWeight: isVarSelected
-                                              ? FontWeight.w600
-                                              : FontWeight.normal,
-                                          color: isVarSelected
-                                              ? primaryColor
-                                              : textColor,
-                                        ),
-                                      ),
-                                      Text(
-                                        '${_formatPrice(variant['price'])} • ${variant['duration']} min',
-                                        style: TextStyle(
-                                          fontSize: 9,
-                                          color: secondaryTextColor,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (isAssigned)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: successColor.withValues(
-                                        alpha: 0.15,
-                                      ),
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      'Assigned',
-                                      style: TextStyle(
-                                        fontSize: 8,
-                                        color: successColor,
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        );
-                      }),
-                    ],
+                    // ✅ Variants (shown when expanded)
+                    if (hasVariants && isExpanded)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: Column(
+                          children: variants.map<Widget>((variant) {
+                            return _buildVariantRow(
+                              serviceId: serviceId,
+                              variant: variant as Map<String, dynamic>,
+                              isCompletelyAssigned: isCompletelyAssigned,
+                            );
+                          }).toList(),
+                        ),
+                      ),
 
                     if (selectedVariantCount > 0)
                       Padding(
-                        padding: const EdgeInsets.only(top: 8),
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                         child: Text(
                           '$selectedVariantCount variant${selectedVariantCount > 1 ? 's' : ''} selected',
                           style: TextStyle(
-                            fontSize: 10,
+                            fontSize: 11,
                             color: primaryColor,
-                            fontWeight: FontWeight.w500,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
                       ),
@@ -1812,10 +1902,12 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     );
   }
 
-  // ============================================================
-  // ✅ MOBILE VIEW
-  // ============================================================
-  Widget _buildMobileView(double padding, int selectedCount) {
+  // ✅ One variant row (checkbox + gender/age + price/duration + badge)
+  Widget _buildVariantRow({
+    required String serviceId,
+    required Map<String, dynamic> variant,
+    required bool isCompletelyAssigned,
+  }) {
     final primaryColor = context.primaryColor;
     final textColor = context.textColor;
     final secondaryTextColor = context.secondaryTextColor;
@@ -1824,256 +1916,83 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
     final successColor = context.successColor;
     final isDark = context.isDarkMode;
 
-    return ListView.builder(
-      padding: EdgeInsets.all(padding),
-      itemCount: _filteredServices.length,
-      itemBuilder: (context, index) {
-        final service = _filteredServices[index];
-        final serviceId = service['id_str'];
-        final variants = service['variants'] as List;
-        final hasVariants = variants.isNotEmpty;
-        final isFullServiceAssigned = service['isFullServiceAssigned'] == true;
-        final allVariantsAssigned = service['allVariantsAssigned'] == true;
-        final isFullServiceSelected = _isFullServiceSelected(serviceId);
-        final selectedVariantCount = _selectedVariants[serviceId]?.length ?? 0;
-        final isExpanded = _expandedServices.contains(serviceId);
-        final categoryColor = _getCategoryColor(
-          context,
-          service['category_name'],
-        );
-        final cardBgColor = _getCardColor(context, index);
+    final variantId = variant['id'] as int;
+    final isAssigned = variant['isAssigned'] == true;
+    final isVarSelected = _isVariantSelected(serviceId, variantId);
+    final disabled = isAssigned || isCompletelyAssigned;
 
-        final isCompletelyAssigned = !hasVariants
-            ? isFullServiceAssigned
-            : allVariantsAssigned;
-
-        final isSelected = isFullServiceSelected || selectedVariantCount > 0;
-
-        return Card(
-          margin: const EdgeInsets.only(bottom: 12),
-          color: cardColor,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(
-              color: isSelected ? primaryColor : borderColor,
-              width: isSelected ? 2 : 1,
-            ),
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(12),
-              color: cardBgColor,
-            ),
-            child: Theme(
-              data: Theme.of(context).copyWith(
-                dividerColor: Colors.transparent,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      decoration: BoxDecoration(
+        color: isVarSelected
+            ? primaryColor.withValues(alpha: 0.08)
+            : (isDark
+                ? cardColor.withValues(alpha: 0.5)
+                : Colors.white.withValues(alpha: 0.7)),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isVarSelected ? primaryColor : borderColor,
+        ),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: disabled ? null : () => _toggleVariant(serviceId, variantId),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Row(
+            children: [
+              Checkbox(
+                value: isVarSelected,
+                onChanged:
+                    disabled ? null : (_) => _toggleVariant(serviceId, variantId),
+                activeColor: primaryColor,
+                visualDensity: VisualDensity.compact,
               ),
-              child: Column(
-                children: [
-                  InkWell(
-                    onTap: hasVariants
-                        ? () => _toggleExpand(serviceId)
-                        : null,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 36,
-                            height: 36,
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? cardColor
-                                  : Colors.white.withValues(alpha: 0.8),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Center(
-                              child: Icon(
-                                _getIconForName(service['icon_name']),
-                                color: primaryColor,
-                                size: 18,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  service['name'],
-                                  style: TextStyle(
-                                    fontWeight: isSelected
-                                        ? FontWeight.bold
-                                        : FontWeight.w600,
-                                    fontSize: 14,
-                                    color: isCompletelyAssigned
-                                        ? secondaryTextColor
-                                        : textColor,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 2),
-                                Row(
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: categoryColor.withValues(
-                                          alpha: 0.15,
-                                        ),
-                                        borderRadius:
-                                            BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        service['category_name'],
-                                        style: TextStyle(
-                                          fontSize: 9,
-                                          color: categoryColor,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                    ),
-                                    if (hasVariants) ...[
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        '${variants.length} variants',
-                                        style: TextStyle(
-                                          fontSize: 9,
-                                          color: secondaryTextColor,
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                          if (!hasVariants)
-                            Checkbox(
-                              value:
-                                  _selectedVariants.containsKey(serviceId),
-                              onChanged: isCompletelyAssigned
-                                  ? null
-                                  : (_) => _toggleFullService(serviceId),
-                              activeColor: primaryColor,
-                              visualDensity: VisualDensity.compact,
-                            ),
-                          if (hasVariants)
-                            Icon(
-                              isExpanded
-                                  ? Icons.expand_less
-                                  : Icons.expand_more,
-                              size: 20,
-                              color: selectedVariantCount > 0
-                                  ? primaryColor
-                                  : secondaryTextColor,
-                            ),
-                        ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      variant['display_text'],
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: isVarSelected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                        color: isVarSelected ? primaryColor : textColor,
                       ),
                     ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_formatPrice(variant['price'])} • ${variant['duration']} min',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: secondaryTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (isAssigned)
+                Container(
+                  margin: const EdgeInsets.only(right: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
                   ),
-
-                  if (isExpanded && hasVariants)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                      child: Column(
-                        children: variants.map((variant) {
-                          final variantId = variant['id'] as int;
-                          final isAssigned = variant['isAssigned'] == true;
-                          final isVarSelected = _isVariantSelected(
-                            serviceId,
-                            variantId,
-                          );
-
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 6),
-                            decoration: BoxDecoration(
-                              color: isVarSelected
-                                  ? primaryColor.withValues(alpha: 0.08)
-                                  : (isDark
-                                      ? cardColor.withValues(alpha: 0.5)
-                                      : Colors.white.withValues(alpha: 0.6)),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(
-                                color: isVarSelected
-                                    ? primaryColor
-                                    : borderColor,
-                              ),
-                            ),
-                            child: ListTile(
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 0,
-                              ),
-                              leading: Checkbox(
-                                value: isVarSelected,
-                                onChanged:
-                                    isAssigned || isCompletelyAssigned
-                                        ? null
-                                        : (_) => _toggleVariant(
-                                            serviceId,
-                                            variantId,
-                                          ),
-                                activeColor: primaryColor,
-                                visualDensity: VisualDensity.compact,
-                              ),
-                              title: Text(
-                                variant['display_text'],
-                                style: TextStyle(
-                                  fontWeight: isVarSelected
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                                  fontSize: 12,
-                                  color: textColor,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              subtitle: Text(
-                                '${_formatPrice(variant['price'])} • ${variant['duration']} min',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  color: secondaryTextColor,
-                                ),
-                              ),
-                              trailing: isAssigned
-                                  ? Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 6,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: successColor.withValues(
-                                          alpha: 0.15,
-                                        ),
-                                        borderRadius:
-                                            BorderRadius.circular(4),
-                                      ),
-                                      child: Text(
-                                        'Assigned',
-                                        style: TextStyle(
-                                          fontSize: 9,
-                                          color: successColor,
-                                        ),
-                                      ),
-                                    )
-                                  : null,
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                ],
-              ),
-            ),
+                  decoration: BoxDecoration(
+                    color: successColor.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'Assigned',
+                    style: TextStyle(fontSize: 9, color: successColor),
+                  ),
+                ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

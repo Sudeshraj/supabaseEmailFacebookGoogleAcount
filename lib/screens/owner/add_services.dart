@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
@@ -31,8 +32,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   final TextEditingController _serviceDescriptionController =
       TextEditingController();
   final TextEditingController _variantPriceController = TextEditingController();
-  final TextEditingController _variantDurationController =
+  // Duration is typed as hours + minutes and stored as total minutes.
+  final TextEditingController _variantHoursController = TextEditingController();
+  final TextEditingController _variantMinutesController =
       TextEditingController();
+  final TextEditingController _variantNameController = TextEditingController();
   final TextEditingController _ageDisplayNameController =
       TextEditingController();
   final TextEditingController _ageMinController = TextEditingController();
@@ -84,6 +88,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   // ==================== VALIDATION ====================
   String? _priceError;
   String? _durationError;
+  String? _variantNameError;
   String? _serviceNameError;
   String? _categoryNameError;
   String? _ageNameError;
@@ -98,10 +103,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   bool _isDark = false;
 
   // ==================== EXPANDABLE ARROWS ====================
-  bool _variantsSectionExpanded = false;
   bool _genderExpanded = false;
   bool _ageExpanded = false;
-  bool _durationExpanded = false;
   bool _priceExpanded = false;
   bool _addAgeCategoryFormExpanded = false;
 
@@ -217,11 +220,238 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     return '$_salonCurrencySymbol${400}';
   }
 
-  bool get _hasAtLeastOneVariantField =>
-      _selectedGenderId != null ||
-      _selectedAgeCategoryId != null ||
-      _variantDurationController.text.trim().isNotEmpty ||
-      _variantPriceController.text.trim().isNotEmpty;
+  // ============================================
+  // TEXT LIMITS + SANITISING (the same limits are enforced again in the DB)
+  // ============================================
+  static const int _maxCategoryName = 40;
+  static const int _maxServiceName = 60;
+  static const int _maxVariantName = 50;
+  static const int _maxAgeName = 30;
+  static const int _maxDescription = 200;
+
+  // Invisible / control characters: C0 controls, DEL, zero-width chars,
+  // bidi overrides (used to spoof text) and the BOM.
+  static final RegExp _badCharsSingleLine = RegExp(
+    r'[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]',
+  );
+  // Same, but a description may keep line breaks (\n = \u000A).
+  static final RegExp _badCharsMultiLine = RegExp(
+    r'[\u0000-\u0009\u000B-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]',
+  );
+
+  /// Blocks bad characters and over-long text while typing / pasting.
+  List<TextInputFormatter> _textFormatters(int max, {bool multiLine = false}) {
+    return [
+      FilteringTextInputFormatter.deny(
+        multiLine ? _badCharsMultiLine : _badCharsSingleLine,
+      ),
+      LengthLimitingTextInputFormatter(max),
+    ];
+  }
+
+  /// Final clean-up before a value is stored: removes bad characters,
+  /// collapses repeated spaces, trims and cuts to [max].
+  String _cleanText(String input, int max, {bool multiLine = false}) {
+    var t = input.replaceAll(
+      multiLine ? _badCharsMultiLine : _badCharsSingleLine,
+      '',
+    );
+    if (multiLine) {
+      t = t
+          .split('\n')
+          .map((l) => l.replaceAll(RegExp(r'[ \t]+'), ' ').trim())
+          .join('\n')
+          .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+          .trim();
+    } else {
+      t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+    }
+    return t.length > max ? t.substring(0, max).trim() : t;
+  }
+
+  bool _isKnownIcon(String? name) =>
+      name != null && _iconSuggestions.any((i) => i['name'] == name);
+
+  bool _isHexColor(String? hex) =>
+      hex != null && RegExp(r'^#[0-9A-Fa-f]{6}$').hasMatch(hex);
+
+  /// Max 8 whole digits (DB column is DECIMAL(10,2)) so a huge number can
+  /// never overflow the column.
+  List<TextInputFormatter> get _priceFormatters => _currencyUsesDecimals
+      ? [
+          FilteringTextInputFormatter.allow(RegExp(r'^\d{0,8}(\.\d{0,2})?')),
+          LengthLimitingTextInputFormatter(11),
+        ]
+      : [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(8),
+        ];
+
+  /// Maps a technical error to a short message the user can act on.
+  /// (Raw database errors are never shown on screen.)
+  String _friendlyError(Object e) {
+    if (e is PostgrestException) {
+      switch (e.code) {
+        case '23505':
+          return 'This already exists (same name, or the same name + gender + age + duration). Please change it.';
+        case '23514':
+        case '22001':
+          return 'Some text is too long or has characters that are not allowed.';
+        case '22003':
+          return 'A number is too large.';
+        case '23503':
+          return "This is linked to other records (like bookings), so it can't be changed right now.";
+        case '42501':
+          return "You don't have permission to make this change.";
+      }
+    }
+    final text = e.toString().toLowerCase();
+    if (text.contains('socketexception') ||
+        text.contains('failed host lookup') ||
+        text.contains('clientexception') ||
+        text.contains('timeout')) {
+      return "Couldn't reach the server. Please check your internet connection and try again.";
+    }
+    return 'Something went wrong. Please try again.';
+  }
+
+  // ============================================
+  // DURATION (hours + minutes → total minutes)
+  // ============================================
+  /// Error text for the current hours/minutes input, or null when valid.
+  String? _durationValidationMessage() {
+    final h = _variantHoursController.text.trim();
+    final m = _variantMinutesController.text.trim();
+    if (h.isEmpty && m.isEmpty) return 'Duration is required';
+    final hours = h.isEmpty ? 0 : int.tryParse(h);
+    final mins = m.isEmpty ? 0 : int.tryParse(m);
+    if (hours == null || mins == null) return 'Enter numbers only';
+    if (hours > 23) return 'Hours must be between 0 and 23';
+    if (mins > 59) return 'Minutes must be between 0 and 59';
+    if (hours * 60 + mins <= 0) return 'Duration must be greater than 0';
+    return null;
+  }
+
+  /// Total minutes, or null while the input is empty / invalid.
+  int? get _parsedDuration {
+    if (_durationValidationMessage() != null) return null;
+    final h = _variantHoursController.text.trim();
+    final m = _variantMinutesController.text.trim();
+    return (h.isEmpty ? 0 : int.parse(h)) * 60 + (m.isEmpty ? 0 : int.parse(m));
+  }
+
+  /// 45 → "45 min", 60 → "1 hr", 90 → "1 hr 30 min", 120 → "2 hrs".
+  String _formatDuration(int minutes) {
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (h == 0) return '$m min';
+    final hText = h == 1 ? '1 hr' : '$h hrs';
+    return m == 0 ? hText : '$hText $m min';
+  }
+
+  // ============================================
+  // VARIANT LABEL HELPERS (only values that are set are shown)
+  // ============================================
+  /// Gender / age / duration parts that are actually set (no "Any").
+  List<String> _variantDetailParts(Map<String, dynamic> v) {
+    final parts = <String>[];
+    final gender = (v['gender_name'] ?? '').toString();
+    final age = (v['age_category_name'] ?? '').toString();
+    final duration = (v['duration'] as num?)?.toInt() ?? 0;
+    if (gender.isNotEmpty && gender != 'Any') parts.add(gender);
+    if (age.isNotEmpty && age != 'Any') parts.add(age);
+    if (duration > 0) parts.add(_formatDuration(duration));
+    return parts;
+  }
+
+  /// Main line of a variant row: its name, or (no name) the set details.
+  String _variantTitle(Map<String, dynamic> v) {
+    final vName = (v['name'] ?? '').toString().trim();
+    if (vName.isNotEmpty) return vName;
+    final parts = _variantDetailParts(v);
+    return parts.isEmpty ? 'Standard' : parts.join(' • ');
+  }
+
+  /// Second line of a variant row. When a name is the title, the details
+  /// move down here; otherwise they are already in the title.
+  List<String> _variantSubtitleParts(Map<String, dynamic> v) {
+    final vName = (v['name'] ?? '').toString().trim();
+    return vName.isNotEmpty ? _variantDetailParts(v) : <String>[];
+  }
+
+  /// Second line widget: details • price (price in teal). Wraps on phones.
+  Widget _variantSecondLine(
+    Map<String, dynamic> v, {
+    double fontSize = 11,
+  }) {
+    final isDark = _isDark;
+    final details = _variantSubtitleParts(v);
+    final hasPrice = v['price_set'] == true;
+    if (details.isEmpty && !hasPrice) return const SizedBox.shrink();
+    final detailColor = isDark ? Colors.white60 : Colors.grey[600];
+    return Text.rich(
+      TextSpan(
+        children: [
+          if (details.isNotEmpty)
+            TextSpan(
+              text: details.join(' • '),
+              style: TextStyle(fontSize: fontSize, color: detailColor),
+            ),
+          if (details.isNotEmpty && hasPrice)
+            TextSpan(
+              text: ' • ',
+              style: TextStyle(fontSize: fontSize, color: detailColor),
+            ),
+          if (hasPrice)
+            TextSpan(
+              text: _formatPriceDisplay(v),
+              style: TextStyle(
+                fontSize: fontSize,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.teal[300] : Colors.teal[700],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// "Beard Trim • Male • Adult (18-60 yrs) • 30 min" for messages.
+  String _variantLabel(Map<String, dynamic> v) {
+    final vName = (v['name'] ?? '').toString().trim();
+    final parts = <String>[
+      if (vName.isNotEmpty) vName,
+      ..._variantDetailParts(v),
+    ];
+    return parts.isEmpty ? 'Standard' : parts.join(' • ');
+  }
+
+  /// Variant form is ready to submit: a service is picked and the duration
+  /// is valid. (The "name needed" rule is explained on the name field.)
+  bool get _canSubmitVariant =>
+      _variantTargetServiceIndex != null && _parsedDuration != null;
+
+  /// Name is optional — but required when only the duration is set
+  /// (no gender and no age).
+  bool get _variantNameRequired =>
+      _selectedGenderId == null && _selectedAgeCategoryId == null;
+
+  /// Clears every variant input. Call inside setState.
+  void _resetVariantForm() {
+    _editingVariantIndex = -1;
+    _selectedGenderId = null;
+    _selectedAgeCategoryId = null;
+    _variantPriceController.clear();
+    _variantHoursController.clear();
+    _variantMinutesController.clear();
+    _variantNameController.clear();
+    _priceError = null;
+    _durationError = null;
+    _variantNameError = null;
+    _genderExpanded = false;
+    _ageExpanded = false;
+    _priceExpanded = false;
+  }
 
   @override
   void initState() {
@@ -235,7 +465,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     _selectedCategoryColor = _categoryColorOptions.first['hex'];
 
     _variantPriceController.addListener(_onVariantFieldChanged);
-    _variantDurationController.addListener(_onVariantFieldChanged);
+    _variantHoursController.addListener(_onVariantFieldChanged);
+    _variantMinutesController.addListener(_onVariantFieldChanged);
+    _variantNameController.addListener(_onVariantNameChanged);
     _serviceNameController.addListener(_validateServiceName);
     _newCategoryNameController.addListener(_validateCategoryName);
     _ageDisplayNameController.addListener(_validateAgeFields);
@@ -247,6 +479,12 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     if (!mounted) return;
     _validatePrice();
     _validateDuration();
+  }
+
+  void _onVariantNameChanged() {
+    if (!mounted) return;
+    // Clear the "name required" message as soon as the user types.
+    if (_variantNameError != null) setState(() => _variantNameError = null);
   }
 
   @override
@@ -261,7 +499,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     _serviceNameController.dispose();
     _serviceDescriptionController.dispose();
     _variantPriceController.dispose();
-    _variantDurationController.dispose();
+    _variantHoursController.dispose();
+    _variantMinutesController.dispose();
+    _variantNameController.dispose();
     _newCategoryNameController.dispose();
     _newCategoryDescriptionController.dispose();
     _ageDisplayNameController.dispose();
@@ -300,7 +540,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   // VALIDATION
   // ============================================
   void _validateServiceName() {
-    final String name = _serviceNameController.text.trim();
+    final String name = _cleanText(
+      _serviceNameController.text,
+      _maxServiceName,
+    );
     if (name.isEmpty) {
       if (mounted) setState(() => _serviceNameError = null);
       return;
@@ -324,7 +567,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   }
 
   void _validateCategoryName() {
-    final String name = _newCategoryNameController.text.trim();
+    final String name = _cleanText(
+      _newCategoryNameController.text,
+      _maxCategoryName,
+    );
     if (name.isEmpty) {
       if (mounted) setState(() => _categoryNameError = null);
       return;
@@ -346,7 +592,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   void _validateAgeFields() {
     if (!mounted) return;
     setState(() {
-      final name = _ageDisplayNameController.text.trim();
+      final name = _cleanText(_ageDisplayNameController.text, _maxAgeName);
       if (name.isEmpty) {
         _ageNameError = null;
       } else {
@@ -402,6 +648,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       if (mounted) setState(() => _priceError = 'Price cannot be negative');
       return;
     }
+    if (price > 99999999.99) {
+      if (mounted) setState(() => _priceError = 'Price is too large');
+      return;
+    }
 
     if (!_currencyUsesDecimals && priceText.contains('.')) {
       final decimalPart = priceText.split('.').last;
@@ -418,23 +668,16 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     if (mounted) setState(() => _priceError = null);
   }
 
+  /// Live validation of hours + minutes. Stays quiet while both are empty
+  /// (the "required" message appears when the user tries to add).
   void _validateDuration() {
-    final String durationText = _variantDurationController.text.trim();
-    if (durationText.isEmpty) {
-      if (mounted) setState(() => _durationError = null);
-      return;
-    }
-
-    final int? duration = int.tryParse(durationText);
-    if (mounted) {
-      if (duration == null) {
-        setState(() => _durationError = 'Please enter a valid number');
-      } else if (duration <= 0) {
-        setState(() => _durationError = 'Duration must be greater than 0');
-      } else {
-        setState(() => _durationError = null);
-      }
-    }
+    if (!mounted) return;
+    final bool bothEmpty =
+        _variantHoursController.text.trim().isEmpty &&
+        _variantMinutesController.text.trim().isEmpty;
+    setState(() {
+      _durationError = bothEmpty ? null : _durationValidationMessage();
+    });
   }
 
   // ============================================
@@ -513,7 +756,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     } catch (e) {
       debugPrint('Error loading data: $e');
       if (mounted) {
-        _showSnackBar('Error loading data: $e', Colors.red);
+        _showSnackBar(_friendlyError(e), Colors.red);
       }
     } finally {
       if (mounted) setState(() => _isLoadingData = false);
@@ -565,7 +808,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       final variantsResponse = await supabase
           .from('service_variants')
           .select(
-            'id, service_id, price, duration, salon_gender_id, salon_age_category_id',
+            'id, service_id, name, price, duration, salon_gender_id, salon_age_category_id',
           )
           .inFilter('service_id', serviceIds)
           .eq('is_active', true);
@@ -610,6 +853,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           'gender_name': genderName,
           'age_category_id': ageId,
           'age_category_name': ageName,
+          'name': (v['name'] ?? '').toString().trim(),
           'price': priceNum ?? 0.0,
           'price_set': priceNum != null,
           'duration': (v['duration'] as num?)?.toInt() ?? 0,
@@ -653,7 +897,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
       final variantsResponse = await supabase
           .from('service_variants')
-          .select('id, price, duration, salon_gender_id, salon_age_category_id')
+          .select(
+            'id, name, price, duration, salon_gender_id, salon_age_category_id',
+          )
           .eq('service_id', widget.serviceId!)
           .eq('is_active', true);
 
@@ -699,6 +945,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           'gender_name': _genderNameFromId(genderId),
           'age_category_id': ageId,
           'age_category_name': _getAgeCategoryDisplayName(ageCat),
+          'name': (v['name'] ?? '').toString().trim(),
           'price': priceNum ?? 0.0,
           'price_set': priceNum != null,
           'duration': (v['duration'] as num?)?.toInt() ?? 0,
@@ -746,7 +993,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     try {
       final variantsResponse = await supabase
           .from('service_variants')
-          .select('id, price, duration, salon_gender_id, salon_age_category_id')
+          .select(
+            'id, name, price, duration, salon_gender_id, salon_age_category_id',
+          )
           .eq('service_id', serviceId)
           .eq('is_active', true);
 
@@ -788,6 +1037,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           'gender_name': _genderNameFromId(genderId),
           'age_category_id': ageId,
           'age_category_name': ageName,
+          'name': (v['name'] ?? '').toString().trim(),
           'price': priceNum ?? 0.0,
           'price_set': priceNum != null,
           'duration': (v['duration'] as num?)?.toInt() ?? 0,
@@ -845,8 +1095,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
     final newGenderId = _selectedGenderId;
     final newAgeId = _selectedAgeCategoryId;
-    final newDuration =
-        int.tryParse(_variantDurationController.text.trim()) ?? 0;
+    final newDuration = _parsedDuration ?? 0;
+    final newName = _cleanText(
+      _variantNameController.text,
+      _maxVariantName,
+    ).toLowerCase();
 
     for (int i = 0; i < variants.length; i++) {
       // Skip the variant being edited
@@ -857,19 +1110,17 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       final sameAge = (v['age_category_id'] as int?) == newAgeId;
       final sameDuration =
           ((v['duration'] as num?)?.toInt() ?? 0) == newDuration;
+      final sameName =
+          (v['name'] ?? '').toString().trim().toLowerCase() == newName;
 
-      if (sameGender && sameAge && sameDuration) return true;
+      if (sameGender && sameAge && sameDuration && sameName) return true;
     }
     return false;
   }
 
+  /// Only called for variants whose price is set (unset prices are hidden).
   String _formatPriceDisplay(Map<String, dynamic> v) {
-    final priceSet = v['price_set'] == true;
     final price = (v['price'] as num?)?.toDouble() ?? 0.0;
-
-    if (!priceSet) {
-      return 'Not set';
-    }
     if (price == 0) {
       return 'Free';
     }
@@ -879,15 +1130,15 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
-  bool _isPriceNotSet(Map<String, dynamic> v) {
-    return v['price_set'] != true;
-  }
-
   // ============================================
   // CATEGORY MANAGEMENT
   // ============================================
   Future<void> _addOrUpdateCategory() async {
-    final displayName = _newCategoryNameController.text.trim();
+    _validateCategoryName();
+    final displayName = _cleanText(
+      _newCategoryNameController.text,
+      _maxCategoryName,
+    );
     if (displayName.isEmpty) {
       _showSnackBar('Category name is required', Colors.orange);
       return;
@@ -896,17 +1147,24 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _showSnackBar(_categoryNameError!, Colors.orange);
       return;
     }
+    final categoryDescription = _cleanText(
+      _newCategoryDescriptionController.text,
+      _maxDescription,
+      multiLine: true,
+    );
 
     if (mounted) setState(() => _isLoading = true);
     try {
       final data = {
         'salon_id': widget.salonId,
         'display_name': displayName,
-        'description': _newCategoryDescriptionController.text.trim().isEmpty
-            ? null
-            : _newCategoryDescriptionController.text.trim(),
-        'icon_name': _selectedIcon,
-        'color': _selectedCategoryColor,
+        'description': categoryDescription.isEmpty ? null : categoryDescription,
+        'icon_name': _isKnownIcon(_selectedIcon)
+            ? _selectedIcon
+            : _iconSuggestions.first['name'],
+        'color': _isHexColor(_selectedCategoryColor)
+            ? _selectedCategoryColor
+            : _categoryColorOptions.first['hex'],
         'is_active': true,
       };
 
@@ -952,7 +1210,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         });
       }
     } catch (e) {
-      if (mounted) _showSnackBar('Error saving category: $e', Colors.red);
+      debugPrint('Error saving category: $e');
+      if (mounted) _showSnackBar(_friendlyError(e), Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -1020,7 +1279,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         });
       }
     } catch (e) {
-      if (mounted) _showSnackBar('Error deleting category: $e', Colors.red);
+      debugPrint('Error deleting category: $e');
+      if (mounted) _showSnackBar(_friendlyError(e), Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -1042,7 +1302,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   Future<void> _addAgeCategoryDirect() async {
     _validateAgeFields();
 
-    final displayName = _ageDisplayNameController.text.trim();
+    final displayName = _cleanText(_ageDisplayNameController.text, _maxAgeName);
     final min = int.tryParse(_ageMinController.text.trim());
     final max = int.tryParse(_ageMaxController.text.trim());
 
@@ -1096,9 +1356,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         _ageNameError = null;
         _ageMinError = null;
         _ageMaxError = null;
+        _addAgeCategoryFormExpanded = false;
       });
     } catch (e) {
-      if (mounted) _showSnackBar('Error adding age category: $e', Colors.red);
+      debugPrint('Error adding age category: $e');
+      if (mounted) _showSnackBar(_friendlyError(e), Colors.red);
     } finally {
       if (mounted) setState(() => _isAddingAgeCategory = false);
     }
@@ -1114,7 +1376,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _showSnackBar('Please select a category for this service', Colors.orange);
       return;
     }
-    final name = _serviceNameController.text.trim();
+    final name = _cleanText(_serviceNameController.text, _maxServiceName);
     if (name.isEmpty) {
       _showSnackBar('Service name is required', Colors.orange);
       return;
@@ -1136,8 +1398,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
     final newService = {
       'name': name,
-      'description': _serviceDescriptionController.text.trim(),
-      'icon_name': _selectedIcon ?? _iconSuggestions.first['name'],
+      'description': _cleanText(
+        _serviceDescriptionController.text,
+        _maxDescription,
+        multiLine: true,
+      ),
+      'icon_name': _isKnownIcon(_selectedIcon)
+          ? _selectedIcon
+          : _iconSuggestions.first['name'],
       'category_id': _selectedCategoryId,
       'variants': variants,
     };
@@ -1242,7 +1510,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
 
       _showSnackBar('Service removed from salon', Colors.orange);
     } catch (e) {
-      if (mounted) _showSnackBar('Error removing service: $e', Colors.red);
+      debugPrint('Error removing service: $e');
+      if (mounted) _showSnackBar(_friendlyError(e), Colors.red);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -1257,19 +1526,31 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       return;
     }
 
-    if (!_hasAtLeastOneVariantField) {
-      _showSnackBar(
-        'Please fill at least one field (gender, age, duration, or price)',
-        Colors.orange,
-      );
+    _validatePrice();
+
+    // Duration is the only always-required field of a variant.
+    final durationMessage = _durationValidationMessage();
+    if (durationMessage != null) {
+      setState(() => _durationError = durationMessage);
+      _showSnackBar(durationMessage, Colors.orange);
       return;
     }
 
-    _validatePrice();
-    _validateDuration();
-
-    if (_priceError != null || _durationError != null) {
+    if (_priceError != null) {
       _showSnackBar('Please fix the errors before adding', Colors.orange);
+      return;
+    }
+
+    // Name is optional, but mandatory when only the duration is set
+    // (no gender and no age).
+    final variantName = _cleanText(_variantNameController.text, _maxVariantName);
+    if (variantName.isEmpty && _variantNameRequired) {
+      const message =
+          'Name is required when only duration is set (no gender or age)';
+      setState(() {
+        _variantNameError = message;
+      });
+      _showSnackBar(message, Colors.orange);
       return;
     }
 
@@ -1280,29 +1561,19 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       price = 0;
     } else {
       final parsed = double.tryParse(priceText);
-      if (parsed == null || parsed < 0) {
+      if (parsed == null || parsed < 0 || parsed > 99999999.99) {
         _showSnackBar('Please enter a valid price', Colors.orange);
         return;
       }
       price = parsed;
     }
 
-    final durationText = _variantDurationController.text.trim();
-    final int duration;
-    if (durationText.isEmpty) {
-      duration = 0;
-    } else {
-      final parsed = int.tryParse(durationText);
-      if (parsed == null || parsed <= 0) {
-        _showSnackBar('Please enter a valid duration', Colors.orange);
-        return;
-      }
-      duration = parsed;
-    }
+    // Stored as total minutes (all calculations use minutes)
+    final int duration = _parsedDuration!;
 
     if (_isVariantDuplicate(_variantTargetServiceIndex!)) {
       _showSnackBar(
-        'This gender + age + duration combination is already added',
+        'This name + gender + age + duration combination is already added',
         Colors.orange,
       );
       return;
@@ -1330,35 +1601,26 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           'gender_name': genderName,
           'age_category_id': _selectedAgeCategoryId,
           'age_category_name': ageName,
+          'name': variantName,
           'price': price,
           'price_set': priceSet,
           'duration': duration,
           'edited': true,
         };
-        _editingVariantIndex = -1;
       } else {
         (service['variants'] as List).add({
           'gender_id': _selectedGenderId,
           'gender_name': genderName,
           'age_category_id': _selectedAgeCategoryId,
           'age_category_name': ageName,
+          'name': variantName,
           'price': price,
           'price_set': priceSet,
           'duration': duration,
         });
       }
 
-      _selectedGenderId = null;
-      _selectedAgeCategoryId = null;
-      _variantPriceController.clear();
-      _variantDurationController.clear();
-      _priceError = null;
-      _durationError = null;
-
-      _genderExpanded = false;
-      _ageExpanded = false;
-      _durationExpanded = false;
-      _priceExpanded = false;
+      _resetVariantForm();
     });
   }
 
@@ -1374,45 +1636,42 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     setState(() {
       _variantTargetServiceIndex = serviceIndex;
       _editingVariantIndex = variantIndex;
-      _variantsSectionExpanded = true;
 
       _selectedGenderId = v['gender_id'] as int?;
       _selectedAgeCategoryId = v['age_category_id'] as int?;
 
       final price = (v['price'] as num).toDouble();
       final priceSet = v['price_set'] == true;
-      _variantPriceController.text = (!priceSet || price == 0)
+      // A price of 0 ("Free") was typed on purpose, so keep it as "0"
+      _variantPriceController.text = !priceSet
           ? ''
-          : (_currencyUsesDecimals
-                ? price.toString()
-                : price.toInt().toString());
+          : (price == 0
+                ? '0'
+                : (_currencyUsesDecimals
+                      ? price.toString()
+                      : price.toInt().toString()));
 
-      final duration = (v['duration'] as num).toInt();
-      _variantDurationController.text = duration == 0
-          ? ''
-          : duration.toString();
+      // Split the stored total minutes back into hours + minutes
+      final duration = (v['duration'] as num?)?.toInt() ?? 0;
+      _variantHoursController.text = duration >= 60
+          ? (duration ~/ 60).toString()
+          : '';
+      _variantMinutesController.text = duration > 0 && duration % 60 > 0
+          ? (duration % 60).toString()
+          : '';
+      _variantNameController.text = (v['name'] ?? '').toString();
+      _durationError = null;
+      _variantNameError = null;
 
-      _genderExpanded = true;
-      _ageExpanded = true;
-      _durationExpanded = true;
-      _priceExpanded = true;
+      // Open the optional sections that already have a value
+      _genderExpanded = _selectedGenderId != null;
+      _ageExpanded = _selectedAgeCategoryId != null;
+      _priceExpanded = priceSet;
     });
   }
 
   void _cancelEditVariant() {
-    setState(() {
-      _editingVariantIndex = -1;
-      _selectedGenderId = null;
-      _selectedAgeCategoryId = null;
-      _variantPriceController.clear();
-      _variantDurationController.clear();
-      _priceError = null;
-      _durationError = null;
-      _genderExpanded = false;
-      _ageExpanded = false;
-      _durationExpanded = false;
-      _priceExpanded = false;
-    });
+    setState(_resetVariantForm);
   }
 
   void _removeVariant(int serviceIndex, int variantIndex) {
@@ -1442,9 +1701,17 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     int variantIndex,
     int variantId,
   ) async {
+    String variantText = 'this variant';
+    if (serviceIndex < _addedServices.length) {
+      final list = _addedServices[serviceIndex]['variants'] as List;
+      if (variantIndex < list.length) {
+        variantText =
+            '"${_variantLabel(Map<String, dynamic>.from(list[variantIndex]))}"';
+      }
+    }
     final confirmed = await _showConfirmDialog(
       title: 'Delete Variant?',
-      message: 'This will permanently remove this variant from the salon.',
+      message: 'This will permanently remove $variantText from the salon.',
     );
 
     if (confirmed == true && mounted) {
@@ -1464,7 +1731,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         });
         _showSnackBar('Variant removed', Colors.orange);
       } catch (e) {
-        if (mounted) _showSnackBar('Error removing variant: $e', Colors.red);
+        debugPrint('Error removing variant: $e');
+        if (mounted) _showSnackBar(_friendlyError(e), Colors.red);
       } finally {
         if (mounted) setState(() => _isLoading = false);
       }
@@ -1664,7 +1932,18 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       for (final service in _addedServices) {
         final fromDb = service['from_db'] == true;
         final localId = service['id'] as int?;
-        final svcName = (service['name'] as String).trim();
+        final svcName = _cleanText(
+          (service['name'] ?? '').toString(),
+          _maxServiceName,
+        );
+        final svcDescription = _cleanText(
+          (service['description'] ?? '').toString(),
+          _maxDescription,
+          multiLine: true,
+        );
+        final svcIcon = _isKnownIcon(service['icon_name']?.toString())
+            ? service['icon_name']
+            : _iconSuggestions.first['name'];
         final svcNameLower = svcName.toLowerCase();
 
         int serviceId;
@@ -1677,11 +1956,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               .from('services')
               .update({
                 'name': svcName,
-                'description': (service['description'] as String).isEmpty
-                    ? null
-                    : service['description'],
+                'description': svcDescription.isEmpty ? null : svcDescription,
                 'category_id': service['category_id'],
-                'icon_name': service['icon_name'],
+                'icon_name': svcIcon,
                 'updated_at': DateTime.now().toIso8601String(),
               })
               .eq('id', serviceId);
@@ -1700,11 +1977,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               .from('services')
               .update({
                 'name': svcName,
-                'description': (service['description'] as String).isEmpty
-                    ? null
-                    : service['description'],
+                'description': svcDescription.isEmpty ? null : svcDescription,
                 'category_id': service['category_id'],
-                'icon_name': service['icon_name'],
+                'icon_name': svcIcon,
                 'updated_at': DateTime.now().toIso8601String(),
               })
               .eq('id', serviceId);
@@ -1719,11 +1994,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 .from('services')
                 .update({
                   'name': svcName,
-                  'description': (service['description'] as String).isEmpty
-                      ? null
-                      : service['description'],
+                  'description': svcDescription.isEmpty ? null : svcDescription,
                   'category_id': service['category_id'],
-                  'icon_name': service['icon_name'],
+                  'icon_name': svcIcon,
                   'is_active': true,
                   'updated_at': DateTime.now().toIso8601String(),
                 })
@@ -1737,11 +2010,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             final serviceData = {
               'salon_id': widget.salonId,
               'name': svcName,
-              'description': (service['description'] as String).isEmpty
-                  ? null
-                  : service['description'],
+              'description': svcDescription.isEmpty ? null : svcDescription,
               'category_id': service['category_id'],
-              'icon_name': service['icon_name'],
+              'icon_name': svcIcon,
               'is_active': true,
               'created_by': supabase.auth.currentUser?.id,
             };
@@ -1768,10 +2039,15 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 ? null
                 : genderIdByNameLower[genderKey];
 
+            final variantNameClean = _cleanText(
+              (v['name'] ?? '').toString(),
+              _maxVariantName,
+            );
             variantDataList.add({
               'service_id': serviceId,
               'salon_gender_id': resolvedGenderId,
               'salon_age_category_id': v['age_category_id'],
+              'name': variantNameClean.isEmpty ? null : variantNameClean,
               'price': v['price_set'] == true ? v['price'] : null,
               'duration': ((v['duration'] as num?)?.toInt() ?? 0) == 0
                   ? null
@@ -1828,18 +2104,9 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         _dbServiceIds.clear();
         _variantTargetServiceIndex = null;
         _editingServiceIndex = -1;
-        _editingVariantIndex = -1;
-        _selectedGenderId = null;
-        _selectedAgeCategoryId = null;
-        _variantPriceController.clear();
-        _variantDurationController.clear();
+        _resetVariantForm();
         _serviceNameController.clear();
         _serviceDescriptionController.clear();
-        _variantsSectionExpanded = false;
-        _genderExpanded = false;
-        _ageExpanded = false;
-        _durationExpanded = false;
-        _priceExpanded = false;
       });
 
       await _loadData();
@@ -1851,7 +2118,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       );
     } catch (e) {
       if (mounted) {
-        if (e.toString().contains(
+        final errorText = e.toString();
+        if (errorText.contains('duplicate key value violates unique') &&
+            errorText.contains('service_variants')) {
+          _showSnackBar(
+            'Two variants are exactly the same (name, gender, age and duration). Please change or remove one.',
+            Colors.orange,
+          );
+        } else if (errorText.contains(
           'duplicate key value violates unique constraint',
         )) {
           _showSnackBar(
@@ -1859,7 +2133,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             Colors.orange,
           );
         } else {
-          _showSnackBar('Error: $e', Colors.red);
+          debugPrint('Error saving services: $e');
+          _showSnackBar(_friendlyError(e), Colors.red);
         }
       }
     } finally {
@@ -2058,7 +2333,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             const SizedBox(height: 4),
             Text(
               'Each category can hold many services, and each service can '
-              'have many variants (by gender, age, price and duration).',
+              'have many variants (by name, gender, age, price and duration).',
               style: TextStyle(
                 fontSize: 11,
                 color: isDark ? Colors.white60 : Colors.grey[600],
@@ -2224,7 +2499,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            'Any • Any   Free • —',
+                            'Short hair   Free • 15 min',
                             style: TextStyle(
                               fontSize: 11,
                               color: isDark ? Colors.white70 : Colors.grey[700],
@@ -2345,8 +2620,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               return TextFormField(
                 controller: textController,
                 focusNode: focusNode,
+                inputFormatters: _textFormatters(_maxCategoryName),
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: InputDecoration(
+                  counterText: '',
                   labelText: 'Category Name *',
                   hintText: 'e.g., Hair, Nails, Spa',
                   hintStyle: TextStyle(
@@ -2398,6 +2675,97 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
+  // ============================================
+  // SERVICE NAME — Autocomplete (suggestions from the salon's own services)
+  // Picking one fills the description + icon. Typing never changes other fields.
+  // ============================================
+  Widget _buildServiceNameSuggestionField() {
+    final isDark = _isDark;
+
+    final suggestions = <String>{
+      for (final s in _addedServices)
+        if ((s['name'] ?? '').toString().isNotEmpty) s['name'].toString(),
+    }.toList();
+
+    return Autocomplete<String>(
+      optionsBuilder: (TextEditingValue textEditingValue) {
+        if (textEditingValue.text.isEmpty) {
+          return const Iterable<String>.empty();
+        }
+        final query = textEditingValue.text.toLowerCase();
+        return suggestions.where(
+          (option) => option.toLowerCase().contains(query),
+        );
+      },
+      onSelected: (String selection) {
+        final found = _addedServices.firstWhere(
+          (s) => (s['name'] ?? '').toString() == selection,
+          orElse: () => {},
+        );
+        setState(() {
+          _serviceNameController.text = selection;
+          // Only picking a suggestion fills the other fields
+          if (found.isNotEmpty) {
+            _serviceDescriptionController.text = (found['description'] ?? '')
+                .toString();
+            final icon = found['icon_name']?.toString();
+            if (_isKnownIcon(icon)) _selectedIcon = icon;
+          }
+        });
+        _validateServiceName();
+      },
+      fieldViewBuilder: (context, textController, focusNode, onFieldSubmitted) {
+        // Sync one-time (no listener accumulation)
+        if (textController.text != _serviceNameController.text) {
+          textController.text = _serviceNameController.text;
+        }
+
+        return TextFormField(
+          controller: textController,
+          focusNode: focusNode,
+          inputFormatters: _textFormatters(_maxServiceName),
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          decoration: InputDecoration(
+            hintText: 'e.g., Hair Cut, Facial',
+            counterText: '',
+            prefixIcon: Icon(
+              Icons.build,
+              size: 18,
+              color: isDark ? Colors.white70 : Colors.grey,
+            ),
+            suffixIcon: suggestions.isNotEmpty
+                ? Icon(
+                    Icons.arrow_drop_down,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  )
+                : null,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+            ),
+            filled: true,
+            fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+            errorText: _serviceNameError,
+            errorMaxLines: 2,
+          ),
+          // Typing only updates the name (never other fields)
+          onChanged: (value) => _serviceNameController.text = value,
+        );
+      },
+    );
+  }
+
   void _autoFillCategory(Map<String, dynamic> selected) {
     setState(() {
       _newCategoryNameController.text =
@@ -2405,14 +2773,15 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
       _newCategoryDescriptionController.text =
           selected['description']?.toString() ?? '';
 
+      // Only accept an icon / colour the app actually knows
       final iconName = selected['icon_name']?.toString();
-      if (iconName != null && iconName.isNotEmpty) {
+      if (_isKnownIcon(iconName)) {
         _selectedIcon = iconName;
       }
 
       final colorHex = selected['color']?.toString();
-      if (colorHex != null && colorHex.isNotEmpty) {
-        _selectedCategoryColor = colorHex;
+      if (_isHexColor(colorHex)) {
+        _selectedCategoryColor = colorHex!;
       }
 
       _validateCategoryName();
@@ -2478,6 +2847,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           TextFormField(
             controller: _newCategoryDescriptionController,
             maxLines: 2,
+            maxLength: _maxDescription,
+            inputFormatters: _textFormatters(_maxDescription, multiLine: true),
             style: TextStyle(color: isDark ? Colors.white : Colors.black87),
             decoration: InputDecoration(
               labelText: 'Description (optional)',
@@ -2624,6 +2995,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     ),
                     title: Text(
                       _getCategoryDisplayName(cat),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: isSelected || isBeingEdited
@@ -3063,42 +3436,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            TextFormField(
-              controller: _serviceNameController,
-              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-              decoration: InputDecoration(
-                hintText: 'e.g., Hair Cut, Facial',
-                prefixIcon: Icon(
-                  Icons.build,
-                  size: 18,
-                  color: isDark ? Colors.white70 : Colors.grey,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: BorderSide(
-                    color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                  ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(
-                    color: AppTheme.primary,
-                    width: 2,
-                  ),
-                ),
-                filled: true,
-                fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                errorText: _serviceNameError,
-                errorMaxLines: 2,
-              ),
-            ),
+            _buildServiceNameSuggestionField(),
             const SizedBox(height: 10),
             Text(
               'Description',
@@ -3112,6 +3450,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             TextFormField(
               controller: _serviceDescriptionController,
               maxLines: 2,
+              maxLength: _maxDescription,
+              inputFormatters: _textFormatters(
+                _maxDescription,
+                multiLine: true,
+              ),
               style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               decoration: InputDecoration(
                 hintText: 'Describe this service...',
@@ -3325,6 +3668,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         Expanded(
                           child: Text(
                             service['name'] as String,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: isSelected || isBeingEdited
@@ -3546,8 +3891,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         ? (selectedService['variants'] as List)
         : <dynamic>[];
 
-    final canAddVariant = selectedService != null && _hasAtLeastOneVariantField;
     final isEditingVariant = _editingVariantIndex >= 0;
+    // Add Variant is enabled once the duration is valid; the name rule
+    // ("required when no gender and no age") is explained on the name field.
+    final canAddVariant = _canSubmitVariant;
 
     Widget variantForm() => Container(
       padding: const EdgeInsets.all(14),
@@ -3599,7 +3946,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
           Text(
             isEditingVariant
                 ? 'Update the fields below'
-                : 'All fields optional — fill at least one to add',
+                : 'Duration is required. Gender, age, price and name are optional '
+                      '(name is required when no gender and no age).',
             style: TextStyle(
               fontSize: 11,
               color: isDark ? Colors.white60 : Colors.grey[600],
@@ -3665,17 +4013,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             onChanged: (v) async {
               setState(() {
                 _variantTargetServiceIndex = v;
-                _editingVariantIndex = -1;
-                _selectedGenderId = null;
-                _selectedAgeCategoryId = null;
-                _variantPriceController.clear();
-                _variantDurationController.clear();
-                _priceError = null;
-                _durationError = null;
-                _genderExpanded = false;
-                _ageExpanded = false;
-                _durationExpanded = false;
-                _priceExpanded = false;
+                _resetVariantForm();
               });
 
               if (v != null && v < _addedServices.length) {
@@ -3691,7 +4029,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             const SizedBox(height: 12),
 
             _buildExpandableHeader(
-              title: 'Gender',
+              title: '1. Gender',
               icon: Icons.wc,
               color: Colors.blue,
               isExpanded: _genderExpanded,
@@ -3714,7 +4052,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             const SizedBox(height: 8),
 
             _buildExpandableHeader(
-              title: 'Age Category',
+              title: '2. Age Category',
               icon: Icons.timeline,
               color: Colors.green,
               isExpanded: _ageExpanded,
@@ -3746,31 +4084,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             const SizedBox(height: 8),
 
             _buildExpandableHeader(
-              title: 'Duration',
-              icon: Icons.timer,
-              color: Colors.orange,
-              isExpanded: _durationExpanded,
-              subtitle: _variantDurationController.text.isNotEmpty
-                  ? '${_variantDurationController.text} mins'
-                  : 'Tap to enter duration (optional)',
-              onTap: () =>
-                  setState(() => _durationExpanded = !_durationExpanded),
-            ),
-            AnimatedCrossFade(
-              duration: const Duration(milliseconds: 200),
-              crossFadeState: _durationExpanded
-                  ? CrossFadeState.showFirst
-                  : CrossFadeState.showSecond,
-              firstChild: Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: _buildDurationField(),
-              ),
-              secondChild: const SizedBox(width: double.infinity),
-            ),
-            const SizedBox(height: 8),
-
-            _buildExpandableHeader(
-              title: 'Price',
+              title: '3. Price',
               icon: Icons.attach_money,
               color: Colors.teal,
               isExpanded: _priceExpanded,
@@ -3790,15 +4104,41 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               ),
               secondChild: const SizedBox(width: double.infinity),
             ),
+            const SizedBox(height: 8),
+
+            // 4. Duration — always shown, required (hours + minutes)
+            _buildStaticSectionHeader(
+              title: '4. Duration',
+              icon: Icons.timer,
+              color: Colors.orange,
+              isRequired: true,
+              subtitle: _parsedDuration != null
+                  ? _formatDuration(_parsedDuration!)
+                  : 'Required — hours and minutes',
+            ),
+            const SizedBox(height: 8),
+            _buildDurationField(),
+            const SizedBox(height: 8),
+
+            // 5. Variant name — optional, required when no gender and no age
+            _buildStaticSectionHeader(
+              title: '5. Variant Name',
+              icon: Icons.label_outline,
+              color: Colors.indigo,
+              isRequired: _variantNameRequired,
+              subtitle: _variantNameRequired
+                  ? 'Required — no gender or age is set'
+                  : 'Optional — e.g., Short hair, Long hair',
+            ),
+            const SizedBox(height: 8),
+            _buildVariantNameField(),
 
             const SizedBox(height: 14),
 
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: (canAddVariant || isEditingVariant)
-                    ? _saveVariant
-                    : null,
+                onPressed: canAddVariant ? _saveVariant : null,
                 icon: Icon(isEditingVariant ? Icons.save : Icons.add, size: 18),
                 label: Text(
                   isEditingVariant ? 'Update Variant' : 'Add Variant',
@@ -3820,7 +4160,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             if (!canAddVariant && !isEditingVariant) ...[
               const SizedBox(height: 6),
               Text(
-                'Fill at least one field to enable',
+                'Enter the duration to enable',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 11,
@@ -3986,10 +4326,6 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
               separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, index) {
                 final v = variants[index];
-                final duration = (v['duration'] as num).toInt();
-                final priceDisplay = _formatPriceDisplay(v);
-                final priceNotSet = _isPriceNotSet(v);
-                final durationDisplay = duration == 0 ? '—' : '$duration min';
                 final isFromDb = v['from_db'] == true;
                 final isBeingEdited = _editingVariantIndex == index;
 
@@ -4032,8 +4368,12 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                         ),
                     ],
                   ),
+                  // Name (or the set details) wraps to 2 lines; details +
+                  // price always sit on their own line below, so nothing is
+                  // pushed off a narrow phone screen. Unset values are hidden.
                   title: Text(
-                    '${v['gender_name']} • ${v['age_category_name']}',
+                    _variantTitle(v),
+                    maxLines: 2,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: isBeingEdited
@@ -4045,32 +4385,11 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
-                  subtitle: Row(
-                    children: [
-                      Text(
-                        priceDisplay,
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontStyle: priceNotSet
-                              ? FontStyle.italic
-                              : FontStyle.normal,
-                          color: priceNotSet
-                              ? (isDark ? Colors.white38 : Colors.grey[500])
-                              : (isDark ? Colors.white60 : Colors.grey[600]),
-                          fontWeight: priceNotSet
-                              ? FontWeight.normal
-                              : FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        ' • $durationDisplay',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: isDark ? Colors.white60 : Colors.grey[600],
-                        ),
-                      ),
-                    ],
-                  ),
+                  subtitle:
+                      (_variantSubtitleParts(v).isNotEmpty ||
+                          v['price_set'] == true)
+                      ? _variantSecondLine(v)
+                      : null,
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -4118,45 +4437,67 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildExpandableHeader(
-              title: 'Variants (Optional)',
-              icon: Icons.tune,
-              color: Colors.purple,
-              isExpanded: _variantsSectionExpanded,
-              isMainHeader: true,
-              subtitle: _variantsSectionExpanded
-                  ? 'Tap to collapse'
-                  : 'Tap to expand and manage variants',
-              onTap: () => setState(
-                () => _variantsSectionExpanded = !_variantsSectionExpanded,
-              ),
-            ),
-            AnimatedCrossFade(
-              duration: const Duration(milliseconds: 250),
-              crossFadeState: _variantsSectionExpanded
-                  ? CrossFadeState.showFirst
-                  : CrossFadeState.showSecond,
-              firstChild: Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: isDesktop
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(child: variantForm()),
-                          const SizedBox(width: 12),
-                          Expanded(child: variantsList()),
-                        ],
-                      )
-                    : Column(
-                        children: [
-                          variantForm(),
-                          const SizedBox(height: 12),
-                          variantsList(),
-                        ],
+            // Always open — no collapse arrow
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.purple.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.tune,
+                    color: Colors.purple,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Variants (Optional)',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
                       ),
-              ),
-              secondChild: const SizedBox(width: double.infinity),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Add price and duration options for a service',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: isDark ? Colors.white60 : Colors.grey[600],
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 16),
+            if (isDesktop)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: variantForm()),
+                  const SizedBox(width: 12),
+                  Expanded(child: variantsList()),
+                ],
+              )
+            else
+              Column(
+                children: [
+                  variantForm(),
+                  const SizedBox(height: 12),
+                  variantsList(),
+                ],
+              ),
           ],
         ),
       ),
@@ -4334,6 +4675,8 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 Expanded(
                   child: Text(
                     catName,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
@@ -4434,6 +4777,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
                 Flexible(
                   child: Text(
                     svcName,
+                    maxLines: 2,
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
@@ -4520,19 +4864,14 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     required String childPrefix,
     required Color parentColor,
   }) {
-    final duration = (v['duration'] as num?)?.toInt() ?? 0;
     final isFromDb = v['from_db'] == true;
-    final priceNotSet = _isPriceNotSet(v);
-    final priceDisplay = _formatPriceDisplay(v);
-
-    final durationDisplay = duration == 0 ? '—' : '$duration min';
     final vConnector = isLastVariant ? '└─' : '├─';
     final circledNum = _toCircledNumber(index + 1);
 
     return Padding(
       padding: const EdgeInsets.only(left: 10, top: 3, bottom: 3),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             '$childPrefix$vConnector',
@@ -4552,87 +4891,36 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
             ),
           ),
           const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              '${v['gender_name']} • ${v['age_category_name']}',
-              style: TextStyle(
-                fontSize: 11.5,
-                color: isDark ? Colors.white : Colors.black87,
-              ),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(width: 12),
-          if (priceNotSet)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.grey.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(
-                  color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
-                  style: BorderStyle.solid,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.price_change_outlined,
-                    size: 10,
-                    color: isDark ? Colors.white38 : Colors.grey[500],
+          // Name (or set details) on the first line (wraps to 2 lines);
+          // details + price on the line below. Unset values are hidden.
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _variantTitle(v),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
-                  const SizedBox(width: 3),
-                  Text(
-                    priceDisplay,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontStyle: FontStyle.italic,
-                      color: isDark ? Colors.white38 : Colors.grey[500],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-              decoration: BoxDecoration(
-                color: Colors.teal.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                priceDisplay,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? Colors.teal[300] : Colors.teal[700],
                 ),
-              ),
-            ),
-          const SizedBox(width: 6),
-          Icon(
-            Icons.timer_outlined,
-            size: 11,
-            color: isDark ? Colors.white38 : Colors.grey[500],
-          ),
-          const SizedBox(width: 3),
-          Text(
-            durationDisplay,
-            style: TextStyle(
-              fontSize: 11,
-              color: isDark ? Colors.white60 : Colors.grey[600],
+                _variantSecondLine(v, fontSize: 10.5),
+              ],
             ),
           ),
           if (isFromDb) ...[
             const SizedBox(width: 6),
-            Container(
-              width: 7,
-              height: 7,
-              decoration: const BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
+            Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: Container(
+                width: 7,
+                height: 7,
+                decoration: const BoxDecoration(
+                  color: Colors.green,
+                  shape: BoxShape.circle,
+                ),
               ),
             ),
           ],
@@ -4830,272 +5118,190 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
   Widget _buildAgeTypingForm() {
     final isDark = _isDark;
 
-    final shouldAutoExpand = _ageCategories.isEmpty;
-    final isAddFormExpanded = _addAgeCategoryFormExpanded || shouldAutoExpand;
+    // The "new age category" form is hidden when categories already exist
+    // (tap "Add New"); it opens by itself when there are none.
+    final showNewForm = _addAgeCategoryFormExpanded || _ageCategories.isEmpty;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+    InputDecoration ageNumberDecoration(String label, String? error) {
+      return InputDecoration(
+        labelText: label,
+        counterText: '',
+        errorText: error,
+        errorMaxLines: 2,
+        isDense: true,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _ageCategories.isEmpty
+                    ? 'No age categories yet — add one below.'
+                    : 'Tap to select',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontStyle: _ageCategories.isEmpty
+                      ? FontStyle.italic
+                      : FontStyle.normal,
+                  color: isDark ? Colors.white38 : Colors.grey[500],
+                ),
+              ),
+            ),
+            if (_ageCategories.isNotEmpty)
+              TextButton.icon(
+                onPressed: () => setState(() {
+                  _addAgeCategoryFormExpanded = !_addAgeCategoryFormExpanded;
+                  _ageNameError = null;
+                  _ageMinError = null;
+                  _ageMaxError = null;
+                }),
+                icon: Icon(
+                  _addAgeCategoryFormExpanded
+                      ? Icons.close
+                      : Icons.add_circle_outline,
+                  size: 14,
+                  color: Colors.green,
+                ),
+                label: Text(
+                  _addAgeCategoryFormExpanded ? 'Cancel' : 'Add New',
+                  style: const TextStyle(fontSize: 11, color: Colors.green),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+          ],
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (_ageCategories.isNotEmpty) ...[
-            Row(
-              children: [
-                Icon(Icons.check_circle, size: 14, color: Colors.green[400]),
-                const SizedBox(width: 6),
-                Text(
-                  'Existing Age Categories (${_ageCategories.length})',
+        if (_ageCategories.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _ageCategories.map((a) {
+              final id = a['id'] as int;
+              final isSelected = _selectedAgeCategoryId == id;
+              return FilterChip(
+                label: Text(
+                  _getAgeCategoryDisplayName(a),
                   style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : Colors.grey[700],
+                    color: isSelected
+                        ? Colors.green
+                        : (isDark ? Colors.white70 : Colors.grey[700]),
+                  ),
+                ),
+                selected: isSelected,
+                onSelected: (v) =>
+                    setState(() => _selectedAgeCategoryId = v ? id : null),
+                backgroundColor: isDark
+                    ? const Color(0xFF2A2A2A)
+                    : Colors.grey[100],
+                selectedColor: Colors.green.withValues(alpha: 0.2),
+                checkmarkColor: Colors.green,
+                shape: StadiumBorder(
+                  side: BorderSide(
+                    color: isSelected
+                        ? Colors.green
+                        : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+        if (showNewForm) ...[
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? const Color(0xFF2A2A2A)
+                  : Colors.green.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+            ),
+            child: Column(
+              children: [
+                _buildAgeNameSuggestionField(),
+                const SizedBox(height: 8),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: TextFormField(
+                        controller: _ageMinController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(3),
+                        ],
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                        decoration: ageNumberDecoration('Min', _ageMinError),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: TextFormField(
+                        controller: _ageMaxController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.digitsOnly,
+                          LengthLimitingTextInputFormatter(3),
+                        ],
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                        decoration: ageNumberDecoration('Max', _ageMaxError),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _isAddingAgeCategory
+                        ? null
+                        : _addAgeCategoryDirect,
+                    icon: _isAddingAgeCategory
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.save, size: 14),
+                    label: const Text(
+                      'Save Age Category',
+                      style: TextStyle(fontSize: 11),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(
-              'Tap to select',
-              style: TextStyle(
-                fontSize: 10,
-                color: isDark ? Colors.white38 : Colors.grey[500],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: _ageCategories.map((a) {
-                final isSelected = _selectedAgeCategoryId == a['id'];
-                return GestureDetector(
-                  onTap: () => setState(
-                    () => _selectedAgeCategoryId = isSelected ? null : a['id'],
-                  ),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isSelected
-                          ? Colors.green.withValues(alpha: 0.15)
-                          : (isDark
-                                ? const Color(0xFF2A2A2A)
-                                : Colors.grey[100]),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(
-                        color: isSelected
-                            ? Colors.green
-                            : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
-                      ),
-                    ),
-                    child: Text(
-                      _getAgeCategoryDisplayName(a),
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isSelected
-                            ? Colors.green
-                            : (isDark ? Colors.white70 : Colors.grey[700]),
-                        fontWeight: isSelected
-                            ? FontWeight.w600
-                            : FontWeight.normal,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-            const SizedBox(height: 14),
-          ],
-
-          _buildExpandableHeader(
-            title: 'Add New Age Category',
-            icon: Icons.add_circle_outline,
-            color: Colors.green,
-            isExpanded: isAddFormExpanded,
-            subtitle: isAddFormExpanded
-                ? 'Tap to collapse'
-                : 'Tap to add a new age category',
-            onTap: () {
-              if (shouldAutoExpand) {
-                _showSnackBar(
-                  'Add at least one age category to continue',
-                  Colors.orange,
-                );
-                return;
-              }
-              setState(
-                () =>
-                    _addAgeCategoryFormExpanded = !_addAgeCategoryFormExpanded,
-              );
-            },
-          ),
-
-          AnimatedCrossFade(
-            duration: const Duration(milliseconds: 200),
-            crossFadeState: isAddFormExpanded
-                ? CrossFadeState.showFirst
-                : CrossFadeState.showSecond,
-            firstChild: Padding(
-              padding: const EdgeInsets.only(top: 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Type a name — suggestions from the master list will appear. Saves to the salon automatically.',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isDark ? Colors.white38 : Colors.grey[500],
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-
-                  _buildAgeNameSuggestionField(),
-
-                  const SizedBox(height: 8),
-
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _ageMinController,
-                          keyboardType: TextInputType.number,
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                          decoration: InputDecoration(
-                            labelText: 'Min Age',
-                            hintText: '0',
-                            prefixIcon: Icon(
-                              Icons.numbers,
-                              size: 18,
-                              color: isDark ? Colors.white70 : Colors.grey,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: BorderSide(
-                                color: isDark
-                                    ? Colors.grey[700]!
-                                    : Colors.grey[300]!,
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: const BorderSide(
-                                color: AppTheme.primary,
-                                width: 2,
-                              ),
-                            ),
-                            filled: true,
-                            fillColor: isDark
-                                ? const Color(0xFF2A2A2A)
-                                : Colors.white,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            errorText: _ageMinError,
-                            errorMaxLines: 2,
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _ageMaxController,
-                          keyboardType: TextInputType.number,
-                          style: TextStyle(
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
-                          decoration: InputDecoration(
-                            labelText: 'Max Age',
-                            hintText: '100',
-                            prefixIcon: Icon(
-                              Icons.numbers,
-                              size: 18,
-                              color: isDark ? Colors.white70 : Colors.grey,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: BorderSide(
-                                color: isDark
-                                    ? Colors.grey[700]!
-                                    : Colors.grey[300]!,
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(10),
-                              borderSide: const BorderSide(
-                                color: AppTheme.primary,
-                                width: 2,
-                              ),
-                            ),
-                            filled: true,
-                            fillColor: isDark
-                                ? const Color(0xFF2A2A2A)
-                                : Colors.white,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            errorText: _ageMaxError,
-                            errorMaxLines: 2,
-                            isDense: true,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      onPressed: _isAddingAgeCategory
-                          ? null
-                          : _addAgeCategoryDirect,
-                      icon: _isAddingAgeCategory
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.save, size: 16),
-                      label: const Text('Save Age Category to Salon'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            secondChild: const SizedBox(width: double.infinity),
           ),
         ],
-      ),
+      ],
     );
   }
 
@@ -5137,8 +5343,10 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
         return TextFormField(
           controller: textController,
           focusNode: focusNode,
+          inputFormatters: _textFormatters(_maxAgeName),
           style: TextStyle(color: isDark ? Colors.white : Colors.black87),
           decoration: InputDecoration(
+            counterText: '',
             labelText: 'Age Category Name *',
             hintText: 'e.g., Adult, Child, Senior',
             prefixIcon: Icon(
@@ -5182,40 +5390,191 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     );
   }
 
+  /// Header for a section that is always visible (no arrow): number, title,
+  /// optional red * and a one-line hint.
+  Widget _buildStaticSectionHeader({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required String subtitle,
+    bool isRequired = false,
+  }) {
+    final isDark = _isDark;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? Colors.grey[700]! : Colors.grey[200]!),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    if (isRequired)
+                      Text(
+                        ' *',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red[300],
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _variantInputDecoration({
+    String? hint,
+    String? suffix,
+    Widget? prefixIcon,
+    String? errorText,
+  }) {
+    final isDark = _isDark;
+    return InputDecoration(
+      hintText: hint,
+      suffixText: suffix,
+      prefixIcon: prefixIcon,
+      counterText: '',
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: BorderSide(
+          color: errorText != null
+              ? Colors.red
+              : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(10),
+        borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+      ),
+      filled: true,
+      fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+    );
+  }
+
+  /// Duration: two number inputs (hours + minutes). Saved as total minutes.
   Widget _buildDurationField() {
     final isDark = _isDark;
-    return TextFormField(
-      controller: _variantDurationController,
-      keyboardType: TextInputType.number,
-      style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-      decoration: InputDecoration(
-        hintText: 'e.g., 30',
-        prefixIcon: Icon(
-          Icons.timer,
-          size: 18,
-          color: isDark ? Colors.white70 : Colors.grey,
+    final total = _parsedDuration;
+
+    Widget input(TextEditingController c, String hint, String suffix) {
+      return TextFormField(
+        controller: c,
+        keyboardType: TextInputType.number,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(2),
+        ],
+        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+        decoration: _variantInputDecoration(
+          hint: hint,
+          suffix: suffix,
+          errorText: _durationError,
         ),
-        suffixText: 'mins',
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(
-            color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: input(_variantHoursController, '0', 'hrs')),
+            const SizedBox(width: 10),
+            Expanded(child: input(_variantMinutesController, '30', 'mins')),
+          ],
+        ),
+        if (_durationError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4),
+            child: Text(
+              _durationError!,
+              style: const TextStyle(fontSize: 12, color: Colors.red),
+            ),
+          )
+        else if (total != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6, left: 4),
+            child: Text(
+              'Total: ${_formatDuration(total)}',
+              style: TextStyle(
+                fontSize: 11.5,
+                color: isDark ? Colors.white54 : Colors.grey[600],
+              ),
+            ),
           ),
+      ],
+    );
+  }
+
+  /// Optional variant name (required when no gender and no age).
+  Widget _buildVariantNameField() {
+    final isDark = _isDark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextFormField(
+          controller: _variantNameController,
+          maxLength: _maxVariantName,
+          inputFormatters: _textFormatters(_maxVariantName),
+          textCapitalization: TextCapitalization.sentences,
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          decoration:
+              _variantInputDecoration(
+                hint: 'e.g., Short hair',
+                errorText: _variantNameError,
+                prefixIcon: Icon(
+                  Icons.label_outline,
+                  size: 18,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
+              ).copyWith(
+                errorText: _variantNameError,
+                errorMaxLines: 2,
+              ),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppTheme.primary, width: 2),
-        ),
-        filled: true,
-        fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
-        ),
-        errorText: _durationError,
-        errorMaxLines: 2,
-      ),
+      ],
     );
   }
 
@@ -5224,6 +5583,7 @@ class _AddServiceScreenState extends State<AddServiceScreen> {
     return TextFormField(
       controller: _variantPriceController,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: _priceFormatters,
       style: TextStyle(color: isDark ? Colors.white : Colors.black87),
       decoration: InputDecoration(
         hintText: _salonPriceHint,

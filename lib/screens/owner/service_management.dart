@@ -144,6 +144,41 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
+  // ✅ ACCESS: owner, or employee with 'manage_services'
+  // ============================================
+  Future<bool> _canManageServices(String userId) async {
+    final salon = await supabase
+        .from('salons')
+        .select('owner_id')
+        .eq('id', widget.salonId)
+        .maybeSingle();
+
+    if (salon != null && salon['owner_id'] == userId) {
+      final r = await supabase
+          .from('user_roles')
+          .select('status')
+          .eq('user_id', userId)
+          .eq('role_id', 3)
+          .maybeSingle();
+      return r != null && r['status'] == 'active';
+    }
+
+    // employee: permission is decided by the server (role + owner's plan)
+    try {
+      final res = await supabase.rpc('get_my_staff_access');
+      for (final s in (res as List)) {
+        if ((s['salon_id'] as num).toInt() == widget.salonId &&
+            (s['permissions'] as List).contains('manage_services')) {
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error checking staff access: $e');
+    }
+    return false;
+  }
+
+  // ============================================
   // DATA LOADING
   // ============================================
 
@@ -161,26 +196,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         return;
       }
 
-      // ✅ STEP 1: Check if user has active owner role
-      final userRoleCheck = await supabase
-          .from('user_roles')
-          .select('status')
-          .eq('user_id', user.id)
-          .eq('role_id', 3)
-          .maybeSingle();
-
-      if (userRoleCheck == null || userRoleCheck['status'] != 'active') {
-        if (mounted) {
-          _showSnackBar(
-            'Your account is not active. Please contact support.',
-            Colors.red,
-          );
-          setState(() => _isLoading = false);
-        }
-        return;
-      }
-
-      // ✅ STEP 2: Check if profile is active and not blocked
+      // ✅ STEP 1: Check if profile is active and not blocked
       final profileCheck = await supabase
           .from('profiles')
           .select('is_active, is_blocked')
@@ -210,17 +226,13 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         }
       }
 
-      // ✅ STEP 3: Check if user owns this salon
-      final salonCheck = await supabase
-          .from('salons')
-          .select('owner_id')
-          .eq('id', widget.salonId)
-          .maybeSingle();
-
-      if (salonCheck == null || salonCheck['owner_id'] != user.id) {
+      // ✅ STEP 2: salon OWNER (active owner role) or an employee with the
+      //            'manage_services' permission (admin, Silver+ plan)
+      final allowed = await _canManageServices(user.id);
+      if (!allowed) {
         if (mounted) {
           _showSnackBar(
-            'You do not have permission to manage this salon.',
+            'You do not have permission to manage services in this salon.',
             Colors.red,
           );
           setState(() => _isLoading = false);
@@ -228,7 +240,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         return;
       }
 
-      // ✅ STEP 4: Load salon currency
+      // ✅ STEP 3: Load salon currency
       await _loadSalonCurrency();
 
       // Load categories
@@ -405,23 +417,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       } else {
         _expandedServices.add(serviceId);
       }
-    });
-  }
-
-  void _expandAllServices() {
-    setState(() {
-      _expandedServices.clear();
-      for (var service in _services) {
-        if (service['has_variants'] == true) {
-          _expandedServices.add(service['id'] as int);
-        }
-      }
-    });
-  }
-
-  void _collapseAllServices() {
-    setState(() {
-      _expandedServices.clear();
     });
   }
 
@@ -2764,7 +2759,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
     final isDark = context.isDarkMode;
-    final hasVariants = _services.any((s) => s['has_variants'] == true);
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
@@ -2783,18 +2777,6 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
           tooltip: 'Back',
         ),
         actions: [
-          if (hasVariants)
-            IconButton(
-              icon: const Icon(Icons.expand, color: Colors.white),
-              onPressed: _expandAllServices,
-              tooltip: 'Expand All',
-            ),
-          if (hasVariants)
-            IconButton(
-              icon: const Icon(Icons.compress, color: Colors.white),
-              onPressed: _collapseAllServices,
-              tooltip: 'Collapse All',
-            ),
           IconButton(
             icon: const Icon(Icons.add, color: Colors.white),
             onPressed: _isProcessing

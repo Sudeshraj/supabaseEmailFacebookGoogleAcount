@@ -1,5 +1,4 @@
-// screens/owner/edit_barber_services_screen.dart
-// Fully Updated with AppTheme, Dark Mode & Edge-to-Edge
+//  barber list screen eken edite click kasrama ena screen eka
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
@@ -35,6 +34,10 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
 
   // Salon barber ID
   int? _salonBarberId;
+
+  // Role of this person in this salon
+  String _staffRole = 'barber';
+  bool _takesAppointments = true;
 
   // Gender and Age Category maps
   final Map<int, String> _genderMap = {};
@@ -174,7 +177,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       // ============================================================
       final salonBarberResponse = await supabase
           .from('salon_barbers')
-          .select('id')
+          .select('id, staff_role, takes_appointments')
           .eq('barber_id', widget.barberId)
           .eq('salon_id', salonIdInt)
           .maybeSingle();
@@ -186,6 +189,8 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
       }
 
       _salonBarberId = salonBarberResponse['id'] as int;
+      _staffRole = (salonBarberResponse['staff_role'] ?? 'barber').toString();
+      _takesAppointments = salonBarberResponse['takes_appointments'] != false;
 
       // ============================================================
       // ✅ STEP 4: GET BARBER PROFILE DETAILS + SALON CURRENCY
@@ -1217,23 +1222,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     });
   }
 
-  void _expandAllServices() {
-    setState(() {
-      _expandedServices.clear();
-      for (var service in _services) {
-        if (service['has_variants'] == true) {
-          _expandedServices.add(service['id'] as int);
-        }
-      }
-    });
-  }
-
-  void _collapseAllServices() {
-    setState(() {
-      _expandedServices.clear();
-    });
-  }
-
   // ============================================================
   // HELPERS
   // ============================================================
@@ -2250,7 +2238,10 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'No services assigned yet',
+              _takesAppointments
+                  ? 'No services assigned yet'
+                  : 'Desk-only staff do not take appointments, so no services are needed',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 16,
                 color: isDark ? Colors.white60 : Colors.grey[600],
@@ -2266,7 +2257,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: const Text('Assign New Service'),
+              child: Text(_takesAppointments ? 'Assign New Service' : 'Change role / make barber'),
             ),
           ],
         ),
@@ -2312,7 +2303,10 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'No services assigned yet',
+              _takesAppointments
+                  ? 'No services assigned yet'
+                  : 'Desk-only staff do not take appointments, so no services are needed',
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 16,
                 color: isDark ? Colors.white60 : Colors.grey[600],
@@ -2328,7 +2322,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              child: const Text('Assign New Service'),
+              child: Text(_takesAppointments ? 'Assign New Service' : 'Change role / make barber'),
             ),
           ],
         ),
@@ -2359,7 +2353,6 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
     final screenWidth = MediaQuery.of(context).size.width;
     final bool isWeb = screenWidth > 800;
     final isDark = context.isDarkMode;
-    final hasVariants = _services.any((s) => s['has_variants'] == true);
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
@@ -2378,22 +2371,15 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           tooltip: 'Back',
         ),
         actions: [
-          if (hasVariants)
-            IconButton(
-              icon: const Icon(Icons.expand, color: Colors.white),
-              onPressed: _expandAllServices,
-              tooltip: 'Expand All',
-            ),
-          if (hasVariants)
-            IconButton(
-              icon: const Icon(Icons.compress, color: Colors.white),
-              onPressed: _collapseAllServices,
-              tooltip: 'Collapse All',
-            ),
+          IconButton(
+            icon: const Icon(Icons.badge_outlined, color: Colors.white),
+            onPressed: _isProcessing ? null : _addService,
+            tooltip: 'Role',
+          ),
           IconButton(
             icon: const Icon(Icons.add, color: Colors.white),
-            onPressed: _addService,
-            tooltip: 'Assign Service',
+            onPressed: _isProcessing ? null : _addService,
+            tooltip: 'Assign New Service',
           ),
         ],
       ),
@@ -2419,6 +2405,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           constraints: const BoxConstraints(maxWidth: 1200),
           child: Column(
             children: [
+              _buildRoleBanner(),
               _buildSearchAndFilter(),
               Expanded(
                 child: RefreshIndicator(
@@ -2437,6 +2424,7 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
   Widget _buildMobileLayout() {
     return Column(
       children: [
+        _buildRoleBanner(),
         _buildSearchAndFilter(),
         Expanded(
           child: RefreshIndicator(
@@ -2446,6 +2434,46 @@ class _EditBarberServicesScreenState extends State<EditBarberServicesScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Shows the role of this person (nothing for a plain barber)
+  Widget _buildRoleBanner() {
+    if (_staffRole == 'barber' && _takesAppointments) {
+      return const SizedBox.shrink();
+    }
+    final isDark = context.isDarkMode;
+    final name = _staffRole == 'admin' ? 'Admin' : 'Cashier';
+    final text = _takesAppointments
+        ? 'Role: Barber + $name'
+        : 'Role: $name (desk only) – not shown to customers, no appointments';
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.deepPurple.withValues(alpha: isDark ? 0.18 : 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.deepPurple.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.badge,
+              size: 18,
+              color: isDark ? Colors.deepPurple[200] : Colors.deepPurple),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.deepPurple[200] : Colors.deepPurple,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
