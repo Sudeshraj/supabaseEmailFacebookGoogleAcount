@@ -52,7 +52,12 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
   // Suggestion sources. Category rows keep description/icon/color so picking
   // a suggestion can auto-fill them.
   List<Map<String, dynamic>> _globalCategories = [];
-  List<String> _globalAgeNames = [];
+  // Global age categories (name + default min/max) used for suggestions
+  List<Map<String, dynamic>> _globalAgeCategories = [];
+  List<String> get _globalAgeNames => _globalAgeCategories
+      .map((a) => (a['display_name'] ?? '').toString())
+      .where((n) => n.isNotEmpty)
+      .toList();
 
   // Local tree: each category has services, each service has variants
   final List<Map<String, dynamic>> _categories = [];
@@ -268,14 +273,13 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         debugPrint('Could not load global categories: $e');
       }
 
-      List<String> globalAgeNames = [];
+      List<Map<String, dynamic>> globalAgeCategories = [];
       try {
         final g = await supabase
             .from('age_categories')
-            .select('display_name')
+            .select('display_name, min_age, max_age')
             .eq('is_active', true);
-        globalAgeNames =
-            g.map<String>((e) => e['display_name'].toString()).toList();
+        globalAgeCategories = List<Map<String, dynamic>>.from(g);
       } catch (e) {
         debugPrint('Could not load global age categories: $e');
       }
@@ -284,7 +288,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
       setState(() {
         _ageCategories = List<Map<String, dynamic>>.from(ageResponse);
         _globalCategories = globalCategories;
-        _globalAgeNames = globalAgeNames;
+        _globalAgeCategories = globalAgeCategories;
       });
 
       // Load services for this salon
@@ -583,7 +587,7 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
         if (q.isEmpty) return const Iterable<String>.empty();
         return suggestions.where((o) {
           final l = o.toLowerCase();
-          return l.contains(q) && l != q;
+          return l.contains(q);
         });
       },
       onSelected: (String s) {
@@ -1825,6 +1829,28 @@ class _ServiceMenuEditorState extends State<ServiceMenuEditor> {
                                 errorText: ageNameError,
                                 onChanged: (_) => setDialogState(
                                     () => ageNameError = null),
+                                // Picking a suggestion fills min and max age
+                                onPicked: (picked) {
+                                  final key = picked.trim().toLowerCase();
+                                  for (final a in _globalAgeCategories) {
+                                    if ((a['display_name'] ?? '')
+                                            .toString()
+                                            .trim()
+                                            .toLowerCase() ==
+                                        key) {
+                                      setDialogState(() {
+                                        newAgeMinController.text =
+                                            (a['min_age'] ?? 0).toString();
+                                        newAgeMaxController.text =
+                                            (a['max_age'] ?? 100).toString();
+                                        ageNameError = null;
+                                        ageMinError = null;
+                                        ageMaxError = null;
+                                      });
+                                      break;
+                                    }
+                                  }
+                                },
                               ),
                               const SizedBox(height: 8),
                               Row(

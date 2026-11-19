@@ -1,10 +1,10 @@
 // servite list <--menue eka
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_application_1/screens/owner/add_services.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/services/currency_service.dart';
-import 'package:flutter_application_1/widgets/currency_prefix.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ServiceManagementScreen extends StatefulWidget {
@@ -35,6 +35,12 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   // Gender and age categories for variant form
   List<Map<String, dynamic>> _genders = [];
   List<Map<String, dynamic>> _ageCategories = [];
+  // Suggestions for the age-name field (global list, optional)
+  List<Map<String, dynamic>> _globalAgeCategories = [];
+  List<String> get _globalAgeNames => _globalAgeCategories
+      .map((a) => (a['display_name'] ?? '').toString())
+      .where((n) => n.isNotEmpty)
+      .toList();
 
   // Currency Service (singleton)
   final CurrencyService _currencyService = CurrencyService.instance;
@@ -92,6 +98,335 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
+  // ✅ SAFE PARSERS (num / String / null – web & mobile දෙකටම)
+  // ============================================
+
+  double _toDouble(dynamic value, {double fallback = 0}) {
+    if (value == null) return fallback;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString().trim()) ?? fallback;
+  }
+
+  int _toInt(dynamic value, {int fallback = 0}) {
+    if (value == null) return fallback;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    final text = value.toString().trim();
+    return int.tryParse(text) ?? double.tryParse(text)?.toInt() ?? fallback;
+  }
+
+  // ============================================
+  // ✅ TEXT LIMITS + SANITISING (same limits are enforced again in the DB)
+  // ============================================
+  static const int _maxServiceName = 60;
+  static const int _maxVariantName = 50;
+  static const int _maxAgeName = 30;
+  static const int _maxDescription = 200;
+
+  // Invisible / control characters: C0 controls, DEL, zero-width chars,
+  // bidi overrides (used to spoof text) and the BOM.
+  static final RegExp _badCharsSingleLine = RegExp(
+      r'[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]');
+  // Same, but a description may keep line breaks (\n = \u000A).
+  static final RegExp _badCharsMultiLine = RegExp(
+      r'[\u0000-\u0009\u000B-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]');
+
+  /// Blocks bad characters and over-long text while typing / pasting.
+  List<TextInputFormatter> _textFormatters(int max, {bool multiLine = false}) {
+    return [
+      FilteringTextInputFormatter.deny(
+        multiLine ? _badCharsMultiLine : _badCharsSingleLine,
+      ),
+      LengthLimitingTextInputFormatter(max),
+    ];
+  }
+
+  /// Final clean-up before a value is stored: removes bad characters,
+  /// collapses repeated spaces, trims and cuts to [max].
+  String _cleanText(String input, int max, {bool multiLine = false}) {
+    var t = input.replaceAll(
+      multiLine ? _badCharsMultiLine : _badCharsSingleLine,
+      '',
+    );
+    if (multiLine) {
+      t = t
+          .split('\n')
+          .map((l) => l.replaceAll(RegExp(r'[ \t]+'), ' ').trim())
+          .join('\n')
+          .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+          .trim();
+    } else {
+      t = t.replaceAll(RegExp(r'\s+'), ' ').trim();
+    }
+    return t.length > max ? t.substring(0, max).trim() : t;
+  }
+
+  /// Price input: digits (+ one decimal point when the currency uses decimals).
+  /// Max 8 whole digits (DB column is DECIMAL(10,2)) so a huge number can
+  /// never overflow the column.
+  List<TextInputFormatter> get _priceFormatters => _currencyUsesDecimals
+      ? [
+          FilteringTextInputFormatter.allow(RegExp(r'^\d{0,8}(\.\d{0,2})?')),
+          LengthLimitingTextInputFormatter(11),
+        ]
+      : [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(8),
+        ];
+
+  // ============================================
+  // ✅ VARIANT DISPLAY HELPERS (nothing is shown for values that are not set)
+  // ============================================
+
+  /// 45 → "45 min", 60 → "1 hr", 90 → "1 hr 30 min", 120 → "2 hrs".
+  String _formatDuration(int minutes) {
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (h == 0) return '$m min';
+    final hText = h == 1 ? '1 hr' : '$h hrs';
+    return m == 0 ? hText : '$hText $m min';
+  }
+
+  /// "Adult (18-60 yrs)" – the age name with its range when both are set.
+  String _ageDisplayName(Map<String, dynamic> ageCat) {
+    String name = (ageCat['display_name'] ?? 'Unknown').toString();
+    if (ageCat['min_age'] != null && ageCat['max_age'] != null) {
+      name = '$name (${ageCat['min_age']}-${ageCat['max_age']} yrs)';
+    }
+    return name;
+  }
+
+  /// "500" instead of "500.0" when a stored price is put back in a text field.
+  String _plainPrice(double p) =>
+      p == p.truncateToDouble() ? p.toInt().toString() : p.toString();
+
+  /// Gender / age / duration parts that are actually set.
+  List<String> _variantDetailParts(Map<String, dynamic> v) {
+    final parts = <String>[];
+    final gender = (v['gender_name'] ?? '').toString().trim();
+    final age = (v['age_name'] ?? '').toString().trim();
+    final duration = _toInt(v['duration']);
+    if (gender.isNotEmpty && gender != 'Any') parts.add(gender);
+    if (age.isNotEmpty && age != 'Any') parts.add(age);
+    if (duration > 0) parts.add(_formatDuration(duration));
+    return parts;
+  }
+
+  /// Main line of a variant row: its name, or (no name) the set details.
+  String _variantTitle(Map<String, dynamic> v) {
+    final vName = (v['name'] ?? '').toString().trim();
+    if (vName.isNotEmpty) return vName;
+    final parts = _variantDetailParts(v);
+    return parts.isEmpty ? 'Standard' : parts.join(' • ');
+  }
+
+  /// Price text, or null when no price has been set (so nothing is shown).
+  String? _variantPriceText(Map<String, dynamic> v) {
+    if (v['price_set'] != true) return null;
+    final price = _toDouble(v['price']);
+    if (price == 0) return 'Free';
+    return _formatPrice(price);
+  }
+
+  /// Second line of a variant row (long names wrap, so the details and the
+  /// price always sit on their own line and stay visible on small screens).
+  String _variantSecondLine(Map<String, dynamic> v) {
+    final vName = (v['name'] ?? '').toString().trim();
+    final parts = <String>[
+      if (vName.isNotEmpty) ..._variantDetailParts(v),
+      if (_variantPriceText(v) != null) _variantPriceText(v)!,
+    ];
+    return parts.join(' • ');
+  }
+
+  /// Readable summary used in confirmation messages.
+  String _variantLabel(Map<String, dynamic> v) {
+    final vName = (v['name'] ?? '').toString().trim();
+    final parts = <String>[
+      if (vName.isNotEmpty) vName,
+      ..._variantDetailParts(v),
+    ];
+    return parts.isEmpty ? 'Standard' : parts.join(' • ');
+  }
+
+  /// The title + second line used in every variant row (web and mobile).
+  Widget _buildVariantTexts(
+    Map<String, dynamic> variant,
+    bool isDark, {
+    double titleSize = 13,
+    double subSize = 12,
+  }) {
+    final second = _variantSecondLine(variant);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _variantTitle(variant),
+          softWrap: true,
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: titleSize,
+            color: isDark ? Colors.white : Colors.black87,
+          ),
+        ),
+        if (second.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            second,
+            softWrap: true,
+            style: TextStyle(
+              fontSize: subSize,
+              color: isDark ? Colors.white60 : Colors.grey[600],
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ============================================
+  // ✅ FRIENDLY ERRORS (raw database errors are never shown to the user)
+  // ============================================
+  String _friendlyError(
+    Object e, {
+    String? duplicateMessage,
+    String? linkedMessage,
+  }) {
+    if (e is PostgrestException) {
+      switch (e.code) {
+        case '23505':
+          return duplicateMessage ??
+              'This item already exists. Please change it and try again.';
+        case '23503':
+          return linkedMessage ??
+              "This item is linked to other records (like bookings), so it can't be changed right now.";
+        case '23514':
+        case '22001':
+        case '22003':
+          return 'Some values are not allowed. Please check the text length and the numbers, then try again.';
+        case '42501':
+          return "You don't have permission to make this change.";
+      }
+    }
+    final text = e.toString().toLowerCase();
+    if (text.contains('socketexception') ||
+        text.contains('failed host lookup') ||
+        text.contains('clientexception') ||
+        text.contains('timeout')) {
+      return "Couldn't reach the server. Please check your internet connection and try again.";
+    }
+    return 'Something went wrong. Please try again.';
+  }
+
+  static const String _variantDuplicateMessage =
+      'This service already has a variant with the same name, gender, age category and duration. Change one of them, or edit the existing variant instead.';
+
+  bool _isDuplicateVariant(
+    List variants, {
+    required int? gender,
+    required int? age,
+    required int duration,
+    String name = '',
+    dynamic ignoreId,
+  }) {
+    final n = name.trim().toLowerCase();
+    for (final v in variants) {
+      if (ignoreId != null && v['id'] == ignoreId) continue;
+      if (v['gender_id'] == gender &&
+          v['age_category_id'] == age &&
+          (v['name'] ?? '').toString().trim().toLowerCase() == n &&
+          _toInt(v['duration']) == duration) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ============================================
+  // ✅ SUGGESTION TEXT FIELD
+  // Shows suggestions while typing. Typing never changes other fields.
+  // ============================================
+  Widget _suggestField({
+    Key? fieldKey,
+    required TextEditingController controller,
+    required List<String> suggestions,
+    required String label,
+    required String hint,
+    required IconData icon,
+    required bool isDark,
+    String? errorText,
+    ValueChanged<String>? onChanged,
+    ValueChanged<String>? onPicked,
+    int maxLength = 60,
+  }) {
+    return Autocomplete<String>(
+      key: fieldKey,
+      initialValue: TextEditingValue(text: controller.text),
+      optionsBuilder: (TextEditingValue v) {
+        final q = v.text.trim().toLowerCase();
+        if (q.isEmpty) return const Iterable<String>.empty();
+        return suggestions.where((o) {
+          final l = o.toLowerCase();
+          return l.contains(q);
+        });
+      },
+      onSelected: (String s) {
+        controller.text = s;
+        onChanged?.call(s);
+        onPicked?.call(s);
+      },
+      fieldViewBuilder: (context, tc, focusNode, onFieldSubmitted) {
+        return TextFormField(
+          controller: tc,
+          focusNode: focusNode,
+          inputFormatters: _textFormatters(maxLength),
+          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          onChanged: (v) {
+            controller.text = v;
+            onChanged?.call(v);
+          },
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: hint,
+            counterText: '',
+            errorText: errorText,
+            errorMaxLines: 2,
+            prefixIcon: Icon(
+              icon,
+              size: 18,
+              color: isDark ? Colors.white70 : Colors.grey,
+            ),
+            suffixIcon: suggestions.isNotEmpty
+                ? Icon(
+                    Icons.arrow_drop_down,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  )
+                : null,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+            ),
+            filled: true,
+            fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 10,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ============================================
   // ✅ CURRENCY HELPERS
   // ============================================
 
@@ -102,12 +437,14 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     );
   }
 
+  /// Price is optional (empty = not set). When typed it must be a valid,
+  /// non-negative number; 0 is allowed and shows as "Free".
   String? _validatePriceForCurrency(String priceText) {
     if (priceText.isEmpty) return null;
 
     final price = double.tryParse(priceText);
-    if (price == null) return 'Please enter a valid number';
-    if (price <= 0) return 'Price must be greater than 0';
+    if (price == null) return 'Enter a valid price';
+    if (price < 0) return 'Price cannot be negative';
 
     if (!_currencyUsesDecimals && priceText.contains('.')) {
       final decimalPart = priceText.split('.').last;
@@ -267,9 +604,22 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
           .eq('is_active', true)
           .order('display_order');
 
+      // Global age-name suggestions (optional – ignored if the table is missing)
+      List<Map<String, dynamic>> globalAgeCategories = [];
+      try {
+        final g = await supabase
+            .from('age_categories')
+            .select('display_name, min_age, max_age')
+            .eq('is_active', true);
+        globalAgeCategories = List<Map<String, dynamic>>.from(g);
+      } catch (e) {
+        debugPrint('Could not load global age categories: $e');
+      }
+
       if (!mounted) return;
 
       setState(() {
+        _globalAgeCategories = globalAgeCategories;
         _categories = List<Map<String, dynamic>>.from(categoriesResponse);
         _genders = List<Map<String, dynamic>>.from(gendersResponse);
         _ageCategories = List<Map<String, dynamic>>.from(ageResponse);
@@ -279,7 +629,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     } catch (e) {
       debugPrint('Error loading data: $e');
       if (mounted) {
-        _showSnackBar('Error loading data: $e', Colors.red);
+        _showSnackBar(_friendlyError(e), Colors.red);
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -323,6 +673,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
           .select('''
             id,
             service_id,
+            name,
             price,
             duration,
             is_active,
@@ -350,28 +701,27 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         final genderId = v['salon_gender_id'] as int?;
         final ageId = v['salon_age_category_id'] as int?;
 
-        String genderName = 'Any';
-        if (genderId != null && genderIdToName.containsKey(genderId)) {
-          genderName = genderIdToName[genderId]!;
+        // Only real values are kept; nothing is shown for "not set".
+        final genderName =
+            genderId != null ? (genderIdToName[genderId] ?? '') : '';
+        var ageName = '';
+        if (ageId != null && ageIdToInfo.containsKey(ageId)) {
+          ageName = _ageDisplayName(ageIdToInfo[ageId]!);
         }
 
-        String ageName = 'Any';
-        if (ageId != null && ageIdToInfo.containsKey(ageId)) {
-          final ageInfo = ageIdToInfo[ageId]!;
-          ageName = ageInfo['display_name'] as String? ?? 'Any';
-          final minAge = ageInfo['min_age'];
-          final maxAge = ageInfo['max_age'];
-          if (minAge != null && maxAge != null) {
-            ageName = '$ageName ($minAge-$maxAge yrs)';
-          }
-        }
+        // price can be NULL (= not set yet); 0 means "Free"
+        final rawPrice = v['price'];
+        final priceNum = rawPrice == null ? null : _toDouble(rawPrice);
 
         variantsByService.putIfAbsent(sid, () => []).add({
           'id': v['id'],
+          'name': (v['name'] ?? '').toString().trim(),
           'gender_name': genderName,
           'age_name': ageName,
-          'price': v['price'],
-          'duration': v['duration'],
+          // ✅ always store as proper numbers (web may return String)
+          'price': priceNum ?? 0.0,
+          'price_set': priceNum != null,
+          'duration': _toInt(v['duration']),
           'is_active': v['is_active'],
           'gender_id': genderId,
           'age_category_id': ageId,
@@ -421,822 +771,1129 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
   }
 
   // ============================================
-  // ✅ ADD VARIANT DIALOG (with proper controller dispose)
+  // ✅ ADD / EDIT VARIANT DIALOG (one dialog, numbered sections)
+  //   1 Gender (optional)   2 Age category (optional)   3 Price (optional)
+  //   4 Duration (required, hours + minutes → stored as total minutes)
+  //   5 Variant name (optional; required when no gender and no age is set)
   // ============================================
-  Future<void> _showAddVariantDialog(Map<String, dynamic> service) async {
-    int? selectedGenderId;
-    int? selectedAgeCategoryId;
-    final priceController = TextEditingController();
-    final durationController = TextEditingController();
-    String? priceError;
-    String? durationError;
+  Future<void> _showAddVariantDialog(Map<String, dynamic> service) =>
+      _showVariantDialog(service);
 
-    void validatePrice() {
-      priceError = _validatePriceForCurrency(priceController.text.trim());
-    }
-
-    void validateDuration() {
-      final duration = int.tryParse(durationController.text.trim());
-      if (durationController.text.trim().isEmpty) {
-        durationError = null;
-      } else if (duration == null) {
-        durationError = 'Please enter a valid number';
-      } else if (duration <= 0) {
-        durationError = 'Duration must be greater than 0';
-      } else {
-        durationError = null;
-      }
-    }
-
-    try {
-      await showDialog(
-        context: context,
-        builder: (dialogContext) => StatefulBuilder(
-          builder: (context, setDialogState) {
-            final isDark = context.isDarkMode;
-
-            return AlertDialog(
-              backgroundColor:
-                  isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              title: null,
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            _getIconForName(service['icon_name']),
-                            color: AppTheme.primary,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Text(
-                            'Add New Option',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 20),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.grey[800] : Colors.grey[100],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.room_service,
-                            size: 20,
-                            color: isDark ? Colors.white60 : Colors.grey[600],
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              service['name'],
-                              style: TextStyle(
-                                fontWeight: FontWeight.w500,
-                                fontSize: 14,
-                                color: isDark ? Colors.white : Colors.black87,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    Text(
-                      'Gender',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<int>(
-                      initialValue: selectedGenderId,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(
-                          Icons.wc,
-                          color: Colors.grey,
-                          size: 20,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        filled: true,
-                        fillColor: isDark
-                            ? const Color(0xFF2A2A2A)
-                            : Colors.white,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 12,
-                        ),
-                      ),
-                      hint: Text(
-                        'Select gender',
-                        style: TextStyle(
-                          color: isDark ? Colors.white60 : Colors.grey,
-                        ),
-                      ),
-                      dropdownColor: isDark
-                          ? const Color(0xFF2A2A2A)
-                          : Colors.white,
-                      items: _genders.map((gender) {
-                        return DropdownMenuItem<int>(
-                          value: gender['id'] as int,
-                          child: Text(
-                            gender['display_name'],
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedGenderId = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    Text(
-                      'Age Category',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    DropdownButtonFormField<int>(
-                      initialValue: selectedAgeCategoryId,
-                      isExpanded: true,
-                      decoration: InputDecoration(
-                        prefixIcon: const Icon(
-                          Icons.timeline,
-                          color: Colors.grey,
-                          size: 20,
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        filled: true,
-                        fillColor: isDark
-                            ? const Color(0xFF2A2A2A)
-                            : Colors.white,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 12,
-                        ),
-                      ),
-                      hint: Text(
-                        'Select age category',
-                        style: TextStyle(
-                          color: isDark ? Colors.white60 : Colors.grey,
-                        ),
-                      ),
-                      dropdownColor: isDark
-                          ? const Color(0xFF2A2A2A)
-                          : Colors.white,
-                      items: _ageCategories.map((ageCat) {
-                        String displayName = ageCat['display_name'];
-                        if (ageCat['min_age'] != null &&
-                            ageCat['max_age'] != null) {
-                          displayName =
-                              '$displayName (${ageCat['min_age']}-${ageCat['max_age']} yrs)';
-                        }
-                        return DropdownMenuItem<int>(
-                          value: ageCat['id'] as int,
-                          child: Text(
-                            displayName,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedAgeCategoryId = value;
-                        });
-                      },
-                    ),
-                    const SizedBox(height: 16),
-
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Price ($_salonCurrencySymbol)',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: priceController,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                style: TextStyle(
-                                  color:
-                                      isDark ? Colors.white : Colors.black87,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText: _salonPriceHint,
-                                  hintStyle: TextStyle(
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.grey,
-                                  ),
-                                  prefixIcon: CurrencyPrefix(
-                                    symbol: _salonCurrencySymbol,
-                                    type: CurrencyDisplayType.text,
-                                    color:
-                                        isDark ? Colors.white70 : Colors.grey,
-                                    fontSize: 16,
-                                  ),
-                                  prefixIconConstraints:
-                                      const BoxConstraints(
-                                    minWidth: 50,
-                                    minHeight: 20,
-                                  ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  filled: true,
-                                  fillColor: isDark
-                                      ? const Color(0xFF2A2A2A)
-                                      : Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 12,
-                                  ),
-                                  errorText: priceError,
-                                  errorMaxLines: 2,
-                                  errorStyle: TextStyle(
-                                    color: isDark
-                                        ? Colors.red[300]
-                                        : Colors.red,
-                                  ),
-                                ),
-                                onChanged: (value) {
-                                  validatePrice();
-                                  setDialogState(() {});
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Duration (mins)',
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              TextFormField(
-                                controller: durationController,
-                                keyboardType: TextInputType.number,
-                                style: TextStyle(
-                                  color:
-                                      isDark ? Colors.white : Colors.black87,
-                                ),
-                                decoration: InputDecoration(
-                                  hintText: 'e.g., 30',
-                                  hintStyle: TextStyle(
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.grey,
-                                  ),
-                                  prefixIcon: const Icon(
-                                    Icons.timer,
-                                    color: Colors.grey,
-                                    size: 20,
-                                  ),
-                                  border: OutlineInputBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  filled: true,
-                                  fillColor: isDark
-                                      ? const Color(0xFF2A2A2A)
-                                      : Colors.white,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 12,
-                                  ),
-                                  errorText: durationError,
-                                  errorMaxLines: 2,
-                                  errorStyle: TextStyle(
-                                    color: isDark
-                                        ? Colors.red[300]
-                                        : Colors.red,
-                                  ),
-                                ),
-                                onChanged: (value) {
-                                  validateDuration();
-                                  setDialogState(() {});
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
-                  child: Text(
-                    'Cancel',
-                    style: TextStyle(
-                      color: isDark ? Colors.white60 : Colors.black87,
-                    ),
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: () async {
-                    validatePrice();
-                    validateDuration();
-
-                    if (selectedGenderId == null) {
-                      _showSnackBar('Please select a gender', Colors.orange);
-                      return;
-                    }
-                    if (selectedAgeCategoryId == null) {
-                      _showSnackBar(
-                        'Please select an age category',
-                        Colors.orange,
-                      );
-                      return;
-                    }
-
-                    final price =
-                        double.tryParse(priceController.text.trim());
-                    final duration =
-                        int.tryParse(durationController.text.trim());
-
-                    if (price == null || price <= 0) {
-                      _showSnackBar(
-                        'Please enter a valid price',
-                        Colors.orange,
-                      );
-                      return;
-                    }
-                    if (duration == null || duration <= 0) {
-                      _showSnackBar(
-                        'Please enter a valid duration',
-                        Colors.orange,
-                      );
-                      return;
-                    }
-
-                    final bool isDuplicate =
-                        service['variants'].any((variant) {
-                      return variant['gender_id'] == selectedGenderId &&
-                          variant['age_category_id'] ==
-                              selectedAgeCategoryId;
-                    });
-
-                    if (isDuplicate) {
-                      _showSnackBar(
-                        'This option already exists!',
-                        Colors.orange,
-                      );
-                      return;
-                    }
-
-                    if (!mounted) return;
-                    setState(() => _isProcessing = true);
-
-                    try {
-                      await supabase.from('service_variants').insert({
-                        'service_id': service['id'],
-                        'salon_gender_id': selectedGenderId,
-                        'salon_age_category_id': selectedAgeCategoryId,
-                        'price': price,
-                        'duration': duration,
-                        'is_active': true,
-                      });
-
-                      if (dialogContext.mounted) {
-                        Navigator.pop(dialogContext);
-                      }
-
-                      await _loadServices();
-
-                      if (mounted) {
-                        _showSnackBar(
-                          'Option added successfully!',
-                          Colors.green,
-                        );
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        _showSnackBar(
-                          'Error adding option: $e',
-                          Colors.red,
-                        );
-                      }
-                    } finally {
-                      if (mounted) setState(() => _isProcessing = false);
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child: const Text(
-                    'Add Option',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            );
-          },
-        ),
-      );
-    } finally {
-      // ✅ Dispose controllers after dialog closes
-      priceController.dispose();
-      durationController.dispose();
-    }
-  }
-
-  // ============================================
-  // ✅ EDIT VARIANT DIALOG (with proper controller dispose)
-  // ============================================
   Future<void> _showEditVariantDialog(
     Map<String, dynamic> service,
     Map<String, dynamic> variant,
-  ) async {
-    final double priceValue = (variant['price'] as num).toDouble();
-    final String initialPriceText = _currencyUsesDecimals
-        ? priceValue.toString()
-        : priceValue.toInt().toString();
+  ) => _showVariantDialog(service, variant: variant);
 
-    final priceController = TextEditingController(text: initialPriceText);
-    final durationController = TextEditingController(
-      text: variant['duration'].toString(),
+  Future<void> _showVariantDialog(
+    Map<String, dynamic> service, {
+    Map<String, dynamic>? variant,
+  }) async {
+    final bool isEdit = variant != null;
+
+    int? selectedGenderId = variant?['gender_id'] as int?;
+    int? selectedAgeId = variant?['age_category_id'] as int?;
+
+    final priceController = TextEditingController(
+      text: isEdit && variant['price_set'] == true
+          ? _plainPrice(_toDouble(variant['price']))
+          : '',
     );
-    String? priceError;
-    String? durationError;
 
-    void validatePrice() {
-      priceError = _validatePriceForCurrency(priceController.text.trim());
+    // Duration is typed as hours + minutes and stored as total minutes.
+    final existingTotal = isEdit ? _toInt(variant['duration']) : 0;
+    final hoursController = TextEditingController(
+      text: existingTotal >= 60 ? (existingTotal ~/ 60).toString() : '',
+    );
+    final minutesController = TextEditingController(
+      text: existingTotal > 0 && existingTotal % 60 > 0
+          ? (existingTotal % 60).toString()
+          : '',
+    );
+    final nameController = TextEditingController(
+      text: (variant?['name'] ?? '').toString(),
+    );
+
+    // Temporary new age category fields
+    final newAgeNameController = TextEditingController();
+    final newAgeMinController = TextEditingController(text: '0');
+    final newAgeMaxController = TextEditingController(text: '100');
+    bool showNewAgeForm = false;
+    bool isSavingAge = false;
+    int ageFormResetCounter = 0; // rebuilds the suggestion field after clear
+
+    String? nameError;
+    String? variantError;
+    String? durationError;
+    String? priceError;
+    String? ageNameError;
+    String? ageMinError;
+    String? ageMaxError;
+    bool isSaving = false;
+
+    // Optional sections stay hidden until opened with the arrow. Edit mode
+    // opens a section automatically when the variant already has a value.
+    bool genderOpen = selectedGenderId != null;
+    bool ageOpen = selectedAgeId != null;
+    bool priceOpen = isEdit && variant['price_set'] == true;
+
+    final isDark = context.isDarkMode;
+
+    // ── Duration helpers (hours + minutes → total minutes) ──
+    String? validateDuration(String hText, String mText) {
+      final h = hText.trim(), m = mText.trim();
+      if (h.isEmpty && m.isEmpty) return 'Duration is required';
+      final hours = h.isEmpty ? 0 : int.tryParse(h);
+      final mins = m.isEmpty ? 0 : int.tryParse(m);
+      if (hours == null || mins == null) return 'Enter numbers only';
+      if (hours > 23) return 'Hours must be between 0 and 23';
+      if (mins > 59) return 'Minutes must be between 0 and 59';
+      if (hours * 60 + mins <= 0) return 'Duration must be greater than 0';
+      return null;
     }
 
-    void validateDuration() {
-      final duration = int.tryParse(durationController.text.trim());
-      if (durationController.text.trim().isEmpty) {
-        durationError = null;
-      } else if (duration == null) {
-        durationError = 'Please enter a valid number';
-      } else if (duration <= 0) {
-        durationError = 'Duration must be greater than 0';
-      } else {
-        durationError = null;
+    /// Total minutes, or null while the input is empty / invalid.
+    int? parseDuration(String hText, String mText) {
+      if (validateDuration(hText, mText) != null) return null;
+      final h = hText.trim().isEmpty ? 0 : int.parse(hText.trim());
+      final m = mText.trim().isEmpty ? 0 : int.parse(mText.trim());
+      return h * 60 + m;
+    }
+
+    InputDecoration fieldDecoration({
+      String? hint,
+      String? suffix,
+      Widget? prefix,
+      String? errorText,
+      bool redBorder = false,
+    }) {
+      return InputDecoration(
+        hintText: hint,
+        suffixText: suffix,
+        counterText: '',
+        errorText: errorText,
+        errorMaxLines: 2,
+        prefixIcon: prefix,
+        prefixIconConstraints: prefix is Padding
+            ? const BoxConstraints(minWidth: 50, minHeight: 20)
+            : null,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(
+            color: redBorder
+                ? Colors.red
+                : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: Colors.red),
+        ),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[50],
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 12,
+          vertical: 10,
+        ),
+      );
+    }
+
+    Widget durationInput({
+      required TextEditingController controller,
+      required String hint,
+      required String suffix,
+      required void Function(VoidCallback) setDialogState,
+      IconData? icon,
+    }) {
+      return TextFormField(
+        controller: controller,
+        inputFormatters: [
+          FilteringTextInputFormatter.digitsOnly,
+          LengthLimitingTextInputFormatter(2),
+        ],
+        keyboardType: TextInputType.number,
+        onChanged: (_) {
+          setDialogState(() {
+            variantError = null;
+            // Show a message while typing, but stay quiet while both empty
+            durationError =
+                hoursController.text.trim().isEmpty &&
+                    minutesController.text.trim().isEmpty
+                ? null
+                : validateDuration(hoursController.text, minutesController.text);
+          });
+        },
+        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+        decoration: fieldDecoration(
+          hint: hint,
+          suffix: suffix,
+          redBorder: durationError != null,
+          prefix: icon != null
+              ? Icon(
+                  icon,
+                  size: 18,
+                  color: isDark ? Colors.white70 : Colors.grey,
+                )
+              : null,
+        ),
+      );
+    }
+
+    // Numbered section header. [open] == null → not collapsible (always shown).
+    Widget sectionHeader({
+      required int number,
+      required String title,
+      required String summary,
+      required Color color,
+      bool? open,
+      VoidCallback? onTap,
+      bool isRequired = false,
+      Widget? trailing,
+    }) {
+      final content = Row(
+        children: [
+          Container(
+            width: 22,
+            height: 22,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              '$number',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    if (isRequired)
+                      Text(
+                        ' *',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.red[300],
+                        ),
+                      ),
+                  ],
+                ),
+                if (summary.isNotEmpty)
+                  Text(
+                    summary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      color: isDark ? Colors.white54 : Colors.grey[600],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          ?trailing,
+          if (open != null)
+            AnimatedRotation(
+              turns: open ? 0.5 : 0,
+              duration: const Duration(milliseconds: 200),
+              child: Icon(
+                Icons.keyboard_arrow_down,
+                size: 22,
+                color: isDark ? Colors.white70 : Colors.grey[600],
+              ),
+            ),
+        ],
+      );
+
+      if (open == null) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: content,
+        );
       }
+      return InkWell(
+        borderRadius: BorderRadius.circular(8),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: content,
+        ),
+      );
+    }
+
+    Widget sectionDivider() => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Divider(
+        height: 1,
+        color: isDark ? Colors.grey[800] : Colors.grey[200],
+      ),
+    );
+
+    // Validates the "new age category" mini form. Shows errors under the
+    // fields and returns true only when everything is valid.
+    bool validateAge(void Function(VoidCallback) set) {
+      final name = _cleanText(newAgeNameController.text, _maxAgeName);
+      final min = int.tryParse(newAgeMinController.text.trim());
+      final max = int.tryParse(newAgeMaxController.text.trim());
+
+      String? nameErr;
+      String? minErr;
+      String? maxErr;
+
+      if (name.isEmpty) {
+        nameErr = 'Name is required';
+      } else if (_ageCategories.any(
+        (a) =>
+            a['display_name'].toString().toLowerCase() == name.toLowerCase(),
+      )) {
+        nameErr = 'This age category already exists';
+      }
+
+      if (min == null) {
+        minErr = 'Numbers only';
+      } else if (min < 0 || min > 150) {
+        minErr = 'Age must be 0-150';
+      }
+
+      if (max == null) {
+        maxErr = 'Numbers only';
+      } else if (max < 0 || max > 150) {
+        maxErr = 'Age must be 0-150';
+      } else if (min != null && max < min) {
+        maxErr = 'Max must be >= min';
+      }
+
+      set(() {
+        ageNameError = nameErr;
+        ageMinError = minErr;
+        ageMaxError = maxErr;
+      });
+
+      return nameErr == null && minErr == null && maxErr == null;
+    }
+
+    Widget ageNumberField(
+      TextEditingController c,
+      String label,
+      String? err,
+      void Function(VoidCallback) set,
+      VoidCallback clearErr,
+    ) {
+      return TextFormField(
+        controller: c,
+        keyboardType: TextInputType.number,
+        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+        maxLength: 3,
+        onChanged: (_) => set(clearErr),
+        style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+        decoration: InputDecoration(
+          labelText: label,
+          counterText: '',
+          errorText: err,
+          errorMaxLines: 2,
+          isDense: true,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          filled: true,
+          fillColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        ),
+      );
     }
 
     try {
       await showDialog(
         context: context,
+        barrierDismissible: false,
         builder: (dialogContext) => StatefulBuilder(
-          builder: (context, setDialogState) {
-            final isDark = context.isDarkMode;
+          builder: (ctx, setDialogState) {
+            final noGenderNoAge =
+                selectedGenderId == null && selectedAgeId == null;
 
             return AlertDialog(
-              backgroundColor:
-                  isDark ? const Color(0xFF1E1E1E) : Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+              scrollable: true,
+              insetPadding: const EdgeInsets.symmetric(
+                horizontal: 24,
+                vertical: 12,
               ),
-              title: null,
-              content: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
+              backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+              contentPadding: const EdgeInsets.all(20),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(
+                      _getIconForName(service['icon_name']),
+                      color: AppTheme.primary,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            _getIconForName(service['icon_name']),
-                            color: AppTheme.primary,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
                         Text(
-                          'Edit Option',
+                          isEdit ? 'Edit Variant' : 'Add New Variant',
                           style: TextStyle(
-                            fontSize: 20,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold,
                             color: isDark ? Colors.white : Colors.black87,
                           ),
                         ),
+                        Text(
+                          'For "${service['name']}"',
+                          softWrap: true,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isDark ? Colors.white60 : Colors.grey[600],
+                          ),
+                        ),
                       ],
                     ),
-                    const SizedBox(height: 20),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.grey[800] : Colors.grey[100],
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.room_service,
-                                size: 16,
-                                color: Colors.grey,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                service['name'],
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w500,
-                                  color:
-                                      isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.wc,
-                                size: 16,
-                                color: Colors.grey,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                variant['gender_name'],
-                                style: TextStyle(
-                                  color:
-                                      isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              const Icon(
-                                Icons.calendar_today,
-                                size: 16,
-                                color: Colors.grey,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                variant['age_name'],
-                                style: TextStyle(
-                                  color:
-                                      isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 460,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 1. Gender (optional, hidden until expanded)
+                    sectionHeader(
+                      number: 1,
+                      title: 'Gender',
+                      color: Colors.blue,
+                      open: genderOpen,
+                      summary: selectedGenderId != null
+                          ? (_genders
+                                    .firstWhere(
+                                      (g) => g['id'] == selectedGenderId,
+                                      orElse: () => {'display_name': 'Selected'},
+                                    )['display_name']
+                                    ?.toString() ??
+                                'Selected')
+                          : 'Optional — tap the arrow to choose',
+                      onTap: () =>
+                          setDialogState(() => genderOpen = !genderOpen),
                     ),
-                    const SizedBox(height: 20),
-                    Text(
-                      'Price & Duration',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
+                    if (genderOpen) ...[
+                      const SizedBox(height: 6),
+                      if (_genders.isEmpty)
+                        Text(
+                          'No genders available for this salon.',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontStyle: FontStyle.italic,
+                            color: isDark ? Colors.white38 : Colors.grey[500],
+                          ),
+                        ),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _genders.map((g) {
+                          final id = g['id'] as int;
+                          final isSelected = selectedGenderId == id;
+                          return FilterChip(
+                            label: Text(
+                              g['display_name'] as String,
+                              style: TextStyle(
+                                color: isSelected
+                                    ? Colors.blue
+                                    : (isDark
+                                          ? Colors.white70
+                                          : Colors.grey[700]),
+                              ),
+                            ),
+                            selected: isSelected,
+                            onSelected: (v) => setDialogState(() {
+                              selectedGenderId = v ? id : null;
+                              variantError = null;
+                              nameError = null;
+                            }),
+                            backgroundColor: isDark
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.grey[100],
+                            selectedColor: Colors.blue.withValues(alpha: 0.2),
+                            checkmarkColor: Colors.blue,
+                            shape: StadiumBorder(
+                              side: BorderSide(
+                                color: isSelected
+                                    ? Colors.blue
+                                    : (isDark
+                                          ? Colors.grey[700]!
+                                          : Colors.grey[300]!),
+                              ),
+                            ),
+                          );
+                        }).toList(),
                       ),
+                    ],
+                    sectionDivider(),
+
+                    // 2. Age Category (optional, hidden until expanded)
+                    sectionHeader(
+                      number: 2,
+                      title: 'Age Category',
+                      color: Colors.green,
+                      open: ageOpen,
+                      summary: selectedAgeId != null
+                          ? _ageDisplayName(
+                              _ageCategories.firstWhere(
+                                (a) => a['id'] == selectedAgeId,
+                                orElse: () => {'display_name': 'Selected'},
+                              ),
+                            )
+                          : 'Optional — tap the arrow to choose',
+                      onTap: () => setDialogState(() => ageOpen = !ageOpen),
+                      trailing: (ageOpen && _ageCategories.isNotEmpty)
+                          ? TextButton.icon(
+                              onPressed: () => setDialogState(() {
+                                showNewAgeForm = !showNewAgeForm;
+                                ageNameError = null;
+                                ageMinError = null;
+                                ageMaxError = null;
+                              }),
+                              icon: Icon(
+                                showNewAgeForm
+                                    ? Icons.close
+                                    : Icons.add_circle_outline,
+                                size: 14,
+                                color: Colors.green,
+                              ),
+                              label: Text(
+                                showNewAgeForm ? 'Cancel' : 'Add New',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.green,
+                                ),
+                              ),
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                ),
+                                minimumSize: Size.zero,
+                              ),
+                            )
+                          : null,
                     ),
-                    const SizedBox(height: 8),
+                    if (ageOpen) ...[
+                      if (_ageCategories.isEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          'No age categories yet — add one below.',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontStyle: FontStyle.italic,
+                            color: isDark ? Colors.white38 : Colors.grey[500],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 6),
+                      if (_ageCategories.isNotEmpty)
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: _ageCategories.map((a) {
+                            final id = a['id'] as int;
+                            final isSelected = selectedAgeId == id;
+                            return FilterChip(
+                              label: Text(
+                                _ageDisplayName(a),
+                                style: TextStyle(
+                                  color: isSelected
+                                      ? Colors.green
+                                      : (isDark
+                                            ? Colors.white70
+                                            : Colors.grey[700]),
+                                ),
+                              ),
+                              selected: isSelected,
+                              onSelected: (v) => setDialogState(() {
+                                selectedAgeId = v ? id : null;
+                                variantError = null;
+                                nameError = null;
+                              }),
+                              backgroundColor: isDark
+                                  ? const Color(0xFF2A2A2A)
+                                  : Colors.grey[100],
+                              selectedColor: Colors.green.withValues(
+                                alpha: 0.2,
+                              ),
+                              checkmarkColor: Colors.green,
+                              shape: StadiumBorder(
+                                side: BorderSide(
+                                  color: isSelected
+                                      ? Colors.green
+                                      : (isDark
+                                            ? Colors.grey[700]!
+                                            : Colors.grey[300]!),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      if (showNewAgeForm || _ageCategories.isEmpty) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? const Color(0xFF2A2A2A)
+                                : Colors.green.withValues(alpha: 0.05),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: Colors.green.withValues(alpha: 0.3),
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              _suggestField(
+                                fieldKey: ValueKey(
+                                  'age_name_$ageFormResetCounter',
+                                ),
+                                controller: newAgeNameController,
+                                suggestions: _globalAgeNames,
+                                label: 'Age Name *',
+                                maxLength: _maxAgeName,
+                                hint: 'e.g., Adult',
+                                icon: Icons.visibility,
+                                isDark: isDark,
+                                errorText: ageNameError,
+                                onChanged: (_) =>
+                                    setDialogState(() => ageNameError = null),
+                                // Picking a suggestion fills min and max age
+                                onPicked: (picked) {
+                                  final key = picked.trim().toLowerCase();
+                                  for (final a in _globalAgeCategories) {
+                                    if ((a['display_name'] ?? '')
+                                            .toString()
+                                            .trim()
+                                            .toLowerCase() ==
+                                        key) {
+                                      setDialogState(() {
+                                        newAgeMinController.text =
+                                            (a['min_age'] ?? 0).toString();
+                                        newAgeMaxController.text =
+                                            (a['max_age'] ?? 100).toString();
+                                        ageNameError = null;
+                                        ageMinError = null;
+                                        ageMaxError = null;
+                                      });
+                                      break;
+                                    }
+                                  }
+                                },
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: ageNumberField(
+                                      newAgeMinController,
+                                      'Min',
+                                      ageMinError,
+                                      setDialogState,
+                                      () => ageMinError = null,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: ageNumberField(
+                                      newAgeMaxController,
+                                      'Max',
+                                      ageMaxError,
+                                      setDialogState,
+                                      () => ageMaxError = null,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: isSavingAge
+                                      ? null
+                                      : () async {
+                                          if (!validateAge(setDialogState)) {
+                                            return;
+                                          }
+                                          final name = _cleanText(
+                                            newAgeNameController.text,
+                                            _maxAgeName,
+                                          );
+                                          final min = int.parse(
+                                            newAgeMinController.text.trim(),
+                                          );
+                                          final max = int.parse(
+                                            newAgeMaxController.text.trim(),
+                                          );
+
+                                          setDialogState(
+                                            () => isSavingAge = true,
+                                          );
+                                          try {
+                                            final inserted = await supabase
+                                                .from('salon_age_categories')
+                                                .insert({
+                                                  'salon_id': widget.salonId,
+                                                  'display_name': name,
+                                                  'min_age': min,
+                                                  'max_age': max,
+                                                  'display_order':
+                                                      _ageCategories.length,
+                                                  'is_active': true,
+                                                })
+                                                .select()
+                                                .single();
+
+                                            if (!mounted) return;
+                                            if (!dialogContext.mounted) return;
+
+                                            setState(() {
+                                              _ageCategories.add(
+                                                Map<String, dynamic>.from(
+                                                  inserted,
+                                                ),
+                                              );
+                                            });
+                                            setDialogState(() {
+                                              selectedAgeId =
+                                                  inserted['id'] as int;
+                                              newAgeNameController.clear();
+                                              newAgeMinController.text = '0';
+                                              newAgeMaxController.text = '100';
+                                              ageFormResetCounter++;
+                                              ageNameError = null;
+                                              ageMinError = null;
+                                              ageMaxError = null;
+                                              showNewAgeForm = false;
+                                              isSavingAge = false;
+                                              nameError = null;
+                                            });
+                                          } catch (e) {
+                                            debugPrint('Error adding age: $e');
+                                            if (dialogContext.mounted) {
+                                              setDialogState(() {
+                                                isSavingAge = false;
+                                                ageNameError = _friendlyError(
+                                                  e,
+                                                  duplicateMessage:
+                                                      'This age category already exists',
+                                                );
+                                              });
+                                            }
+                                          }
+                                        },
+                                  icon: const Icon(Icons.save, size: 14),
+                                  label: const Text(
+                                    'Save Age Category',
+                                    style: TextStyle(fontSize: 11),
+                                  ),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 8,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                    sectionDivider(),
+
+                    // 3. Price (optional, hidden until expanded)
+                    sectionHeader(
+                      number: 3,
+                      title: 'Price',
+                      color: Colors.teal,
+                      open: priceOpen,
+                      summary: priceController.text.trim().isNotEmpty
+                          ? '$_salonCurrencySymbol ${priceController.text.trim()}'
+                          : 'Optional — tap the arrow to set',
+                      onTap: () =>
+                          setDialogState(() => priceOpen = !priceOpen),
+                    ),
+                    if (priceOpen) ...[
+                      const SizedBox(height: 6),
+                      TextFormField(
+                        controller: priceController,
+                        inputFormatters: _priceFormatters,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        onChanged: (v) {
+                          setDialogState(() {
+                            variantError = null;
+                            priceError = _validatePriceForCurrency(v.trim());
+                          });
+                        },
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                        decoration: fieldDecoration(
+                          hint: _salonPriceHint,
+                          errorText: priceError,
+                          prefix: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Center(
+                              widthFactor: 1.0,
+                              child: Text(
+                                _salonCurrencySymbol,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? Colors.white70 : Colors.grey,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Leave empty to set the price later. 0 shows as "Free".',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          color: isDark ? Colors.white38 : Colors.grey[500],
+                        ),
+                      ),
+                    ],
+                    sectionDivider(),
+
+                    // 4. Duration (always shown, required)
+                    sectionHeader(
+                      number: 4,
+                      title: 'Duration',
+                      color: Colors.orange,
+                      isRequired: true,
+                      summary: 'Required — hours and minutes',
+                    ),
+                    const SizedBox(height: 6),
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Expanded(
-                          child: TextFormField(
-                            controller: priceController,
-                            keyboardType:
-                                const TextInputType.numberWithOptions(
-                              decimal: true,
-                            ),
-                            style: TextStyle(
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                            decoration: InputDecoration(
-                              labelText: 'Price ($_salonCurrencySymbol)',
-                              labelStyle: TextStyle(
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.grey[600],
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              prefixIcon: CurrencyPrefix(
-                                symbol: _salonCurrencySymbol,
-                                type: CurrencyDisplayType.text,
-                                color: isDark ? Colors.white70 : Colors.grey,
-                                fontSize: 14,
-                              ),
-                              prefixIconConstraints: const BoxConstraints(
-                                minWidth: 50,
-                                minHeight: 20,
-                              ),
-                              filled: true,
-                              fillColor: isDark
-                                  ? const Color(0xFF2A2A2A)
-                                  : Colors.white,
-                              errorText: priceError,
-                              errorStyle: TextStyle(
-                                color:
-                                    isDark ? Colors.red[300] : Colors.red,
-                              ),
-                            ),
-                            onChanged: (value) {
-                              validatePrice();
-                              setDialogState(() {});
-                            },
+                          child: durationInput(
+                            controller: hoursController,
+                            hint: '0',
+                            suffix: 'hrs',
+                            icon: Icons.timer,
+                            setDialogState: setDialogState,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 10),
                         Expanded(
-                          child: TextFormField(
-                            controller: durationController,
-                            keyboardType: TextInputType.number,
-                            style: TextStyle(
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                            decoration: InputDecoration(
-                              labelText: 'Duration (mins)',
-                              labelStyle: TextStyle(
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.grey[600],
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              prefixIcon: const Icon(
-                                Icons.timer,
-                                size: 20,
-                                color: Colors.grey,
-                              ),
-                              filled: true,
-                              fillColor: isDark
-                                  ? const Color(0xFF2A2A2A)
-                                  : Colors.white,
-                              errorText: durationError,
-                              errorStyle: TextStyle(
-                                color:
-                                    isDark ? Colors.red[300] : Colors.red,
-                              ),
-                            ),
-                            onChanged: (value) {
-                              validateDuration();
-                              setDialogState(() {});
-                            },
+                          child: durationInput(
+                            controller: minutesController,
+                            hint: '30',
+                            suffix: 'mins',
+                            setDialogState: setDialogState,
                           ),
                         ),
                       ],
                     ),
+                    if (durationError != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6, left: 4),
+                        child: Text(
+                          durationError!,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.red,
+                          ),
+                        ),
+                      )
+                    else if (parseDuration(
+                          hoursController.text,
+                          minutesController.text,
+                        ) !=
+                        null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6, left: 4),
+                        child: Text(
+                          'Total: ${_formatDuration(parseDuration(hoursController.text, minutesController.text)!)}',
+                          style: TextStyle(
+                            fontSize: 11.5,
+                            color: isDark ? Colors.white54 : Colors.grey[600],
+                          ),
+                        ),
+                      ),
+                    sectionDivider(),
+
+                    // 5. Variant name (optional; required when only the
+                    // duration is set — no gender and no age)
+                    sectionHeader(
+                      number: 5,
+                      title: 'Variant name',
+                      color: Colors.indigo,
+                      isRequired: noGenderNoAge,
+                      summary: noGenderNoAge
+                          ? 'Required — no gender or age is set'
+                          : 'Optional — e.g., Short hair, Long hair',
+                    ),
+                    const SizedBox(height: 6),
+                    TextFormField(
+                      controller: nameController,
+                      maxLength: _maxVariantName,
+                      inputFormatters: _textFormatters(_maxVariantName),
+                      textCapitalization: TextCapitalization.sentences,
+                      onChanged: (_) => setDialogState(() {
+                        variantError = null;
+                        nameError = null;
+                      }),
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                      decoration: fieldDecoration(
+                        hint: 'e.g., Short hair',
+                        errorText: nameError,
+                        prefix: Icon(
+                          Icons.label_outline,
+                          size: 18,
+                          color: isDark ? Colors.white70 : Colors.grey,
+                        ),
+                      ),
+                    ),
+
+                    if (variantError != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.error_outline,
+                              size: 16,
+                              color: Colors.red,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                variantError!,
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: Colors.red,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
+                  onPressed: isSaving
+                      ? null
+                      : () => Navigator.pop(dialogContext),
                   child: Text(
                     'Cancel',
                     style: TextStyle(
-                      color: isDark ? Colors.white60 : Colors.black87,
+                      color: isDark ? Colors.white60 : Colors.grey,
                     ),
                   ),
                 ),
                 ElevatedButton(
-                  onPressed: () async {
-                    validatePrice();
-                    validateDuration();
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final priceText = priceController.text.trim();
 
-                    final price =
-                        double.tryParse(priceController.text.trim());
-                    final duration =
-                        int.tryParse(durationController.text.trim());
+                          // Price is optional, but when typed it must be valid.
+                          final priceErr = _validatePriceForCurrency(priceText);
+                          if (priceErr != null) {
+                            setDialogState(() {
+                              priceOpen = true;
+                              priceError = priceErr;
+                            });
+                            return;
+                          }
 
-                    if (price == null || price <= 0) {
-                      _showSnackBar(
-                        'Please enter a valid price',
-                        Colors.orange,
-                      );
-                      return;
-                    }
-                    if (duration == null || duration <= 0) {
-                      _showSnackBar(
-                        'Please enter a valid duration',
-                        Colors.orange,
-                      );
-                      return;
-                    }
+                          // Duration is the only required number.
+                          final durErr = validateDuration(
+                            hoursController.text,
+                            minutesController.text,
+                          );
+                          if (durErr != null) {
+                            setDialogState(() => durationError = durErr);
+                            return;
+                          }
+                          // Stored as total minutes (all calculations use minutes)
+                          final duration = parseDuration(
+                            hoursController.text,
+                            minutesController.text,
+                          )!;
 
-                    if (!mounted) return;
-                    setState(() => _isProcessing = true);
+                          // Name is optional, but mandatory when only the
+                          // duration is set (no gender and no age).
+                          final variantName = _cleanText(
+                            nameController.text,
+                            _maxVariantName,
+                          );
+                          if (variantName.isEmpty &&
+                              selectedGenderId == null &&
+                              selectedAgeId == null) {
+                            setDialogState(() {
+                              nameError =
+                                  'Name is required when only duration is set (no gender or age)';
+                            });
+                            return;
+                          }
 
-                    try {
-                      await supabase
-                          .from('service_variants')
-                          .update({
-                            'price': price,
-                            'duration': duration,
-                            'updated_at': DateTime.now().toIso8601String(),
-                          })
-                          .eq('id', variant['id']);
+                          final priceSet = priceText.isNotEmpty;
+                          final price = priceSet
+                              ? double.tryParse(priceText)
+                              : null;
 
-                      if (dialogContext.mounted) {
-                        Navigator.pop(dialogContext);
-                      }
+                          // Block duplicates before they reach the database.
+                          if (_isDuplicateVariant(
+                            service['variants'] as List,
+                            gender: selectedGenderId,
+                            age: selectedAgeId,
+                            duration: duration,
+                            name: variantName,
+                            ignoreId: variant?['id'],
+                          )) {
+                            setDialogState(
+                              () => variantError = _variantDuplicateMessage,
+                            );
+                            return;
+                          }
 
-                      await _loadServices();
+                          if (!mounted) return;
+                          setDialogState(() {
+                            isSaving = true;
+                            variantError = null;
+                          });
+                          setState(() => _isProcessing = true);
 
-                      if (mounted) {
-                        _showSnackBar(
-                          'Option updated successfully!',
-                          Colors.green,
-                        );
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        _showSnackBar(
-                          'Error updating option: $e',
-                          Colors.red,
-                        );
-                      }
-                    } finally {
-                      if (mounted) setState(() => _isProcessing = false);
-                    }
-                  },
+                          try {
+                            final payload = <String, dynamic>{
+                              'salon_gender_id': selectedGenderId,
+                              'salon_age_category_id': selectedAgeId,
+                              'name': variantName.isEmpty ? null : variantName,
+                              'price': price,
+                              'duration': duration,
+                            };
+
+                            if (isEdit) {
+                              await supabase
+                                  .from('service_variants')
+                                  .update({
+                                    ...payload,
+                                    'updated_at': DateTime.now()
+                                        .toIso8601String(),
+                                  })
+                                  .eq('id', variant['id']);
+                            } else {
+                              await supabase.from('service_variants').insert({
+                                ...payload,
+                                'service_id': service['id'],
+                                'is_active': true,
+                              });
+                            }
+
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                            }
+
+                            await _loadServices();
+
+                            if (mounted) {
+                              _showSnackBar(
+                                isEdit
+                                    ? 'Variant updated successfully!'
+                                    : 'Variant added successfully!',
+                                Colors.green,
+                              );
+                            }
+                          } catch (e) {
+                            debugPrint('Error saving variant: $e');
+                            if (dialogContext.mounted) {
+                              setDialogState(() {
+                                isSaving = false;
+                                variantError = _friendlyError(
+                                  e,
+                                  duplicateMessage: _variantDuplicateMessage,
+                                );
+                              });
+                            }
+                          } finally {
+                            if (mounted) setState(() => _isProcessing = false);
+                          }
+                        },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primary,
                     foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 10,
+                    ),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: const Text(
-                    'Save Changes',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : Text(
+                          isEdit ? 'Save Changes' : 'Add Variant',
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                 ),
               ],
             );
@@ -1246,7 +1903,12 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     } finally {
       // ✅ Dispose controllers after dialog closes
       priceController.dispose();
-      durationController.dispose();
+      hoursController.dispose();
+      minutesController.dispose();
+      nameController.dispose();
+      newAgeNameController.dispose();
+      newAgeMinController.dispose();
+      newAgeMaxController.dispose();
     }
   }
 
@@ -1282,7 +1944,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Delete Option',
+                      'Delete Variant',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -1294,7 +1956,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               ),
               const SizedBox(height: 16),
               Text(
-                "Are you sure you want to delete this option?",
+                "Are you sure you want to delete this variant?",
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
@@ -1313,6 +1975,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   children: [
                     Text(
                       'Service: ${service['name']}',
+                      softWrap: true,
                       style: TextStyle(
                         fontWeight: FontWeight.w500,
                         color: isDark ? Colors.white : Colors.black87,
@@ -1320,20 +1983,23 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${variant['gender_name']} - ${variant['age_name']}',
+                      _variantLabel(variant),
+                      softWrap: true,
                       style: TextStyle(
                         fontSize: 13,
                         color: isDark ? Colors.white60 : Colors.black87,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${_formatPrice(variant['price'])} | ${variant['duration']} mins',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white60 : Colors.black87,
+                    if (_variantPriceText(variant) != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        _variantPriceText(variant)!,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white60 : Colors.black87,
+                        ),
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
@@ -1384,11 +2050,19 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
         await _loadServices();
 
         if (mounted) {
-          _showSnackBar('Option deleted successfully', Colors.green);
+          _showSnackBar('Variant deleted successfully', Colors.green);
         }
       } catch (e) {
+        debugPrint('Error deleting variant: $e');
         if (mounted) {
-          _showSnackBar('Error deleting option: $e', Colors.red);
+          _showSnackBar(
+            _friendlyError(
+              e,
+              linkedMessage:
+                  "This variant is already used by bookings or barbers, so it can't be deleted right now.",
+            ),
+            Colors.red,
+          );
         }
       } finally {
         if (mounted) setState(() => _isProcessing = false);
@@ -1404,18 +2078,42 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
     final descriptionController = TextEditingController(
       text: service['description'] ?? '',
     );
-    int? selectedCategoryId = service['category_id'];
+    // The dropdown only accepts a value that is in its list.
+    int? selectedCategoryId = _categories.any(
+      (c) => c['id'] == service['category_id'],
+    )
+        ? service['category_id'] as int?
+        : null;
+    String? nameError;
+    String? categoryError;
+    String? saveError;
+    bool isSaving = false;
 
     final isDark = context.isDarkMode;
+
+    InputDecoration decoration(String label, {String? errorText}) {
+      return InputDecoration(
+        labelText: label,
+        labelStyle: TextStyle(
+          color: isDark ? Colors.white60 : Colors.grey[600],
+        ),
+        counterText: '',
+        errorText: errorText,
+        errorMaxLines: 2,
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+      );
+    }
 
     try {
       await showDialog(
         context: context,
+        barrierDismissible: false,
         builder: (dialogContext) => StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              backgroundColor:
-                  isDark ? const Color(0xFF1E1E1E) : Colors.white,
+              backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
               ),
@@ -1454,62 +2152,43 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     const SizedBox(height: 20),
                     TextFormField(
                       controller: nameController,
+                      maxLength: _maxServiceName,
+                      inputFormatters: _textFormatters(_maxServiceName),
+                      textCapitalization: TextCapitalization.words,
+                      onChanged: (_) => setDialogState(() {
+                        nameError = null;
+                        saveError = null;
+                      }),
                       style: TextStyle(
                         color: isDark ? Colors.white : Colors.black87,
                       ),
-                      decoration: InputDecoration(
-                        labelText: 'Service Name',
-                        labelStyle: TextStyle(
-                          color:
-                              isDark ? Colors.white60 : Colors.grey[600],
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        filled: true,
-                        fillColor: isDark
-                            ? const Color(0xFF2A2A2A)
-                            : Colors.white,
+                      decoration: decoration(
+                        'Service Name *',
+                        errorText: nameError,
                       ),
                     ),
                     const SizedBox(height: 16),
                     TextFormField(
                       controller: descriptionController,
                       maxLines: 3,
+                      maxLength: _maxDescription,
+                      inputFormatters: _textFormatters(
+                        _maxDescription,
+                        multiLine: true,
+                      ),
+                      onChanged: (_) => setDialogState(() => saveError = null),
                       style: TextStyle(
                         color: isDark ? Colors.white : Colors.black87,
                       ),
-                      decoration: InputDecoration(
-                        labelText: 'Description',
-                        labelStyle: TextStyle(
-                          color:
-                              isDark ? Colors.white60 : Colors.grey[600],
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        filled: true,
-                        fillColor: isDark
-                            ? const Color(0xFF2A2A2A)
-                            : Colors.white,
-                      ),
+                      decoration: decoration('Description'),
                     ),
                     const SizedBox(height: 16),
                     DropdownButtonFormField<int>(
                       initialValue: selectedCategoryId,
-                      decoration: InputDecoration(
-                        labelText: 'Category',
-                        labelStyle: TextStyle(
-                          color:
-                              isDark ? Colors.white60 : Colors.grey[600],
-                        ),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        filled: true,
-                        fillColor: isDark
-                            ? const Color(0xFF2A2A2A)
-                            : Colors.white,
+                      isExpanded: true,
+                      decoration: decoration(
+                        'Category *',
+                        errorText: categoryError,
                       ),
                       dropdownColor: isDark
                           ? const Color(0xFF2A2A2A)
@@ -1519,9 +2198,9 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                           value: category['id'] as int,
                           child: Text(
                             category['display_name'],
+                            overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color:
-                                  isDark ? Colors.white : Colors.black87,
+                              color: isDark ? Colors.white : Colors.black87,
                             ),
                           ),
                         );
@@ -1529,15 +2208,53 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       onChanged: (value) {
                         setDialogState(() {
                           selectedCategoryId = value;
+                          categoryError = null;
+                          saveError = null;
                         });
                       },
                     ),
+                    if (saveError != null) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: Colors.red.withValues(alpha: 0.4),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Icon(
+                              Icons.error_outline,
+                              size: 16,
+                              color: Colors.red,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                saveError!,
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  color: Colors.red,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
               actions: [
                 TextButton(
-                  onPressed: () => Navigator.pop(dialogContext),
+                  onPressed: isSaving
+                      ? null
+                      : () => Navigator.pop(dialogContext),
                   child: Text(
                     'Cancel',
                     style: TextStyle(
@@ -1546,56 +2263,97 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                   ),
                 ),
                 ElevatedButton(
-                  onPressed: () async {
-                    if (nameController.text.trim().isEmpty) {
-                      _showSnackBar(
-                        'Please enter service name',
-                        Colors.orange,
-                      );
-                      return;
-                    }
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          final cleanName = _cleanText(
+                            nameController.text,
+                            _maxServiceName,
+                          );
+                          final cleanDescription = _cleanText(
+                            descriptionController.text,
+                            _maxDescription,
+                            multiLine: true,
+                          );
 
-                    if (!mounted) return;
-                    setState(() => _isProcessing = true);
+                          String? nErr;
+                          String? cErr;
+                          if (cleanName.isEmpty) {
+                            nErr = 'Service name is required';
+                          } else if (selectedCategoryId != null &&
+                              _services.any(
+                                (s) =>
+                                    s['id'] != service['id'] &&
+                                    s['category_id'] == selectedCategoryId &&
+                                    (s['name'] ?? '')
+                                            .toString()
+                                            .trim()
+                                            .toLowerCase() ==
+                                        cleanName.toLowerCase(),
+                              )) {
+                            nErr =
+                                'A service with this name already exists in this category';
+                          }
+                          if (selectedCategoryId == null) {
+                            cErr = 'Please select a category';
+                          }
+                          if (nErr != null || cErr != null) {
+                            setDialogState(() {
+                              nameError = nErr;
+                              categoryError = cErr;
+                            });
+                            return;
+                          }
 
-                    try {
-                      await supabase
-                          .from('services')
-                          .update({
-                            'name': nameController.text.trim(),
-                            'description':
-                                descriptionController.text.trim().isEmpty
-                                    ? null
-                                    : descriptionController.text.trim(),
-                            'category_id': selectedCategoryId,
-                            'updated_at':
-                                DateTime.now().toIso8601String(),
-                          })
-                          .eq('id', service['id']);
+                          if (!mounted) return;
+                          setDialogState(() {
+                            isSaving = true;
+                            saveError = null;
+                          });
+                          setState(() => _isProcessing = true);
 
-                      if (dialogContext.mounted) {
-                        Navigator.pop(dialogContext);
-                      }
+                          try {
+                            await supabase
+                                .from('services')
+                                .update({
+                                  'name': cleanName,
+                                  'description': cleanDescription.isEmpty
+                                      ? null
+                                      : cleanDescription,
+                                  'category_id': selectedCategoryId,
+                                  'updated_at': DateTime.now()
+                                      .toIso8601String(),
+                                })
+                                .eq('id', service['id']);
 
-                      await _loadServices();
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                            }
 
-                      if (mounted) {
-                        _showSnackBar(
-                          'Service updated successfully!',
-                          Colors.green,
-                        );
-                      }
-                    } catch (e) {
-                      if (mounted) {
-                        _showSnackBar(
-                          'Error updating service: $e',
-                          Colors.red,
-                        );
-                      }
-                    } finally {
-                      if (mounted) setState(() => _isProcessing = false);
-                    }
-                  },
+                            await _loadServices();
+
+                            if (mounted) {
+                              _showSnackBar(
+                                'Service updated successfully!',
+                                Colors.green,
+                              );
+                            }
+                          } catch (e) {
+                            debugPrint('Error updating service: $e');
+                            if (dialogContext.mounted) {
+                              setDialogState(() {
+                                isSaving = false;
+                                saveError = _friendlyError(
+                                  e,
+                                  duplicateMessage:
+                                      'A service with this name already exists in this category.',
+                                );
+                              });
+                            }
+                          } finally {
+                            if (mounted) setState(() => _isProcessing = false);
+                          }
+                        },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primary,
                     foregroundColor: Colors.white,
@@ -1603,7 +2361,16 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: const Text('Save Changes'),
+                  child: isSaving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Text('Save Changes'),
                 ),
               ],
             );
@@ -1656,6 +2423,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
               const SizedBox(height: 16),
               Text(
                 "Are you sure you want to delete '${service['name']}'?",
+                softWrap: true,
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
@@ -1682,7 +2450,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '• ${service['variant_count']} option${service['variant_count'] != 1 ? 's' : ''}',
+                      '• ${service['variant_count']} variant${service['variant_count'] != 1 ? 's' : ''}',
                       style: TextStyle(
                         fontSize: 13,
                         color: isDark ? Colors.white70 : Colors.black87,
@@ -1748,7 +2516,14 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
       } catch (e) {
         debugPrint('Error deleting service: $e');
         if (mounted) {
-          _showSnackBar('Error deleting service: $e', Colors.red);
+          _showSnackBar(
+            _friendlyError(
+              e,
+              linkedMessage:
+                  "This service is already used by bookings, so it can't be deleted right now.",
+            ),
+            Colors.red,
+          );
         }
       } finally {
         if (mounted) setState(() => _isProcessing = false);
@@ -2026,7 +2801,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                             fontSize: 18,
                             color: isDark ? Colors.white : Colors.grey[800],
                           ),
-                          maxLines: 1,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 4),
@@ -2118,7 +2893,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     Row(
                       children: [
                         Text(
-                          'Options',
+                          'Variants',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -2132,7 +2907,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               ? null
                               : () => _showAddVariantDialog(service),
                           icon: const Icon(Icons.add, size: 16),
-                          label: const Text('Add Option'),
+                          label: const Text('Add Variant'),
                           style: TextButton.styleFrom(
                             foregroundColor: accentColor,
                             padding: const EdgeInsets.symmetric(
@@ -2179,32 +2954,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               ),
                               const SizedBox(width: 12),
                               Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      '${variant['gender_name']} • ${variant['age_name']}',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w600,
-                                        fontSize: 13,
-                                        color: isDark
-                                            ? Colors.white
-                                            : Colors.black87,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${_formatPrice(variant['price'])} | ${variant['duration']} mins',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: isDark
-                                            ? Colors.white60
-                                            : Colors.grey[600],
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                child: _buildVariantTexts(variant, isDark),
                               ),
                               Row(
                                 mainAxisSize: MainAxisSize.min,
@@ -2221,7 +2971,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                             service,
                                             variant,
                                           ),
-                                    tooltip: 'Edit Option',
+                                    tooltip: 'Edit Variant',
                                   ),
                                   IconButton(
                                     icon: const Icon(
@@ -2233,7 +2983,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                         ? null
                                         : () =>
                                             _deleteVariant(service, variant),
-                                    tooltip: 'Delete Option',
+                                    tooltip: 'Delete Variant',
                                   ),
                                 ],
                               ),
@@ -2265,7 +3015,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                             ),
                             const SizedBox(height: 12),
                             Text(
-                              'No options added yet',
+                              'No variants added yet',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: isDark
@@ -2276,7 +3026,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                             ),
                             const SizedBox(height: 8),
                             Text(
-                              'Click "Add Option" to add gender and age-based pricing',
+                              'Click "Add Variant" to add price and duration options',
                               style: TextStyle(
                                 fontSize: 12,
                                 color: isDark
@@ -2361,7 +3111,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               color:
                                   isDark ? Colors.white : Colors.grey[800],
                             ),
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
                           const SizedBox(height: 4),
@@ -2394,7 +3144,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
-                                    '${variants.length} options',
+                                    '${variants.length} variants',
                                     style: TextStyle(
                                       fontSize: 10,
                                       color: isDark
@@ -2479,7 +3229,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                     Row(
                       children: [
                         Text(
-                          'Options',
+                          'Variants',
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -2493,7 +3243,7 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                               ? null
                               : () => _showAddVariantDialog(service),
                           icon: const Icon(Icons.add, size: 16),
-                          label: const Text('Add Option'),
+                          label: const Text('Add Variant'),
                           style: TextButton.styleFrom(
                             foregroundColor: accentColor,
                           ),
@@ -2533,29 +3283,10 @@ class _ServiceManagementScreenState extends State<ServiceManagementScreen> {
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    '${variant['gender_name']} • ${variant['age_name']}',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: 13,
-                                      color: isDark
-                                          ? Colors.white
-                                          : Colors.black87,
-                                    ),
-                                  ),
-                                  Text(
-                                    '${_formatPrice(variant['price'])} | ${variant['duration']} mins',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: isDark
-                                          ? Colors.white60
-                                          : Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
+                              child: _buildVariantTexts(
+                                variant,
+                                isDark,
+                                subSize: 11,
                               ),
                             ),
                             Row(
