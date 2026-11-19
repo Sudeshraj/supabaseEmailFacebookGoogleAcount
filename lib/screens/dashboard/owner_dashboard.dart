@@ -630,6 +630,8 @@ Future<void> _loadNotificationCount() async {
     ];
   }
 
+  /// ✅ Icon-only plan badge (same style as the customer dashboard's Pro
+  /// button: 48x48 IconButton). The icon colour changes with the package.
   Widget _buildPlanBadge() {
     return Consumer<SubscriptionProvider>(
       builder: (context, sub, _) {
@@ -644,8 +646,12 @@ Future<void> _loadNotificationCount() async {
                     ? Colors.blueGrey
                     : Colors.brown;
 
-        return GestureDetector(
-          onTap: () {
+        return IconButton(
+          icon: Icon(Icons.workspace_premium, color: badgeColor),
+          tooltip: '$planName Plan',
+          splashRadius: 24,
+          iconSize: 24,
+          onPressed: () {
             if (_selectedSalonId == null) {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('No active salon found')),
@@ -663,30 +669,6 @@ Future<void> _loadNotificationCount() async {
               },
             );
           },
-          child: Container(
-            margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: badgeColor.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: badgeColor, width: 1),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.workspace_premium, size: 14, color: badgeColor),
-                const SizedBox(width: 4),
-                Text(
-                  planName,
-                  style: TextStyle(
-                    color: badgeColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
         );
       },
     );
@@ -2761,38 +2743,52 @@ Future<void> _loadNotificationCount() async {
     );
   }
 
+  /// ✅ FIX: On web the Scrollbar + ScrollView now span the FULL screen width
+  /// (so the scrollbar sits at the far-right edge of the screen). The 1200px
+  /// max-width centering is applied INSIDE the scroll view, so the content
+  /// layout looks exactly the same as before.
   Widget _buildBody(bool isWeb) {
-    return _isLoading
-        ? const Center(
-            child: CircularProgressIndicator(color: AppTheme.primary),
-          )
-        : Center(
-            child: Container(
-              constraints: BoxConstraints(
-                maxWidth: isWeb ? 1200 : double.infinity,
+    if (_isLoading) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppTheme.primary),
+      );
+    }
+
+    if (isWeb) {
+      return Scrollbar(
+        controller: _scrollController,
+        thumbVisibility: true,
+        trackVisibility: true,
+        thickness: 8.0,
+        radius: const Radius.circular(10),
+        scrollbarOrientation: ScrollbarOrientation.right,
+        child: SingleChildScrollView(
+          controller: _scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: _buildDashboardContent(),
               ),
-              child: isWeb
-                  ? Scrollbar(
-                      controller: _scrollController,
-                      thumbVisibility: true,
-                      trackVisibility: true,
-                      thickness: 8.0,
-                      radius: const Radius.circular(10),
-                      scrollbarOrientation: ScrollbarOrientation.right,
-                      child: SingleChildScrollView(
-                        controller: _scrollController,
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.all(24),
-                        child: _buildDashboardContent(),
-                      ),
-                    )
-                  : SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: EdgeInsets.zero,
-                      child: _buildDashboardContent(),
-                    ),
             ),
-          );
+          ),
+        ),
+      );
+    }
+
+    // Mobile layout (unchanged)
+    return Center(
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: double.infinity),
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.zero,
+          child: _buildDashboardContent(),
+        ),
+      ),
+    );
   }
 
   Widget _buildDashboardContent() {

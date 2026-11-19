@@ -3548,90 +3548,98 @@ Future<void> _loadUnreadCount() async {
     );
   }
 
+  /// ✅ FIX: Scrollbar + RefreshIndicator + ScrollView now span the FULL
+  /// screen width, so the scrollbar sits at the far-right edge of the screen.
+  /// The 1200px max-width centering is applied INSIDE the scroll view, so the
+  /// content layout looks exactly the same as before.
   Widget _buildWebLayout() {
-    return Center(
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 1200),
-        child: _isLoading && _followedSalons.isEmpty && _offers.isEmpty
-            ? const Center(
-                child: CircularProgressIndicator(color: AppTheme.primary),
-              )
-            : Scrollbar(
-                controller: _scrollController,
-                thumbVisibility: true,
-                trackVisibility: true,
-                thickness: 8.0,
-                radius: const Radius.circular(10),
-                scrollbarOrientation: ScrollbarOrientation.right,
-                child: RefreshIndicator(
-                  onRefresh: _loadDashboardData,
-                  color: AppTheme.primary,
-                  child: SingleChildScrollView(
-                    controller: _scrollController,
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      children: [
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 20),
-                          child: CompositedTransformTarget(
-                            link: _searchLayerLink,
-                            child: Container(
-                              key: _searchFieldKey,
-                              decoration: BoxDecoration(
-                                color: context.isDarkMode
-                                    ? Colors.white.withValues(alpha: 0.08)
-                                    : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(30),
-                                border: Border.all(color: context.dividerColor),
+    if (_isLoading && _followedSalons.isEmpty && _offers.isEmpty) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppTheme.primary),
+      );
+    }
+
+    return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: true,
+      trackVisibility: true,
+      thickness: 8.0,
+      radius: const Radius.circular(10),
+      scrollbarOrientation: ScrollbarOrientation.right,
+      child: RefreshIndicator(
+        onRefresh: _loadDashboardData,
+        color: AppTheme.primary,
+        child: SingleChildScrollView(
+          controller: _scrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1200),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 20),
+                      child: CompositedTransformTarget(
+                        link: _searchLayerLink,
+                        child: Container(
+                          key: _searchFieldKey,
+                          decoration: BoxDecoration(
+                            color: context.isDarkMode
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(30),
+                            border: Border.all(color: context.dividerColor),
+                          ),
+                          child: TextField(
+                            controller: _searchController,
+                            focusNode: _searchFocusNode,
+                            style: TextStyle(color: context.textColor),
+                            decoration: InputDecoration(
+                              hintText: '🔍 Search for salons...',
+                              hintStyle: TextStyle(
+                                color: context.secondaryTextColor,
                               ),
-                              child: TextField(
-                                controller: _searchController,
-                                focusNode: _searchFocusNode,
-                                style: TextStyle(color: context.textColor),
-                                decoration: InputDecoration(
-                                  hintText: '🔍 Search for salons...',
-                                  hintStyle: TextStyle(
-                                    color: context.secondaryTextColor,
-                                  ),
-                                  prefixIcon: Icon(
-                                    Icons.search,
-                                    color: context.secondaryTextColor,
-                                  ),
-                                  suffixIcon: _searchController.text.isNotEmpty
-                                      ? GestureDetector(
-                                          onTap: () {
-                                            _searchController.clear();
-                                            _hideSearchResults();
-                                          },
-                                          child: Icon(
-                                            Icons.close,
-                                            color: context.secondaryTextColor,
-                                          ),
-                                        )
-                                      : null,
-                                  border: InputBorder.none,
-                                  contentPadding: const EdgeInsets.symmetric(
-                                    vertical: 14,
-                                    horizontal: 8,
-                                  ),
-                                ),
-                                onTap: () {
-                                  if (_searchController.text.isNotEmpty &&
-                                      _searchResults.isNotEmpty) {
-                                    _showSearchOverlay();
-                                  }
-                                },
+                              prefixIcon: Icon(
+                                Icons.search,
+                                color: context.secondaryTextColor,
+                              ),
+                              suffixIcon: _searchController.text.isNotEmpty
+                                  ? GestureDetector(
+                                      onTap: () {
+                                        _searchController.clear();
+                                        _hideSearchResults();
+                                      },
+                                      child: Icon(
+                                        Icons.close,
+                                        color: context.secondaryTextColor,
+                                      ),
+                                    )
+                                  : null,
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(
+                                vertical: 14,
+                                horizontal: 8,
                               ),
                             ),
+                            onTap: () {
+                              if (_searchController.text.isNotEmpty &&
+                                  _searchResults.isNotEmpty) {
+                                _showSearchOverlay();
+                              }
+                            },
                           ),
                         ),
-                        _buildDashboardContent(),
-                      ],
+                      ),
                     ),
-                  ),
+                    _buildDashboardContent(),
+                  ],
                 ),
               ),
+            ),
+          ),
+        ),
       ),
     );
   }
