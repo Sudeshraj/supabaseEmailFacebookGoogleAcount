@@ -2161,7 +2161,7 @@ Future<void> _loadNotificationCount() async {
       icon: Icons.calendar_today,
       color: Colors.blue,
       subtitle: '$_completedToday completed',
-      onTap: _viewMySchedule,
+      onTap: _viewMyAppointments,
     );
 
     final earningsCard = DashboardStatCard(

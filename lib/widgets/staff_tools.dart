@@ -193,7 +193,7 @@ class _StaffToolsSectionState extends State<StaffToolsSection> {
     final id = a.salonId;
     final name = Uri.encodeComponent(a.salonName);
     final all = <_Tile>[
-      _Tile('all_appointments', Icons.event_note, 'All Appointments',
+      _Tile('all_appointments', Icons.event_note, 'Appointments',
           Colors.blue, '/owner/appointments?salonId=$id'),
       _Tile('view_customers', Icons.people, 'Customers', Colors.purple,
           '/owner/customers?salonId=$id'),
@@ -211,7 +211,7 @@ class _StaffToolsSectionState extends State<StaffToolsSection> {
           '/owner/barbers?salonId=$id'),
       _Tile('manage_holidays', Icons.wb_sunny, 'Salon Holidays', Colors.teal,
           '/owner/salon/holidays?salonId=$id'),
-      _Tile('manage_offers', Icons.local_offer, 'Offers & Promotions',
+      _Tile('manage_offers', Icons.local_offer, 'Offers',
           AppTheme.primary, '/owner/offers/$id'),
       _Tile('view_revenue', Icons.attach_money, 'Revenue', Colors.orange,
           '/owner/revenue?salonId=$id'),

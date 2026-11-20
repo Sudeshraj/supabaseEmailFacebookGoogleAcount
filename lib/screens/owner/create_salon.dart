@@ -4389,12 +4389,16 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       body: SafeArea(
         child: Container(
           color: isDark ? const Color(0xFF121212) : Colors.grey[50],
-          child: Center(
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: isWeb ? 1000 : double.infinity,
-              ),
-              child: SingleChildScrollView(
+          // ✅ FIX: the scroll view now spans the FULL screen width, so the
+          // scrollbar sits at the far-right edge of the screen. The max-width
+          // centering (1000px on web) is applied INSIDE the scroll view, so
+          // the content layout looks exactly the same as before.
+          child: SingleChildScrollView(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: isWeb ? 1000 : double.infinity,
+                ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [

@@ -30,6 +30,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
     with SingleTickerProviderStateMixin {
   static const String _kDefaultTz = 'Asia/Colombo';
 
+  // max content width on web (header + cards are centered inside this)
+  static const double _kMaxContentWidth = 1300;
+
   final supabase = Supabase.instance.client;
   final CurrencyService _currencyService = CurrencyService.instance;
 
@@ -684,9 +687,13 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: _isWeb,
+        automaticallyImplyLeading: false,
+        // ✅ FIX: back arrow now has an explicit white color (the theme was
+        // hiding it), same as the other screens
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          tooltip: 'Back',
+          onPressed: () => Navigator.maybePop(context),
         ),
         title: Column(
           crossAxisAlignment:
@@ -702,7 +709,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
         actions: [
           IconButton(
             tooltip: 'Refresh',
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh, color: Colors.white),
             onPressed: _loading ? null : _loadAppointments,
           ),
         ],
@@ -718,62 +725,80 @@ class _AppointmentsScreenState extends State<AppointmentsScreen>
                     buttonText: 'Retry',
                     onPressed: _loadData,
                   )
-                : Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 1300),
-                      child: _content(dark),
-                    ),
-                  ),
+                // ✅ FIX: no max-width box around the whole content anymore.
+                // The header is centered (max 1300) inside _content, and the
+                // list spans the full screen width so its scrollbar sits at
+                // the far-right edge of the screen.
+                : _content(dark),
       ),
     );
   }
 
   Widget _content(bool dark) {
     final side = _isWeb ? 20.0 : 12.0;
+    // horizontal padding that the list used to have (kept the same)
+    final listSide = side - 8 < 0 ? 0.0 : side - 8;
+
     return Column(
       children: [
-        Padding(
-          padding: EdgeInsets.fromLTRB(side, 12, side, 0),
-          child: Column(
-            children: [
-              if (_tzDiffers) ...[_tzBanner(dark), const SizedBox(height: 10)],
-              _searchBox(dark),
-              const SizedBox(height: 10),
-              _periodBar(dark),
-              const SizedBox(height: 10),
-              ApptStatsRow(
-                counts: _counts,
-                isDark: dark,
-                onTap: (i) => _tabController.animateTo(i),
+        // ---------- header (centered, max 1300) ----------
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _kMaxContentWidth),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(side, 12, side, 0),
+              child: Column(
+                children: [
+                  if (_tzDiffers) ...[
+                    _tzBanner(dark),
+                    const SizedBox(height: 10),
+                  ],
+                  _searchBox(dark),
+                  const SizedBox(height: 10),
+                  _periodBar(dark),
+                  const SizedBox(height: 10),
+                  ApptStatsRow(
+                    counts: _counts,
+                    isDark: dark,
+                    onTap: (i) => _tabController.animateTo(i),
+                  ),
+                  const SizedBox(height: 10),
+                  buildApptTabBar(_tabController, _counts, dark),
+                  const SizedBox(height: 6),
+                ],
               ),
-              const SizedBox(height: 10),
-              buildApptTabBar(_tabController, _counts, dark),
-              const SizedBox(height: 6),
-            ],
+            ),
           ),
         ),
+        // ---------- list (full width → scrollbar at the screen edge) ----------
         Expanded(
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: side - 8 < 0 ? 0 : side - 8),
-            child: ApptList(
-              items: _filtered,
-              isDark: dark,
-              onRefresh: _loadAppointments,
-              emptyText: _emptyText(),
-              emptySub: 'for $_periodText',
-              cardBuilder: (a) => ApptCard(
-                apt: a,
-                isDark: dark,
-                busy: _busy,
-                showBarber: true,
-                h: _handlers(a),
-                onTap: () => showApptDetails(
-                  context,
-                  apt: a,
-                  isDark: dark,
-                  busy: _busy,
-                  showBarber: true,
-                  h: _handlers(a),
+          child: ApptList(
+            items: _filtered,
+            isDark: dark,
+            onRefresh: _loadAppointments,
+            emptyText: _emptyText(),
+            emptySub: 'for $_periodText',
+            // cards are centered (max 1300) with the same side padding as before
+            cardBuilder: (a) => Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: _kMaxContentWidth),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: listSide),
+                  child: ApptCard(
+                    apt: a,
+                    isDark: dark,
+                    busy: _busy,
+                    showBarber: true,
+                    h: _handlers(a),
+                    onTap: () => showApptDetails(
+                      context,
+                      apt: a,
+                      isDark: dark,
+                      busy: _busy,
+                      showBarber: true,
+                      h: _handlers(a),
+                    ),
+                  ),
                 ),
               ),
             ),
