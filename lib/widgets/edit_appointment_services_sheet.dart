@@ -11,7 +11,12 @@ import '../../theme/app_theme.dart';
 /// appointment map එකේ තියෙන්න ඕන keys:
 ///   id, salon_id, offer_id, customer_name, services
 ///   (appointment_services rows — supports both `id` and
-///   `appointment_service_id` keys), extra_charge, extra_charge_note
+///   `appointment_service_id` keys, and must have `service_id`),
+///   extra_charge, extra_charge_note, symbol (optional currency symbol)
+///
+/// ✅ RULE: a service that is already on the appointment (or already in the
+/// "New services" list) can NOT be added again. If the existing one is
+/// removed (marked for removal) it can be added again as a replacement.
 ///
 /// Save සාර්ථක නම් `true` return කරනවා (screen එක refresh කරන්න).
 class EditAppointmentServicesSheet extends StatefulWidget {
@@ -55,11 +60,17 @@ class _EditAppointmentServicesSheetState
   String _search = '';
   bool _showSuggestions = false;
 
+  /// currency symbol (from the appointment map, default 'Rs.')
+  String get _sym {
+    final s = widget.appointment['symbol']?.toString().trim() ?? '';
+    return s.isEmpty ? 'Rs.' : s;
+  }
+
   @override
   void initState() {
     super.initState();
 
-    // ✅ FIX: services rows may use either `id` (barber screen) or
+    // services rows may use either `id` (barber screen) or
     // `appointment_service_id` (owner screen) as the primary key. Normalize
     // everything to `id` so downstream code has a single source of truth.
     final services = widget.appointment['services'] as List? ?? [];
@@ -67,20 +78,22 @@ class _EditAppointmentServicesSheetState
       if (s == null) continue;
       final raw = Map<String, dynamic>.from(s as Map);
 
-      // Normalize id
       if (raw['id'] == null && raw['appointment_service_id'] != null) {
         raw['id'] = raw['appointment_service_id'];
       }
 
-      // Skip rows without a valid id (shouldn't happen with schema, but
-      // defensive against partial data / RLS-filtered joins).
       final idVal = raw['id'];
       if (idVal == null) continue;
       final id = idVal is int ? idVal : int.tryParse(idVal.toString());
       if (id == null || id < 0) continue;
       raw['id'] = id;
 
-      // Normalize numeric fields safely
+      // service_id is needed for the "already added" check
+      final sidVal = raw['service_id'];
+      raw['service_id'] = sidVal == null
+          ? null
+          : (sidVal is int ? sidVal : int.tryParse(sidVal.toString()));
+
       raw['duration'] = _toInt(raw['duration'], fallback: 30);
       raw['original_price'] = _toDouble(raw['original_price']);
       raw['discount_amount'] = _toDouble(raw['discount_amount']);
@@ -102,7 +115,7 @@ class _EditAppointmentServicesSheetState
     _load();
   }
 
-  // ✅ Safe numeric helpers
+  // Safe numeric helpers
   int _toInt(dynamic v, {int fallback = 0}) {
     if (v == null) return fallback;
     if (v is int) return v;
@@ -125,6 +138,27 @@ class _EditAppointmentServicesSheetState
     _searchFocus.dispose();
     super.dispose();
   }
+
+  // ---------------------------------------------------------------
+  // ✅ "ALREADY ADDED" RULE
+  //   taken = services still on the appointment (not marked for removal)
+  //           + services in the "New services" list
+  // ---------------------------------------------------------------
+  Set<int> get _takenServiceIds {
+    final ids = <int>{};
+    for (final s in _existing) {
+      if (_removeIds.contains(s['id'])) continue;
+      final sid = s['service_id'];
+      if (sid is int) ids.add(sid);
+    }
+    for (final a in _added) {
+      final sid = a['service_id'];
+      if (sid is int) ids.add(sid);
+    }
+    return ids;
+  }
+
+  bool _isTaken(int serviceId) => _takenServiceIds.contains(serviceId);
 
   // ---------------------------------------------------------------
   // LOAD
@@ -347,29 +381,42 @@ class _EditAppointmentServicesSheetState
     final value = _toDouble(_offer!['discount_value']);
     final v = value.toStringAsFixed(value % 1 == 0 ? 0 : 1);
     if (type == 'percentage') return '$v% OFF';
-    if (type == 'fixed') return 'Rs. $v OFF';
+    if (type == 'fixed') return '$_sym $v OFF';
     return 'FREE';
   }
 
   // ---------------------------------------------------------------
   // SEARCH + SUGGESTIONS
   // ---------------------------------------------------------------
+  /// catalog after search; services that can still be added come first,
+  /// the ones already on the appointment go to the end (greyed out)
   List<Map<String, dynamic>> get _filteredCatalog {
-    if (_search.isEmpty) return _catalog;
     final q = _search.toLowerCase();
-    return _catalog.where((s) {
-      return s['name'].toString().toLowerCase().contains(q) ||
-          s['category'].toString().toLowerCase().contains(q);
-    }).toList();
+    final base = _search.isEmpty
+        ? _catalog
+        : _catalog.where((s) {
+            return s['name'].toString().toLowerCase().contains(q) ||
+                s['category'].toString().toLowerCase().contains(q);
+          }).toList();
+
+    final taken = _takenServiceIds;
+    return [
+      ...base.where((s) => !taken.contains(s['id'])),
+      ...base.where((s) => taken.contains(s['id'])),
+    ];
   }
 
   List<Map<String, dynamic>> get _suggestions {
     if (_search.isEmpty) return [];
     final q = _search.toLowerCase();
+    final taken = _takenServiceIds;
     final matches = _catalog
         .where((s) => s['name'].toString().toLowerCase().contains(q))
         .toList();
     matches.sort((a, b) {
+      final aTaken = taken.contains(a['id']) ? 1 : 0;
+      final bTaken = taken.contains(b['id']) ? 1 : 0;
+      if (aTaken != bTaken) return aTaken - bTaken;
       final an = a['name'].toString().toLowerCase();
       final bn = b['name'].toString().toLowerCase();
       final aStarts = an.startsWith(q) ? 0 : 1;
@@ -381,6 +428,14 @@ class _EditAppointmentServicesSheetState
   }
 
   void _pickSuggestion(Map<String, dynamic> service) {
+    if (_isTaken(service['id'] as int)) {
+      _showSnack(
+        '${service['name']} is already added to this appointment',
+        color: Colors.orange,
+      );
+      return;
+    }
+
     final variants = (service['variants'] as List).cast<Map<String, dynamic>>();
     setState(() {
       _searchCtrl.text = service['name'].toString();
@@ -427,22 +482,24 @@ class _EditAppointmentServicesSheetState
   // ACTIONS
   // ---------------------------------------------------------------
   void _addVariant(Map<String, dynamic> service, Map<String, dynamic> variant) {
-    final price = _toDouble(variant['price']);
-    final discount = _discountFor(service['id'] as int, price);
+    final serviceId = service['id'] as int;
 
-    final alreadyAdded = _added.any((a) => a['variant_id'] == variant['id']);
-    if (alreadyAdded) {
+    // ✅ the same service can not be added twice (any variant)
+    if (_isTaken(serviceId)) {
       _showSnack(
-        '${service['name']} is already in the list',
+        '${service['name']} is already added to this appointment',
         color: Colors.orange,
       );
       return;
     }
 
+    final price = _toDouble(variant['price']);
+    final discount = _discountFor(serviceId, price);
+
     setState(() {
       _added.add({
         'variant_id': variant['id'],
-        'service_id': service['id'],
+        'service_id': serviceId,
         'name': service['name'],
         'label': variant['label'],
         'duration': _toInt(variant['duration'], fallback: 30),
@@ -450,6 +507,7 @@ class _EditAppointmentServicesSheetState
         'discount_amount': discount,
         'final_price': price - discount,
       });
+      _expandedServiceId = null; // the service is taken now, close its tile
     });
     _showSnack('${service['name']} added', color: Colors.green.shade600);
   }
@@ -498,7 +556,7 @@ class _EditAppointmentServicesSheetState
 
         String msg = '✅ Updated.';
         if (result['new_price'] != null) {
-          msg += ' Total: Rs. ${newPrice.toStringAsFixed(2)}.';
+          msg += ' Total: $_sym ${newPrice.toStringAsFixed(2)}.';
         }
         if (minutesChanged != 0 && newEndTime != null) {
           final shortTime = newEndTime.length >= 5
@@ -565,7 +623,7 @@ class _EditAppointmentServicesSheetState
       children: [
         if (discount > 0)
           Text(
-            'Rs. ${original.toStringAsFixed(2)}',
+            '$_sym ${original.toStringAsFixed(2)}',
             style: TextStyle(
               fontSize: 11,
               color: Colors.grey[500],
@@ -573,7 +631,7 @@ class _EditAppointmentServicesSheetState
             ),
           ),
         Text(
-          'Rs. ${finalPrice.toStringAsFixed(2)}',
+          '$_sym ${finalPrice.toStringAsFixed(2)}',
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
@@ -586,7 +644,6 @@ class _EditAppointmentServicesSheetState
   }
 
   Widget _existingRow(Map<String, dynamic> s) {
-    // ✅ Safe id extraction — never throws
     final rawId = s['id'] ?? s['appointment_service_id'];
     if (rawId == null) return const SizedBox.shrink();
     final id = rawId is int ? rawId : int.tryParse(rawId.toString());
@@ -659,13 +716,24 @@ class _EditAppointmentServicesSheetState
                     'At least one service is required - add a replacement first',
                     color: Colors.orange,
                   )
-                : () => setState(() {
+                : () {
                     if (removed) {
-                      _removeIds.remove(id);
+                      // ✅ undo is not allowed while the same service was
+                      // added again as a replacement
+                      final sid = s['service_id'];
+                      if (sid is int &&
+                          _added.any((a) => a['service_id'] == sid)) {
+                        _showSnack(
+                          '${s['service_name']} is in the new services list. Remove it there first.',
+                          color: Colors.orange,
+                        );
+                        return;
+                      }
+                      setState(() => _removeIds.remove(id));
                     } else {
-                      _removeIds.add(id);
+                      setState(() => _removeIds.add(id));
                     }
-                  }),
+                  },
           ),
         ],
       ),
@@ -719,7 +787,10 @@ class _EditAppointmentServicesSheetState
             ),
           ),
           const SizedBox(width: 8),
-          _priceText(_toDouble(a['original_price']), _toDouble(a['discount_amount'])),
+          _priceText(
+            _toDouble(a['original_price']),
+            _toDouble(a['discount_amount']),
+          ),
           IconButton(
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.close, size: 20, color: Colors.red),
@@ -733,123 +804,170 @@ class _EditAppointmentServicesSheetState
   Widget _serviceTile(Map<String, dynamic> service) {
     final isDark = context.isDarkMode;
     final id = service['id'] as int;
-    final expanded = _expandedServiceId == id;
+    final taken = _isTaken(id);
+    final expanded = !taken && _expandedServiceId == id;
     final variants = (service['variants'] as List).cast<Map<String, dynamic>>();
     final hasOffer = _offerApplies(id);
     final singleVariant = variants.length == 1;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-        ),
-      ),
-      child: Column(
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: variants.isEmpty
-                ? null
-                : () => setState(
-                    () => _expandedServiceId = expanded ? null : id,
-                  ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          service['name'].toString(),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: context.textColor,
-                          ),
-                        ),
-                        if ((service['category'] as String).isNotEmpty)
-                          Text(
-                            service['category'].toString(),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: context.secondaryTextColor,
-                            ),
-                          ),
-                        if (variants.isEmpty)
-                          Text(
-                            'No active variants',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.orange.shade700,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                  if (hasOffer)
-                    Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 6,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        _offerLabel(),
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.green.shade600,
-                        ),
-                      ),
-                    ),
-                  if (singleVariant)
-                    SizedBox(
-                      height: 32,
-                      child: ElevatedButton(
-                        onPressed: () => _addVariant(service, variants.first),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                        child: const Text(
-                          'Add',
-                          style: TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    )
-                  else if (variants.isNotEmpty)
-                    Icon(
-                      expanded
-                          ? Icons.keyboard_arrow_up
-                          : Icons.keyboard_arrow_down,
-                      color: context.secondaryTextColor,
-                    ),
-                ],
-              ),
-            ),
+    return Opacity(
+      opacity: taken ? 0.55 : 1,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
           ),
-          if (expanded && !singleVariant)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Column(
-                children: variants.map((v) => _variantRow(service, v)).toList(),
+        ),
+        child: Column(
+          children: [
+            InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: (taken || variants.isEmpty)
+                  ? null
+                  : () => setState(
+                      () => _expandedServiceId = expanded ? null : id,
+                    ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            service['name'].toString(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: context.textColor,
+                            ),
+                          ),
+                          if ((service['category'] as String).isNotEmpty)
+                            Text(
+                              service['category'].toString(),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: context.secondaryTextColor,
+                              ),
+                            ),
+                          if (taken)
+                            Text(
+                              'Already added to this appointment',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.green.shade600,
+                              ),
+                            )
+                          else if (variants.isEmpty)
+                            Text(
+                              'No active variants',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.orange.shade700,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    if (hasOffer && !taken)
+                      Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          _offerLabel(),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green.shade600,
+                          ),
+                        ),
+                      ),
+                    if (taken)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.check_circle,
+                              size: 14,
+                              color: Colors.green.shade600,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Added',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.green.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else if (singleVariant)
+                      SizedBox(
+                        height: 32,
+                        child: ElevatedButton(
+                          onPressed: () => _addVariant(service, variants.first),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                          ),
+                          child: const Text(
+                            'Add',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      )
+                    else if (variants.isNotEmpty)
+                      Icon(
+                        expanded
+                            ? Icons.keyboard_arrow_up
+                            : Icons.keyboard_arrow_down,
+                        color: context.secondaryTextColor,
+                      ),
+                  ],
+                ),
               ),
             ),
-        ],
+            if (expanded && !singleVariant)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: Column(
+                  children: variants
+                      .map((v) => _variantRow(service, v))
+                      .toList(),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -939,24 +1057,34 @@ class _EditAppointmentServicesSheetState
         itemBuilder: (context, index) {
           final s = suggestions[index];
           final variants = (s['variants'] as List).cast<Map<String, dynamic>>();
+          final taken = _isTaken(s['id'] as int);
           return ListTile(
             dense: true,
             leading: Icon(
-              Icons.content_cut,
+              taken ? Icons.check_circle : Icons.content_cut,
               size: 18,
-              color: AppTheme.primary,
+              color: taken ? Colors.green.shade600 : AppTheme.primary,
             ),
             title: Text(
               s['name'].toString(),
-              style: TextStyle(fontSize: 13, color: context.textColor),
+              style: TextStyle(
+                fontSize: 13,
+                color: taken
+                    ? context.secondaryTextColor
+                    : context.textColor,
+              ),
             ),
             subtitle: Text(
-              variants.length == 1
+              taken
+                  ? 'Already added'
+                  : variants.length == 1
                   ? 'Tap to add directly'
                   : '${variants.length} variants',
               style: TextStyle(
                 fontSize: 11,
-                color: context.secondaryTextColor,
+                color: taken
+                    ? Colors.green.shade600
+                    : context.secondaryTextColor,
               ),
             ),
             onTap: () => _pickSuggestion(s),
@@ -1186,7 +1314,7 @@ class _EditAppointmentServicesSheetState
                               onChanged: (_) => setState(() {}),
                               style: TextStyle(color: context.textColor),
                               decoration: InputDecoration(
-                                prefixText: 'Rs. ',
+                                prefixText: '$_sym ',
                                 hintText: '0',
                                 helperText:
                                     'Added on top of the services total (default 0)',
@@ -1253,7 +1381,7 @@ class _EditAppointmentServicesSheetState
                         ),
                         const Spacer(),
                         Text(
-                          'Rs. ${_grandTotal.toStringAsFixed(2)}',
+                          '$_sym ${_grandTotal.toStringAsFixed(2)}',
                           style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
@@ -1265,9 +1393,9 @@ class _EditAppointmentServicesSheetState
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Services Rs. ${_servicesFinal.toStringAsFixed(2)}'
-                        '${_discountTotal > 0 ? '  •  Discount Rs. ${_discountTotal.toStringAsFixed(2)}' : ''}'
-                        '${_extra > 0 ? '  •  Extra Rs. ${_extra.toStringAsFixed(2)}' : ''}'
+                        'Services $_sym ${_servicesFinal.toStringAsFixed(2)}'
+                        '${_discountTotal > 0 ? '  •  Discount $_sym ${_discountTotal.toStringAsFixed(2)}' : ''}'
+                        '${_extra > 0 ? '  •  Extra $_sym ${_extra.toStringAsFixed(2)}' : ''}'
                         '${_durationDelta != 0 ? '  •  ${_durationDelta > 0 ? '+' : ''}$_durationDelta min' : ''}',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
