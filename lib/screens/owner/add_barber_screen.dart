@@ -52,6 +52,11 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   bool _isCashier = false;
   bool _isAdmin = false;
 
+  /// Was Cashier ticked by the user BEFORE Admin was ticked? Admin ticks
+  /// Cashier automatically; when Admin is un-ticked again, Cashier goes
+  /// back to what the user had chosen (no surprise leftovers).
+  bool _cashierBeforeAdmin = false;
+
   final Map<String, List<int>> _selectedItems = {};
 
   // ==================== SELECTED ITEMS ====================
@@ -464,6 +469,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           _isBarber = true;
           _isCashier = false;
           _isAdmin = false;
+          _cashierBeforeAdmin = false;
         });
         return;
       }
@@ -499,6 +505,7 @@ class _AddBarberScreenState extends State<AddBarberScreen>
         _existingTakes = exTakes;
         _isBarber = exTakes;
         _isAdmin = exRole == 'admin';
+        _cashierBeforeAdmin = false;
         _isCashier = exRole == 'admin' || exRole == 'cashier';
       });
     } catch (e) {
@@ -1198,7 +1205,10 @@ class _AddBarberScreenState extends State<AddBarberScreen>
       _showSnackBar('Please select a salon', context.errorColor);
       return;
     }
-    if (_takesAppointments && _createsSchedule && _totalSelectedItems == 0) {
+    if (_takesAppointments &&
+        _createsSchedule &&
+        _totalSelectedItems == 0 &&
+        !_hasKeptServices) {
       _showSnackBar('Please select at least one service', context.errorColor);
       return;
     }
@@ -2884,6 +2894,14 @@ class _AddBarberScreenState extends State<AddBarberScreen>
 
   bool get _isExistingMember => _existingTakes != null;
 
+  /// Services this person already has in this salon (kept in the database
+  /// even while desk-only). They show as "already assigned" (disabled), so
+  /// going desk-only -> barber again must NOT demand new services.
+  bool get _hasKeptServices =>
+      _isExistingMember &&
+      (_barberAssignedServiceIds.isNotEmpty ||
+          _barberAssignedVariantIds.isNotEmpty);
+
   /// Owner changed the role of a person who is already in this salon.
   bool get _roleChangedForExisting =>
       _isExistingMember &&
@@ -2900,7 +2918,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
     if (!_isExistingMember) return !_takesAppointments || items > 0;
     if (_existingTakes == false) {
       // desk-only person: -> barber needs services, otherwise only a role change
-      return _takesAppointments ? items > 0 : _roleChangedForExisting;
+      return _takesAppointments
+          ? (items > 0 || _hasKeptServices)
+          : _roleChangedForExisting;
     }
     // existing barber: add services and/or change the role
     return _takesAppointments
@@ -2927,24 +2947,42 @@ class _AddBarberScreenState extends State<AddBarberScreen>
   }
 
   void _toggleRole(String role, bool value) {
+    // Rule: at least one role always stays ticked. Nothing else is changed
+    // behind the user's back, except "Admin includes Cashier".
+    String? blocked;
     setState(() {
       switch (role) {
         case 'barber':
+          if (!value && !_isCashier && !_isAdmin) {
+            blocked = 'At least one role must stay selected';
+            break;
+          }
           _isBarber = value;
-          // keep at least one role ticked
-          if (!_isBarber && !_isCashier && !_isAdmin) _isCashier = true;
           break;
         case 'cashier':
-          if (!value && _isAdmin) return; // admin includes cashier
-          if (!value && !_isBarber) return; // keep at least one role
+          if (_isAdmin) break; // locked: included in Admin
+          if (!value && !_isBarber) {
+            blocked = 'At least one role must stay selected';
+            break;
+          }
           _isCashier = value;
           break;
         case 'admin':
-          _isAdmin = value;
-          if (value) _isCashier = true; // admin includes cashier
+          if (value) {
+            _cashierBeforeAdmin = _isCashier;
+            _isAdmin = true;
+            _isCashier = true; // admin includes cashier
+          } else {
+            _isAdmin = false;
+          _cashierBeforeAdmin = false;
+            // back to what was chosen before; a desk-only person keeps
+            // Cashier so that a role is always selected
+            _isCashier = _cashierBeforeAdmin || !_isBarber;
+          }
           break;
       }
     });
+    if (blocked != null) _showSnackBar(blocked!, Colors.orange);
   }
 
   Widget _buildStaffRoleSelector() {
@@ -3016,7 +3054,9 @@ class _AddBarberScreenState extends State<AddBarberScreen>
           roleBox(
             role: 'cashier',
             title: 'Cashier',
-            subtitle: 'Front desk: all appointments, payments, Book / VIP',
+            subtitle: _isAdmin
+                ? 'Included in Admin'
+                : 'Front desk: all appointments, payments, Book / VIP',
             value: _isCashier,
             enabled: !_isAdmin,
           ),

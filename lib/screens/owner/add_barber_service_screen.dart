@@ -5,7 +5,7 @@ import '../../theme/app_theme.dart';
 import '../../services/currency_service.dart';
 
 // ============================================================
-// ✅ Custom exceptions for cleaner error handling
+// ✅ Custom exceptions for cleaner error handling 
 // ============================================================
 class BarberRoleNotFoundException implements Exception {
   final String message;
@@ -81,6 +81,15 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   bool _isBarber = true;
   bool _isCashier = false;
   bool _isAdmin = false;
+
+  /// Was Cashier ticked by the user BEFORE Admin was ticked? (Admin ticks
+  /// Cashier automatically; un-ticking Admin restores the user's choice.)
+  bool _cashierBeforeAdmin = false;
+
+  /// This person already has services in this salon (kept in the database
+  /// even while desk-only). Going desk-only -> barber again then needs no
+  /// new services.
+  bool _hasKeptServices = false;
 
   // ==================== ✅ CURRENCY STATE ====================
   String _salonCurrencyCode = 'LKR';
@@ -330,6 +339,8 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           .select('service_id, variant_id')
           .eq('salon_barber_id', _salonBarberId!);
 
+      _hasKeptServices = existingServices.isNotEmpty;
+
       final Set<String> assignedServiceKeys = {};
       for (var item in existingServices) {
         if (item['variant_id'] == null) {
@@ -536,24 +547,41 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
   }
 
   void _toggleRole(String role, bool value) {
+    // Rule: at least one role always stays ticked. Nothing else changes
+    // behind the user's back, except "Admin includes Cashier".
+    String? blocked;
     setState(() {
       switch (role) {
         case 'barber':
+          if (!value && !_isCashier && !_isAdmin) {
+            blocked = 'At least one role must stay selected';
+            break;
+          }
           _isBarber = value;
-          // keep at least one role ticked
-          if (!_isBarber && !_isCashier && !_isAdmin) _isCashier = true;
           break;
         case 'cashier':
-          if (!value && _isAdmin) return; // admin includes cashier
-          if (!value && !_isBarber) return; // keep at least one role
+          if (_isAdmin) break; // locked: included in Admin
+          if (!value && !_isBarber) {
+            blocked = 'At least one role must stay selected';
+            break;
+          }
           _isCashier = value;
           break;
         case 'admin':
-          _isAdmin = value;
-          if (value) _isCashier = true; // admin includes cashier
+          if (value) {
+            _cashierBeforeAdmin = _isCashier;
+            _isAdmin = true;
+            _isCashier = true; // admin includes cashier
+          } else {
+            _isAdmin = false;
+            // back to the user's earlier choice; a desk-only person keeps
+            // Cashier so that a role is always selected
+            _isCashier = _cashierBeforeAdmin || !_isBarber;
+          }
           break;
       }
     });
+    if (blocked != null) _showSnackBar(blocked!, context.warningColor);
   }
 
   void _toggleVariant(String serviceId, int variantId) {
@@ -690,7 +718,7 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
 
     // desk-only -> barber needs services (and a schedule, made by the server)
     final becomesBarber = _canSetRole && _isBarber && !_currentTakes;
-    if (becomesBarber && !hasServices) {
+    if (becomesBarber && !hasServices && !_hasKeptServices) {
       _showSnackBar(
         'Select at least one service to make this person a barber',
         context.warningColor,
@@ -743,7 +771,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
           return;
         }
         _showSnackBar(
-          'Saved: $_roleSummary, ${serviceRows.length} service(s) added',
+          serviceRows.isEmpty
+              ? 'Saved: $_roleSummary (previous services kept)'
+              : 'Saved: $_roleSummary, ${serviceRows.length} service(s) added',
           context.successColor,
         );
         Navigator.pop(context, true);
@@ -1176,7 +1206,9 @@ class _AddBarberServiceScreenState extends State<AddBarberServiceScreen> {
       role: 'cashier',
       icon: Icons.point_of_sale,
       title: 'Cashier',
-      subtitle: 'Front desk: all appointments, payments, Book / VIP',
+      subtitle: _isAdmin
+          ? 'Included in Admin'
+          : 'Front desk: all appointments, payments, Book / VIP',
       value: _isCashier,
       enabled: !_isAdmin,
     );

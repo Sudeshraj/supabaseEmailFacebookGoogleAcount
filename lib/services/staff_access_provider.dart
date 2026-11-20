@@ -3,6 +3,22 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Same as the staff_role_permissions seed. Only used when the server
+/// (old SQL) does not send role_permissions yet.
+Set<String> _defaultRolePerms(String role) {
+  const cashier = {
+    'all_appointments', 'manage_appointments', 'book', 'vip_book',
+    'view_customers',
+  };
+  const admin = {
+    ...cashier, 'manage_services', 'manage_barbers', 'manage_offers',
+    'manage_holidays', 'view_revenue', 'view_reports', 'view_analytics',
+  };
+  if (role == 'admin') return admin;
+  if (role == 'cashier') return cashier;
+  return const {};
+}
+
 /// One salon + what the logged-in user may do there.
 class SalonAccess {
   final int salonId;
@@ -10,7 +26,12 @@ class SalonAccess {
   final bool isOwner; // true = own salon, false = employee
   final String staffRole; // owner | barber | cashier | admin
   final String plan; // bronze | silver | gold | platinum
-  final Set<String> permissions;
+  final Set<String> permissions; // GRANTED right now (role + owner's plan)
+
+  /// What the ROLE is entitled to whatever the plan is. A permission that is
+  /// in rolePermissions but not in permissions is shown LOCKED (the owner
+  /// must upgrade the package).
+  final Set<String> rolePermissions;
 
   const SalonAccess({
     required this.salonId,
@@ -19,23 +40,43 @@ class SalonAccess {
     required this.staffRole,
     required this.plan,
     required this.permissions,
+    required this.rolePermissions,
   });
 
   bool can(String permission) => permissions.contains(permission);
 
-  /// cashier / admin with at least one extra permission
-  bool get hasStaffTools => !isOwner && permissions.isNotEmpty;
+  /// role has it, but the owner's current plan does not unlock it yet
+  bool isLocked(String permission) =>
+      rolePermissions.contains(permission) && !permissions.contains(permission);
 
-  factory SalonAccess.fromJson(Map<String, dynamic> j) => SalonAccess(
+  /// cashier / admin (even when everything is still locked). A plain
+  /// barber has no role permissions, so sees nothing.
+  bool get hasStaffTools => !isOwner && rolePermissions.isNotEmpty;
+
+  factory SalonAccess.fromJson(Map<String, dynamic> j) {
+    Set<String> toSet(dynamic v) =>
+        ((v as List?) ?? const []).map((e) => e.toString()).toSet();
+    final granted = toSet(j['permissions']);
+    // old SQL (no role_permissions yet) -> fall back to granted ones
+    final staffRole = (j['staff_role'] ?? 'barber').toString();
+    // server list + granted + built-in defaults (so an empty / missing
+    // staff_role_permissions seed can never hide the locked tiles)
+    final isOwnerRow = j['access'] == 'owner';
+    final role = {
+      ...toSet(j['role_permissions']),
+      ...granted,
+      if (!isOwnerRow) ..._defaultRolePerms(staffRole),
+    };
+    return SalonAccess(
         salonId: (j['salon_id'] as num).toInt(),
         salonName: (j['salon_name'] ?? 'Salon').toString(),
         isOwner: j['access'] == 'owner',
         staffRole: (j['staff_role'] ?? 'barber').toString(),
         plan: (j['plan'] ?? 'bronze').toString(),
-        permissions: ((j['permissions'] as List?) ?? const [])
-            .map((e) => e.toString())
-            .toSet(),
-      );
+        permissions: granted,
+        rolePermissions: role,
+    );
+  }
 }
 
 /// Registered in main.dart (MultiProvider). It loads itself on sign-in and
@@ -96,6 +137,10 @@ class StaffAccessProvider extends ChangeNotifier {
       _salons = (res as List)
           .map((e) => SalonAccess.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
+      for (final s in _salons) {
+        debugPrint('🔐 staff access: salon ${s.salonId} role=${s.staffRole} '
+            'plan=${s.plan} granted=${s.permissions} role=${s.rolePermissions}');
+      }
       _loaded = true;
     } catch (e) {
       debugPrint('❌ StaffAccessProvider.load: $e');

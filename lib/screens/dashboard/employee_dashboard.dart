@@ -249,6 +249,85 @@ void didPopNext() {
 
   // ==================== STAFF ACCESS (cashier / admin) ====================
 
+  /// Desk-only = the selected salon lists me as cashier/admin only
+  /// (takes_appointments = false). Such a person sees ONLY the staff tools:
+  /// no rating, stats, quick actions, schedule or performance.
+  bool get _isDeskOnly {
+    if (_selectedSalonId == null) return false;
+    for (final s in _assignedSalons) {
+      if (s['id'] == _selectedSalonId) {
+        return s['takes_appointments'] == false;
+      }
+    }
+    return false;
+  }
+
+  /// Staff tools card (Book / VIP + owner-screen tiles, locked or open by
+  /// the owner's package). Renders nothing for a plain barber.
+  Widget _buildStaffTools({double topMargin = 8}) {
+    return Consumer<StaffAccessProvider>(
+      builder: (context, staff, _) {
+        final salons = staff.staffSalons
+            .where((s) => s.salonId.toString() == _selectedSalonId)
+            .toList();
+        if (salons.isEmpty) return const SizedBox.shrink();
+        return StaffToolsSection(
+          key: ValueKey('staff_tools_${salons.first.salonId}'),
+          salons: salons,
+          topMargin: topMargin,
+          onBooked: () => _loadData(showLoading: false),
+        );
+      },
+    );
+  }
+
+  // ==================== PLAN BADGE (owner's package) ====================
+
+  /// Icon-only badge like the owner dashboard. It shows the package of the
+  /// OWNER of the currently selected salon; its colour follows the package
+  /// (Platinum amber, Gold orange, Silver blue-grey, Bronze/free brown).
+  Widget _buildPlanBadge() {
+    return Consumer<StaffAccessProvider>(
+      builder: (context, staff, _) {
+        final id = int.tryParse(_selectedSalonId ?? '');
+        final access = id == null ? null : staff.forSalon(id);
+        if (access == null) return const SizedBox.shrink();
+
+        final plan = access.plan.toLowerCase();
+        final Color badgeColor = plan == 'platinum'
+            ? Colors.amber
+            : plan == 'gold'
+                ? Colors.orange
+                : plan == 'silver'
+                    ? Colors.blueGrey
+                    : Colors.brown;
+        final planName = plan.isEmpty
+            ? 'Bronze'
+            : plan[0].toUpperCase() + plan.substring(1);
+
+        return IconButton(
+          icon: Icon(Icons.workspace_premium, color: badgeColor),
+          tooltip: '$planName Plan',
+          splashRadius: 24,
+          iconSize: 24,
+          onPressed: () {
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(
+                SnackBar(
+                  content: Text(
+                    '${_selectedSalonName.isNotEmpty ? _selectedSalonName : 'This salon'}'
+                    ' is on the $planName plan (set by the salon owner).',
+                  ),
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+          },
+        );
+      },
+    );
+  }
+
   /// Reloads which extra permissions (if any) this employee has per salon.
   /// The server checks the salon owner's live plan, so a plan change shows
   /// up here after the next refresh.
@@ -806,6 +885,7 @@ Future<void> _loadNotificationCount() async {
             id,
             salon_id,
             status,
+            takes_appointments,
             salons!salon_id (
               id,
               name,
@@ -843,6 +923,8 @@ Future<void> _loadNotificationCount() async {
             'currency_code': salonData['currency_code'],
             'timezone': salonData['timezone'],
             'barber_salon_id': item['id'],
+            // false = desk-only (cashier / admin who takes no appointments)
+            'takes_appointments': item['takes_appointments'] != false,
           };
           salons.add(salon);
         }
@@ -1777,7 +1859,7 @@ Future<void> _loadNotificationCount() async {
   // ✅ SALON SELECTOR CHIP — Center chip below AppBar (in body top)
   // ============================================================
 
-  Widget _buildSalonSelectorChip() {
+  Widget _buildSalonSelectorChip({bool compact = false}) {
     if (_assignedSalons.isEmpty) return const SizedBox.shrink();
 
     final isDark = context.isDarkMode;
@@ -1786,7 +1868,7 @@ Future<void> _loadNotificationCount() async {
     // ✅ Single salon: just show name (no chip, no dropdown)
     if (!hasMultipleSalons) {
       return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: EdgeInsets.symmetric(horizontal: 16, vertical: compact ? 4 : 8),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
@@ -1817,7 +1899,7 @@ Future<void> _loadNotificationCount() async {
 
     // ✅ Multiple salons: dropdown chip centered
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: compact ? 4 : 8),
       child: Center(
         child: ConstrainedBox(
           constraints: BoxConstraints(
@@ -2310,6 +2392,7 @@ Future<void> _loadNotificationCount() async {
         ),
         title: null,
         actions: _safeActions([
+          _buildPlanBadge(),
           _buildNotificationIcon(),
           _buildProfileImage(),
           const SizedBox(width: 8),
@@ -2394,25 +2477,15 @@ Future<void> _loadNotificationCount() async {
     return Column(
       children: [
         // ✅ Salon selector chip — CENTERED at top of body
-        if (_assignedSalons.isNotEmpty) _buildSalonSelectorChip(),
+        if (_assignedSalons.isNotEmpty)
+          _buildSalonSelectorChip(compact: _isDeskOnly),
 
-        // ✅ STAFF TOOLS (cashier / admin only). Plain barbers see nothing here.
-        //    Book / VIP buttons + owner-screen tiles for the selected salon.
-        //    The barber's own "My Appointments" below stays unchanged.
-        Consumer<StaffAccessProvider>(
-          builder: (context, staff, _) {
-            final salons = staff.staffSalons
-                .where((s) => s.salonId.toString() == _selectedSalonId)
-                .toList();
-            if (salons.isEmpty) return const SizedBox.shrink();
-            return StaffToolsSection(
-              key: ValueKey('staff_tools_${salons.first.salonId}'),
-              salons: salons,
-              onBooked: () => _loadData(showLoading: false),
-            );
-          },
-        ),
-
+        // ✅ Desk-only (cashier / admin without appointments): ONLY the
+        //    staff tools are shown, nothing else.
+        if (_isDeskOnly) ...[
+          _buildStaffTools(topMargin: 0),
+          const SizedBox(height: 12),
+        ] else ...[
         if (_showPermissionCard && !_hasPermission)
           PermissionCard(
             onEnable: _enableNotifications,
@@ -2556,6 +2629,10 @@ Future<void> _loadNotificationCount() async {
         ),
         const SizedBox(height: 16),
 
+        // ✅ STAFF TOOLS (cashier / admin who ALSO takes appointments):
+        //    placed right after Today's Schedule. Plain barbers see nothing.
+        _buildStaffTools(),
+
         Container(
           width: double.infinity,
           margin: const EdgeInsets.all(16),
@@ -2614,6 +2691,7 @@ Future<void> _loadNotificationCount() async {
           ),
         ),
         const SizedBox(height: 20),
+        ], // end of barber (takes appointments) content
       ],
     );
   }
