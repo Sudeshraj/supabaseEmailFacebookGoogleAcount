@@ -10,13 +10,17 @@ import '../../theme/app_theme.dart';
 ///
 /// appointment map එකේ තියෙන්න ඕන keys:
 ///   id, salon_id, offer_id, customer_name, services
-///   (appointment_services rows — supports both `id` and
-///   `appointment_service_id` keys, and must have `service_id`),
-///   extra_charge, extra_charge_note, symbol (optional currency symbol)
+///   (appointment_services rows: `id` or `appointment_service_id`,
+///   `variant_id`), extra_charge, extra_charge_note, symbol (optional)
 ///
-/// ✅ RULE: a service that is already on the appointment (or already in the
-/// "New services" list) can NOT be added again. If the existing one is
-/// removed (marked for removal) it can be added again as a replacement.
+/// ✅ RULE (same as the salon profile menu):
+///   - the unit is the VARIANT, not the service
+///   - a service can have many variants on one appointment
+///     (Haircut Male + Haircut Child ...)
+///   - the SAME variant can be on an appointment only once
+///   - a variant that is already on the appointment is shown ticked and
+///     disabled ("Added"); if it is marked for removal it can be ticked again
+///     (replacement)
 ///
 /// Save සාර්ථක නම් `true` return කරනවා (screen එක refresh කරන්න).
 class EditAppointmentServicesSheet extends StatefulWidget {
@@ -37,8 +41,8 @@ class _EditAppointmentServicesSheetState
   bool _isSaving = false;
   String? _error;
 
-  // Salon services catalog (service -> variants), flat-queried (see _load())
-  List<Map<String, dynamic>> _catalog = [];
+  // category -> services -> variants (same shape as the salon profile menu)
+  List<Map<String, dynamic>> _tree = [];
 
   // දැනට appointment එකේ තියෙන services
   final List<Map<String, dynamic>> _existing = [];
@@ -54,13 +58,9 @@ class _EditAppointmentServicesSheetState
   final TextEditingController _extraCtrl = TextEditingController();
   final TextEditingController _noteCtrl = TextEditingController();
   final TextEditingController _searchCtrl = TextEditingController();
-  final FocusNode _searchFocus = FocusNode();
 
-  int? _expandedServiceId;
   String _search = '';
-  bool _showSuggestions = false;
 
-  /// currency symbol (from the appointment map, default 'Rs.')
   String get _sym {
     final s = widget.appointment['symbol']?.toString().trim() ?? '';
     return s.isEmpty ? 'Rs.' : s;
@@ -70,9 +70,6 @@ class _EditAppointmentServicesSheetState
   void initState() {
     super.initState();
 
-    // services rows may use either `id` (barber screen) or
-    // `appointment_service_id` (owner screen) as the primary key. Normalize
-    // everything to `id` so downstream code has a single source of truth.
     final services = widget.appointment['services'] as List? ?? [];
     for (final s in services) {
       if (s == null) continue;
@@ -88,11 +85,10 @@ class _EditAppointmentServicesSheetState
       if (id == null || id < 0) continue;
       raw['id'] = id;
 
-      // service_id is needed for the "already added" check
-      final sidVal = raw['service_id'];
-      raw['service_id'] = sidVal == null
+      final vidVal = raw['variant_id'];
+      raw['variant_id'] = vidVal == null
           ? null
-          : (sidVal is int ? sidVal : int.tryParse(sidVal.toString()));
+          : (vidVal is int ? vidVal : int.tryParse(vidVal.toString()));
 
       raw['duration'] = _toInt(raw['duration'], fallback: 30);
       raw['original_price'] = _toDouble(raw['original_price']);
@@ -106,16 +102,9 @@ class _EditAppointmentServicesSheetState
     _extraCtrl.text = extra > 0 ? extra.toStringAsFixed(2) : '0';
     _noteCtrl.text = widget.appointment['extra_charge_note']?.toString() ?? '';
 
-    _searchFocus.addListener(() {
-      setState(
-        () => _showSuggestions = _searchFocus.hasFocus && _search.isNotEmpty,
-      );
-    });
-
     _load();
   }
 
-  // Safe numeric helpers
   int _toInt(dynamic v, {int fallback = 0}) {
     if (v == null) return fallback;
     if (v is int) return v;
@@ -135,30 +124,26 @@ class _EditAppointmentServicesSheetState
     _extraCtrl.dispose();
     _noteCtrl.dispose();
     _searchCtrl.dispose();
-    _searchFocus.dispose();
     super.dispose();
   }
 
   // ---------------------------------------------------------------
-  // ✅ "ALREADY ADDED" RULE
-  //   taken = services still on the appointment (not marked for removal)
-  //           + services in the "New services" list
+  // ✅ VARIANT RULE
+  //   existing-kept : on the appointment and not marked for removal
+  //   in-added      : ticked in this session (not saved yet)
   // ---------------------------------------------------------------
-  Set<int> get _takenServiceIds {
-    final ids = <int>{};
-    for (final s in _existing) {
-      if (_removeIds.contains(s['id'])) continue;
-      final sid = s['service_id'];
-      if (sid is int) ids.add(sid);
-    }
-    for (final a in _added) {
-      final sid = a['service_id'];
-      if (sid is int) ids.add(sid);
-    }
-    return ids;
-  }
+  Set<int> get _keptVariantIds => {
+    for (final s in _existing)
+      if (!_removeIds.contains(s['id']) && s['variant_id'] is int)
+        s['variant_id'] as int,
+  };
 
-  bool _isTaken(int serviceId) => _takenServiceIds.contains(serviceId);
+  Set<int> get _addedVariantIds => {
+    for (final a in _added) a['variant_id'] as int,
+  };
+
+  bool _isOnAppointment(int variantId) => _keptVariantIds.contains(variantId);
+  bool _isTicked(int variantId) => _addedVariantIds.contains(variantId);
 
   // ---------------------------------------------------------------
   // LOAD
@@ -171,8 +156,6 @@ class _EditAppointmentServicesSheetState
 
     try {
       final salonId = widget.appointment['salon_id'];
-      debugPrint('🔍 [EDIT SHEET] Loading catalog for salon_id: $salonId');
-
       if (salonId == null) {
         if (!mounted) return;
         setState(() {
@@ -182,17 +165,17 @@ class _EditAppointmentServicesSheetState
         return;
       }
 
-      // STEP 1: services
       final servicesResponse = await supabase
           .from('services')
           .select('id, name, category_id')
           .eq('salon_id', salonId)
-          .eq('is_active', true);
+          .eq('is_active', true)
+          .order('name');
 
       if (servicesResponse.isEmpty) {
         if (!mounted) return;
         setState(() {
-          _catalog = [];
+          _tree = [];
           _isLoading = false;
         });
         return;
@@ -200,11 +183,10 @@ class _EditAppointmentServicesSheetState
 
       final serviceIds = servicesResponse.map((s) => s['id'] as int).toList();
 
-      // STEP 2: variants
       final variantsResponse = await supabase
           .from('service_variants')
           .select(
-            'id, service_id, price, duration, salon_gender_id, salon_age_category_id, is_active',
+            'id, service_id, name, price, duration, salon_gender_id, salon_age_category_id, is_active',
           )
           .inFilter('service_id', serviceIds);
 
@@ -212,35 +194,21 @@ class _EditAppointmentServicesSheetState
           .where((v) => v['is_active'] == true)
           .toList();
 
-      // STEP 3: categories
-      final categoryIds = servicesResponse
-          .map((s) => s['category_id'] as int?)
-          .whereType<int>()
-          .toSet()
-          .toList();
-      Map<int, String> categoryMap = {};
-      if (categoryIds.isNotEmpty) {
-        try {
-          final rows = await supabase
-              .from('salon_categories')
-              .select('id, display_name')
-              .inFilter('id', categoryIds);
-          for (final c in rows) {
-            categoryMap[c['id'] as int] =
-                c['display_name']?.toString() ?? 'Other';
-          }
-        } catch (e) {
-          debugPrint('⚠️ categories failed: $e');
-        }
-      }
+      // categories (name, colour, order)
+      final categories = await supabase
+          .from('salon_categories')
+          .select('id, display_name, color, display_order')
+          .eq('salon_id', salonId)
+          .eq('is_active', true)
+          .order('display_order');
 
-      // STEP 4: genders
+      // genders
       final genderIds = activeVariants
           .map((v) => v['salon_gender_id'] as int?)
           .whereType<int>()
           .toSet()
           .toList();
-      Map<int, String> genderMap = {};
+      final Map<int, String> genderMap = {};
       if (genderIds.isNotEmpty) {
         try {
           final rows = await supabase
@@ -255,55 +223,80 @@ class _EditAppointmentServicesSheetState
         }
       }
 
-      // STEP 5: age categories
+      // age categories
       final ageIds = activeVariants
           .map((v) => v['salon_age_category_id'] as int?)
           .whereType<int>()
           .toSet()
           .toList();
-      Map<int, String> ageMap = {};
+      final Map<int, String> ageMap = {};
+      final Map<int, String> ageRangeMap = {};
       if (ageIds.isNotEmpty) {
         try {
           final rows = await supabase
               .from('salon_age_categories')
-              .select('id, display_name')
+              .select('id, display_name, min_age, max_age')
               .inFilter('id', ageIds);
           for (final a in rows) {
             ageMap[a['id'] as int] = a['display_name']?.toString() ?? '';
+            final mn = (a['min_age'] as num?)?.toInt();
+            final mx = (a['max_age'] as num?)?.toInt();
+            ageRangeMap[a['id'] as int] = (mn == null || mx == null)
+                ? ''
+                : (mx >= 100 ? '$mn+ yrs' : '$mn–$mx yrs');
           }
         } catch (e) {
           debugPrint('⚠️ age categories failed: $e');
         }
       }
 
-      // STEP 6: group
-      final Map<int, Map<String, dynamic>> grouped = {};
-      for (final s in servicesResponse) {
-        final id = s['id'] as int;
-        final catId = s['category_id'] as int?;
-        grouped[id] = {
-          'id': id,
-          'name': s['name']?.toString() ?? 'Service',
-          'category': catId != null ? (categoryMap[catId] ?? '') : '',
-          'variants': <Map<String, dynamic>>[],
-        };
-      }
+      // variants per service
+      final Map<int, List<Map<String, dynamic>>> variantsByService = {};
       for (final v in activeVariants) {
         final sid = v['service_id'] as int;
-        final genderId = v['salon_gender_id'] as int?;
-        final ageId = v['salon_age_category_id'] as int?;
-        final gender = genderId != null ? (genderMap[genderId] ?? '') : '';
-        final age = ageId != null ? (ageMap[ageId] ?? '') : '';
-        (grouped[sid]?['variants'] as List?)?.add({
+        final gId = v['salon_gender_id'] as int?;
+        final aId = v['salon_age_category_id'] as int?;
+        final name = v['name']?.toString().trim() ?? '';
+        final gender = gId != null ? (genderMap[gId] ?? '') : '';
+        final age = aId != null ? (ageMap[aId] ?? '') : '';
+        variantsByService.putIfAbsent(sid, () => []).add({
           'id': v['id'] as int,
           'price': _toDouble(v['price']),
           'duration': _toInt(v['duration'], fallback: 30),
-          'label': '$gender $age'.trim(),
+          'name': name,
+          'gender': gender,
+          'age': age,
+          'age_range': aId != null ? (ageRangeMap[aId] ?? '') : '',
+          // same text the DB stores in appointment_services.variant_label
+          'label': '$name $gender $age'.trim(),
         });
       }
 
-      final catalog = grouped.values.toList();
-      debugPrint('✅ [EDIT SHEET] Grouped into ${catalog.length} service(s)');
+      // services per category
+      final Map<int, List<Map<String, dynamic>>> servicesByCat = {};
+      for (final s in servicesResponse) {
+        final sid = s['id'] as int;
+        final variants = variantsByService[sid] ?? [];
+        if (variants.isEmpty) continue;
+        servicesByCat.putIfAbsent(s['category_id'] as int, () => []).add({
+          'id': sid,
+          'name': s['name']?.toString() ?? 'Service',
+          'variants': variants,
+        });
+      }
+
+      final List<Map<String, dynamic>> tree = [];
+      for (final c in categories) {
+        final cid = c['id'] as int;
+        final list = servicesByCat[cid] ?? [];
+        if (list.isEmpty) continue;
+        tree.add({
+          'id': cid,
+          'name': c['display_name']?.toString() ?? 'Category',
+          'color': c['color']?.toString(),
+          'services': list,
+        });
+      }
 
       // Offer
       Map<String, dynamic>? offer;
@@ -334,7 +327,7 @@ class _EditAppointmentServicesSheetState
 
       if (!mounted) return;
       setState(() {
-        _catalog = catalog;
+        _tree = tree;
         _offer = offer;
         _offerServiceIds = offerServiceIds;
         _isLoading = false;
@@ -386,68 +379,23 @@ class _EditAppointmentServicesSheetState
   }
 
   // ---------------------------------------------------------------
-  // SEARCH + SUGGESTIONS
+  // SEARCH (service name / category name)
   // ---------------------------------------------------------------
-  /// catalog after search; services that can still be added come first,
-  /// the ones already on the appointment go to the end (greyed out)
-  List<Map<String, dynamic>> get _filteredCatalog {
+  List<Map<String, dynamic>> get _filteredTree {
+    if (_search.isEmpty) return _tree;
     final q = _search.toLowerCase();
-    final base = _search.isEmpty
-        ? _catalog
-        : _catalog.where((s) {
-            return s['name'].toString().toLowerCase().contains(q) ||
-                s['category'].toString().toLowerCase().contains(q);
-          }).toList();
-
-    final taken = _takenServiceIds;
-    return [
-      ...base.where((s) => !taken.contains(s['id'])),
-      ...base.where((s) => taken.contains(s['id'])),
-    ];
-  }
-
-  List<Map<String, dynamic>> get _suggestions {
-    if (_search.isEmpty) return [];
-    final q = _search.toLowerCase();
-    final taken = _takenServiceIds;
-    final matches = _catalog
-        .where((s) => s['name'].toString().toLowerCase().contains(q))
-        .toList();
-    matches.sort((a, b) {
-      final aTaken = taken.contains(a['id']) ? 1 : 0;
-      final bTaken = taken.contains(b['id']) ? 1 : 0;
-      if (aTaken != bTaken) return aTaken - bTaken;
-      final an = a['name'].toString().toLowerCase();
-      final bn = b['name'].toString().toLowerCase();
-      final aStarts = an.startsWith(q) ? 0 : 1;
-      final bStarts = bn.startsWith(q) ? 0 : 1;
-      if (aStarts != bStarts) return aStarts - bStarts;
-      return an.compareTo(bn);
-    });
-    return matches.take(6).toList();
-  }
-
-  void _pickSuggestion(Map<String, dynamic> service) {
-    if (_isTaken(service['id'] as int)) {
-      _showSnack(
-        '${service['name']} is already added to this appointment',
-        color: Colors.orange,
-      );
-      return;
+    final out = <Map<String, dynamic>>[];
+    for (final c in _tree) {
+      final catMatch = c['name'].toString().toLowerCase().contains(q);
+      final services = (c['services'] as List)
+          .cast<Map<String, dynamic>>()
+          .where(
+            (s) => catMatch || s['name'].toString().toLowerCase().contains(q),
+          )
+          .toList();
+      if (services.isNotEmpty) out.add({...c, 'services': services});
     }
-
-    final variants = (service['variants'] as List).cast<Map<String, dynamic>>();
-    setState(() {
-      _searchCtrl.text = service['name'].toString();
-      _search = service['name'].toString().toLowerCase();
-      _showSuggestions = false;
-      _expandedServiceId = service['id'] as int;
-    });
-    _searchFocus.unfocus();
-
-    if (variants.length == 1) {
-      _addVariant(service, variants.first);
-    }
+    return out;
   }
 
   // ---------------------------------------------------------------
@@ -467,8 +415,7 @@ class _EditAppointmentServicesSheetState
   double get _discountTotal =>
       _sum(_kept, 'discount_amount') + _sum(_added, 'discount_amount');
 
-  int get _addedDuration =>
-      _added.fold(0, (a, i) => a + _toInt(i['duration']));
+  int get _addedDuration => _added.fold(0, (a, i) => a + _toInt(i['duration']));
 
   int get _removedDuration => _existing
       .where((s) => _removeIds.contains(s['id']))
@@ -481,35 +428,45 @@ class _EditAppointmentServicesSheetState
   // ---------------------------------------------------------------
   // ACTIONS
   // ---------------------------------------------------------------
-  void _addVariant(Map<String, dynamic> service, Map<String, dynamic> variant) {
-    final serviceId = service['id'] as int;
+  /// tick / untick a variant of the catalog
+  void _toggleVariant(Map<String, dynamic> service, Map<String, dynamic> v) {
+    final vid = v['id'] as int;
 
-    // ✅ the same service can not be added twice (any variant)
-    if (_isTaken(serviceId)) {
+    // already on the appointment (and not marked for removal): locked
+    if (_isOnAppointment(vid)) {
       _showSnack(
-        '${service['name']} is already added to this appointment',
+        '${service['name']} (${_variantText(v)}) is already added to this appointment',
         color: Colors.orange,
       );
       return;
     }
 
-    final price = _toDouble(variant['price']);
+    if (_isTicked(vid)) {
+      setState(() => _added.removeWhere((a) => a['variant_id'] == vid));
+      return;
+    }
+
+    final serviceId = service['id'] as int;
+    final price = _toDouble(v['price']);
     final discount = _discountFor(serviceId, price);
 
     setState(() {
       _added.add({
-        'variant_id': variant['id'],
+        'variant_id': vid,
         'service_id': serviceId,
         'name': service['name'],
-        'label': variant['label'],
-        'duration': _toInt(variant['duration'], fallback: 30),
+        'label': v['label'],
+        'duration': _toInt(v['duration'], fallback: 30),
         'original_price': price,
         'discount_amount': discount,
         'final_price': price - discount,
       });
-      _expandedServiceId = null; // the service is taken now, close its tile
     });
-    _showSnack('${service['name']} added', color: Colors.green.shade600);
+  }
+
+  String _variantText(Map<String, dynamic> v) {
+    final label = v['label']?.toString() ?? '';
+    return label.isEmpty ? 'Standard' : label;
   }
 
   void _showSnack(String msg, {Color color = Colors.red}) {
@@ -583,6 +540,15 @@ class _EditAppointmentServicesSheetState
   // ---------------------------------------------------------------
   // UI HELPERS
   // ---------------------------------------------------------------
+  Color _hexColor(String? hex) {
+    if (hex != null && hex.startsWith('#') && hex.length == 7) {
+      try {
+        return Color(int.parse('0xFF${hex.substring(1)}'));
+      } catch (_) {}
+    }
+    return AppTheme.primary;
+  }
+
   Widget _sectionTitle(String text) {
     return Padding(
       padding: const EdgeInsets.only(top: 16, bottom: 8),
@@ -643,14 +609,40 @@ class _EditAppointmentServicesSheetState
     );
   }
 
-  Widget _existingRow(Map<String, dynamic> s) {
-    final rawId = s['id'] ?? s['appointment_service_id'];
-    if (rawId == null) return const SizedBox.shrink();
-    final id = rawId is int ? rawId : int.tryParse(rawId.toString());
-    if (id == null || id < 0) return const SizedBox.shrink();
+  Widget _infoChip(IconData icon, String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: color),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
+  // ---------------------------------------------------------------
+  // CURRENT SERVICES (already on the appointment)
+  // ---------------------------------------------------------------
+  Widget _existingRow(Map<String, dynamic> s) {
+    final id = s['id'] as int;
     final removed = _removeIds.contains(id);
-    final isBarberAdded = s['added_by'] != null;
+    final isStaffAdded = s['added_by'] != null;
     final original = _toDouble(s['original_price']);
     final discount = _toDouble(s['discount_amount']);
     final duration = _toInt(s['duration'], fallback: 30);
@@ -689,7 +681,7 @@ class _EditAppointmentServicesSheetState
                         ),
                       ),
                     Text(
-                      '$duration min${isBarberAdded ? ' • added by staff' : ''}',
+                      '$duration min${isStaffAdded ? ' • added by staff' : ''}',
                       style: TextStyle(
                         fontSize: 12,
                         color: context.secondaryTextColor,
@@ -718,13 +710,12 @@ class _EditAppointmentServicesSheetState
                   )
                 : () {
                     if (removed) {
-                      // ✅ undo is not allowed while the same service was
-                      // added again as a replacement
-                      final sid = s['service_id'];
-                      if (sid is int &&
-                          _added.any((a) => a['service_id'] == sid)) {
+                      // undo is not allowed while the same variant was
+                      // ticked again as a replacement
+                      final vid = s['variant_id'];
+                      if (vid is int && _isTicked(vid)) {
                         _showSnack(
-                          '${s['service_name']} is in the new services list. Remove it there first.',
+                          '${s['service_name']} is in the new services list. Untick it below first.',
                           color: Colors.orange,
                         );
                         return;
@@ -801,223 +792,111 @@ class _EditAppointmentServicesSheetState
     );
   }
 
-  Widget _serviceTile(Map<String, dynamic> service) {
-    final isDark = context.isDarkMode;
-    final id = service['id'] as int;
-    final taken = _isTaken(id);
-    final expanded = !taken && _expandedServiceId == id;
-    final variants = (service['variants'] as List).cast<Map<String, dynamic>>();
-    final hasOffer = _offerApplies(id);
-    final singleVariant = variants.length == 1;
+  // ---------------------------------------------------------------
+  // MENU (category -> service -> variants with checkboxes)
+  // ---------------------------------------------------------------
+  Widget _categoryBlock(Map<String, dynamic> cat) {
+    final color = _hexColor(cat['color']?.toString());
+    final services = (cat['services'] as List).cast<Map<String, dynamic>>();
 
-    return Opacity(
-      opacity: taken ? 0.55 : 1,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
-          ),
-        ),
-        child: Column(
-          children: [
-            InkWell(
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(12),
-              onTap: (taken || variants.isEmpty)
-                  ? null
-                  : () => setState(
-                      () => _expandedServiceId = expanded ? null : id,
-                    ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 12,
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            service['name'].toString(),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              color: context.textColor,
-                            ),
-                          ),
-                          if ((service['category'] as String).isNotEmpty)
-                            Text(
-                              service['category'].toString(),
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: context.secondaryTextColor,
-                              ),
-                            ),
-                          if (taken)
-                            Text(
-                              'Already added to this appointment',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.green.shade600,
-                              ),
-                            )
-                          else if (variants.isEmpty)
-                            Text(
-                              'No active variants',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.orange.shade700,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    if (hasOffer && !taken)
-                      Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          _offerLabel(),
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green.shade600,
-                          ),
-                        ),
-                      ),
-                    if (taken)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.check_circle,
-                              size: 14,
-                              color: Colors.green.shade600,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              'Added',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.green.shade600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else if (singleVariant)
-                      SizedBox(
-                        height: 32,
-                        child: ElevatedButton(
-                          onPressed: () => _addVariant(service, variants.first),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primary,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          child: const Text(
-                            'Add',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                        ),
-                      )
-                    else if (variants.isNotEmpty)
-                      Icon(
-                        expanded
-                            ? Icons.keyboard_arrow_up
-                            : Icons.keyboard_arrow_down,
-                        color: context.secondaryTextColor,
-                      ),
-                  ],
-                ),
+            ),
+            child: Text(
+              cat['name'].toString(),
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                color: context.textColor,
               ),
             ),
-            if (expanded && !singleVariant)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                child: Column(
-                  children: variants
-                      .map((v) => _variantRow(service, v))
-                      .toList(),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(left: 12, top: 4),
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    color: color.withValues(alpha: 0.45),
+                    width: 2,
+                  ),
                 ),
               ),
-          ],
-        ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: services.map((s) => _serviceBlock(s, color)).toList(),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _variantRow(Map<String, dynamic> service, Map<String, dynamic> v) {
-    final price = _toDouble(v['price']);
-    final discount = _discountFor(service['id'] as int, price);
-    final label = v['label'].toString();
+  Widget _serviceBlock(Map<String, dynamic> service, Color catColor) {
+    final variants = (service['variants'] as List).cast<Map<String, dynamic>>();
+    final sid = service['id'] as int;
+    final hasOffer = _offerApplies(sid);
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
+      padding: const EdgeInsets.only(top: 8, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label.isEmpty ? 'Standard' : label,
+          Row(
+            children: [
+              Container(
+                width: 14,
+                height: 2,
+                color: catColor.withValues(alpha: 0.45),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  service['name'].toString(),
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
                     color: context.textColor,
                   ),
                 ),
-                Text(
-                  '${v['duration']} min',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: context.secondaryTextColor,
+              ),
+              if (hasOffer)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    _offerLabel(),
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green.shade600,
+                    ),
                   ),
                 ),
-              ],
-            ),
+            ],
           ),
-          _priceText(price, discount),
-          const SizedBox(width: 8),
-          SizedBox(
-            height: 32,
-            child: ElevatedButton(
-              onPressed: () => _addVariant(service, v),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-              ),
-              child: const Text('Add', style: TextStyle(fontSize: 12)),
+          Padding(
+            padding: const EdgeInsets.only(left: 14),
+            child: Column(
+              children: variants
+                  .map((v) => _variantRow(service, v, catColor))
+                  .toList(),
             ),
           ),
         ],
@@ -1025,71 +904,138 @@ class _EditAppointmentServicesSheetState
     );
   }
 
-  Widget _suggestionsOverlay() {
-    final isDark = context.isDarkMode;
-    final suggestions = _suggestions;
-    if (!_showSuggestions || suggestions.isEmpty) {
-      return const SizedBox.shrink();
-    }
+  Widget _variantRow(
+    Map<String, dynamic> service,
+    Map<String, dynamic> v,
+    Color catColor,
+  ) {
+    final vid = v['id'] as int;
+    final onAppointment = _isOnAppointment(vid);
+    final ticked = _isTicked(vid);
+    final checked = onAppointment || ticked;
 
-    return Container(
-      margin: const EdgeInsets.only(top: 4),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2A2A2A) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+    final price = _toDouble(v['price']);
+    final discount = _discountFor(service['id'] as int, price);
+    final duration = _toInt(v['duration']);
+    final name = v['name'].toString();
+    final gender = v['gender'].toString();
+    final age = v['age'].toString();
+    final ageRange = v['age_range'].toString();
+    final ageText = age.isEmpty
+        ? ''
+        : (ageRange.isEmpty ? age : '$age ($ageRange)');
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Opacity(
+        opacity: onAppointment ? 0.6 : 1,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _toggleVariant(service, v),
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              decoration: BoxDecoration(
+                color: ticked
+                    ? AppTheme.primary.withValues(alpha: 0.08)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: ticked
+                      ? AppTheme.primary.withValues(alpha: 0.5)
+                      : context.dividerColor.withValues(alpha: 0.6),
+                ),
+              ),
+              child: Row(
+                children: [
+                  SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: Checkbox(
+                      value: checked,
+                      // locked when the variant is already on the appointment
+                      onChanged: onAppointment
+                          ? null
+                          : (_) => _toggleVariant(service, v),
+                      activeColor: AppTheme.primary,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            if (name.isNotEmpty)
+                              _infoChip(
+                                Icons.label_outline,
+                                name,
+                                Colors.teal.shade400,
+                              ),
+                            if (gender.isNotEmpty)
+                              _infoChip(
+                                Icons.person_outline,
+                                gender,
+                                Colors.blue.shade400,
+                              ),
+                            if (ageText.isNotEmpty)
+                              _infoChip(
+                                Icons.cake_outlined,
+                                ageText,
+                                Colors.purple.shade400,
+                              ),
+                            if (name.isEmpty &&
+                                gender.isEmpty &&
+                                ageText.isEmpty)
+                              _infoChip(
+                                Icons.check_circle_outline,
+                                'Standard',
+                                Colors.grey.shade600,
+                              ),
+                            if (onAppointment)
+                              _infoChip(
+                                Icons.lock_outline,
+                                'Added',
+                                Colors.green.shade600,
+                              ),
+                          ],
+                        ),
+                        if (duration > 0) ...[
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.timer_outlined,
+                                size: 12,
+                                color: context.secondaryTextColor,
+                              ),
+                              const SizedBox(width: 3),
+                              Text(
+                                '$duration min',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: context.secondaryTextColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  _priceText(price, discount),
+                ],
+              ),
+            ),
           ),
-        ],
-      ),
-      child: ListView.separated(
-        shrinkWrap: true,
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        itemCount: suggestions.length,
-        separatorBuilder: (_, _) => Divider(
-          height: 1,
-          color: isDark ? Colors.grey[800] : Colors.grey[100],
         ),
-        itemBuilder: (context, index) {
-          final s = suggestions[index];
-          final variants = (s['variants'] as List).cast<Map<String, dynamic>>();
-          final taken = _isTaken(s['id'] as int);
-          return ListTile(
-            dense: true,
-            leading: Icon(
-              taken ? Icons.check_circle : Icons.content_cut,
-              size: 18,
-              color: taken ? Colors.green.shade600 : AppTheme.primary,
-            ),
-            title: Text(
-              s['name'].toString(),
-              style: TextStyle(
-                fontSize: 13,
-                color: taken
-                    ? context.secondaryTextColor
-                    : context.textColor,
-              ),
-            ),
-            subtitle: Text(
-              taken
-                  ? 'Already added'
-                  : variants.length == 1
-                  ? 'Tap to add directly'
-                  : '${variants.length} variants',
-              style: TextStyle(
-                fontSize: 11,
-                color: taken
-                    ? Colors.green.shade600
-                    : context.secondaryTextColor,
-              ),
-            ),
-            onTap: () => _pickSuggestion(s),
-          );
-        },
       ),
     );
   }
@@ -1102,7 +1048,7 @@ class _EditAppointmentServicesSheetState
     final isDark = context.isDarkMode;
     final bg = isDark ? const Color(0xFF1E1E1E) : Colors.white;
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
-    final filtered = _filteredCatalog;
+    final tree = _filteredTree;
 
     return FractionallySizedBox(
       heightFactor: 0.92,
@@ -1179,10 +1125,7 @@ class _EditAppointmentServicesSheetState
                       ),
                     )
                   : GestureDetector(
-                      onTap: () {
-                        _searchFocus.unfocus();
-                        setState(() => _showSuggestions = false);
-                      },
+                      onTap: () => FocusScope.of(context).unfocus(),
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                         child: Column(
@@ -1241,16 +1184,22 @@ class _EditAppointmentServicesSheetState
                             ],
 
                             _sectionTitle('Add service'),
+                            Text(
+                              'Tick the options you want to add',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: context.secondaryTextColor,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
                             TextField(
                               controller: _searchCtrl,
-                              focusNode: _searchFocus,
-                              onChanged: (v) => setState(() {
-                                _search = v.trim().toLowerCase();
-                                _showSuggestions = _search.isNotEmpty;
-                              }),
+                              onChanged: (v) => setState(
+                                () => _search = v.trim().toLowerCase(),
+                              ),
                               style: TextStyle(color: context.textColor),
                               decoration: InputDecoration(
-                                hintText: 'Type a service name...',
+                                hintText: 'Search service or category...',
                                 hintStyle: TextStyle(
                                   color: context.secondaryTextColor,
                                 ),
@@ -1260,14 +1209,10 @@ class _EditAppointmentServicesSheetState
                                 ),
                                 suffixIcon: _search.isNotEmpty
                                     ? IconButton(
-                                        icon: const Icon(
-                                          Icons.clear,
-                                          size: 18,
-                                        ),
+                                        icon: const Icon(Icons.clear, size: 18),
                                         onPressed: () => setState(() {
                                           _searchCtrl.clear();
                                           _search = '';
-                                          _showSuggestions = false;
                                         }),
                                       )
                                     : null,
@@ -1281,9 +1226,8 @@ class _EditAppointmentServicesSheetState
                                 ),
                               ),
                             ),
-                            _suggestionsOverlay(),
                             const SizedBox(height: 8),
-                            if (filtered.isEmpty)
+                            if (tree.isEmpty)
                               Padding(
                                 padding: const EdgeInsets.all(12),
                                 child: Text(
@@ -1294,7 +1238,7 @@ class _EditAppointmentServicesSheetState
                                 ),
                               )
                             else
-                              ...filtered.map(_serviceTile),
+                              ...tree.map(_categoryBlock),
 
                             _sectionTitle('Extra charge (optional)'),
                             TextField(
