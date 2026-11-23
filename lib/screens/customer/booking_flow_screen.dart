@@ -4,12 +4,30 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
+import 'package:timezone/timezone.dart' as tzdata;
 import '../../services/timezone_service.dart';
 import '../../services/currency_service.dart';
 import '../../services/currency_settings_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
 
+// =====================================================================
+// BOOKING FLOW
+//
+// TIME MODEL
+//  - The SALON is always calculated in ITS OWN timezone (salons.timezone).
+//    "today", the calendar, the slot times and the DB all use it.
+//  - The user's timezone is only a display reference ("Your time: ...").
+//
+// BOOKING RULES (decided by the database, this screen only shows them)
+//  - ONE gap scan: appointments, VIP, breaks, leave, day off, salon close.
+//  - If the services do not fit before close -> NO_SLOT ("try the next day").
+//    There is NO overflow, NO waiting list, NO salon-hours extension.
+//  - A not-started VIP that the new booking overlaps by <= 15 min is moved
+//    later when the booking is CONFIRMED (the preview only says VIP_PUSH).
+//  - The start time is validated again by the DB at confirm
+//    (SLOT_TAKEN / SLOT_PASSED / NO_SLOT) -> back to the time step.
+// =====================================================================
 class BookingFlowScreen extends StatefulWidget {
   final Map<String, dynamic>? initialSalon;
   const BookingFlowScreen({super.key, this.initialSalon});
@@ -123,6 +141,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     const Color(0xFFF3E5F5),
   ];
 
+  /// Errors the database can return at confirm time that only need a fresh
+  /// look at the time step (not a hard failure).
+  static const Set<String> _slotRecoveryCodes = {
+    'SLOT_TAKEN',
+    'SLOT_PASSED',
+    'NO_SLOT',
+    'SALON_CLOSED',
+    'BARBER_UNAVAILABLE',
+  };
+
   // ═══════════════════════════════════════════════════
   // ✅ SALON "NOW" / "TODAY" (salon timezone reference)
   // ═══════════════════════════════════════════════════
@@ -142,6 +170,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final now = _salonNow;
     return DateTime(now.year, now.month, now.day);
   }
+
+  /// ✅ Date-only arithmetic. (`date.add(Duration(days: n))` is wrong on the
+  /// device's DST-switch days: the day can be 23 / 25 hours long.)
+  DateTime _addDays(DateTime d, int n) => DateTime(d.year, d.month, d.day + n);
 
   // ═══════════════════════════════════════════════════
   // ✅ CURRENCY + TIMEZONE HELPERS
@@ -190,11 +222,30 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return _selectedSalonTimezone != _userTimezone;
   }
 
-  /// ✅ DST check via TimezoneService (salon timezone)
-  bool _isDST() {
+  /// ✅ FIX: is DST active in the SALON timezone on the selected date?
+  /// (It used the USER's timezone before, so the badge was wrong for a salon
+  ///  in another country.)
+  bool _isSalonDstOnSelectedDate() {
     try {
-      final status = TimezoneService.getDSTStatus();
-      return status['isDST'] == true;
+      final tzName = _selectedSalonTimezone.isNotEmpty
+          ? _selectedSalonTimezone
+          : _kDefaultSalonTimezone;
+      final loc = tzdata.getLocation(tzName);
+      final date = _selectedDate ?? _todayDate;
+
+      final onDate = tzdata.TZDateTime(
+        loc,
+        date.year,
+        date.month,
+        date.day,
+        12,
+      ).timeZoneOffset;
+      final jan = tzdata.TZDateTime(loc, date.year, 1, 15, 12).timeZoneOffset;
+      final jul = tzdata.TZDateTime(loc, date.year, 7, 15, 12).timeZoneOffset;
+
+      if (jan == jul) return false; // this timezone has no DST
+      final standard = jan < jul ? jan : jul;
+      return onDate != standard;
     } catch (_) {
       return false;
     }
@@ -457,6 +508,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     );
   }
 
+  void _showInfoSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: Colors.orange.shade800,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   // ============================================
   // TIMEZONE + CURRENCY INIT
   // ============================================
@@ -507,6 +569,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   void _onTimezoneChanged() async {
+    // The slot times are in the SALON timezone, so only the "Your time"
+    // reference line changes. Reload to refresh it.
     if (_currentStep == 5 && _selectedDate != null && _selectedBarber != null) {
       setState(() {
         _availableSlots = [];
@@ -567,12 +631,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     await _loadSalonServices();
     await _applyPreselectedServices();
     await _loadHolidays();
-
-    try {
-      await supabase.rpc('cleanup_old_queues');
-    } catch (e) {
-      debugPrint('⚠️ Cleanup queues failed (non-critical): $e');
-    }
+    // (cleanup_old_queues is a server-only function: it is run by the
+    //  database, not by the app)
   }
 
   /// ✅ Load salon timezone + currency + exchange rate
@@ -1273,6 +1333,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         _holidays.clear();
         _holidayNames.clear();
         for (var holiday in response) {
+          // plain salon-local date (no timezone maths)
           final date = DateTime.parse(holiday['holiday_date']);
           _holidays.add(date);
           _holidayNames[date] = holiday['name'];
@@ -1315,8 +1376,21 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   DateTime? _firstSelectableDate() {
     for (int i = 0; i <= 30; i++) {
-      final d = _todayDate.add(Duration(days: i));
+      final d = _addDays(_todayDate, i);
       if (_isDaySelectable(d)) return d;
+    }
+    return null;
+  }
+
+  /// ✅ NEW: the next day AFTER [from] that can be booked
+  /// (skips holidays and non-working weekdays; max 30 days from today,
+  ///  the same limit as the calendar).
+  DateTime? _nextSelectableAfter(DateTime from) {
+    final maxDate = _addDays(_todayDate, 30);
+    var d = _addDays(DateTime(from.year, from.month, from.day), 1);
+    while (!d.isAfter(maxDate)) {
+      if (_isDaySelectable(d)) return d;
+      d = _addDays(d, 1);
     }
     return null;
   }
@@ -1699,7 +1773,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       final totalDuration = _calculateTotalDuration();
 
       // ✅ isToday based on SALON timezone
-      final isToday = _selectedDate!.isAtSameMomentAs(_todayDate);
+      final isToday = DateUtils.isSameDay(_selectedDate, _todayDate);
 
       final result = await supabase
           .rpc(
@@ -1719,25 +1793,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       final data = result is List && result.isNotEmpty ? result[0] : result;
 
       final conflictType = data['conflict_type']?.toString() ?? '';
-      final extensionMinutes = data['extension_minutes'] ?? 0;
-
-      if (isToday &&
-          (conflictType == 'OVERFLOW' || conflictType == 'MOVE_TO_NEXT_DAY')) {
-        setState(() {
-          _slotErrorMessage =
-              'No appointments available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
-              'Your requested time would exceed salon closing time by $extensionMinutes minutes.\n\n'
-              'Please select another date or try tomorrow.';
-          _slotErrorType = 'overflow';
-          _isLoadingSlots = false;
-        });
-        return;
-      }
+      final dayText = DateFormat('EEEE, MMM dd').format(_selectedDate!);
 
       if (conflictType == 'SALON_CLOSED') {
         setState(() {
           _slotErrorMessage =
-              'Salon is closed on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\nPlease select another date.';
+              'Salon is closed on $dayText.\n\nPlease select another date.';
           _slotErrorType = 'salon_closed';
           _isLoadingSlots = false;
         });
@@ -1747,18 +1808,30 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       if (conflictType == 'BARBER_UNAVAILABLE') {
         setState(() {
           _slotErrorMessage =
-              '${_selectedBarber!['full_name']} is not working on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\nPlease select another barber.';
+              '${_selectedBarber!['full_name']} is not working on $dayText.\n\nPlease select another barber.';
           _slotErrorType = 'barber';
           _isLoadingSlots = false;
         });
         return;
       }
 
-      if (conflictType == 'NO_SLOTS_REMAINING') {
+      // ✅ NO OVERFLOW: if the services do not fit before closing time the
+      //    database says NO_SLOT and the customer tries the next day.
+      if (conflictType == 'NO_SLOT') {
         setState(() {
           _slotErrorMessage =
-              'No appointments available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\nAll time slots are fully booked. Please select another date.';
+              'No free time left on $dayText for your $totalDuration min of services.\n\nPlease try the next day or choose another date.';
           _slotErrorType = 'date_full';
+          _isLoadingSlots = false;
+        });
+        return;
+      }
+
+      if (conflictType == 'SALON_NOT_FOUND') {
+        setState(() {
+          _slotErrorMessage =
+              'This barber is not assigned to the salon.\n\nPlease select another barber.';
+          _slotErrorType = 'barber';
           _isLoadingSlots = false;
         });
         return;
@@ -1774,10 +1847,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         return;
       }
 
-      String utcStart = data['new_start_time']?.toString() ?? '--:--';
-      String utcEnd = data['new_end_time']?.toString() ?? '--:--';
+      final String? utcStartRaw = data['new_start_time']?.toString();
+      final String? utcEndRaw = data['new_end_time']?.toString();
+      if (utcStartRaw == null || utcEndRaw == null) {
+        throw Exception('No time returned for this day');
+      }
+      final String utcStart = utcStartRaw;
+      final String utcEnd = utcEndRaw;
 
-      // ✅ SALON timezone for slot display
+      // ✅ SALON timezone for slot display (the date is the SALON-local date)
       String localStart = TimezoneService.utcToLocalTimeForDateWithTimezone(
         utcStart,
         _selectedDate!,
@@ -1789,21 +1867,38 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         _selectedSalonTimezone,
       );
 
+      // ✅ "Your time" reference line (only when the user is in another
+      //    timezone). Display only: nothing is calculated from it.
+      String? userStart;
+      String? userEnd;
+      if (_isDifferentTimezone) {
+        userStart = TimezoneService.utcTimeToUserClockForSalonDate(
+          utcStart,
+          _selectedDate!,
+          _selectedSalonTimezone,
+          _userTimezone,
+        );
+        userEnd = TimezoneService.utcTimeToUserClockForSalonDate(
+          utcEnd,
+          _selectedDate!,
+          _selectedSalonTimezone,
+          _userTimezone,
+        );
+      }
+
       final queueNum = data['new_queue_number'] is int
           ? data['new_queue_number']
           : 1;
       final wait = data['estimated_wait_minutes'] is int
           ? data['estimated_wait_minutes']
           : 0;
-      final extMins = data['extension_minutes'] is int
-          ? data['extension_minutes']
-          : 0;
-      final willExtend = data['salon_will_extend'] == true;
       final adjusted = data['adjusted_for']?.toString() ?? '';
 
       final newSlot = {
         'start_time': localStart,
         'end_time': localEnd,
+        'user_start_time': userStart,
+        'user_end_time': userEnd,
         'utc_start_time': utcStart,
         'utc_end_time': utcEnd,
         'queue_number': queueNum,
@@ -1811,8 +1906,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         'duration': totalDuration,
         'estimated_wait_minutes': wait,
         'travel_time_used': _selectedTravelTime,
-        'salon_will_extend': willExtend,
-        'extension_minutes': extMins,
         'adjusted_for': adjusted,
       };
 
@@ -1848,29 +1941,134 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 
+  /// ✅ NEW: "Try next day" - the next bookable day (holidays and
+  /// non-working weekdays skipped) on which THIS barber is available.
+  Future<void> _tryNextAvailableDate() async {
+    if (_selectedDate == null || _selectedSalon == null) return;
+
+    final savedBarber = _selectedBarber;
+    if (savedBarber == null) {
+      setState(() {
+        _selectedBarber = null;
+        _barbersLoaded = false;
+        _barberAvailability = {};
+        _availableBarbers = [];
+        _slotErrorMessage = null;
+        _slotErrorType = null;
+        _currentStep = 3;
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoadingSlots = true;
+      _slotErrorMessage = null;
+      _slotErrorType = null;
+      _showTravelTimeSelector = false;
+      _selectedTravelTime = 0;
+      _availableSlots = [];
+      _selectedSlot = null;
+    });
+
+    try {
+      DateTime? candidate = _nextSelectableAfter(_selectedDate!);
+      Map<String, dynamic>? availability;
+
+      while (candidate != null) {
+        final a = await _checkBarberFullAvailability(
+          savedBarber['id'].toString(),
+          candidate,
+        );
+        if (!mounted) return;
+        if (a['is_available'] == true) {
+          availability = a;
+          break;
+        }
+        candidate = _nextSelectableAfter(candidate);
+      }
+
+      if (candidate == null || availability == null) {
+        setState(() {
+          _isLoadingSlots = false;
+          _slotErrorMessage =
+              '${savedBarber['full_name'] ?? 'This barber'} has no more available days in the next 30 days.\n\nPlease try another barber.';
+          _slotErrorType = 'barber';
+        });
+        return;
+      }
+
+      final DateTime nextDate = candidate;
+      final Map<String, dynamic> nextAvailability = availability;
+
+      setState(() {
+        _selectedDate = nextDate;
+        _calendarVersion++;
+        _isDateUnavailable = false;
+        _unavailableReason = null;
+        _barberAvailability = {savedBarber['id'].toString(): nextAvailability};
+        _barbersLoaded = false;
+        _availableBarbers = [];
+      });
+
+      await _loadAvailableSlots();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingSlots = false;
+        _slotErrorMessage = 'Error: ${e.toString()}';
+        _slotErrorType = 'general';
+      });
+    }
+  }
+
   // ==================== STEP 6: CONFIRM ====================
 
+  /// ✅ Only the VIP push is explained to the customer. (Everything else the
+  /// database does to find the slot is not something the customer needs.)
+  bool _hasVipPush(String adjustedFor) => adjustedFor.contains('VIP_PUSH');
+
   String _getAdjustedForDisplay(String adjustedFor) {
-    if (adjustedFor.contains('VIP_AFTER')) {
-      return 'Time adjusted - After VIP appointment';
+    if (_hasVipPush(adjustedFor)) {
+      return 'A nearby VIP appointment will start a few minutes later to fit your booking.';
     }
-    if (adjustedFor.contains('VIP_PUSHED')) {
-      return 'VIP appointment rescheduled after this';
+    return '';
+  }
+
+  String _slotRecoveryMessage(String code) {
+    switch (code) {
+      case 'SLOT_TAKEN':
+        return 'That time was just taken. Here is the next free time.';
+      case 'SLOT_PASSED':
+        return 'That time has already passed. Here is the next free time.';
+      case 'NO_SLOT':
+        return 'No free time is left for these services on this day.';
+      case 'SALON_CLOSED':
+        return 'The salon is closed on this date.';
+      case 'BARBER_UNAVAILABLE':
+        return 'The barber is not available on this date.';
+      default:
+        return 'Please pick the time again.';
     }
-    if (adjustedFor.contains('BREAK_AFTER')) {
-      return 'Time adjusted - After barber break';
-    }
-    if (adjustedFor.contains('LEAVE_AFTER')) {
-      return 'Time adjusted - After barber leave';
-    }
-    if (adjustedFor.contains('SALON_EXTEND')) {
-      return 'Salon hours extended for this appointment';
-    }
-    if (adjustedFor.contains('TRAVEL')) return 'Travel time added';
-    if (adjustedFor.contains('AFTER_EFFECTIVE')) {
-      return 'Adjusted due to previous appointment';
-    }
-    return 'Time adjusted based on availability';
+  }
+
+  /// ✅ NEW: the database re-checks the picked time at confirm. If it is gone
+  /// go back to the time step and show what is free now.
+  Future<void> _recoverFromSlotError(String code) async {
+    if (!mounted) return;
+
+    setState(() {
+      _isBooking = false;
+      _currentStep = 5;
+      _availableSlots = [];
+      _selectedSlot = null;
+      _showTravelTimeSelector = false;
+      _slotErrorMessage = null;
+      _slotErrorType = null;
+      _isLoadingSlots = true;
+    });
+
+    _showInfoSnack(_slotRecoveryMessage(code));
+    await _loadAvailableSlots();
   }
 
   Future<void> _confirmBooking() async {
@@ -1930,6 +2128,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'p_variant_ids': variantIds,
           'p_offer_ids': offerIds,
           'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
+          // the server re-validates this start time and computes the end
           'p_utc_start_time': _selectedSlot!['utc_start_time'],
           'p_utc_end_time': _selectedSlot!['utc_end_time'],
           'p_child_name': _getChildNameForBooking(),
@@ -1937,7 +2136,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'p_notes': null,
           'p_is_vip': false,
           'p_vip_booking_id': null,
-          'p_confirm_overflow': true,
         },
       );
 
@@ -1946,6 +2144,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       if (result == null || result['success'] != true) {
         final msg = result?['message']?.toString() ?? 'Booking failed';
         final code = result?['error_code']?.toString() ?? '';
+
+        // ✅ the picked time is no longer free: back to the time step
+        if (_slotRecoveryCodes.contains(code)) {
+          await _recoverFromSlotError(code);
+          return;
+        }
+
         throw Exception(code.isNotEmpty ? '$msg ($code)' : msg);
       }
 
@@ -2304,14 +2509,19 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     return Icons.build;
   }
 
-  /// ✅ Salon opening hours — SALON timezone
+  /// ✅ Salon opening hours - in THAT salon's own timezone.
+  /// (The salon list RPC returns each salon's timezone. The old code used the
+  ///  timezone of the last selected salon, i.e. Colombo, for every salon.)
   String _getSalonLocalTime(Map<String, dynamic> salon) {
     final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
     final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
 
-    final tz = _selectedSalonTimezone.isNotEmpty
-        ? _selectedSalonTimezone
-        : _kDefaultSalonTimezone;
+    final salonTz = salon['timezone']?.toString() ?? '';
+    final tz = salonTz.isNotEmpty
+        ? salonTz
+        : (_selectedSalonTimezone.isNotEmpty
+              ? _selectedSalonTimezone
+              : _kDefaultSalonTimezone);
 
     final openLocal = TimezoneService.utcToLocalTimeRecurringWithTimezone(
       openTimeUTC,
@@ -4406,7 +4616,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   Widget _buildDateSelectionStep() {
     final isDark = context.isDarkMode;
     final today = _todayDate;
-    final maxDate = today.add(const Duration(days: 30));
+    final maxDate = _addDays(today, 30);
 
     final firstSelectable = _firstSelectableDate();
     final noDatesAvailable = _scheduleLoaded && firstSelectable == null;
@@ -4428,7 +4638,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         ? _holidayNames[_selectedDate]
         : null;
     final isSelectedToday =
-        _selectedDate != null && _selectedDate!.isAtSameMomentAs(today);
+        _selectedDate != null && DateUtils.isSameDay(_selectedDate, today);
 
     return Column(
       children: [
@@ -5626,7 +5836,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ),
                 ),
               ),
-              if (_isDST()) ...[
+              if (_isSalonDstOnSelectedDate()) ...[
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -5748,11 +5958,15 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final errorType = _slotErrorType ?? 'general';
     final showDateButtons =
         errorType == 'date' ||
-        errorType == 'overflow' ||
         errorType == 'salon_closed' ||
         errorType == 'date_full';
     final showBarberButton = errorType == 'barber';
     final showGoBack = errorType == 'general';
+
+    // the next bookable day (holidays / non-working weekdays skipped)
+    final DateTime? nextDate = _selectedDate == null
+        ? null
+        : _nextSelectableAfter(_selectedDate!);
 
     return Center(
       child: SingleChildScrollView(
@@ -5813,106 +6027,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                     label: const Text('Change Date'),
                   ),
-                if (showDateButtons)
+                if (showDateButtons && nextDate != null)
                   ElevatedButton.icon(
-                    onPressed: () async {
-                      if (_selectedDate == null) return;
-                      final tomorrow = _selectedDate!.add(
-                        const Duration(days: 1),
-                      );
-                      final savedBarber = _selectedBarber;
-                      final savedSalon = _selectedSalon;
-
-                      setState(() {
-                        _selectedDate = tomorrow;
-                        _showTravelTimeSelector = false;
-                        _selectedTravelTime = 0;
-                        _availableSlots = [];
-                        _selectedSlot = null;
-                        _isLoadingSlots = true;
-                        _slotErrorMessage = null;
-                        _slotErrorType = null;
-                      });
-
-                      try {
-                        final isHoliday = _holidays.contains(tomorrow);
-                        if (isHoliday) {
-                          if (!mounted) return;
-                          setState(() {
-                            _isLoadingSlots = false;
-                            _slotErrorMessage =
-                                '${_holidayNames[tomorrow] ?? 'Holiday'} — Salon is closed tomorrow.';
-                            _slotErrorType = 'salon_closed';
-                          });
-                          return;
-                        }
-
-                        if (savedBarber == null || savedSalon == null) {
-                          if (!mounted) return;
-                          setState(() {
-                            _isLoadingSlots = false;
-                            _selectedBarber = null;
-                            _barbersLoaded = false;
-                            _barberAvailability = {};
-                            _availableBarbers = [];
-                            _currentStep = 3;
-                          });
-                          return;
-                        }
-
-                        final availability = await _checkBarberFullAvailability(
-                          savedBarber['id'] as String,
-                          tomorrow,
-                        );
-
-                        if (!mounted) return;
-
-                        if (availability['is_available'] != true) {
-                          setState(() {
-                            _selectedBarber = null;
-                            _barbersLoaded = false;
-                            _barberAvailability = {};
-                            _availableBarbers = [];
-                            _isLoadingSlots = false;
-                            _currentStep = 3;
-                          });
-                          await _loadAvailableBarbers();
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '${savedBarber['full_name']} is not available on '
-                                '${DateFormat('MMM dd').format(tomorrow)}.',
-                              ),
-                              backgroundColor: Colors.orange.shade800,
-                            ),
-                          );
-                          return;
-                        }
-
-                        setState(() {
-                          _selectedBarber = savedBarber;
-                          _barberAvailability = {
-                            savedBarber['id']: availability,
-                          };
-                          _barbersLoaded = false;
-                          _availableBarbers = [];
-                        });
-
-                        await _loadAvailableSlots();
-                      } catch (e) {
-                        if (!mounted) return;
-                        setState(() {
-                          _isLoadingSlots = false;
-                          _slotErrorMessage = 'Error: ${e.toString()}';
-                          _slotErrorType = 'general';
-                        });
-                      }
-                    },
+                    onPressed: _tryNextAvailableDate,
                     icon: const Icon(Icons.arrow_forward, size: 18),
-                    label: Text(
-                      'Try ${DateFormat('MMM dd').format(_selectedDate != null ? _selectedDate!.add(const Duration(days: 1)) : _todayDate)}',
-                    ),
+                    label: Text('Try ${DateFormat('MMM dd').format(nextDate)}'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
@@ -5923,6 +6042,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ),
               ],
             ),
+            if (showDateButtons && nextDate == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  'No more bookable days in the next 30 days.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                ),
+              ),
             if (showBarberButton) ...[
               const SizedBox(height: 16),
               TextButton.icon(
@@ -6119,10 +6250,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final queueNumber = slot['queue_number'] ?? 0;
     final startTime = slot['start_time']?.toString() ?? '--:--';
     final endTime = slot['end_time']?.toString() ?? '--:--';
+    final userStartTime = slot['user_start_time']?.toString();
+    final userEndTime = slot['user_end_time']?.toString();
     final waitMinutes = slot['estimated_wait_minutes'] ?? 0;
     final travelTimeUsed = slot['travel_time_used'] ?? 0;
-    final salonWillExtend = slot['salon_will_extend'] ?? false;
-    final extensionMinutes = slot['extension_minutes'] ?? 0;
+    final adjustedFor = slot['adjusted_for']?.toString() ?? '';
 
     return Card(
       margin: const EdgeInsets.all(16),
@@ -6191,6 +6323,22 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   ],
                 ),
               ),
+              // ✅ NEW: the same time on the user's clock (reference only)
+              if (userStartTime != null && userEndTime != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    'Your time: $userStartTime - $userEndTime',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontStyle: FontStyle.italic,
+                      color: isDark
+                          ? Colors.blue.shade300
+                          : Colors.blue.shade700,
+                    ),
+                  ),
+                ),
               const SizedBox(height: 16),
               if (waitMinutes > 0 && waitMinutes <= 200)
                 Container(
@@ -6227,16 +6375,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                     ),
                   ),
                 ),
-              if (salonWillExtend)
+              // ✅ the only adjustment the customer is told about
+              if (_hasVipPush(adjustedFor))
                 Padding(
                   padding: const EdgeInsets.only(top: 8),
                   child: Text(
-                    '⏰ Salon will close $extensionMinutes min late for you',
+                    '⭐ ${_getAdjustedForDisplay(adjustedFor)}',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 13,
+                      fontSize: 12.5,
                       color: isDark
-                          ? Colors.green.shade300
-                          : Colors.green.shade700,
+                          ? Colors.amber.shade300
+                          : Colors.amber.shade900,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -6329,10 +6479,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final salonAddress = _selectedSalon!['address']?.toString() ?? '';
     final startTime = _selectedSlot!['start_time']?.toString() ?? '--:--';
     final endTime = _selectedSlot!['end_time']?.toString() ?? '--:--';
+    final userStartTime = _selectedSlot!['user_start_time']?.toString();
+    final userEndTime = _selectedSlot!['user_end_time']?.toString();
+    final hasUserClock = userStartTime != null && userEndTime != null;
     final queueNumber = _selectedSlot!['queue_number'] ?? '?';
     final travelTimeUsed = _selectedSlot!['travel_time_used'] ?? 0;
-    final salonWillExtend = _selectedSlot!['salon_will_extend'] ?? false;
-    final extensionMinutes = _selectedSlot!['extension_minutes'] ?? 0;
     final adjustedFor = _selectedSlot!['adjusted_for']?.toString() ?? '';
     final barberName = _selectedBarber!['full_name']?.toString() ?? 'Barber';
     final barberRating =
@@ -6358,7 +6509,34 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   Icons.calendar_today,
                   'Date & Time',
                   DateFormat('EEEE, MMM dd').format(_selectedDate!),
-                  '$startTime - $endTime • Queue $queueNumber',
+                  hasUserClock
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 4),
+                            Text(
+                              '$startTime - $endTime (salon time) • Queue $queueNumber',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Your time: $userStartTime - $userEndTime',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontStyle: FontStyle.italic,
+                                color: isDark
+                                    ? Colors.blue.shade300
+                                    : Colors.blue.shade700,
+                              ),
+                            ),
+                          ],
+                        )
+                      : '$startTime - $endTime • Queue $queueNumber',
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
@@ -6552,17 +6730,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       '',
                     ),
                   ),
-                if (salonWillExtend)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: _buildConfirmationTile(
-                      Icons.access_time,
-                      'Salon Hours',
-                      'Extended by $extensionMinutes minutes',
-                      'Salon will stay open later',
-                    ),
-                  ),
-                if (adjustedFor.isNotEmpty)
+                // ✅ the only adjustment the customer is told about
+                if (_hasVipPush(adjustedFor))
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: _buildConfirmationTile(

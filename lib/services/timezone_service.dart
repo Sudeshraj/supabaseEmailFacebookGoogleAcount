@@ -4,6 +4,24 @@ import 'package:timezone/timezone.dart' as tz;
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+// =====================================================================
+// TIME MODEL (how every screen must use this service)
+//
+//  - A SALON is always calculated in ITS OWN timezone (salons.timezone).
+//    The user's timezone is only a display reference ("Your time: ...").
+//
+//  - Everything saved in the database is UTC, converted with the SALON
+//    timezone:
+//      * RECURRING data (salon open/close, barber schedules, breaks,
+//        special schedule / break, leave start/end):
+//          reference date 2024-01-01  -> *Recurring* methods.
+//        9:00 stays 9:00 all year, also in DST countries.
+//      * APPOINTMENT times: the ACTUAL date -> *ForDate* methods.
+//        The date you pass is the SALON-LOCAL date (appointment_date).
+//
+//  - Dates (appointment_date, leave_date, schedule_date, holiday_date) are
+//    plain salon-local dates. Do not run timezone maths on them.
+// =====================================================================
 class TimezoneService {
   static bool _initialized = false;
   static String _currentTimezone = 'Asia/Colombo';
@@ -54,6 +72,25 @@ class TimezoneService {
         'offset': '-8:00',
         'flag': '🇺🇸',
       },
+      // ✅ NEW (multi-country): states with their own rules
+      {
+        'name': 'Alaska Time',
+        'timezone': 'America/Anchorage',
+        'offset': '-9:00',
+        'flag': '🇺🇸',
+      },
+      {
+        'name': 'Hawaii Time',
+        'timezone': 'Pacific/Honolulu',
+        'offset': '-10:00',
+        'flag': '🇺🇸',
+      },
+      {
+        'name': 'Arizona Time (no DST)',
+        'timezone': 'America/Phoenix',
+        'offset': '-7:00',
+        'flag': '🇺🇸',
+      },
     ],
     'GB': [
       {
@@ -76,6 +113,31 @@ class TimezoneService {
         'offset': '+8:00',
         'flag': '🇦🇺',
       },
+      // ✅ NEW (multi-country): different DST rules from Sydney
+      {
+        'name': 'Melbourne',
+        'timezone': 'Australia/Melbourne',
+        'offset': '+10:00',
+        'flag': '🇦🇺',
+      },
+      {
+        'name': 'Brisbane (no DST)',
+        'timezone': 'Australia/Brisbane',
+        'offset': '+10:00',
+        'flag': '🇦🇺',
+      },
+      {
+        'name': 'Adelaide',
+        'timezone': 'Australia/Adelaide',
+        'offset': '+9:30',
+        'flag': '🇦🇺',
+      },
+      {
+        'name': 'Darwin (no DST)',
+        'timezone': 'Australia/Darwin',
+        'offset': '+9:30',
+        'flag': '🇦🇺',
+      },
     ],
     'CA': [
       {
@@ -88,6 +150,25 @@ class TimezoneService {
         'name': 'Vancouver',
         'timezone': 'America/Vancouver',
         'offset': '-8:00',
+        'flag': '🇨🇦',
+      },
+      // ✅ NEW (multi-country)
+      {
+        'name': 'Edmonton',
+        'timezone': 'America/Edmonton',
+        'offset': '-7:00',
+        'flag': '🇨🇦',
+      },
+      {
+        'name': 'Winnipeg',
+        'timezone': 'America/Winnipeg',
+        'offset': '-6:00',
+        'flag': '🇨🇦',
+      },
+      {
+        'name': 'Halifax',
+        'timezone': 'America/Halifax',
+        'offset': '-4:00',
         'flag': '🇨🇦',
       },
     ],
@@ -357,6 +438,24 @@ class TimezoneService {
         'flag': '🇰🇪',
       },
     ],
+    // ✅ NEW: these two countries are in countryDialList (and the currency
+    //    list) but had no timezone entry
+    'CN': [
+      {
+        'name': 'China',
+        'timezone': 'Asia/Shanghai',
+        'offset': '+8:00',
+        'flag': '🇨🇳',
+      },
+    ],
+    'CH': [
+      {
+        'name': 'Switzerland',
+        'timezone': 'Europe/Zurich',
+        'offset': '+1:00',
+        'flag': '🇨🇭',
+      },
+    ],
   };
 
   // ==================== INITIALIZATION ====================
@@ -499,6 +598,14 @@ class TimezoneService {
           return;
         }
       }
+    }
+
+    // ✅ NEW: aliases / extra timezones (Australia/Hobart, Asia/Calcutta ...)
+    final extraIso = _extraTimezoneCountries[timezone];
+    if (extraIso != null) {
+      _currentCountryCode = extraIso;
+      _currentCountryName = getCountryNameForIso(extraIso);
+      return;
     }
 
     if (timezone.contains('/')) {
@@ -671,8 +778,24 @@ class TimezoneService {
 
   // ==================== LIST HELPERS ====================
 
+  /// NOTE: kept exactly as before (unknown country -> Sri Lanka list) so
+  /// existing callers keep working. For a SAFE lookup use
+  /// [getTimezonesForCountryOrEmpty] / [hasTimezonesForCountry].
   static List<Map<String, String>> getTimezonesForCountry(String countryCode) {
     return countryTimezones[countryCode] ?? countryTimezones['LK']!;
+  }
+
+  /// ✅ NEW: no silent Sri Lanka fallback. Unknown country -> empty list.
+  static List<Map<String, String>> getTimezonesForCountryOrEmpty(
+    String countryCode,
+  ) {
+    return countryTimezones[countryCode] ?? const <Map<String, String>>[];
+  }
+
+  /// ✅ NEW
+  static bool hasTimezonesForCountry(String countryCode) {
+    final list = countryTimezones[countryCode];
+    return list != null && list.isNotEmpty;
   }
 
   static List<Map<String, String>> getAllCountries() {
@@ -695,9 +818,27 @@ class TimezoneService {
 
   // ==================== ✅ CURRENCY HELPERS ====================
 
+  /// Canadian timezones (must be checked BEFORE the generic 'America/' rule,
+  /// otherwise Toronto / Vancouver ... got USD)
+  static const Set<String> _canadianTimezones = {
+    'America/Toronto',
+    'America/Vancouver',
+    'America/Edmonton',
+    'America/Winnipeg',
+    'America/Halifax',
+    'America/St_Johns',
+    'America/Regina',
+    'America/Montreal',
+  };
+
   /// Get currency code from timezone
   static String getCurrencyForTimezone(String timezone) {
     if (timezone.startsWith('Asia/Colombo')) return 'LKR';
+
+    // ✅ FIX: Canada before 'America/' (was unreachable -> always USD)
+    if (timezone.startsWith('Canada/') || _canadianTimezones.contains(timezone)) {
+      return 'CAD';
+    }
     if (timezone.startsWith('America/') || timezone.startsWith('US/')) {
       return 'USD';
     }
@@ -705,11 +846,15 @@ class TimezoneService {
         timezone.startsWith('Asia/Calcutta')) {
       return 'INR';
     }
+
+    // ✅ FIX: Switzerland before the generic 'Europe/' rule (was unreachable)
+    if (timezone.startsWith('Europe/Zurich')) return 'CHF';
     if (timezone.startsWith('Europe/London') ||
         timezone.startsWith('Europe/Belfast')) {
       return 'GBP';
     }
     if (timezone.startsWith('Europe/')) return 'EUR';
+
     if (timezone.startsWith('Australia/')) return 'AUD';
     if (timezone.startsWith('Asia/Singapore')) return 'SGD';
     if (timezone.startsWith('Asia/Dubai')) return 'AED';
@@ -717,19 +862,17 @@ class TimezoneService {
     if (timezone.startsWith('Asia/Bangkok')) return 'THB';
     if (timezone.startsWith('Asia/Karachi')) return 'PKR';
     if (timezone.startsWith('Asia/Dhaka')) return 'BDT';
-    if (timezone.startsWith('Asia/Kathmandu')) return 'NPR';
+    if (timezone.startsWith('Asia/Kathmandu') ||
+        timezone.startsWith('Asia/Katmandu')) {
+      return 'NPR';
+    }
     if (timezone.startsWith('Asia/Tokyo')) return 'JPY';
     if (timezone.startsWith('Asia/Shanghai') ||
-        timezone.startsWith('Asia/Chongqing')) {
+        timezone.startsWith('Asia/Chongqing') ||
+        timezone.startsWith('Asia/Harbin')) {
       return 'CNY';
     }
     if (timezone.startsWith('Pacific/Auckland')) return 'NZD';
-    if (timezone.startsWith('Europe/Zurich')) return 'CHF';
-    if (timezone.startsWith('Canada/') ||
-        timezone == 'America/Toronto' ||
-        timezone == 'America/Vancouver') {
-      return 'CAD';
-    }
     return 'USD';
   }
 
@@ -1056,31 +1199,126 @@ class TimezoneService {
     }
   }
 
-  // ==================== DST-SAFE CONVERSIONS FOR SPECIFIC DATES ====================
+  // ==================== ✅ SALON-DATE CONVERSION (CORE FIX) ====================
 
-  /// Convert UTC time to LOCAL DateTime using SPECIFIC DATE (For appointments)
-  static DateTime utcToLocalDateTimeForDate(
+  /// A stored UTC TIME that belongs to an appointment on the SALON-LOCAL date
+  /// [salonDate]  ->  the local DateTime on that date.
+  ///
+  /// The old code assumed the UTC date == the salon date. That is wrong
+  /// whenever the salon's offset moves the time across UTC midnight
+  /// (Sydney 09:00 = 22:00 UTC of the PREVIOUS day, Auckland, Los Angeles ...)
+  /// and gave a 1 hour error on the two days around a DST switch.
+  /// Here the UTC date (D-1, D or D+1) whose local date equals [salonDate]
+  /// is used, the same rule as the database function utc_time_to_local_min().
+  /// (On the one ambiguous hour of a "clocks go back" day both pick the first
+  /// candidate: D-1, D, D+1.)
+  static DateTime utcTimeToLocalOnSalonDate(
     String utcTime,
-    DateTime specificDate,
+    DateTime salonDate,
+    String timezone,
   ) {
     try {
       String timeStr = utcTime;
       if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
       final parts = timeStr.split(':');
-      int utcHour = int.parse(parts[0]);
-      int utcMinute = int.parse(parts[1]);
+      final utcHour = int.parse(parts[0]);
+      final utcMinute = int.parse(parts[1]);
+      final location = tz.getLocation(timezone);
 
-      final utcDateTime = DateTime.utc(
-        specificDate.year,
-        specificDate.month,
-        specificDate.day,
-        utcHour,
-        utcMinute,
+      for (final dayShift in const [-1, 0, 1]) {
+        final utc = DateTime.utc(
+          salonDate.year,
+          salonDate.month,
+          salonDate.day + dayShift,
+          utcHour,
+          utcMinute,
+        );
+        final local = tz.TZDateTime.from(utc, location);
+        if (local.year == salonDate.year &&
+            local.month == salonDate.month &&
+            local.day == salonDate.day) {
+          return local;
+        }
+      }
+
+      // should not happen: fall back to the same-date interpretation
+      return tz.TZDateTime.from(
+        DateTime.utc(
+          salonDate.year,
+          salonDate.month,
+          salonDate.day,
+          utcHour,
+          utcMinute,
+        ),
+        location,
+      );
+    } catch (e) {
+      debugPrint('❌ Error in utcTimeToLocalOnSalonDate: $e');
+      return salonDate;
+    }
+  }
+
+  /// 12-hour text ('9:05 AM') of a DateTime
+  static String _format12h(DateTime dt) {
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    final displayHour = dt.hour % 12 == 0 ? 12 : dt.hour % 12;
+    return '$displayHour:${dt.minute.toString().padLeft(2, '0')} $period';
+  }
+
+  /// ✅ NEW: the same stored time on the USER's clock (display reference only,
+  /// "Your time: 4:30 AM (+1 day)"). Never use this for any calculation.
+  static String utcTimeToUserClockForSalonDate(
+    String utcTime,
+    DateTime salonDate,
+    String salonTimezone,
+    String userTimezone,
+  ) {
+    try {
+      final salonLocal = utcTimeToLocalOnSalonDate(
+        utcTime,
+        salonDate,
+        salonTimezone,
+      );
+      final userLocal = tz.TZDateTime.from(
+        salonLocal,
+        tz.getLocation(userTimezone),
       );
 
-      final location = tz.getLocation(_currentTimezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-      return localDateTime;
+      final userDay = DateTime.utc(
+        userLocal.year,
+        userLocal.month,
+        userLocal.day,
+      );
+      final salonDay = DateTime.utc(
+        salonDate.year,
+        salonDate.month,
+        salonDate.day,
+      );
+      final diff = userDay.difference(salonDay).inDays;
+
+      final dayNote = diff > 0
+          ? ' (+$diff day)'
+          : diff < 0
+          ? ' (${diff.abs() == 1 ? '-1' : '-${diff.abs()}'} day)'
+          : '';
+
+      return '${_format12h(userLocal)}$dayNote';
+    } catch (e) {
+      debugPrint('❌ Error in utcTimeToUserClockForSalonDate: $e');
+      return utcTime;
+    }
+  }
+
+  // ==================== DST-SAFE CONVERSIONS FOR SPECIFIC DATES ====================
+
+  /// Convert UTC time to LOCAL DateTime using SPECIFIC DATE (For appointments)
+  /// [specificDate] = the SALON-LOCAL date (appointment_date).
+  static DateTime utcToLocalDateTimeForDate(
+    String utcTime,
+    DateTime specificDate,
+  ) {
+    try {
+      return utcTimeToLocalOnSalonDate(utcTime, specificDate, _currentTimezone);
     } catch (e) {
       debugPrint('❌ Error in utcToLocalDateTimeForDate: $e');
       return specificDate;
@@ -1143,29 +1381,15 @@ class TimezoneService {
   // ==================== DST-SAFE CONVERSIONS FOR SPECIFIC DATES WITH CUSTOM TIMEZONE ====================
 
   /// Convert UTC time to LOCAL DateTime using SPECIFIC DATE with custom timezone
+  /// [specificDate] = the SALON-LOCAL date (appointment_date).
+  /// (Also correct for NZ / UTC+13 / UTC+14 and for the DST switch days.)
   static DateTime utcToLocalDateTimeForDateWithTimezone(
     String utcTime,
     DateTime specificDate,
     String timezone,
   ) {
     try {
-      String timeStr = utcTime;
-      if (timeStr.length > 5) timeStr = timeStr.substring(0, 5);
-      final parts = timeStr.split(':');
-      int utcHour = int.parse(parts[0]);
-      int utcMinute = int.parse(parts[1]);
-
-      final utcDateTime = DateTime.utc(
-        specificDate.year,
-        specificDate.month,
-        specificDate.day,
-        utcHour,
-        utcMinute,
-      );
-
-      final location = tz.getLocation(timezone);
-      final localDateTime = tz.TZDateTime.from(utcDateTime, location);
-      return localDateTime;
+      return utcTimeToLocalOnSalonDate(utcTime, specificDate, timezone);
     } catch (e) {
       debugPrint('❌ Error in utcToLocalDateTimeForDateWithTimezone: $e');
       return specificDate;
@@ -1271,6 +1495,20 @@ class TimezoneService {
     return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
   }
 
+  /// ✅ NEW: appointment time (actual date) as TimeOfDay in the salon timezone
+  static TimeOfDay utcToTimeOfDayForDateWithTimezone(
+    String utcTime,
+    DateTime salonDate,
+    String timezone,
+  ) {
+    final localDateTime = utcTimeToLocalOnSalonDate(
+      utcTime,
+      salonDate,
+      timezone,
+    );
+    return TimeOfDay(hour: localDateTime.hour, minute: localDateTime.minute);
+  }
+
   /// ✅ Convert a TimeOfDay from one timezone to another
   /// Useful when displaying salon times in user's timezone
   static TimeOfDay convertTimeOfDayBetweenTimezones(
@@ -1305,6 +1543,8 @@ class TimezoneService {
   }
 
   /// Get local hour/minute for specific date
+  /// (dayOffset is 0: [selectedDate] is the salon-local date, so the local
+  ///  result is always on that date)
   static Map<String, int> getLocalHourMinuteForDate(
     String utcTime,
     DateTime selectedDate,
@@ -1323,29 +1563,32 @@ class TimezoneService {
   }
 
   /// ✅ Get current date in a specific timezone
-static DateTime getNowInTimezone(String timezone) {
-  try {
-    final location = tz.getLocation(timezone);
-    final now = tz.TZDateTime.now(location);
-    // Convert to local DateTime (without timezone info) for easy use
-    return DateTime(
-      now.year,
-      now.month,
-      now.day,
-      now.hour,
-      now.minute,
-      now.second,
-    );
-  } catch (e) {
-    debugPrint('❌ Error in getNowInTimezone: $e');
-    return DateTime.now();
+  static DateTime getNowInTimezone(String timezone) {
+    try {
+      final location = tz.getLocation(timezone);
+      final now = tz.TZDateTime.now(location);
+      // Convert to local DateTime (without timezone info) for easy use
+      return DateTime(
+        now.year,
+        now.month,
+        now.day,
+        now.hour,
+        now.minute,
+        now.second,
+      );
+    } catch (e) {
+      debugPrint('❌ Error in getNowInTimezone: $e');
+      return DateTime.now();
+    }
   }
-}
 
-// =====================================================================
-// TimezoneService එක ඇතුළට paste කරන්න (class එකේ ඇතුළේ, උදා:
-// "CURRENCY HELPERS" section එකට උඩින්)
-// =====================================================================
+  /// ✅ NEW: "today" (date only, 00:00) in a specific timezone.
+  /// Use the SALON timezone for date pickers / "is this day in the past"
+  /// checks, never the device date.
+  static DateTime getTodayInTimezone(String timezone) {
+    final now = getNowInTimezone(timezone);
+    return DateTime(now.year, now.month, now.day);
+  }
 
   // ==================== ✅ COUNTRY / DIAL CODE HELPERS ====================
   // iso / name / dial code / flag. Phone country code picker + address
