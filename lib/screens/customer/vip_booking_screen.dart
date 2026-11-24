@@ -4,12 +4,50 @@ import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
+import 'package:timezone/timezone.dart' as tzdata;
 import '../../services/timezone_service.dart';
 import '../../services/currency_service.dart';
-import '../../services/currency_settings_service.dart'; // ✅ NEW
+import '../../services/currency_settings_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
 
+// =====================================================================
+// VIP BOOKING FLOW
+//
+// TIME MODEL (same as BookingFlowScreen)
+//  - The SALON is always calculated in ITS OWN timezone (salons.timezone).
+//    "today", the calendar, the slot times and the DB all use it.
+//  - The user's timezone is only a display reference ("Your time: ...").
+//  - Dates (appointment_date) are plain salon-local dates.
+//  - Times sent to the DB are UTC TIME values converted with the ACTUAL
+//    salon-local date (TimezoneService *ForDate* methods).
+//
+// VIP RULES (decided by the database, this screen only shows them)
+//  - Customers pick their own start time. The candidate times (every 15 min,
+//    inside the barber's work window) are built here and checked by ONE
+//    database call: get_vip_start_options(). It uses the SAME function as
+//    create_vip_booking() (find_barber_slot), so a time that is shown as
+//    free is accepted at confirm, including the "VIP push" case: a time that
+//    squeezes in before a not-started VIP (<= 15 min overlap) is allowed and
+//    that VIP starts a few minutes later (marked with a clock icon).
+//  - create_vip_booking() validates the picked start again at confirm
+//    (SLOT_TAKEN / SLOT_PASSED / NO_SLOT / SALON_CLOSED / BARBER_UNAVAILABLE)
+//    -> back to the time step.
+//  - The VIP number shown at the time step is a PREVIEW from the DB function
+//    get_vip_preview_number(); the FINAL number is given when the booking is
+//    CONFIRMED (a VIP before you may be moved / cancelled meanwhile).
+//  - VIP booking needs a Pro membership (enforced by a database trigger).
+//
+// SAFETY NETS (the app keeps working if the database is not fully updated)
+//  - get_vip_start_options missing -> falls back to is_barber_free_for()
+//    per time (strict: no VIP push).
+//  - salons.timezone missing from the salon list -> read from the salons
+//    table. A salon whose timezone is unknown shows NO hours (never a wrong
+//    time).
+//  - The salon settings (timezone / currency) must be loaded before slots
+//    are built; if they can not be loaded the customer gets an error
+//    instead of slots in the wrong timezone.
+// =====================================================================
 class VIPBookingScreen extends StatefulWidget {
   final Map<String, dynamic>? initialSalon;
   const VIPBookingScreen({super.key, this.initialSalon});
@@ -66,6 +104,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   bool _isSameAsCustomer = true;
   bool _isCheckingDuplicate = false;
   String? _duplicateError;
+  Timer? _dupDebounce;
+  int _dupRequestId = 0; // ignores answers of an older duplicate check
 
   // Step 5: Time Slot (VIP)
   List<Map<String, dynamic>> _allTimeSlots = [];
@@ -73,9 +113,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   bool _isLoadingSlots = false;
   String? _slotErrorMessage;
   String? _slotErrorType;
-  bool _showingVipNumber = false;
-  int _generatedVipNumber = 0;
-  String _selectedStartTime = '';
+  int _slotRequestId = 0; // ignores answers of an older request
+  int _generatedVipNumber =
+      0; // PREVIEW only; the DB gives the final number at confirm
+
+  /// Gap between the start times offered to the customer (minutes).
+  static const int _slotStepMinutes = 15;
 
   // Step 6: Confirm
   bool _isBooking = false;
@@ -92,23 +135,28 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   double _originalTotalPrice = 0;
   double _finalTotalPrice = 0;
 
-  // ✅ Timezone (salon + user)
+  // Pro membership (VIP booking is a Pro feature). null = not known yet.
+  bool? _isPro;
+
+  // Timezone (salon + user)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
-  static const String _kDefaultCurrency = 'LKR'; // ✅ NEW
+  static const String _kDefaultCurrency = 'LKR';
   String _userTimezone = '';
   String _selectedSalonTimezone = _kDefaultSalonTimezone;
+  // true only after the salon's own timezone + currency were really loaded
+  bool _salonSettingsLoaded = false;
   String _lastTimezone = '';
   bool _isTimezoneLoaded = false;
 
-  // ✅ Currency (salon + user + rate)
+  // Currency (salon + user + rate)
   String _salonCurrencyCode = 'LKR';
-  String _userCurrencyCode = _kDefaultCurrency; // ✅ NEW
-  double? _exchangeRate; // ✅ NEW
+  String _userCurrencyCode = _kDefaultCurrency;
+  double? _exchangeRate;
   final CurrencyService _currencyService = CurrencyService.instance;
   final CurrencySettingsService _currencySettings =
-      CurrencySettingsService.instance; // ✅ NEW
+      CurrencySettingsService.instance;
 
-  // ✅ Responsive
+  // Responsive
   bool _isWeb = false;
 
   final ScrollController _scrollController = ScrollController();
@@ -124,15 +172,26 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     const Color(0xFFF3E5F5),
   ];
 
+  /// Errors the database can return at confirm time that only need a fresh
+  /// look at the time step (not a hard failure).
+  static const Set<String> _slotRecoveryCodes = {
+    'SLOT_TAKEN',
+    'SLOT_PASSED',
+    'NO_SLOT',
+    'SALON_CLOSED',
+    'BARBER_UNAVAILABLE',
+  };
+
   // ═══════════════════════════════════════════════════
-  // ✅ SALON "NOW" / "TODAY" (salon timezone reference)
+  // SALON "NOW" / "TODAY" (salon timezone reference)
   // ═══════════════════════════════════════════════════
+  String get _salonTz => _selectedSalonTimezone.isNotEmpty
+      ? _selectedSalonTimezone
+      : _kDefaultSalonTimezone;
+
   DateTime get _salonNow {
-    final tz = _selectedSalonTimezone.isNotEmpty
-        ? _selectedSalonTimezone
-        : _kDefaultSalonTimezone;
     try {
-      return TimezoneService.getNowInTimezone(tz);
+      return TimezoneService.getNowInTimezone(_salonTz);
     } catch (e) {
       debugPrint('❌ Error getting salon now: $e');
       return DateTime.now();
@@ -144,11 +203,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return DateTime(now.year, now.month, now.day);
   }
 
+  /// Date-only arithmetic. (`date.add(Duration(days: n))` is wrong on the
+  /// device's DST-switch days: the day can be 23 / 25 hours long.)
+  DateTime _addDays(DateTime d, int n) => DateTime(d.year, d.month, d.day + n);
+
   // ═══════════════════════════════════════════════════
-  // ✅ CURRENCY + TIMEZONE HELPERS
+  // CURRENCY + TIMEZONE HELPERS
   // ═══════════════════════════════════════════════════
 
-  /// ✅ Salon currency format
+  /// Salon currency format
   String _formatPrice(dynamic price) {
     return _currencyService.format(
       price: price,
@@ -156,7 +219,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  /// ✅ NEW: User currency format (approximate)
+  /// User currency format (approximate)
   String _formatUserPrice(dynamic price) {
     return _currencyService.format(
       price: price,
@@ -164,38 +227,49 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
-  /// ✅ NEW: Check if dual display is applicable
+  /// Dual display applicable?
   bool get _showApprox {
     return _exchangeRate != null &&
         _exchangeRate! > 0 &&
         _userCurrencyCode != _salonCurrencyCode;
   }
 
-  /// ✅ Salon timezone display (main)
+  /// Salon timezone display (main)
   String _getSalonTimezoneDisplay() {
-    final tz = _selectedSalonTimezone.isNotEmpty
-        ? _selectedSalonTimezone
-        : _kDefaultSalonTimezone;
-    return TimezoneService.getFullTimezoneDisplayFor(tz);
+    return TimezoneService.getFullTimezoneDisplayFor(_salonTz);
   }
 
-  /// ✅ User timezone display
+  /// User timezone display
   String _getUserTimezoneDisplay() {
     if (_userTimezone.isEmpty) return '';
     return TimezoneService.getFullTimezoneDisplayFor(_userTimezone);
   }
 
-  /// ✅ User timezone ≠ salon timezone?
+  /// User timezone ≠ salon timezone?
   bool get _isDifferentTimezone {
     if (_selectedSalonTimezone.isEmpty || _userTimezone.isEmpty) return false;
     return _selectedSalonTimezone != _userTimezone;
   }
 
-  /// ✅ DST check via TimezoneService (salon timezone)
-  bool _isDST() {
+  /// Is DST active in the SALON timezone on the selected date?
+  bool _isSalonDstOnSelectedDate() {
     try {
-      final status = TimezoneService.getDSTStatus();
-      return status['isDST'] == true;
+      final loc = tzdata.getLocation(_salonTz);
+      final date = _selectedDate ?? _todayDate;
+
+      final onDate = tzdata.TZDateTime(
+        loc,
+        date.year,
+        date.month,
+        date.day,
+        12,
+      ).timeZoneOffset;
+      final jan = tzdata.TZDateTime(loc, date.year, 1, 15, 12).timeZoneOffset;
+      final jul = tzdata.TZDateTime(loc, date.year, 7, 15, 12).timeZoneOffset;
+
+      if (jan == jul) return false; // this timezone has no DST
+      final standard = jan < jul ? jan : jul;
+      return onDate != standard;
     } catch (_) {
       return false;
     }
@@ -222,6 +296,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     _childNameController.dispose();
     _scrollController.dispose();
     _salonSearchDebounce?.cancel();
+    _dupDebounce?.cancel();
     super.dispose();
   }
 
@@ -280,7 +355,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return normalized;
   }
 
-  /// ✅ MediaQuery.sizeOf (only reacts to size changes)
+  /// MediaQuery.sizeOf (only reacts to size changes)
   void _checkScreenSize() {
     final size = MediaQuery.sizeOf(context);
     final isWeb = size.width > 800;
@@ -498,6 +573,17 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     );
   }
 
+  void _showInfoSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: Colors.orange.shade800,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   // ============================================
   // TIMEZONE + CURRENCY INIT
   // ============================================
@@ -514,7 +600,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     _lastTimezone = _userTimezone;
 
-    // ✅ NEW: Load user currency
+    // Load user currency
     try {
       _userCurrencyCode = await _currencySettings.getUserCurrency();
       debugPrint('✅ [VIP] User currency loaded: $_userCurrencyCode');
@@ -528,8 +614,23 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _isTimezoneLoaded = true;
     });
 
+    unawaited(_loadProStatus());
     await _loadAllSalons();
     await _initializeScreen();
+  }
+
+  /// VIP booking is a Pro feature (the real lock is in the database).
+  /// This only lets the screen warn the customer early.
+  Future<void> _loadProStatus() async {
+    try {
+      final result = await supabase.rpc('get_my_customer_pro');
+      if (!mounted) return;
+      if (result is Map && result['success'] == true) {
+        setState(() => _isPro = result['is_pro'] == true);
+      }
+    } catch (e) {
+      debugPrint('⚠️ [VIP] Could not check Pro status: $e');
+    }
   }
 
   Future<void> _checkTimezoneChange() async {
@@ -548,30 +649,17 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   void _onTimezoneChanged() async {
+    // The slot times are in the SALON timezone, so only the "Your time"
+    // reference line changes. Reload to refresh it.
     if (_currentStep == 5 && _selectedDate != null && _selectedBarber != null) {
       setState(() {
         _allTimeSlots = [];
         _selectedSlot = null;
-        _showingVipNumber = false;
-        _generatedVipNumber = 0;
-        _selectedStartTime = '';
         _slotErrorMessage = null;
         _slotErrorType = null;
         _isLoadingSlots = true;
       });
       await _loadAvailableSlots();
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Timezone changed to ${TimezoneService.getTimezoneDisplayName()}',
-            ),
-            backgroundColor: AppTheme.primary,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
     }
   }
 
@@ -609,16 +697,19 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _selectedSalon = normalized;
       _currentStep = startingStep;
       _isInitialized = true;
+      _salonSettingsLoaded = false;
     });
 
-    // ✅ Load salon settings (TZ + currency + rate) FIRST
+    // Load salon timezone + currency + exchange rate FIRST
     await _loadSalonSettings();
     await _loadSalonServices();
     await _applyPreselectedServices();
     await _loadHolidays();
   }
 
-  /// ✅ Load salon timezone + currency + exchange rate
+  /// Load salon timezone + currency + exchange rate.
+  /// _salonSettingsLoaded becomes true ONLY when the salon row was read, so
+  /// slots are never built in a guessed timezone.
   Future<void> _loadSalonSettings() async {
     if (_selectedSalon == null) return;
 
@@ -639,6 +730,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         setState(() {
           if (tz != null && tz.isNotEmpty) {
             _selectedSalonTimezone = tz;
+            _salonSettingsLoaded = true;
           }
           if (curr != null && curr.isNotEmpty) {
             _salonCurrencyCode = curr;
@@ -650,7 +742,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'Currency=$_salonCurrencyCode',
         );
 
-        // ✅ NEW: Load exchange rate for this salon → user currency
+        // Load exchange rate for this salon → user currency
         await _loadExchangeRate();
       }
     } catch (e) {
@@ -658,7 +750,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
   }
 
-  /// ✅ NEW: Load exchange rate (salon → user)
+  /// Load exchange rate (salon → user)
   Future<void> _loadExchangeRate() async {
     if (!mounted) return;
 
@@ -718,6 +810,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _isSameAsCustomer ? '' : (_selectedChildName?.trim() ?? '');
 
   void _resetBooking() {
+    _dupDebounce?.cancel();
+    _dupRequestId++;
     setState(() {
       _currentStep = 0;
       _selectedSalon = null;
@@ -726,9 +820,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _selectedBarber = null;
       _selectedSlot = null;
       _allTimeSlots = [];
-      _showingVipNumber = false;
-      _generatedVipNumber = 0;
-      _selectedStartTime = '';
+      _slotRequestId++;
       _searchController.clear();
       _searchResults = List.from(_allSalons);
       _isInitialized = false;
@@ -747,6 +839,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _childNameController.clear();
       _selectedChildName = null;
       _isSameAsCustomer = true;
+      _isCheckingDuplicate = false;
       _duplicateError = null;
       _slotErrorMessage = null;
       _slotErrorType = null;
@@ -758,14 +851,53 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _preselectedServicesApplied = false;
       _availableOffersPerService.clear();
       _serviceOffers.clear();
-      // ✅ Reset salon settings + rate
+      // Reset salon settings + rate (user currency stays: user preference)
       _selectedSalonTimezone = _kDefaultSalonTimezone;
+      _salonSettingsLoaded = false;
       _salonCurrencyCode = 'LKR';
       _exchangeRate = null;
     });
   }
 
   // ==================== STEP 0: SALON ====================
+
+  /// Safety net: if the salon list RPC does not return `timezone` (database
+  /// not fully updated), read it from the salons table in ONE query.
+  Future<List<Map<String, dynamic>>> _withSalonTimezones(
+    List<Map<String, dynamic>> salons,
+  ) async {
+    final missing = salons
+        .where((s) => (s['timezone']?.toString() ?? '').isEmpty)
+        .map((s) => (s['id'] as num?)?.toInt())
+        .whereType<int>()
+        .toList();
+    if (missing.isEmpty) return salons;
+
+    try {
+      final rows = await supabase
+          .from('salons')
+          .select('id, timezone')
+          .inFilter('id', missing);
+
+      final tzById = <int, String>{
+        for (final r in rows)
+          if (r['id'] != null)
+            (r['id'] as num).toInt(): r['timezone']?.toString() ?? '',
+      };
+
+      return salons.map((s) {
+        final id = (s['id'] as num?)?.toInt();
+        final tz = id == null ? null : tzById[id];
+        if (tz != null && tz.isNotEmpty) {
+          return <String, dynamic>{...s, 'timezone': tz};
+        }
+        return s;
+      }).toList();
+    } catch (e) {
+      debugPrint('⚠️ [VIP] Could not read salon timezones: $e');
+      return salons;
+    }
+  }
 
   Future<void> _loadAllSalons() async {
     setState(() {
@@ -782,7 +914,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       if (!mounted) return;
 
       if (result != null && result.isNotEmpty) {
-        final salons = List<Map<String, dynamic>>.from(result);
+        final salons = await _withSalonTimezones(
+          List<Map<String, dynamic>>.from(result),
+        );
+        if (!mounted) return;
         setState(() {
           _allSalons = salons;
           _searchResults = List.from(salons);
@@ -832,10 +967,13 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
         if (!mounted) return;
 
+        final found = result != null
+            ? await _withSalonTimezones(List<Map<String, dynamic>>.from(result))
+            : <Map<String, dynamic>>[];
+        if (!mounted) return;
+
         setState(() {
-          _searchResults = result != null
-              ? List<Map<String, dynamic>>.from(result)
-              : [];
+          _searchResults = found;
           _isSearching = false;
         });
       } catch (e) {
@@ -870,11 +1008,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _salonServices = [];
       _selectedServices = [];
       _selectedDate = null;
+      _salonSettingsLoaded = false;
       _availableOffersPerService.clear();
       _serviceOffers.clear();
     });
 
-    // ✅ Load salon settings (timezone + currency + rate) BEFORE services
+    // Load salon settings (timezone + currency + rate) BEFORE services
     await _loadSalonSettings();
     await _loadSalonServices();
   }
@@ -1318,6 +1457,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         _holidays.clear();
         _holidayNames.clear();
         for (var holiday in response) {
+          // plain salon-local date (no timezone maths)
           final date = DateTime.parse(holiday['holiday_date']);
           _holidays.add(date);
           _holidayNames[date] = holiday['name'];
@@ -1348,8 +1488,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
   }
 
-  /// ✅ A day can be picked when it is not past (SALON time), not a holiday
-  ///    and (if the schedule is known) at least one barber works that weekday.
+  /// A day can be picked when it is not past (SALON time), not a holiday
+  /// and (if the schedule is known) at least one barber works that weekday.
   bool _isDaySelectable(DateTime date) {
     final d = DateTime(date.year, date.month, date.day);
     if (d.isBefore(_todayDate)) return false;
@@ -1360,8 +1500,21 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   DateTime? _firstSelectableDate() {
     for (int i = 0; i <= 30; i++) {
-      final d = _todayDate.add(Duration(days: i));
+      final d = _addDays(_todayDate, i);
       if (_isDaySelectable(d)) return d;
+    }
+    return null;
+  }
+
+  /// The next day AFTER [from] that can be booked
+  /// (skips holidays and non-working weekdays; max 30 days from today,
+  ///  the same limit as the calendar).
+  DateTime? _nextSelectableAfter(DateTime from) {
+    final maxDate = _addDays(_todayDate, 30);
+    var d = _addDays(DateTime(from.year, from.month, from.day), 1);
+    while (!d.isAfter(maxDate)) {
+      if (_isDaySelectable(d)) return d;
+      d = _addDays(d, 1);
     }
     return null;
   }
@@ -1415,18 +1568,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   // ==================== STEP 3: BARBER ====================
 
-  Future<Map<String, dynamic>> _checkBarberFullAvailability(
-    String barberId,
-    DateTime date,
-  ) async {
-    final dateStr = DateFormat('yyyy-MM-dd').format(date);
-    Map<String, dynamic> result = {
-      'is_available': true,
-      'reason': null,
-      'has_special_schedule': false,
-      'has_special_break': false,
-    };
-
+  /// Date-INDEPENDENT checks (role / profile / salon status).
+  /// Returns null when the barber can take bookings, else a short reason.
+  Future<String?> _barberStaticProblem(String barberId) async {
+    const unavailable = 'Currently unavailable';
     try {
       final roleCheck = await supabase
           .from('user_roles')
@@ -1440,18 +1585,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           .eq('roles.name', 'barber')
           .maybeSingle();
 
-      if (roleCheck == null) {
-        result['is_available'] = false;
-        result['reason'] = 'Currently unavailable';
-        return result;
-      }
+      if (roleCheck == null) return unavailable;
 
       final status = roleCheck['status'] as String? ?? 'active';
-      if (status != 'active') {
-        result['is_available'] = false;
-        result['reason'] = 'Currently unavailable';
-        return result;
-      }
+      if (status != 'active') return unavailable;
 
       final profileCheck = await supabase
           .from('profiles')
@@ -1460,16 +1597,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           .maybeSingle();
 
       if (profileCheck != null) {
-        if (profileCheck['is_blocked'] == true) {
-          result['is_available'] = false;
-          result['reason'] = 'Currently unavailable';
-          return result;
-        }
-        if (profileCheck['is_active'] == false) {
-          result['is_available'] = false;
-          result['reason'] = 'Currently unavailable';
-          return result;
-        }
+        if (profileCheck['is_blocked'] == true) return unavailable;
+        if (profileCheck['is_active'] == false) return unavailable;
       }
 
       final salonBarberCheck = await supabase
@@ -1479,19 +1608,31 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           .eq('salon_id', _selectedSalon!['id'])
           .maybeSingle();
 
-      if (salonBarberCheck != null) {
-        final salonStatus = salonBarberCheck['status'] as String? ?? 'active';
-        if (salonStatus != 'active') {
-          result['is_available'] = false;
-          result['reason'] = 'Currently unavailable';
-          return result;
-        }
-      } else {
-        result['is_available'] = false;
-        result['reason'] = 'Currently unavailable';
-        return result;
-      }
+      if (salonBarberCheck == null) return unavailable;
+      final salonStatus = salonBarberCheck['status'] as String? ?? 'active';
+      if (salonStatus != 'active') return unavailable;
 
+      return null;
+    } catch (e) {
+      debugPrint('Error checking barber status: $e');
+      return 'Could not check availability';
+    }
+  }
+
+  /// Date-DEPENDENT check (leave / day off / salon holiday): ONE call.
+  Future<Map<String, dynamic>> _barberDateAvailability(
+    String barberId,
+    DateTime date,
+  ) async {
+    final dateStr = DateFormat('yyyy-MM-dd').format(date);
+    final Map<String, dynamic> result = {
+      'is_available': true,
+      'reason': null,
+      'has_special_schedule': false,
+      'has_special_break': false,
+    };
+
+    try {
       final scheduleResult = await supabase.rpc(
         'get_barber_effective_schedule',
         params: {
@@ -1525,8 +1666,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         }
       }
 
-      result['is_available'] = true;
-      result['reason'] = null;
       return result;
     } catch (e) {
       debugPrint('Error checking barber availability: $e');
@@ -1534,6 +1673,22 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       result['reason'] = 'Could not check availability';
       return result;
     }
+  }
+
+  Future<Map<String, dynamic>> _checkBarberFullAvailability(
+    String barberId,
+    DateTime date,
+  ) async {
+    final problem = await _barberStaticProblem(barberId);
+    if (problem != null) {
+      return {
+        'is_available': false,
+        'reason': problem,
+        'has_special_schedule': false,
+        'has_special_break': false,
+      };
+    }
+    return _barberDateAvailability(barberId, date);
   }
 
   Future<void> _loadAvailableBarbers() async {
@@ -1585,28 +1740,31 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
       final dateToCheck = _selectedDate ?? _todayDate;
 
-      for (var i = 0; i < barberList.length; i++) {
-        final barber = barberList[i];
-        final barberId = barber['barber_id'];
+      // all barbers are checked in PARALLEL (each check is a few queries)
+      await Future.wait(
+        barberList.map((barber) async {
+          final String barberId = barber['barber_id'].toString();
 
-        final availability = await _checkBarberFullAvailability(
-          barberId,
-          dateToCheck,
-        );
+          final availability = await _checkBarberFullAvailability(
+            barberId,
+            dateToCheck,
+          );
 
-        _barberAvailability[barberId] = availability;
+          _barberAvailability[barberId] = availability;
 
-        barberList[i]['is_available'] = availability['is_available'];
-        barberList[i]['unavailable_reason'] = availability['reason'];
-        barberList[i]['has_special_schedule'] =
-            availability['has_special_schedule'];
-        barberList[i]['has_special_break'] = availability['has_special_break'];
-      }
+          barber['is_available'] = availability['is_available'];
+          barber['unavailable_reason'] = availability['reason'];
+          barber['has_special_schedule'] = availability['has_special_schedule'];
+          barber['has_special_break'] = availability['has_special_break'];
+        }),
+      );
 
       barberList.sort((a, b) {
         if (a['is_available'] && !b['is_available']) return -1;
         if (!a['is_available'] && b['is_available']) return 1;
-        return (b['avg_rating'] as num).compareTo(a['avg_rating'] as num);
+        final double ra = (a['avg_rating'] as num?)?.toDouble() ?? 0;
+        final double rb = (b['avg_rating'] as num?)?.toDouble() ?? 0;
+        return rb.compareTo(ra);
       });
 
       if (!mounted) return;
@@ -1628,7 +1786,20 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
   // ==================== STEP 4: PERSON ====================
 
+  /// Debounced duplicate check for the "someone else" name field
+  /// (one query per pause in typing, not per keystroke).
+  void _scheduleDuplicateCheck() {
+    _dupDebounce?.cancel();
+    _dupDebounce = Timer(
+      const Duration(milliseconds: 450),
+      _checkDuplicateBooking,
+    );
+  }
+
+  /// The DB allows ONE active booking (VIP or normal) per customer, per
+  /// person (self / child name) and per day.
   Future<void> _checkDuplicateBooking() async {
+    _dupDebounce?.cancel();
     if (_selectedDate == null) return;
     final user = supabase.auth.currentUser;
     if (user == null) return;
@@ -1639,28 +1810,28 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     if (!_isSameAsCustomer && childName.isEmpty) return;
 
+    final int reqId = ++_dupRequestId;
     setState(() => _isCheckingDuplicate = true);
 
     try {
       final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
 
-      // ✅ Match both 'myself' and named child
       final query = supabase
           .from('appointments')
           .select('id')
           .eq('customer_id', user.id)
           .eq('appointment_date', dateStr)
-          .eq('is_vip', true)
           .not('status', 'in', '("cancelled","no_show")');
 
       final existing = childName.isEmpty
           ? await query.or('child_name.is.null,child_name.eq.')
           : await query.eq('child_name', childName);
 
-      if (!mounted) return;
+      // a newer check was started meanwhile: ignore this (older) answer
+      if (!mounted || reqId != _dupRequestId) return;
       setState(() {
         _duplicateError = existing.isNotEmpty
-            ? '⚠️ You already have a VIP booking for '
+            ? '⚠️ You already have a booking for '
                   '${childName.isEmpty ? "yourself" : childName} '
                   'on ${DateFormat('MMM dd').format(_selectedDate!)}.'
             : null;
@@ -1668,7 +1839,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     } catch (e) {
       debugPrint('❌ [VIP] Error checking duplicate: $e');
     } finally {
-      if (mounted) setState(() => _isCheckingDuplicate = false);
+      if (mounted && reqId == _dupRequestId) {
+        setState(() => _isCheckingDuplicate = false);
+      }
     }
   }
 
@@ -1685,6 +1858,168 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   }
 
   // ==================== STEP 5: TIME SLOT ====================
+
+  /// recurring UTC TIME text ('03:30:00', reference date) -> salon-local minutes
+  int _recurringLocalMin(String utcTime) {
+    final dt = TimezoneService.utcToLocalDateTimeRecurringWithTimezone(
+      utcTime,
+      _salonTz,
+    );
+    return dt.hour * 60 + dt.minute;
+  }
+
+  /// same, but an END time at local midnight means 24:00
+  int _recurringLocalEndMin(String utcTime) {
+    final m = _recurringLocalMin(utcTime);
+    return m == 0 ? 1440 : m;
+  }
+
+  String _hhmm(int minutes) =>
+      '${(minutes ~/ 60).toString().padLeft(2, '0')}:${(minutes % 60).toString().padLeft(2, '0')}';
+
+  String _formatMin12(int minutes) {
+    final h = (minutes ~/ 60) % 24;
+    final m = minutes % 60;
+    final period = h >= 12 ? 'PM' : 'AM';
+    final displayHour = h % 12 == 0 ? 12 : h % 12;
+    return '$displayHour:${m.toString().padLeft(2, '0')} $period';
+  }
+
+  /// Asks the DATABASE which candidate start times are free. ONE call.
+  /// It uses the same function as create_vip_booking(), so a time marked free
+  /// is accepted at confirm (including a "VIP push": the time squeezes in
+  /// before a not-started VIP, which then starts a few minutes later).
+  /// Returns a blocking reason ('SALON_CLOSED' / 'BARBER_UNAVAILABLE') when
+  /// the whole day is blocked, else null.
+  Future<String?> _markSlotsFromDb({
+    required List<Map<String, dynamic>> toCheck,
+    required String barberId,
+    required dynamic salonId,
+    required String dateStr,
+    required int duration,
+    required int requestId,
+  }) async {
+    if (toCheck.isEmpty) return null;
+
+    try {
+      final rows = await supabase
+          .rpc(
+            'get_vip_start_options',
+            params: {
+              'p_barber_id': barberId,
+              'p_salon_id': salonId,
+              'p_date': dateStr,
+              'p_duration': duration,
+              'p_start_mins': toCheck
+                  .map((s) => s['start_min'] as int)
+                  .toList(),
+            },
+          )
+          .timeout(const Duration(seconds: 20));
+
+      if (!mounted || requestId != _slotRequestId) return null;
+
+      final Map<int, Map<String, dynamic>> byMin = {};
+      for (final r in (rows as List)) {
+        final m = Map<String, dynamic>.from(r as Map);
+        byMin[(m['start_min'] as num).toInt()] = m;
+      }
+
+      final reasons = <String>{};
+      for (final slot in toCheck) {
+        final r = byMin[slot['start_min'] as int];
+        final status = r?['status']?.toString() ?? 'TAKEN';
+        reasons.add(status);
+
+        if (status == 'FREE') {
+          slot['is_available'] = true;
+          slot['is_push'] = r?['push'] == true;
+        } else if (status == 'SLOT_PASSED') {
+          slot['is_past'] = true;
+          slot['status_text'] = 'Time Passed';
+        } else {
+          slot['is_booked'] = true;
+          slot['status_text'] = 'Booked';
+        }
+      }
+
+      if (reasons.length == 1) {
+        final only = reasons.first;
+        if (only == 'SALON_CLOSED' || only == 'BARBER_UNAVAILABLE') {
+          return only;
+        }
+      }
+      return null;
+    } on PostgrestException catch (e) {
+      final bool missing =
+          e.code == 'PGRST202' ||
+          e.code == '42883' ||
+          e.message.contains('get_vip_start_options');
+      if (!missing) rethrow;
+
+      // database not fully updated: strict per-time check (no VIP push)
+      debugPrint('⚠️ [VIP] get_vip_start_options missing → legacy check');
+      await _markSlotsLegacy(
+        toCheck: toCheck,
+        barberId: barberId,
+        salonId: salonId,
+        dateStr: dateStr,
+        requestId: requestId,
+      );
+      return null;
+    }
+  }
+
+  /// Fallback: one is_barber_free_for() call per time (no VIP push).
+  Future<void> _markSlotsLegacy({
+    required List<Map<String, dynamic>> toCheck,
+    required String barberId,
+    required dynamic salonId,
+    required String dateStr,
+    required int requestId,
+  }) async {
+    int failedChecks = 0;
+    const int batchSize = 6;
+
+    for (int i = 0; i < toCheck.length; i += batchSize) {
+      final chunk = toCheck.skip(i).take(batchSize).toList();
+      await Future.wait(
+        chunk.map((slot) async {
+          try {
+            final free = await supabase
+                .rpc(
+                  'is_barber_free_for',
+                  params: {
+                    'p_barber_id': barberId,
+                    'p_salon_id': salonId,
+                    'p_date': dateStr,
+                    'p_start': slot['utc_start_time'],
+                    'p_end': slot['utc_end_time'],
+                  },
+                )
+                .timeout(const Duration(seconds: 15));
+            if (free == true) {
+              slot['is_available'] = true;
+              slot['is_push'] = false;
+            } else {
+              slot['is_booked'] = true;
+              slot['status_text'] = 'Booked';
+            }
+          } catch (e) {
+            failedChecks++;
+            debugPrint('⚠️ [VIP] is_barber_free_for failed: $e');
+            slot['is_booked'] = true;
+            slot['status_text'] = 'Unavailable';
+          }
+        }),
+      );
+      if (!mounted || requestId != _slotRequestId) return;
+    }
+
+    if (toCheck.isNotEmpty && failedChecks == toCheck.length) {
+      throw Exception('Could not check the barber availability');
+    }
+  }
 
   Future<void> _loadAvailableSlots() async {
     if (_selectedDate == null) {
@@ -1720,13 +2055,13 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
     if (!mounted) return;
 
+    final int requestId = ++_slotRequestId;
+    final DateTime date = _selectedDate!;
+
     setState(() {
       _isLoadingSlots = true;
       _allTimeSlots = [];
       _selectedSlot = null;
-      _showingVipNumber = false;
-      _generatedVipNumber = 0;
-      _selectedStartTime = '';
       _slotErrorMessage = null;
       _slotErrorType = null;
     });
@@ -1744,433 +2079,475 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         return;
       }
 
-      final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-      final totalDuration = _calculateTotalDuration();
-
-      final barberId = _selectedBarber!['barber_id'] ?? _selectedBarber!['id'];
-
-      final scheduleResult = await supabase.rpc(
-        'get_barber_effective_schedule',
-        params: {
-          'p_barber_id': barberId,
-          'p_salon_id': _selectedSalon!['id'],
-          'p_date': dateStr,
-        },
-      );
-
-      Map<String, dynamic> effectiveSchedule = {};
-      if (scheduleResult != null) {
-        if (scheduleResult is List && scheduleResult.isNotEmpty) {
-          final firstItem = scheduleResult[0];
-          if (firstItem is Map) {
-            effectiveSchedule = Map<String, dynamic>.from(firstItem);
-          }
-        } else if (scheduleResult is Map) {
-          effectiveSchedule = Map<String, dynamic>.from(scheduleResult);
-        }
-      }
-
-      final leaveType = effectiveSchedule['leave_type'] as String?;
-      if (leaveType == 'full_day') {
-        if (mounted) {
+      // The slots are built in the SALON's timezone, so its settings must be
+      // really loaded (never guess the timezone).
+      if (!_salonSettingsLoaded) {
+        await _loadSalonSettings();
+        if (!mounted || requestId != _slotRequestId) return;
+        if (!_salonSettingsLoaded) {
           setState(() {
             _isLoadingSlots = false;
             _slotErrorMessage =
-                '${_selectedBarber!['full_name']} is on leave on this date.';
-            _slotErrorType = 'barber';
+                'Could not load the salon settings.\n\nPlease check your connection and try again.';
+            _slotErrorType = 'general';
           });
+          return;
         }
+      }
+
+      final dateStr = DateFormat('yyyy-MM-dd').format(date);
+      final dayText = DateFormat('EEEE, MMM dd').format(date);
+      final totalDuration = _calculateTotalDuration();
+      final tz = _salonTz;
+
+      final barberId = (_selectedBarber!['barber_id'] ?? _selectedBarber!['id'])
+          .toString();
+      final salonId = _selectedSalon!['id'];
+
+      // ---- 1. the barber's work window for this date (salon rules) ----
+      final scheduleResult = await supabase
+          .rpc(
+            'get_barber_effective_schedule',
+            params: {
+              'p_barber_id': barberId,
+              'p_salon_id': salonId,
+              'p_date': dateStr,
+            },
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (!mounted || requestId != _slotRequestId) return;
+
+      Map<String, dynamic> schedule = {};
+      if (scheduleResult is List && scheduleResult.isNotEmpty) {
+        final first = scheduleResult[0];
+        if (first is Map) schedule = Map<String, dynamic>.from(first);
+      } else if (scheduleResult is Map) {
+        schedule = Map<String, dynamic>.from(scheduleResult);
+      }
+
+      if (schedule['is_salon_holiday'] == true ||
+          schedule['salon_open_time'] == null) {
+        setState(() {
+          _slotErrorMessage =
+              'Salon is closed on $dayText.\n\nPlease select another date.';
+          _slotErrorType = 'salon_closed';
+          _isLoadingSlots = false;
+        });
         return;
       }
 
-      String workStartUTC =
-          effectiveSchedule['work_start']?.toString() ?? '09:00';
-      String workEndUTC =
-          effectiveSchedule['work_end']?.toString() ?? '18:00';
-
-      if (workStartUTC.length > 5) workStartUTC = workStartUTC.substring(0, 5);
-      if (workEndUTC.length > 5) workEndUTC = workEndUTC.substring(0, 5);
-
-      final workStartParts = workStartUTC.split(':');
-      final workEndParts = workEndUTC.split(':');
-      int workStartHour = int.parse(workStartParts[0]);
-      int workStartMinute = workStartParts.length > 1
-          ? int.parse(workStartParts[1])
-          : 0;
-      int workEndHour = int.parse(workEndParts[0]);
-      int workEndMinute = workEndParts.length > 1
-          ? int.parse(workEndParts[1])
-          : 0;
-
-      List<Map<String, dynamic>> breakRanges = [];
-
-      String? breakStartUTC =
-          effectiveSchedule['lunch_break_start']?.toString();
-      String? breakEndUTC = effectiveSchedule['lunch_break_end']?.toString();
-      bool hasSpecialBreak = effectiveSchedule['has_special_break'] == true;
-
-      if (breakStartUTC != null &&
-          breakEndUTC != null &&
-          breakStartUTC.isNotEmpty &&
-          breakEndUTC.isNotEmpty) {
-        if (breakStartUTC.length > 5) {
-          breakStartUTC = breakStartUTC.substring(0, 5);
-        }
-        if (breakEndUTC.length > 5) breakEndUTC = breakEndUTC.substring(0, 5);
-
-        final breakStartParts = breakStartUTC.split(':');
-        final breakEndParts = breakEndUTC.split(':');
-
-        breakRanges.add({
-          'start_hour': int.parse(breakStartParts[0]),
-          'start_min': breakStartParts.length > 1
-              ? int.parse(breakStartParts[1])
-              : 0,
-          'end_hour': int.parse(breakEndParts[0]),
-          'end_min': breakEndParts.length > 1 ? int.parse(breakEndParts[1]) : 0,
-          'type': hasSpecialBreak ? 'special' : 'regular',
+      if (schedule['leave_type'] == 'full_day') {
+        setState(() {
+          _slotErrorMessage =
+              '${_selectedBarber!['full_name']} is on leave on $dayText.\n\nPlease select another barber.';
+          _slotErrorType = 'barber';
+          _isLoadingSlots = false;
         });
+        return;
       }
 
-      final existingAppointments = await supabase
-          .from('appointments')
-          .select('id, start_time, end_time, vip_queue_number, is_vip, status')
-          .eq('barber_id', barberId)
-          .eq('appointment_date', dateStr)
-          .eq('is_vip', true)
-          .neq('status', 'cancelled')
-          .neq('status', 'no_show')
-          .order('start_time', ascending: true);
-
-      List<Map<String, dynamic>> bookedRanges = [];
-      for (final apt in existingAppointments) {
-        String startTimeUTC = apt['start_time'].toString();
-        String endTimeUTC = apt['end_time'].toString();
-
-        if (startTimeUTC.length > 5) {
-          startTimeUTC = startTimeUTC.substring(0, 5);
-        }
-        if (endTimeUTC.length > 5) {
-          endTimeUTC = endTimeUTC.substring(0, 5);
-        }
-
-        final startParts = startTimeUTC.split(':');
-        final endParts = endTimeUTC.split(':');
-
-        bookedRanges.add({
-          'start_hour': int.parse(startParts[0]),
-          'start_min': startParts.length > 1 ? int.parse(startParts[1]) : 0,
-          'end_hour': int.parse(endParts[0]),
-          'end_min': endParts.length > 1 ? int.parse(endParts[1]) : 0,
-          'vip_number': apt['vip_queue_number'] ?? 0,
-          'is_vip': true,
+      final String? workStartUtc = schedule['work_start']?.toString();
+      final String? workEndUtc = schedule['work_end']?.toString();
+      if (workStartUtc == null || workEndUtc == null) {
+        setState(() {
+          _slotErrorMessage =
+              '${_selectedBarber!['full_name']} is not working on $dayText.\n\nPlease select another barber.';
+          _slotErrorType = 'barber';
+          _isLoadingSlots = false;
         });
+        return;
       }
+
+      // work window, clamped to the salon's own opening hours
+      int winStart = _recurringLocalMin(workStartUtc);
+      int winEnd = _recurringLocalEndMin(workEndUtc);
+
+      final String? salonOpenUtc = schedule['salon_open_time']?.toString();
+      final String? salonCloseUtc = schedule['salon_close_time']?.toString();
+      if (salonOpenUtc != null && salonOpenUtc.isNotEmpty) {
+        final so = _recurringLocalMin(salonOpenUtc);
+        if (so > winStart) winStart = so;
+      }
+      if (salonCloseUtc != null && salonCloseUtc.isNotEmpty) {
+        final sc = _recurringLocalEndMin(salonCloseUtc);
+        if (sc < winEnd) winEnd = sc;
+      }
+
+      // Break (only used to LABEL a time as "Break")
+      int? breakStartMin;
+      int? breakEndMin;
+      final String? bStart = schedule['lunch_break_start']?.toString();
+      final String? bEnd = schedule['lunch_break_end']?.toString();
+      if (bStart != null &&
+          bStart.isNotEmpty &&
+          bEnd != null &&
+          bEnd.isNotEmpty) {
+        breakStartMin = _recurringLocalMin(bStart);
+        breakEndMin = _recurringLocalEndMin(bEnd);
+      }
+      final bool specialBreak = schedule['has_special_break'] == true;
+
+      // ---- 2. candidate start times (salon-local minutes) ----
+      // the work start itself + clean times (every 15 min) inside the window
+      final bool isToday = DateUtils.isSameDay(date, _todayDate);
+      final now = _salonNow;
+      final int nowMin = isToday ? now.hour * 60 + now.minute : -1;
+
+      final Set<int> startSet = {winStart};
+      final int firstAligned =
+          ((winStart + _slotStepMinutes - 1) ~/ _slotStepMinutes) *
+          _slotStepMinutes;
+      for (int s = firstAligned; s < winEnd; s += _slotStepMinutes) {
+        startSet.add(s);
+      }
+      final List<int> starts =
+          startSet
+              .where(
+                (s) =>
+                    s + totalDuration <= winEnd && // fits before closing
+                    s + totalDuration < 1440, // the DB can not take midnight
+              )
+              .toList()
+            ..sort();
 
       final List<Map<String, dynamic>> slots = [];
-      int slotNumber = 1;
+      for (final int start in starts) {
+        final int end = start + totalDuration;
 
-      DateTime currentSlotStartUTC = DateTime(
-        _selectedDate!.year,
-        _selectedDate!.month,
-        _selectedDate!.day,
-        workStartHour,
-        workStartMinute,
-      );
+        // the database allows a start up to 15 min in the past; clearly
+        // passed times are labelled here, the rest is decided by the database
+        final bool isPast = isToday && start < nowMin - 15;
+        final bool isBreak =
+            breakStartMin != null &&
+            breakEndMin != null &&
+            start < breakEndMin &&
+            end > breakStartMin;
 
-      DateTime workEndDateTimeUTC = DateTime(
-        _selectedDate!.year,
-        _selectedDate!.month,
-        _selectedDate!.day,
-        workEndHour,
-        workEndMinute,
-      );
+        final utcStart = TimezoneService.localToUtcTimeForDateWithTimezone(
+          _hhmm(start),
+          date,
+          tz,
+        );
+        final utcEnd = TimezoneService.localToUtcTimeForDateWithTimezone(
+          _hhmm(end),
+          date,
+          tz,
+        );
 
-      if (workEndHour < workStartHour ||
-          (workEndHour == workStartHour && workEndMinute <= workStartMinute)) {
-        workEndDateTimeUTC = workEndDateTimeUTC.add(const Duration(days: 1));
-      }
-
-      bool isOverlapWithRanges(
-        int startMin,
-        int endMin,
-        List<Map<String, dynamic>> ranges,
-      ) {
-        for (final range in ranges) {
-          final rangeStartMin =
-              (range['start_hour'] as int) * 60 + (range['start_min'] as int);
-          int rangeEndMin =
-              (range['end_hour'] as int) * 60 + (range['end_min'] as int);
-
-          if (rangeEndMin < rangeStartMin) {
-            rangeEndMin += 24 * 60;
-          }
-
-          int effectiveEndMin = endMin;
-          if (endMin < startMin) {
-            effectiveEndMin = endMin + 24 * 60;
-          }
-
-          if (startMin < rangeEndMin && effectiveEndMin > rangeStartMin) {
-            return true;
-          }
+        String? userStart;
+        String? userEnd;
+        if (_isDifferentTimezone) {
+          userStart = TimezoneService.utcTimeToUserClockForSalonDate(
+            utcStart,
+            date,
+            tz,
+            _userTimezone,
+          );
+          userEnd = TimezoneService.utcTimeToUserClockForSalonDate(
+            utcEnd,
+            date,
+            tz,
+            _userTimezone,
+          );
         }
-        return false;
-      }
-
-      while (currentSlotStartUTC.isBefore(workEndDateTimeUTC)) {
-        final slotStartUTC = currentSlotStartUTC;
-        final slotEndUTC = currentSlotStartUTC.add(
-          Duration(minutes: totalDuration),
-        );
-
-        if (slotEndUTC.isAfter(workEndDateTimeUTC)) {
-          break;
-        }
-
-        int slotStartMin = slotStartUTC.hour * 60 + slotStartUTC.minute;
-        int slotEndMin = slotEndUTC.hour * 60 + slotEndUTC.minute;
-
-        bool isOverlappingWithBookings = isOverlapWithRanges(
-          slotStartMin,
-          slotEndMin,
-          bookedRanges,
-        );
-
-        bool isOverlappingWithBreak = isOverlapWithRanges(
-          slotStartMin,
-          slotEndMin,
-          breakRanges,
-        );
-
-        final utcStartStr =
-            '${slotStartUTC.hour.toString().padLeft(2, '0')}:${slotStartUTC.minute.toString().padLeft(2, '0')}:00';
-
-        final localSlotStart = TimezoneService.utcToLocalDateTimeForDateWithTimezone(
-          utcStartStr,
-          _selectedDate!,
-          _selectedSalonTimezone,
-        );
-
-        bool isPast = _isSlotInPast(localSlotStart, totalDuration);
-
-        bool isAvailable =
-            !isOverlappingWithBookings && !isOverlappingWithBreak && !isPast;
-
-        String statusText = '';
-        int displayVipNumber = 0;
-
-        if (isOverlappingWithBookings) {
-          statusText = 'Booked';
-          for (final booked in bookedRanges) {
-            final bookedStartMin =
-                (booked['start_hour'] as int) * 60 +
-                (booked['start_min'] as int);
-            final bookedEndMin =
-                (booked['end_hour'] as int) * 60 + (booked['end_min'] as int);
-            if (slotStartMin < bookedEndMin && slotEndMin > bookedStartMin) {
-              displayVipNumber = booked['vip_number'];
-              break;
-            }
-          }
-        } else if (isOverlappingWithBreak) {
-          statusText =
-              breakRanges.isNotEmpty && breakRanges.first['type'] == 'special'
-              ? 'Special Break'
-              : 'Break';
-        } else if (isPast) {
-          statusText = 'Time Passed';
-        } else {
-          int vipCountBefore = 0;
-          for (final booked in bookedRanges) {
-            if (booked['is_vip'] == true) {
-              final bookedStartMin =
-                  (booked['start_hour'] as int) * 60 +
-                  (booked['start_min'] as int);
-              if (bookedStartMin < slotStartMin) {
-                vipCountBefore++;
-              }
-            }
-          }
-          displayVipNumber = vipCountBefore + 1;
-        }
-
-        final localStartDateTime =
-            TimezoneService.utcToLocalDateTimeForDateWithTimezone(
-          utcStartStr,
-          _selectedDate!,
-          _selectedSalonTimezone,
-        );
-
-        final utcEndStr =
-            '${slotEndUTC.hour.toString().padLeft(2, '0')}:${slotEndUTC.minute.toString().padLeft(2, '0')}:00';
-
-        final localEndDateTime =
-            TimezoneService.utcToLocalDateTimeForDateWithTimezone(
-          utcEndStr,
-          _selectedDate!,
-          _selectedSalonTimezone,
-        );
-
-        final displayStartTime = _formatTimeWithAmPm(localStartDateTime);
-        final displayEndTime = _formatTimeWithAmPm(localEndDateTime);
 
         slots.add({
-          'start_time_display': displayStartTime,
-          'end_time_display': displayEndTime,
-          'utc_start_time': utcStartStr,
-          'utc_end_time': utcEndStr,
-          'slot_number': slotNumber,
-          'vip_number': displayVipNumber,
-          'is_available': isAvailable,
+          'start_min': start,
+          'end_min': end,
+          'start_time_display': _formatMin12(start),
+          'end_time_display': _formatMin12(end),
+          'user_start_time': userStart,
+          'user_end_time': userEnd,
+          'utc_start_time': utcStart,
+          'utc_end_time': utcEnd,
           'is_past': isPast,
-          'is_booked': isOverlappingWithBookings,
-          'is_break': isOverlappingWithBreak,
-          'status_text': statusText,
+          'is_break': isBreak && !isPast,
+          'is_booked': false,
+          'is_available': false,
+          'is_push': false,
+          'status_text': isPast
+              ? 'Time Passed'
+              : (isBreak ? (specialBreak ? 'Special Break' : 'Break') : ''),
           'duration': totalDuration,
         });
+      }
 
-        slotNumber++;
-        currentSlotStartUTC = currentSlotStartUTC.add(
-          Duration(minutes: totalDuration),
-        );
+      // ---- 3. ask the database which candidates are really free ----
+      final toCheck = slots
+          .where((s) => s['is_past'] != true && s['is_break'] != true)
+          .toList();
+
+      final String? dayBlock = await _markSlotsFromDb(
+        toCheck: toCheck,
+        barberId: barberId,
+        salonId: salonId,
+        dateStr: dateStr,
+        duration: totalDuration,
+        requestId: requestId,
+      );
+      if (!mounted || requestId != _slotRequestId) return;
+
+      if (dayBlock == 'SALON_CLOSED') {
+        setState(() {
+          _slotErrorMessage =
+              'Salon is closed on $dayText.\n\nPlease select another date.';
+          _slotErrorType = 'salon_closed';
+          _isLoadingSlots = false;
+        });
+        return;
+      }
+      if (dayBlock == 'BARBER_UNAVAILABLE') {
+        setState(() {
+          _slotErrorMessage =
+              '${_selectedBarber!['full_name']} is not available on $dayText.\n\nPlease select another barber.';
+          _slotErrorType = 'barber';
+          _isLoadingSlots = false;
+        });
+        return;
       }
 
       final availableSlots = slots
           .where((s) => s['is_available'] == true)
           .toList();
-      final hasAnySlots = slots.isNotEmpty;
-      final hasAvailableSlots = availableSlots.isNotEmpty;
 
-      if (mounted) {
-        setState(() {
-          _allTimeSlots = slots;
+      String? errorMessage;
+      String? errorType;
 
-          if (!hasAnySlots) {
-            _slotErrorMessage =
-                'No time slots available on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
-                'The barber has no working hours on this date.';
-            _slotErrorType = 'barber';
-          } else if (!hasAvailableSlots) {
-            final allBooked = slots.every((s) => s['is_booked'] == true);
-            final allPast = slots.every((s) => s['is_past'] == true);
-            final allBreak = slots.every((s) => s['is_break'] == true);
-
-            if (allBooked) {
-              _slotErrorMessage =
-                  'All VIP slots on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)} are booked.\n\n'
-                  'Please select another date or try tomorrow.';
-              _slotErrorType = 'date_full';
-            } else if (allPast) {
-              _slotErrorMessage =
-                  'All VIP slots on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)} have passed.\n\n'
-                  'Please select another date.';
-              _slotErrorType = 'overflow';
-            } else if (allBreak) {
-              _slotErrorMessage =
-                  'Barber is on break during all available hours on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
-                  'Please try another date.';
-              _slotErrorType = 'date_full';
-            } else {
-              _slotErrorMessage =
-                  'No available VIP slots on ${DateFormat('EEEE, MMM dd').format(_selectedDate!)}.\n\n'
-                  'Some slots may be booked or the barber is on break. Please try another date or barber.';
-              _slotErrorType = 'date_full';
-            }
-          } else {
-            _slotErrorMessage = null;
-            _slotErrorType = null;
-          }
-
-          _isLoadingSlots = false;
-        });
+      if (slots.isEmpty) {
+        errorMessage =
+            'Your $totalDuration min of services do not fit into the working hours on $dayText.\n\nPlease try another date or fewer services.';
+        errorType = 'date_full';
+      } else if (availableSlots.isEmpty) {
+        final allPast = slots.every((s) => s['is_past'] == true);
+        if (allPast) {
+          errorMessage =
+              'All VIP times on $dayText have passed.\n\nPlease select another date.';
+          errorType = 'overflow';
+        } else {
+          errorMessage =
+              'No free VIP time on $dayText for your $totalDuration min of services.\n\nPlease try the next day or choose another date or barber.';
+          errorType = 'date_full';
+        }
       }
+
+      setState(() {
+        _allTimeSlots = slots;
+        _slotErrorMessage = errorMessage;
+        _slotErrorType = errorType;
+        _isLoadingSlots = false;
+      });
     } catch (e) {
       debugPrint('❌ [VIP] Load slots error: $e');
-      if (mounted) {
-        setState(() {
-          _isLoadingSlots = false;
-          _slotErrorMessage =
-              'Failed to load time slots.\n\nError: ${e.toString().replaceFirst('Exception: ', '')}';
-          _slotErrorType = 'general';
-          _allTimeSlots = [];
-        });
-      }
+      if (!mounted || requestId != _slotRequestId) return;
+      setState(() {
+        _isLoadingSlots = false;
+        _slotErrorMessage =
+            'Failed to load time slots.\n\nError: ${e.toString().replaceFirst('Exception: ', '')}';
+        _slotErrorType = 'general';
+        _allTimeSlots = [];
+      });
     } finally {
-      if (mounted && _isLoadingSlots) {
+      if (mounted && requestId == _slotRequestId && _isLoadingSlots) {
         setState(() => _isLoadingSlots = false);
       }
     }
   }
 
-  Future<void> _bookSlot(Map<String, dynamic> slot) async {
-    if (!slot['is_available']) return;
+  /// Select a time and ask the DB which VIP number this time would get.
+  /// (Other customers' bookings are private, so the number is calculated by
+  ///  get_vip_preview_number(). The FINAL number is given at confirm.)
+  Future<void> _selectSlot(Map<String, dynamic> slot) async {
+    if (slot['is_available'] != true) return;
+    if (_selectedBarber == null ||
+        _selectedSalon == null ||
+        _selectedDate == null) {
+      return;
+    }
 
     setState(() {
-      _isLoadingSlots = true;
+      _selectedSlot = slot;
+      _generatedVipNumber = 0;
     });
 
     try {
-      final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate!);
-      final selectedStartTime = slot['utc_start_time'];
-      final selectedStartMin =
-          int.parse(selectedStartTime.split(':')[0]) * 60 +
-          int.parse(selectedStartTime.split(':')[1]);
+      final barberId = (_selectedBarber!['barber_id'] ?? _selectedBarber!['id'])
+          .toString();
+      final result = await supabase.rpc(
+        'get_vip_preview_number',
+        params: {
+          'p_barber_id': barberId,
+          'p_salon_id': _selectedSalon!['id'],
+          'p_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
+          'p_utc_start': slot['utc_start_time'],
+        },
+      );
 
-      final barberId = _selectedBarber!['barber_id'] ?? _selectedBarber!['id'];
+      if (!mounted) return;
+      // the customer may have tapped another time meanwhile
+      if (_selectedSlot == null ||
+          _selectedSlot!['start_min'] != slot['start_min']) {
+        return;
+      }
 
-      final existingVIP = await supabase
-          .from('appointments')
-          .select('start_time, vip_queue_number')
-          .eq('barber_id', barberId)
-          .eq('appointment_date', dateStr)
-          .eq('is_vip', true)
-          .neq('status', 'cancelled')
-          .neq('status', 'no_show')
-          .order('start_time', ascending: true);
+      final n = result is num
+          ? result.toInt()
+          : (int.tryParse(result?.toString() ?? '') ?? 0);
+      setState(() => _generatedVipNumber = n);
+    } catch (e) {
+      debugPrint('⚠️ [VIP] Could not get VIP number preview: $e');
+    }
+  }
 
-      int vipNumber = 1;
-      for (final vip in existingVIP) {
-        String vipStartTime = vip['start_time'].toString();
-        if (vipStartTime.length > 5) {
-          vipStartTime = vipStartTime.substring(0, 5);
-        }
-        final vipStartParts = vipStartTime.split(':');
-        final vipStartMin =
-            int.parse(vipStartParts[0]) * 60 + int.parse(vipStartParts[1]);
-        if (vipStartMin < selectedStartMin) {
-          vipNumber++;
-        } else {
+  /// "Try next day": the next bookable day (holidays and non-working
+  /// weekdays skipped) on which THIS barber is available.
+  /// (The barber's role / profile status does not depend on the date, so it
+  ///  is checked ONCE; each following day costs only one schedule call.)
+  Future<void> _tryNextAvailableDate() async {
+    if (_selectedDate == null || _selectedSalon == null) return;
+
+    final savedBarber = _selectedBarber;
+    if (savedBarber == null) {
+      setState(() {
+        _selectedBarber = null;
+        _barbersLoaded = false;
+        _barberAvailability = {};
+        _availableBarbers = [];
+        _slotErrorMessage = null;
+        _slotErrorType = null;
+        _currentStep = 3;
+      });
+      return;
+    }
+
+    setState(() {
+      _isLoadingSlots = true;
+      _slotErrorMessage = null;
+      _slotErrorType = null;
+      _allTimeSlots = [];
+      _selectedSlot = null;
+    });
+
+    try {
+      final String barberId = (savedBarber['barber_id'] ?? savedBarber['id'])
+          .toString();
+
+      final problem = await _barberStaticProblem(barberId);
+      if (!mounted) return;
+      if (problem != null) {
+        setState(() {
+          _isLoadingSlots = false;
+          _slotErrorMessage =
+              '${savedBarber['full_name'] ?? 'This barber'} is currently unavailable.\n\nPlease try another barber.';
+          _slotErrorType = 'barber';
+        });
+        return;
+      }
+
+      DateTime? candidate = _nextSelectableAfter(_selectedDate!);
+      Map<String, dynamic>? availability;
+
+      while (candidate != null) {
+        final a = await _barberDateAvailability(barberId, candidate);
+        if (!mounted) return;
+        if (a['is_available'] == true) {
+          availability = a;
           break;
         }
+        candidate = _nextSelectableAfter(candidate);
       }
 
-      if (mounted) {
+      if (candidate == null || availability == null) {
         setState(() {
-          _selectedSlot = slot;
-          _selectedStartTime = slot['start_time_display'];
-          _generatedVipNumber = vipNumber;
-          _showingVipNumber = true;
           _isLoadingSlots = false;
+          _slotErrorMessage =
+              '${savedBarber['full_name'] ?? 'This barber'} has no more available days in the next 30 days.\n\nPlease try another barber.';
+          _slotErrorType = 'barber';
         });
+        return;
       }
+
+      final DateTime nextDate = candidate;
+      final Map<String, dynamic> nextAvailability = availability;
+
+      setState(() {
+        _selectedDate = nextDate;
+        _calendarVersion++;
+        _isDateUnavailable = false;
+        _unavailableReason = null;
+        _barberAvailability = {barberId: nextAvailability};
+        _barbersLoaded = false;
+        _availableBarbers = [];
+      });
+
+      await _loadAvailableSlots();
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoadingSlots = false;
-          _selectedSlot = slot;
-          _selectedStartTime = slot['start_time_display'];
-          _generatedVipNumber = slot['vip_number'];
-          _showingVipNumber = true;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _isLoadingSlots = false;
+        _slotErrorMessage = 'Error: ${e.toString()}';
+        _slotErrorType = 'general';
+      });
     }
   }
 
   // ==================== STEP 6: CONFIRM ====================
 
+  String _slotRecoveryMessage(String code) {
+    switch (code) {
+      case 'SLOT_TAKEN':
+        return 'That time was just taken. Please pick another time.';
+      case 'SLOT_PASSED':
+        return 'That time has already passed. Please pick another time.';
+      case 'NO_SLOT':
+        return 'No free time is left for these services on this day.';
+      case 'SALON_CLOSED':
+        return 'The salon is closed on this date.';
+      case 'BARBER_UNAVAILABLE':
+        return 'The barber is not available on this date.';
+      default:
+        return 'Please pick the time again.';
+    }
+  }
+
+  /// The database re-checks the picked time at confirm. If it is gone go
+  /// back to the time step and show what is free now.
+  Future<void> _recoverFromSlotError(String code) async {
+    if (!mounted) return;
+
+    setState(() {
+      _isBooking = false;
+      _currentStep = 5;
+      _allTimeSlots = [];
+      _selectedSlot = null;
+      _slotErrorMessage = null;
+      _slotErrorType = null;
+      _isLoadingSlots = true;
+    });
+
+    _showInfoSnack(_slotRecoveryMessage(code));
+    await _loadAvailableSlots();
+  }
+
   Future<void> _confirmBooking() async {
     if (!mounted) return;
+    if (_isBooking) return; // a double tap must not book twice
+
+    if (_selectedServices.isEmpty) {
+      _showErrorSnack('Please select at least one service');
+      return;
+    }
+
+    if (_selectedSalon == null ||
+        _selectedBarber == null ||
+        _selectedDate == null ||
+        _selectedSlot == null) {
+      _showErrorSnack(
+        'Missing booking information. Please complete all steps.',
+      );
+      return;
+    }
+
     setState(() => _isBooking = true);
 
     try {
@@ -2211,6 +2588,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           'p_barber_id': barberId,
           'p_variant_ids': variantIds,
           'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
+          // the server re-validates this start time and computes the end
           'p_utc_start_time': utcStartTime,
           'p_utc_end_time': utcEndTime,
           'p_child_name': _getChildNameForBooking(),
@@ -2221,13 +2599,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
       if (!mounted) return;
 
-      if (result['success'] == true) {
-        final confirmedVipNumber =
-            result['vip_number'] ?? _generatedVipNumber;
+      if (result != null && result['success'] == true) {
+        final dynamic rawVip = result['vip_number'];
+        final String vipDisplay =
+            result['display_queue']?.toString() ??
+            (rawVip != null ? 'VIP-$rawVip' : 'VIP');
 
-        // ✅ NEW: Extract confirmed amounts from response
-        final confirmedRate =
-            (result['exchange_rate_at_booking'] as num?)?.toDouble();
+        // Confirmed amounts from the response
+        final confirmedRate = (result['exchange_rate_at_booking'] as num?)
+            ?.toDouble();
         final confirmedPrice =
             (result['price'] as num?)?.toDouble() ?? _getDisplayTotalPrice();
         final confirmedUserAmount =
@@ -2240,24 +2620,39 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
         setState(() => _isBooking = false);
 
-        // ✅ NEW: Success dialog with dual currency
         _showVipBookingSuccessDialog(
-          vipNumber: confirmedVipNumber,
+          vipDisplay: vipDisplay,
           confirmedPrice: confirmedPrice,
           confirmedUserAmount: confirmedUserAmount,
           bookingNumber: confirmedBookingNumber,
         );
       } else {
-        final errorMessage = result['message'] ?? 'VIP booking failed';
-        final errorCode = result['error_code']?.toString() ?? '';
+        final errorMessage =
+            result?['message']?.toString() ?? 'VIP booking failed';
+        final errorCode = result?['error_code']?.toString() ?? '';
+
+        // the picked time is no longer free: back to the time step
+        if (_slotRecoveryCodes.contains(errorCode)) {
+          await _recoverFromSlotError(errorCode);
+          return;
+        }
+
+        if (errorMessage.contains('Pro membership')) {
+          if (mounted) setState(() => _isPro = false);
+          throw Exception(
+            'VIP booking needs a Pro membership. Upgrade to Pro to book VIP.',
+          );
+        }
+
         throw Exception(
           errorCode.isNotEmpty ? '$errorMessage ($errorCode)' : errorMessage,
         );
       }
     } catch (e) {
+      debugPrint('❌ [VIP] Booking failed: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed: $e'), backgroundColor: Colors.red),
+        _showErrorSnack(
+          'Failed: ${e.toString().replaceFirst('Exception: ', '')}',
         );
       }
     } finally {
@@ -2265,9 +2660,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     }
   }
 
-  // ✅ NEW: Success dialog with confirmed amounts
+  // Success dialog with confirmed amounts
   void _showVipBookingSuccessDialog({
-    required int vipNumber,
+    required String vipDisplay,
     required double confirmedPrice,
     double? confirmedUserAmount,
     String? bookingNumber,
@@ -2279,20 +2674,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         icon: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: Colors.amber.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
-          child: const Icon(
-            Icons.star,
-            color: Colors.amber,
-            size: 48,
-          ),
+          child: const Icon(Icons.star, color: Colors.amber, size: 48),
         ),
         title: Text(
           '⭐ VIP Booking Confirmed!',
@@ -2325,15 +2714,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 ),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [
-                      Colors.amber.shade300,
-                      Colors.amber.shade600,
-                    ],
+                    colors: [Colors.amber.shade300, Colors.amber.shade600],
                   ),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  'VIP-$vipNumber',
+                  vipDisplay,
                   style: const TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
@@ -2360,8 +2746,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           'Amount',
                           style: TextStyle(
                             fontSize: 14,
-                            color:
-                                isDark ? Colors.white70 : Colors.grey[700],
+                            color: isDark ? Colors.white70 : Colors.grey[700],
                           ),
                         ),
                         Text(
@@ -2384,9 +2769,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             style: TextStyle(
                               fontSize: 13,
                               fontStyle: FontStyle.italic,
-                              color: isDark
-                                  ? Colors.white60
-                                  : Colors.grey[600],
+                              color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                           ),
                           Text(
@@ -2465,10 +2848,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               ),
               child: const Text(
                 'Done',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -2564,50 +2944,28 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     return Icons.build;
   }
 
-  /// ✅ Salon opening hours — SALON timezone, NOT user timezone
+  /// Salon opening hours - in THAT salon's own timezone.
+  /// (The salon list RPC returns each salon's timezone, or it is read from
+  ///  the salons table. Open / close are recurring times, so the reference
+  ///  date 2024-01-01 is used.) Returns '' when the salon's timezone is
+  ///  unknown: a wrong time is never shown.
   String _getSalonLocalTime(Map<String, dynamic> salon) {
+    final salonTz = salon['timezone']?.toString() ?? '';
+    if (salonTz.isEmpty) return '';
+
     final openTimeUTC = salon['open_time']?.toString() ?? '09:00:00';
     final closeTimeUTC = salon['close_time']?.toString() ?? '18:00:00';
-    final referenceDate = _selectedDate ?? _todayDate;
 
-    // ✅ FIXED: use SALON timezone
-    final tz = _selectedSalonTimezone.isNotEmpty
-        ? _selectedSalonTimezone
-        : _kDefaultSalonTimezone;
-
-    final openLocal = TimezoneService.utcToLocalTimeForDateWithTimezone(
+    final openLocal = TimezoneService.utcToLocalTimeRecurringWithTimezone(
       openTimeUTC,
-      referenceDate,
-      tz,
+      salonTz,
     );
-    final closeLocal = TimezoneService.utcToLocalTimeForDateWithTimezone(
+    final closeLocal = TimezoneService.utcToLocalTimeRecurringWithTimezone(
       closeTimeUTC,
-      referenceDate,
-      tz,
+      salonTz,
     );
 
     return '$openLocal - $closeLocal';
-  }
-
-  String _formatTimeWithAmPm(DateTime time) {
-    final period = time.hour >= 12 ? 'PM' : 'AM';
-    final displayHour = time.hour % 12 == 0 ? 12 : time.hour % 12;
-    return '$displayHour:${time.minute.toString().padLeft(2, '0')} $period';
-  }
-
-  bool _isSlotInPast(DateTime localSlotStart, int durationMinutes) {
-    final now = DateTime.now();
-    final slotEnd = localSlotStart.add(Duration(minutes: durationMinutes));
-
-    if (slotEnd.isBefore(now) || slotEnd.isAtSameMomentAs(now)) {
-      return true;
-    }
-
-    if (localSlotStart.isBefore(now) && slotEnd.isAfter(now)) {
-      return true;
-    }
-
-    return false;
   }
 
   // ============================================
@@ -3291,6 +3649,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final logoUrl = salon['logo_url'];
     final avgRating = (salon['avg_rating'] as num?)?.toDouble() ?? 0.0;
     final totalBookings = salon['total_bookings'] ?? 0;
+    // '' when the salon's timezone is unknown (no wrong time is shown)
+    final hoursText = _getSalonLocalTime(salon);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
@@ -3370,23 +3730,24 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           ),
                         ],
                       ),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.access_time,
-                          size: 14,
-                          color: isDark ? Colors.white60 : Colors.grey[500],
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _getSalonLocalTime(salon),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: isDark ? Colors.white60 : Colors.grey[600],
+                    if (hoursText.isNotEmpty)
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.access_time,
+                            size: 14,
+                            color: isDark ? Colors.white60 : Colors.grey[500],
                           ),
-                        ),
-                      ],
-                    ),
+                          const SizedBox(width: 4),
+                          Text(
+                            hoursText,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isDark ? Colors.white60 : Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
                     const SizedBox(height: 4),
                     Row(
                       children: [
@@ -3443,6 +3804,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   Widget _buildServiceSelectionStep() {
     final isDark = context.isDarkMode;
     final tree = _buildServiceTree();
+    // VIP booking needs Pro: do not let a non-Pro customer walk through the
+    // whole flow just to be refused at the end (the database still enforces it)
+    final bool proBlocked = _isPro == false;
 
     return Column(
       children: [
@@ -3537,7 +3901,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // ✅ UPDATED: dual display in panel
+                  // dual display in panel
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
@@ -3564,8 +3928,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           style: TextStyle(
                             fontSize: 10.5,
                             fontStyle: FontStyle.italic,
-                            color:
-                                isDark ? Colors.white60 : Colors.grey[600],
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                     ],
@@ -3576,6 +3939,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ),
           ),
 
+        _buildProBanner(isDark),
         _buildLegacyOfferBanner(isDark),
 
         Expanded(
@@ -3613,7 +3977,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
         _buildBottomBar(
           isDark: isDark,
-          enabled: _selectedServices.isNotEmpty,
+          enabled: _selectedServices.isNotEmpty && !proBlocked,
           onPressed: () {
             setState(() {
               _currentStep = 2;
@@ -3624,15 +3988,17 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                _selectedServices.isEmpty
-                    ? 'Select a Service'
-                    : 'Continue to Date',
+                proBlocked
+                    ? 'Pro membership required'
+                    : (_selectedServices.isEmpty
+                          ? 'Select a Service'
+                          : 'Continue to Date'),
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              if (_selectedServices.isNotEmpty) ...[
+              if (_selectedServices.isNotEmpty && !proBlocked) ...[
                 const SizedBox(width: 8),
                 const Icon(Icons.arrow_forward, size: 18),
               ],
@@ -3640,6 +4006,43 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// VIP booking needs a Pro membership (the DB enforces it; this only warns).
+  Widget _buildProBanner(bool isDark) {
+    if (_isPro != false) return const SizedBox.shrink();
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.amber.shade900 : Colors.amber.shade50,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.amber.shade700 : Colors.amber.shade300,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.workspace_premium,
+            color: isDark ? Colors.amber.shade300 : Colors.amber.shade800,
+            size: 22,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'VIP booking needs a Pro membership. Upgrade to Pro to book VIP.',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.amber.shade200 : Colors.amber.shade900,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -4178,7 +4581,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          // ✅ UPDATED: dual display in variant row
+                          // dual display in variant row
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
@@ -4490,7 +4893,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                     color: AppTheme.primary,
                                   ),
                                 ),
-                                // ✅ NEW: approx user currency
+                                // approx user currency
                                 if (_showApprox)
                                   Text(
                                     '≈ ${_formatUserPrice(_getDisplayTotalPrice() * _exchangeRate!)}',
@@ -4600,7 +5003,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ],
                 ),
               ),
-              // ✅ UPDATED: dual display
+              // dual display
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
@@ -4703,7 +5106,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   Widget _buildDateSelectionStep() {
     final isDark = context.isDarkMode;
     final today = _todayDate;
-    final maxDate = today.add(const Duration(days: 30));
+    final maxDate = _addDays(today, 30);
 
     final firstSelectable = _firstSelectableDate();
     final noDatesAvailable = _scheduleLoaded && firstSelectable == null;
@@ -4725,7 +5128,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         ? _holidayNames[_selectedDate]
         : null;
     final isSelectedToday =
-        _selectedDate != null && _selectedDate!.isAtSameMomentAs(today);
+        _selectedDate != null && DateUtils.isSameDay(_selectedDate, today);
 
     return Column(
       children: [
@@ -4767,7 +5170,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               color: AppTheme.primary,
                             ),
                           ),
-                          // ✅ NEW: approx user currency
+                          // approx user currency
                           if (_showApprox) ...[
                             const SizedBox(width: 6),
                             Text(
@@ -4775,8 +5178,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontStyle: FontStyle.italic,
-                                color:
-                                    isDark ? Colors.white60 : Colors.grey[600],
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
                               ),
                             ),
                           ],
@@ -5202,7 +5606,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   Widget _buildBarberSelectionStep() {
     final isDark = context.isDarkMode;
 
-    if (!_barbersLoaded &&
+    // All steps live in an IndexedStack (they all build), so load the
+    // barbers only while THIS step is the visible one.
+    if (_currentStep == 3 &&
+        !_barbersLoaded &&
         !_isLoadingBarbers &&
         _selectedSalon != null &&
         _selectedBarber == null) {
@@ -5279,6 +5686,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           isDark: isDark,
           enabled: _selectedBarber != null,
           onPressed: () {
+            _dupDebounce?.cancel();
             setState(() {
               _currentStep = 4;
               _childNameController.clear();
@@ -5629,10 +6037,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                 icon: Icons.group,
                                 title: 'Someone else',
                                 subtitle: 'Family member, friend or child',
-                                onTap: () => setState(() {
-                                  _isSameAsCustomer = false;
-                                  _duplicateError = null;
-                                }),
+                                onTap: () {
+                                  _dupDebounce?.cancel();
+                                  _dupRequestId++;
+                                  setState(() {
+                                    _isSameAsCustomer = false;
+                                    _isCheckingDuplicate = false;
+                                    _duplicateError = null;
+                                  });
+                                },
                               ),
                               if (!_isSameAsCustomer)
                                 Padding(
@@ -5690,7 +6103,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                         _selectedChildName = v.trim();
                                         _duplicateError = null;
                                       });
-                                      _checkDuplicateBooking();
+                                      // one query after a pause in typing
+                                      _scheduleDuplicateCheck();
                                     },
                                   ),
                                 ),
@@ -5745,9 +6159,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 _currentStep = 5;
                 _allTimeSlots = [];
                 _selectedSlot = null;
-                _showingVipNumber = false;
-                _generatedVipNumber = 0;
-                _selectedStartTime = '';
                 _isLoadingSlots = true;
                 _slotErrorMessage = null;
                 _slotErrorType = null;
@@ -5889,7 +6300,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   // STEP 5: TIME SLOT SELECTION
   // ============================================
 
-  /// ✅ Timezone indicator: Salon time (main) + User reference
+  /// Timezone indicator: Salon time (main) + User reference
   Widget _buildTimezoneIndicator() {
     final isDark = context.isDarkMode;
     final showUserTz = _isDifferentTimezone;
@@ -5909,11 +6320,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.store,
-                size: 14,
-                color: AppTheme.primary,
-              ),
+              const Icon(Icons.store, size: 14, color: AppTheme.primary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -5925,7 +6332,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ),
                 ),
               ),
-              if (_isDST()) ...[
+              if (_isSalonDstOnSelectedDate()) ...[
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(
@@ -5960,17 +6367,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
               decoration: BoxDecoration(
                 color: Colors.orange.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.orange.withValues(alpha: 0.3),
-                ),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.person,
-                    size: 12,
-                    color: Colors.orange[700],
-                  ),
+                  Icon(Icons.person, size: 12, color: Colors.orange[700]),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
@@ -5999,7 +6400,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final unavailableSlots = _allTimeSlots
         .where((s) => s['is_available'] != true)
         .toList();
-    final canContinue = _selectedSlot != null && _showingVipNumber;
+    final canContinue =
+        _selectedSlot != null && !_isLoadingSlots && _slotErrorMessage == null;
+    final bool anyPushSlot = availableSlots.any((s) => s['is_push'] == true);
 
     return Column(
       children: [
@@ -6029,14 +6432,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Choose your preferred time',
+                        'Choose your preferred time (salon time)',
                         style: TextStyle(
                           fontSize: 14,
                           color: isDark ? Colors.white60 : Colors.grey[600],
                         ),
                       ),
                       const SizedBox(height: 20),
-                      if (_showingVipNumber && _selectedSlot != null) ...[
+                      if (_selectedSlot != null) ...[
                         Center(
                           child: Card(
                             margin: const EdgeInsets.symmetric(
@@ -6057,8 +6460,19 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
+                                  if (_generatedVipNumber > 0) ...[
+                                    Text(
+                                      'VIP-$_generatedVipNumber',
+                                      style: TextStyle(
+                                        fontSize: 48,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppTheme.primary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                  ],
                                   Text(
-                                    'Your VIP Number',
+                                    'Your VIP Time',
                                     style: TextStyle(
                                       fontSize: 15,
                                       color: isDark
@@ -6069,15 +6483,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                     ),
                                   ),
                                   const SizedBox(height: 12),
-                                  Text(
-                                    'VIP-$_generatedVipNumber',
-                                    style: TextStyle(
-                                      fontSize: 56,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppTheme.primary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 16),
                                   Container(
                                     padding: const EdgeInsets.symmetric(
                                       horizontal: 24,
@@ -6098,17 +6503,65 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                           color: AppTheme.primary,
                                         ),
                                         const SizedBox(width: 10),
-                                        Text(
-                                          _selectedStartTime,
-                                          style: TextStyle(
-                                            fontSize: 17,
-                                            fontWeight: FontWeight.w600,
-                                            color: isDark
-                                                ? Colors.white
-                                                : _textDark,
+                                        Flexible(
+                                          child: Text(
+                                            '${_selectedSlot!['start_time_display']} - ${_selectedSlot!['end_time_display']}',
+                                            style: TextStyle(
+                                              fontSize: 17,
+                                              fontWeight: FontWeight.w600,
+                                              color: isDark
+                                                  ? Colors.white
+                                                  : _textDark,
+                                            ),
                                           ),
                                         ),
                                       ],
+                                    ),
+                                  ),
+                                  if (_selectedSlot!['user_start_time'] !=
+                                          null &&
+                                      _selectedSlot!['user_end_time'] != null)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 8),
+                                      child: Text(
+                                        'Your time: ${_selectedSlot!['user_start_time']} - ${_selectedSlot!['user_end_time']}',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontSize: 12.5,
+                                          fontStyle: FontStyle.italic,
+                                          color: isDark
+                                              ? Colors.blue.shade300
+                                              : Colors.blue.shade700,
+                                        ),
+                                      ),
+                                    ),
+                                  if (_selectedSlot!['is_push'] == true)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 8),
+                                      child: Text(
+                                        '⏱ The VIP booked right after this time will start a few minutes later.',
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: isDark
+                                              ? Colors.orange.shade300
+                                              : Colors.orange.shade800,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _generatedVipNumber > 0
+                                        ? '⭐ Your VIP number is VIP-$_generatedVipNumber. It is final when you confirm.'
+                                        : '⭐ Your VIP number is given when you confirm.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      color: isDark
+                                          ? Colors.amber.shade300
+                                          : Colors.amber.shade900,
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ],
@@ -6133,29 +6586,35 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                           spacing: 12,
                           runSpacing: 12,
                           children: availableSlots.map((slot) {
-                            final isSelected = _selectedSlot == slot;
+                            final isSelected =
+                                _selectedSlot != null &&
+                                _selectedSlot!['start_min'] ==
+                                    slot['start_min'];
                             final displayTime = slot['start_time_display'];
-                            final willGetVipNumber = slot['vip_number'];
+                            final displayEnd = slot['end_time_display'];
+                            final bool isPush = slot['is_push'] == true;
 
                             return ElevatedButton(
-                              onPressed: () => _bookSlot(slot),
+                              onPressed: () => _selectSlot(slot),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: isSelected && _showingVipNumber
+                                backgroundColor: isSelected
                                     ? AppTheme.primary
                                     : (isDark
                                           ? const Color(0xFF2A2A2A)
                                           : Colors.white),
-                                foregroundColor: isSelected && _showingVipNumber
+                                foregroundColor: isSelected
                                     ? Colors.white
                                     : AppTheme.primary,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(25),
                                   side: BorderSide(
-                                    color: isSelected && _showingVipNumber
+                                    color: isSelected
                                         ? AppTheme.primary
-                                        : AppTheme.primary.withValues(
-                                            alpha: 0.5,
-                                          ),
+                                        : (isPush
+                                              ? Colors.orange.shade400
+                                              : AppTheme.primary.withValues(
+                                                  alpha: 0.5,
+                                                )),
                                     width: 1.5,
                                   ),
                                 ),
@@ -6163,9 +6622,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   horizontal: 16,
                                   vertical: 12,
                                 ),
-                                elevation: isSelected && _showingVipNumber
-                                    ? 2
-                                    : 0,
+                                elevation: isSelected ? 2 : 0,
                               ),
                               child: Column(
                                 mainAxisSize: MainAxisSize.min,
@@ -6174,11 +6631,10 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                     displayTime,
                                     style: TextStyle(
                                       fontSize: 14,
-                                      fontWeight:
-                                          isSelected && _showingVipNumber
+                                      fontWeight: isSelected
                                           ? FontWeight.bold
                                           : FontWeight.w500,
-                                      color: isSelected && _showingVipNumber
+                                      color: isSelected
                                           ? Colors.white
                                           : (isDark
                                                 ? Colors.white
@@ -6187,10 +6643,12 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                                   ),
                                   const SizedBox(height: 2),
                                   Text(
-                                    'VIP-$willGetVipNumber',
+                                    isPush
+                                        ? 'until $displayEnd ⏱'
+                                        : 'until $displayEnd',
                                     style: TextStyle(
                                       fontSize: 10,
-                                      color: isSelected && _showingVipNumber
+                                      color: isSelected
                                           ? Colors.white70
                                           : AppTheme.primary.withValues(
                                               alpha: 0.7,
@@ -6202,6 +6660,29 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             );
                           }).toList(),
                         ),
+                        if (anyPushSlot) ...[
+                          const SizedBox(height: 14),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: Colors.orange.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            child: Text(
+                              '⏱  Times marked ⏱ fit in just before the next VIP. That VIP will start a few minutes later (they are notified).',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: isDark
+                                    ? Colors.orange.shade300
+                                    : Colors.orange.shade800,
+                              ),
+                            ),
+                          ),
+                        ],
                       ],
                       if (unavailableSlots.isNotEmpty) ...[
                         const SizedBox(height: 24),
@@ -6229,7 +6710,9 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             Color statusColor = Colors.grey[500]!;
 
                             if (isBooked) {
-                              displayStatus = 'Booked';
+                              displayStatus = statusText.toString().isNotEmpty
+                                  ? statusText.toString()
+                                  : 'Booked';
                               statusColor = Colors.red.shade400;
                             } else if (isBreak) {
                               displayStatus = 'Break';
@@ -6237,8 +6720,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                             } else if (isPast) {
                               displayStatus = 'Time Passed';
                               statusColor = Colors.grey[500]!;
-                            } else if (statusText.isNotEmpty) {
-                              displayStatus = statusText;
+                            } else if (statusText.toString().isNotEmpty) {
+                              displayStatus = statusText.toString();
                             }
 
                             return Container(
@@ -6322,6 +6805,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final showBarberButton = errorType == 'barber';
     final showGoBack = errorType == 'general';
 
+    // the next bookable day (holidays / non-working weekdays skipped)
+    final DateTime? nextDate = _selectedDate == null
+        ? null
+        : _nextSelectableAfter(_selectedDate!);
+
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -6369,7 +6857,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                         _slotErrorType = null;
                         _currentStep = 2;
                         _allTimeSlots = [];
-                        _showingVipNumber = false;
                         _selectedSlot = null;
                       });
                     },
@@ -6380,105 +6867,11 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                     ),
                     label: const Text('Change Date'),
                   ),
-                if (showDateButtons)
+                if (showDateButtons && nextDate != null)
                   ElevatedButton.icon(
-                    onPressed: () async {
-                      if (_selectedDate == null) return;
-                      final tomorrow = _selectedDate!.add(
-                        const Duration(days: 1),
-                      );
-                      final savedBarber = _selectedBarber;
-                      final savedSalon = _selectedSalon;
-
-                      setState(() {
-                        _selectedDate = tomorrow;
-                        _allTimeSlots = [];
-                        _showingVipNumber = false;
-                        _selectedSlot = null;
-                        _isLoadingSlots = true;
-                        _slotErrorMessage = null;
-                        _slotErrorType = null;
-                      });
-
-                      try {
-                        final isHoliday = _holidays.contains(tomorrow);
-                        if (isHoliday) {
-                          if (!mounted) return;
-                          setState(() {
-                            _isLoadingSlots = false;
-                            _slotErrorMessage =
-                                '${_holidayNames[tomorrow] ?? 'Holiday'} — Salon is closed tomorrow.';
-                            _slotErrorType = 'salon_closed';
-                          });
-                          return;
-                        }
-
-                        if (savedBarber == null || savedSalon == null) {
-                          if (!mounted) return;
-                          setState(() {
-                            _isLoadingSlots = false;
-                            _selectedBarber = null;
-                            _barbersLoaded = false;
-                            _barberAvailability = {};
-                            _availableBarbers = [];
-                            _currentStep = 3;
-                          });
-                          return;
-                        }
-
-                        final availability = await _checkBarberFullAvailability(
-                          savedBarber['barber_id'] ?? savedBarber['id'],
-                          tomorrow,
-                        );
-
-                        if (!mounted) return;
-
-                        if (availability['is_available'] != true) {
-                          setState(() {
-                            _selectedBarber = null;
-                            _barbersLoaded = false;
-                            _barberAvailability = {};
-                            _availableBarbers = [];
-                            _isLoadingSlots = false;
-                            _currentStep = 3;
-                          });
-                          await _loadAvailableBarbers();
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '${savedBarber['full_name']} is not available on '
-                                '${DateFormat('MMM dd').format(tomorrow)}.',
-                              ),
-                              backgroundColor: Colors.orange.shade800,
-                            ),
-                          );
-                          return;
-                        }
-
-                        setState(() {
-                          _selectedBarber = savedBarber;
-                          _barberAvailability = {
-                            savedBarber['id']: availability,
-                          };
-                          _barbersLoaded = false;
-                          _availableBarbers = [];
-                        });
-
-                        await _loadAvailableSlots();
-                      } catch (e) {
-                        if (!mounted) return;
-                        setState(() {
-                          _isLoadingSlots = false;
-                          _slotErrorMessage = 'Error: ${e.toString()}';
-                          _slotErrorType = 'general';
-                        });
-                      }
-                    },
+                    onPressed: _tryNextAvailableDate,
                     icon: const Icon(Icons.arrow_forward, size: 18),
-                    label: Text(
-                      'Try ${DateFormat('MMM dd').format(_selectedDate != null ? _selectedDate!.add(const Duration(days: 1)) : _todayDate)}',
-                    ),
+                    label: Text('Try ${DateFormat('MMM dd').format(nextDate)}'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppTheme.primary,
                       foregroundColor: Colors.white,
@@ -6489,6 +6882,18 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   ),
               ],
             ),
+            if (showDateButtons && nextDate == null)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  'No more bookable days in the next 30 days.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                ),
+              ),
             if (showBarberButton) ...[
               const SizedBox(height: 16),
               TextButton.icon(
@@ -6603,12 +7008,14 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
     final startTime =
         _selectedSlot!['start_time_display']?.toString() ?? '--:--';
     final endTime = _selectedSlot!['end_time_display']?.toString() ?? '--:--';
+    final userStartTime = _selectedSlot!['user_start_time']?.toString();
+    final userEndTime = _selectedSlot!['user_end_time']?.toString();
+    final hasUserClock = userStartTime != null && userEndTime != null;
     final barberName = _selectedBarber!['full_name']?.toString() ?? 'Barber';
     final barberRating =
         (_selectedBarber!['avg_rating'] as num?)?.toStringAsFixed(1) ?? 'New';
     final totalDuration = _calculateTotalDuration();
     final totalPrice = _getDisplayTotalPrice();
-    final vipNumber = _generatedVipNumber;
 
     return Column(
       children: [
@@ -6620,8 +7027,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                 _buildConfirmationTile(
                   Icons.star,
                   'VIP Booking',
-                  'VIP-$vipNumber',
-                  '',
+                  _generatedVipNumber > 0 ? 'VIP-$_generatedVipNumber' : 'VIP',
+                  'The final VIP number is confirmed after booking.',
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
@@ -6635,7 +7042,34 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   Icons.calendar_today,
                   'Date & Time',
                   DateFormat('EEEE, MMM dd').format(_selectedDate!),
-                  '$startTime - $endTime',
+                  hasUserClock
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 4),
+                            Text(
+                              '$startTime - $endTime (salon time)',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Your time: $userStartTime - $userEndTime',
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontStyle: FontStyle.italic,
+                                color: isDark
+                                    ? Colors.blue.shade300
+                                    : Colors.blue.shade700,
+                              ),
+                            ),
+                          ],
+                        )
+                      : '$startTime - $endTime',
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(
@@ -6820,7 +7254,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   '⭐ $barberRating rating',
                 ),
                 const SizedBox(height: 12),
-                // ✅ UPDATED: Estimated Amount with dual currency
+                // Estimated Amount with dual currency
                 _buildConfirmationTile(
                   Icons.attach_money,
                   'Estimated Amount',
@@ -6828,7 +7262,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // ✅ NEW: approx user currency
+                      // approx user currency
                       if (_showApprox)
                         Padding(
                           padding: const EdgeInsets.only(bottom: 6),

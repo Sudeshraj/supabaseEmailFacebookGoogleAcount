@@ -20,22 +20,26 @@ import 'package:geolocator/geolocator.dart';
 // EDIT BUSINESS SCREEN (class name EditSalonScreen is unchanged)
 // View + Edit modes
 //
+// TIME MODEL
+//  - The business timezone is fixed (it is chosen when the business is
+//    created). Every calculation of the business uses it.
+//  - Business hours are EDITED and SAVED in the BUSINESS timezone (the
+//    business's own wall-clock time), converted to UTC with that timezone.
+//  - The user's own timezone is only a display reference ("Your time").
+//
 // VIEW MODE (default):
-//  - Shows ONLY the data saved in the DB (raw, no local timezone
-//    conversion). Business hours are shown in the business's own timezone.
+//  - Shows ONLY the data saved in the DB. Business hours are shown in the
+//    business's own timezone.
 //  - AppBar: [Edit] [Delete]
 //
 // EDIT MODE:
 //  - Step-by-step wizard (mirrors CreateSalonScreen).
 //  Steps:
-//   0. Basic (name, business type) + Contact Info (+ logo/cover)
-//   1. Location (address + map location)
-//   2. Business Hours + Currency
-//   3. Review & Save
-//  - When editing, business hours are converted to the USER's local
-//    timezone so the picker feels natural. On save they are converted
-//    back to the business's timezone and stored as UTC.
-//  - Currency starts from the DB value; user can change it manually.
+//   0. Basic (name, business type) + Location + Contact Info (+ logo/cover)
+//   1. Business Hours + Currency
+//   2. Review & Save
+//  - Currency starts from the DB value. It can not be changed once the
+//    business has services, offers or bookings (the database enforces it).
 //  - Phone: country code picker + number, saved in E.164 (+94771234567).
 //    An old local number (0771234567) is read using the business country.
 //  - Location: country, province, district, city (+ free text address).
@@ -64,7 +68,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ==================== STEP MANAGEMENT ====================
   int _currentStep = 0;
   int _furthestStep = 0;
-  static const int _totalSteps = 4;
+  static const int _totalSteps = 3;
 
   // Basic info controllers
   final TextEditingController _nameController = TextEditingController();
@@ -99,9 +103,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       TimezoneService.countryDialList;
 
   Map<String, String> get _currentDialEntry => _supportedDialCodes.firstWhere(
-        (c) => c['iso'] == _phoneIso,
-        orElse: () => _supportedDialCodes.first,
-      );
+    (c) => c['iso'] == _phoneIso,
+    orElse: () => _supportedDialCodes.first,
+  );
 
   String get _currentDial => _currentDialEntry['dial']!;
   String get _currentDialFlag => _currentDialEntry['flag']!;
@@ -111,13 +115,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   String _countryIso = _kDefaultPhoneIso;
 
   Map<String, String> get _countryEntry => _supportedDialCodes.firstWhere(
-        (c) => c['iso'] == _countryIso,
-        orElse: () => _supportedDialCodes.first,
-      );
+    (c) => c['iso'] == _countryIso,
+    orElse: () => _supportedDialCodes.first,
+  );
 
   String get _countryName => _countryEntry['name']!;
   String get _countryFlag => _countryEntry['flag']!;
-
 
   // Images
   File? _logoFile;
@@ -137,10 +140,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   String _salonTimezone = '';
   String _openTimeUtc = '';
   String _closeTimeUtc = '';
-  TimeOfDay? _openTimeLocal; // EDIT MODE (user tz)
-  TimeOfDay? _closeTimeLocal; // EDIT MODE (user tz)
-  TimeOfDay? _openTimeSalonLocal; // VIEW MODE (business tz)
-  TimeOfDay? _closeTimeSalonLocal; // VIEW MODE (business tz)
+  // ✅ EDIT MODE: the business's own wall-clock time (BUSINESS timezone)
+  TimeOfDay? _openTimeLocal;
+  TimeOfDay? _closeTimeLocal;
+  // ✅ VIEW MODE: the same hours, business timezone
+  TimeOfDay? _openTimeSalonLocal;
+  TimeOfDay? _closeTimeSalonLocal;
+  // ✅ the same hours on the USER's clock (display reference only)
+  TimeOfDay? _openTimeUser;
+  TimeOfDay? _closeTimeUser;
   bool _isTimezoneLoaded = false;
   bool _isLoading = true;
   bool _isSaving = false;
@@ -151,6 +159,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   String _dbCurrencySymbol = 'Rs.';
   String _salonCurrencyCode = 'LKR';
   String _salonCurrencySymbol = 'Rs.';
+  // true when the business already has services / offers / bookings:
+  // the currency can not be changed any more (the database enforces it too)
+  bool _currencyLocked = false;
 
   static const List<Map<String, String>> _supportedCurrencies = [
     {'code': 'LKR', 'symbol': 'Rs.', 'name': 'Sri Lankan Rupee'},
@@ -196,7 +207,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     return null;
   }
 
-
   final supabase = Supabase.instance.client;
   final picker = ImagePicker();
 
@@ -207,8 +217,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ✅ TIMEZONE DISPLAY HELPERS (with fallback)
   // ============================================
   String _getSalonTimezoneDisplay() {
-    final tz =
-        _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
+    final tz = _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
     return tz;
   }
 
@@ -222,9 +231,38 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final salonTz = _salonTimezone.isEmpty
         ? _kDefaultSalonTimezone
         : _salonTimezone;
-    final userTz =
-        _userTimezone.isEmpty ? _kDefaultSalonTimezone : _userTimezone;
+    final userTz = _userTimezone.isEmpty
+        ? _kDefaultSalonTimezone
+        : _userTimezone;
     return salonTz == userTz;
+  }
+
+  /// ✅ A time of the BUSINESS on the USER's clock (display reference only)
+  TimeOfDay _salonToUser(TimeOfDay t) {
+    if (_isSameTimezone) return t;
+    try {
+      return TimezoneService.convertTimeOfDayBetweenTimezones(
+        t,
+        fromTimezone: _getSalonTimezoneDisplay(),
+        toTimezone: _getUserTimezoneDisplay(),
+      );
+    } catch (e) {
+      debugPrint('❌ Error in _salonToUser: $e');
+      return t;
+    }
+  }
+
+  /// ✅ NEW: open time must be before close time.
+  /// A closing time of 12:00 AM means "open until midnight" (24:00).
+  /// (A business that is open past midnight is not supported.)
+  bool get _hoursValid {
+    final o = _openTimeLocal;
+    final c = _closeTimeLocal;
+    if (o == null || c == null) return false;
+    final openMin = o.hour * 60 + o.minute;
+    final closeRaw = c.hour * 60 + c.minute;
+    final closeMin = closeRaw == 0 ? 1440 : closeRaw;
+    return closeMin > openMin;
   }
 
   /// ✅ Cleaner symbol lookup
@@ -267,9 +305,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         // shared dial code (+1): prefer the business country
         final sameDialIso = _supportedDialCodes.firstWhere(
           (c) => c['iso'] == _countryIso && c['dial'] == bestDial,
-          orElse: () => _supportedDialCodes.firstWhere(
-            (c) => c['dial'] == bestDial,
-          ),
+          orElse: () =>
+              _supportedDialCodes.firstWhere((c) => c['dial'] == bestDial),
         )['iso']!;
         _phoneIso = sameDialIso;
         _phoneController.text = digits.substring(bestDial.length - 1);
@@ -318,7 +355,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       await TimezoneService.initialize();
       final prefs = await SharedPreferences.getInstance();
 
-      _userTimezone = prefs.getString(TimezoneService.kUserTimezone) ??
+      _userTimezone =
+          prefs.getString(TimezoneService.kUserTimezone) ??
           TimezoneService.getCurrentTimezone();
 
       // ✅ Fallback if empty
@@ -358,6 +396,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       await _loadLocationConfig(restoreFromText: true);
       // rating + followers for the profile card
       await _loadViewStats();
+      // can the currency still be changed?
+      await _loadCurrencyLock();
     } catch (e) {
       debugPrint('❌ Error loading data: $e');
       if (mounted) {
@@ -370,6 +410,41 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  /// ✅ NEW: the currency is locked once the business has services, offers
+  /// or bookings (all prices depend on it). The database trigger enforces the
+  /// same rule; this only gives the owner a clear message BEFORE saving.
+  Future<void> _loadCurrencyLock() async {
+    try {
+      final services = await supabase
+          .from('services')
+          .select('id')
+          .eq('salon_id', widget.salonId)
+          .limit(1);
+      final appointments = await supabase
+          .from('appointments')
+          .select('id')
+          .eq('salon_id', widget.salonId)
+          .limit(1);
+      final offers = await supabase
+          .from('offers')
+          .select('id')
+          .eq('salon_id', widget.salonId)
+          .eq('discount_type', 'fixed')
+          .limit(1);
+
+      if (!mounted) return;
+      setState(() {
+        _currencyLocked =
+            (services as List).isNotEmpty ||
+            (appointments as List).isNotEmpty ||
+            (offers as List).isNotEmpty;
+      });
+    } catch (e) {
+      // not critical: the database trigger still protects the currency
+      debugPrint('⚠️ Could not check currency lock: $e');
     }
   }
 
@@ -438,13 +513,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final savedCurrencyCode = response['currency_code']?.toString();
     if (savedCurrencyCode != null && savedCurrencyCode.isNotEmpty) {
       _dbCurrencyCode = savedCurrencyCode;
-      _dbCurrencySymbol = response['currency_symbol']?.toString() ??
+      _dbCurrencySymbol =
+          response['currency_symbol']?.toString() ??
           _getSymbolForCode(_dbCurrencyCode);
     } else {
-      _dbCurrencyCode =
-          TimezoneService.getCurrencyForTimezone(_salonTimezone);
-      _dbCurrencySymbol =
-          TimezoneService.getSymbolForCurrency(_dbCurrencyCode);
+      _dbCurrencyCode = TimezoneService.getCurrencyForTimezone(_salonTimezone);
+      _dbCurrencySymbol = TimezoneService.getSymbolForCurrency(_dbCurrencyCode);
     }
     // Working copy for EDIT mode
     _salonCurrencyCode = _dbCurrencyCode;
@@ -478,12 +552,23 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _salonTimezone,
     );
 
-    // ✅ EDIT MODE: UTC → user timezone
+    // ✅ EDIT MODE: UTC → business timezone (the hours are edited in the
+    // BUSINESS's own time, not in the time of the person who edits)
     _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
+      _openTimeUtc,
+      _salonTimezone,
+    );
+    _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
+      _closeTimeUtc,
+      _salonTimezone,
+    );
+
+    // ✅ display reference: the same hours on the user's clock
+    _openTimeUser = TimezoneService.utcToTimeOfDayWithTimezone(
       _openTimeUtc,
       _userTimezone,
     );
-    _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
+    _closeTimeUser = TimezoneService.utcToTimeOfDayWithTimezone(
       _closeTimeUtc,
       _userTimezone,
     );
@@ -499,14 +584,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       _currentStep = 0;
       _furthestStep = 0;
 
-      // ✅ Re-sync times: UTC → user timezone (fresh)
+      // ✅ Re-sync times: UTC → BUSINESS timezone (fresh)
       _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
         _openTimeUtc,
-        _userTimezone,
+        _salonTimezone,
       );
       _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
         _closeTimeUtc,
-        _userTimezone,
+        _salonTimezone,
       );
 
       // ✅ Preserve DB currency (don't auto-overwrite!)
@@ -555,16 +640,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   bool _canProceedFromStep(int step) {
     switch (step) {
       case 0:
-        // Basic + Contact
         return _isBusinessTypeValid &&
+            _mapUrlError == null &&
             _nameController.text.trim().isNotEmpty &&
+            _cityController.text.trim().isNotEmpty &&
             _isPhoneValid &&
             _isEmailValid;
       case 1:
-        // Location: city is required, the map link must be valid if given
-        return _cityController.text.trim().isNotEmpty && _mapUrlError == null;
-      case 2:
-        return _openTimeLocal != null && _closeTimeLocal != null;
+        // ✅ open time must be before close time
+        return _hoursValid;
       default:
         return true;
     }
@@ -573,11 +657,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   String _stepRequirementMessage(int step) {
     switch (step) {
       case 0:
-        return 'Please select a business type and enter a business name (and a valid phone/email if provided)';
+        return 'Please select a business type, enter a business name and city (and a valid phone/email if provided)';
       case 1:
-        return 'Please enter the city (and a valid map link if provided)';
-      case 2:
-        return 'Please set business hours';
+        return 'Close time must be after open time';
       default:
         return '';
     }
@@ -837,7 +919,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     );
   }
 
-
   // ============================================
   // IMAGE FUNCTIONS
   // ============================================
@@ -1086,25 +1167,34 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     if (mounted) setState(() => _isUploadingLogo = true);
     try {
       if (_logoWebBytes != null) {
-        await supabase.storage.from('salon-images').uploadBinary(
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(
               filePath,
               _logoWebBytes!,
-              fileOptions:
-                  const FileOptions(upsert: true, contentType: 'image/jpeg'),
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
             );
       } else if (_logoFile != null) {
-        await supabase.storage.from('salon-images').upload(
+        await supabase.storage
+            .from('salon-images')
+            .upload(
               filePath,
               _logoFile!,
-              fileOptions:
-                  const FileOptions(upsert: true, contentType: 'image/jpeg'),
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
             );
       } else {
         return _currentLogoUrl;
       }
 
-      final baseUrl =
-          supabase.storage.from('salon-images').getPublicUrl(filePath);
+      final baseUrl = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading logo: $e');
@@ -1134,25 +1224,34 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     if (mounted) setState(() => _isUploadingCover = true);
     try {
       if (_coverWebBytes != null) {
-        await supabase.storage.from('salon-images').uploadBinary(
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(
               filePath,
               _coverWebBytes!,
-              fileOptions:
-                  const FileOptions(upsert: true, contentType: 'image/jpeg'),
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
             );
       } else if (_coverFile != null) {
-        await supabase.storage.from('salon-images').upload(
+        await supabase.storage
+            .from('salon-images')
+            .upload(
               filePath,
               _coverFile!,
-              fileOptions:
-                  const FileOptions(upsert: true, contentType: 'image/jpeg'),
+              fileOptions: const FileOptions(
+                upsert: true,
+                contentType: 'image/jpeg',
+              ),
             );
       } else {
         return _currentCoverUrl;
       }
 
-      final baseUrl =
-          supabase.storage.from('salon-images').getPublicUrl(filePath);
+      final baseUrl = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading cover: $e');
@@ -1167,7 +1266,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   // ============================================
 
   Future<void> _onSavePressed() async {
-    for (int step = 0; step < _totalSteps; step++) {
+    for (int step = 0; step <= 2; step++) {
       if (!_canProceedFromStep(step)) {
         _goToStep(step);
         _showSnackBar(_stepRequirementMessage(step), Colors.orange);
@@ -1183,14 +1282,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final confirmed = await showCustomAlert(
       context: context,
       title: "Save Changes?",
-      message: 'Do you want to save changes to "${_nameController.text.trim()}"?\n\n'
+      message:
+          'Do you want to save changes to "${_nameController.text.trim()}"?\n\n'
           '${_selectedBusinessTypeName != null ? 'Type: $_selectedBusinessTypeName\n' : ''}'
           'Location: ${_titleCase(_cityController.text)}, $_countryName\n'
           '${phoneE164 != null ? 'Phone: $phoneE164\n' : ''}'
           'Business Timezone: $_salonTimezone\n'
-          'Currency: $_salonCurrencyCode ($_salonCurrencySymbol)\n\n'
-          'Business hours are being edited in your local timezone ($_userTimezone) '
-          'and will be saved converted to the business\'s timezone ($_salonTimezone).',
+          'Business hours: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)}\n'
+          'Currency: $_salonCurrencyCode ($_salonCurrencySymbol)',
       isError: false,
       buttonText: "Save",
       buttonIcon: Icons.save,
@@ -1239,24 +1338,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         imageUploadFailed = true;
       }
 
-      // ✅ Direct conversion chain (user tz → business tz → UTC)
-      final openTimeSalon = TimezoneService.convertTimeOfDayBetweenTimezones(
-        _openTimeLocal!,
-        fromTimezone: _userTimezone,
-        toTimezone: _salonTimezone,
-      );
-      final closeTimeSalon = TimezoneService.convertTimeOfDayBetweenTimezones(
-        _closeTimeLocal!,
-        fromTimezone: _userTimezone,
-        toTimezone: _salonTimezone,
-      );
-
+      // ✅ The hours are the BUSINESS's own wall-clock time: convert them to
+      // UTC with the business timezone (no user-timezone step in between).
       final openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
-        openTimeSalon,
+        _openTimeLocal!,
         _salonTimezone,
       );
       final closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
-        closeTimeSalon,
+        _closeTimeLocal!,
         _salonTimezone,
       );
 
@@ -1287,16 +1376,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         'cover_url': coverUrl,
         'open_time': openTimeUtc,
         'close_time': closeTimeUtc,
+        // unchanged: the database refuses a timezone change once the
+        // business has schedules or bookings
         'timezone': _salonTimezone,
         'currency_code': _salonCurrencyCode,
         'currency_symbol': _salonCurrencySymbol,
-        'updated_at': DateTime.now().toIso8601String(),
+        // (updated_at is set by the database trigger)
       };
 
-      await supabase
-          .from('salons')
-          .update(updateData)
-          .eq('id', widget.salonId);
+      await supabase.from('salons').update(updateData).eq('id', widget.salonId);
 
       if (!mounted) return;
 
@@ -1305,13 +1393,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           ? '\n\n⚠️ Note: Some images failed to upload. You can retry from Edit mode.'
           : '';
 
+      final userTimeLine = _isSameTimezone
+          ? ''
+          : '\n🕐 Your time: ${_salonToUser(_openTimeLocal!).format(context)} - ${_salonToUser(_closeTimeLocal!).format(context)} ($_userTimezone)';
+
       await showCustomAlert(
         context: context,
         title: "✅ Business Updated!",
         message:
             "${_nameController.text.trim()} has been updated successfully.\n\n"
-            "🕐 Your local time: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)} ($_userTimezone)\n"
-            "🕐 Business time: ${openTimeSalon.format(context)} - ${closeTimeSalon.format(context)} ($_salonTimezone)$imageWarning",
+            "🕐 Business time: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)} ($_salonTimezone)"
+            "$userTimeLine$imageWarning",
         isError: false,
       );
 
@@ -1327,7 +1419,25 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       await _loadAllData();
     } catch (e) {
       debugPrint('❌ Error updating business: $e');
-      if (mounted) _showSnackBar('Error: $e', Colors.red);
+      if (!mounted) return;
+
+      String msg = 'Error: $e';
+      if (e is PostgrestException) {
+        if (e.message.contains('Currency can not be changed')) {
+          // put the screen back to what the database has
+          setState(() {
+            _salonCurrencyCode = _dbCurrencyCode;
+            _salonCurrencySymbol = _dbCurrencySymbol;
+            _currencyLocked = true;
+          });
+          msg =
+              'The currency can not be changed because this business already has services, offers or bookings. It was reset.';
+        } else if (e.message.contains('Timezone can not be changed')) {
+          msg =
+              'The business timezone can not be changed after schedules or bookings exist.';
+        }
+      }
+      _showSnackBar(msg, Colors.red);
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -1347,8 +1457,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded,
-                color: Colors.red, size: 28),
+            const Icon(
+              Icons.warning_amber_rounded,
+              color: Colors.red,
+              size: 28,
+            ),
             const SizedBox(width: 12),
             Text(
               'Delete Business',
@@ -1426,8 +1539,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
               foregroundColor: Colors.white,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
             ),
             child: const Text(
               'Delete Permanently',
@@ -1600,8 +1712,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
             ),
           ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 10,
+          ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: const BorderSide(color: AppTheme.primary, width: 2),
@@ -1642,8 +1756,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final close = _closeTimeSalonLocal;
     if (open == null || close == null) return false;
     try {
-      final tz =
-          _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+      final tz = _salonTimezone.isNotEmpty
+          ? _salonTimezone
+          : _kDefaultSalonTimezone;
       final now = TimezoneService.getNowInTimezone(tz);
       final nowMinutes = now.hour * 60 + now.minute;
       final openMinutes = open.hour * 60 + open.minute;
@@ -1818,8 +1933,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         width: double.infinity,
         height: double.infinity,
         fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) =>
-            _buildViewDefaultCover(),
+        errorBuilder: (context, error, stackTrace) => _buildViewDefaultCover(),
       );
     }
     return _buildViewDefaultCover();
@@ -2005,9 +2119,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final locationLine = _composeFullAddress();
     final openText = _openTimeSalonLocal?.format(context) ?? '—';
     final closeText = _closeTimeSalonLocal?.format(context) ?? '—';
-    final showUserTime = !_isSameTimezone &&
-        _openTimeLocal != null &&
-        _closeTimeLocal != null;
+    // ✅ the hours on the USER's clock (reference only)
+    final showUserTime =
+        !_isSameTimezone && _openTimeUser != null && _closeTimeUser != null;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2037,8 +2151,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             if (_selectedBusinessTypeName != null) ...[
               const SizedBox(height: 6),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 3,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
@@ -2091,8 +2207,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.people,
-                          size: 16, color: context.secondaryTextColor),
+                      Icon(
+                        Icons.people,
+                        size: 16,
+                        color: context.secondaryTextColor,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         '$_followersCount followers',
@@ -2111,8 +2230,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 children: [
                   Padding(
                     padding: const EdgeInsets.only(top: 2),
-                    child: Icon(Icons.location_on,
-                        size: 16, color: context.secondaryTextColor),
+                    child: Icon(
+                      Icons.location_on,
+                      size: 16,
+                      color: context.secondaryTextColor,
+                    ),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -2135,8 +2257,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.access_time,
-                        size: 16, color: context.secondaryTextColor),
+                    Icon(
+                      Icons.access_time,
+                      size: 16,
+                      color: context.secondaryTextColor,
+                    ),
                     const SizedBox(width: 6),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2149,7 +2274,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                         ),
                         if (showUserTime)
                           Text(
-                            'Your time: ${_openTimeLocal!.format(context)} - ${_closeTimeLocal!.format(context)}',
+                            'Your time: ${_openTimeUser!.format(context)} - ${_closeTimeUser!.format(context)}',
                             style: context.bodySmall.copyWith(
                               color: _isDark
                                   ? Colors.blue[300]
@@ -2162,8 +2287,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   ],
                 ),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: isOpen
                         ? Colors.green.withValues(alpha: 0.1)
@@ -2432,8 +2559,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       ),
       trailing: onTap == null
           ? null
-          : Icon(Icons.chevron_right,
-              size: 20, color: context.secondaryTextColor),
+          : Icon(
+              Icons.chevron_right,
+              size: 20,
+              color: context.secondaryTextColor,
+            ),
       onTap: onTap,
     );
   }
@@ -2559,34 +2689,36 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            ...rows.map((r) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(
-                        width: 120,
-                        child: Text(
-                          r.label,
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: isDark ? Colors.white60 : Colors.grey[600],
-                          ),
+            ...rows.map(
+              (r) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 120,
+                      child: Text(
+                        r.label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isDark ? Colors.white60 : Colors.grey[600],
                         ),
                       ),
-                      Expanded(
-                        child: Text(
-                          r.value,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
-                            color: isDark ? Colors.white : Colors.black87,
-                          ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        r.value,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white : Colors.black87,
                         ),
                       ),
-                    ],
-                  ),
-                )),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -2601,7 +2733,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final isDesktop = _isWeb;
     final isDark = _isDark;
 
-    final hasImage = _coverFile != null ||
+    final hasImage =
+        _coverFile != null ||
         _coverWebBytes != null ||
         _currentCoverUrl != null;
 
@@ -2640,8 +2773,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           Text(
                             'Tap to add cover photo',
                             style: TextStyle(
-                              color:
-                                  isDark ? Colors.white60 : Colors.grey[600],
+                              color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                           ),
                         ],
@@ -2657,8 +2789,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               child: GestureDetector(
                 onTap: _showCoverSourceDialog,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.6),
                     borderRadius: BorderRadius.circular(20),
@@ -2694,9 +2828,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     final isDesktop = _isWeb;
     final isDark = _isDark;
 
-    final hasImage = _logoFile != null ||
-        _logoWebBytes != null ||
-        _currentLogoUrl != null;
+    final hasImage =
+        _logoFile != null || _logoWebBytes != null || _currentLogoUrl != null;
 
     return Container(
       margin: const EdgeInsets.only(left: 16, top: 0, bottom: 16),
@@ -2811,12 +2944,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
             const Divider(),
             ListTile(
-              leading:
-                  const Icon(Icons.photo_library, color: AppTheme.primary),
+              leading: const Icon(Icons.photo_library, color: AppTheme.primary),
               title: Text(
                 'Choose from Gallery',
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -2827,8 +2958,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
               title: Text(
                 'Take a Photo',
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -2842,8 +2972,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Logo',
-                  style:
-                      TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                  style: TextStyle(
+                    color: isDark ? Colors.red[300] : Colors.red,
+                  ),
                 ),
                 onTap: () {
                   Navigator.pop(sheetContext);
@@ -2883,12 +3014,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
             const Divider(),
             ListTile(
-              leading:
-                  const Icon(Icons.photo_library, color: AppTheme.primary),
+              leading: const Icon(Icons.photo_library, color: AppTheme.primary),
               title: Text(
                 'Choose from Gallery',
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -2899,8 +3028,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               leading: const Icon(Icons.camera_alt, color: AppTheme.primary),
               title: Text(
                 'Take a Photo',
-                style:
-                    TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -2914,8 +3042,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 leading: const Icon(Icons.delete, color: Colors.red),
                 title: Text(
                   'Remove Cover',
-                  style:
-                      TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                  style: TextStyle(
+                    color: isDark ? Colors.red[300] : Colors.red,
+                  ),
                 ),
                 onTap: () {
                   Navigator.pop(sheetContext);
@@ -2993,8 +3122,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               Expanded(
                 child: TextFormField(
                   controller: _phoneController,
-                  style:
-                      TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                   keyboardType: TextInputType.phone,
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()]')),
@@ -3030,8 +3160,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide:
-                          const BorderSide(color: AppTheme.primary, width: 2),
+                      borderSide: const BorderSide(
+                        color: AppTheme.primary,
+                        width: 2,
+                      ),
                     ),
                     errorBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -3086,9 +3218,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     return cleaned
         .split(' ')
         .map(
-          (w) => w.isEmpty
-              ? w
-              : w[0].toUpperCase() + w.substring(1).toLowerCase(),
+          (w) =>
+              w.isEmpty ? w : w[0].toUpperCase() + w.substring(1).toLowerCase(),
         )
         .join(' ');
   }
@@ -3106,7 +3237,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     return parts.join(', ');
   }
 
-  String? _nullIfEmpty(String value) => value.trim().isEmpty ? null : value.trim();
+  String? _nullIfEmpty(String value) =>
+      value.trim().isEmpty ? null : value.trim();
 
   /// Country selector (looks like a text field, opens the country picker)
   Widget _buildCountryField() {
@@ -3176,7 +3308,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  'Auto-detected from business timezone — tap to change',
+                  // ✅ the business timezone is fixed when the business is created
+                  'Business timezone stays ${_getSalonTimezoneDisplay()} when you change the country',
                   style: TextStyle(
                     fontSize: 11,
                     color: isDark ? Colors.teal[300] : Colors.teal[700],
@@ -3323,7 +3456,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             selected: selected,
             showCheckmark: false,
             selectedColor: AppTheme.primary,
-            backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+            backgroundColor: isDark
+                ? const Color(0xFF2A2A2A)
+                : Colors.grey[100],
             labelStyle: TextStyle(
               fontSize: 13,
               fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
@@ -3356,7 +3491,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       ),
     );
   }
-
 
   // ============================================================
   // ✅ LOCATION HIERARCHY  (country → province → district → city)
@@ -3474,11 +3608,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         if (provId != null) {
           final hasDistrictLevel = labels.containsKey(2);
           if (hasDistrictLevel) {
-            dists = await _fetchLocations(
-              iso: iso,
-              level: 2,
-              parentId: provId,
-            );
+            dists = await _fetchLocations(iso: iso, level: 2, parentId: provId);
             distId = _findIdByName(dists, _districtController.text);
           }
           final cityParent = hasDistrictLevel ? distId : provId;
@@ -3580,11 +3710,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
     });
 
     try {
-      final c = await _fetchLocations(
-        iso: _countryIso,
-        level: 3,
-        parentId: id,
-      );
+      final c = await _fetchLocations(iso: _countryIso, level: 3, parentId: id);
       if (!mounted || _districtId != id) return;
       setState(() => _cityOptions = c);
     } catch (e) {
@@ -3621,8 +3747,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         builder: (ctx, setSheetState) {
           final q = query.trim().toLowerCase();
           final list = options
-              .where((o) =>
-                  q.isEmpty || (o['name'] as String).toLowerCase().contains(q))
+              .where(
+                (o) =>
+                    q.isEmpty ||
+                    (o['name'] as String).toLowerCase().contains(q),
+              )
               .toList();
           final showOther = onOther != null && q.isEmpty;
 
@@ -3864,11 +3993,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               : 'Select ${dLabel.toLowerCase()}',
           onTap: dMode == 'dropdown'
               ? () => _showLocationPicker(
-                    title: 'Select $dLabel',
-                    options: _districtOptions,
-                    currentName: _districtController.text,
-                    onSelected: _selectDistrict,
-                  )
+                  title: 'Select $dLabel',
+                  options: _districtOptions,
+                  currentName: _districtController.text,
+                  onSelected: _selectDistrict,
+                )
               : null,
         ),
       );
@@ -3898,15 +4027,15 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               : 'Select ${cLabel.toLowerCase()}',
           onTap: cMode == 'dropdown'
               ? () => _showLocationPicker(
-                    title: 'Select $cLabel',
-                    options: _cityOptions,
-                    currentName: _cityController.text,
-                    onSelected: _selectCity,
-                    onOther: () => setState(() {
-                      _cityManual = true;
-                      _cityController.clear();
-                    }),
-                  )
+                  title: 'Select $cLabel',
+                  options: _cityOptions,
+                  currentName: _cityController.text,
+                  onSelected: _selectCity,
+                  onOther: () => setState(() {
+                    _cityManual = true;
+                    _cityController.clear();
+                  }),
+                )
               : null,
         ),
       );
@@ -3964,7 +4093,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   bool get _hasMapLocation =>
       MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ||
-      (_mapUrlError == null && MapLinkUtils.check(_mapUrlController.text).uri != null);
+      (_mapUrlError == null &&
+          MapLinkUtils.check(_mapUrlController.text).uri != null);
 
   /// normalised link for the DB (null when empty / invalid)
   String? _mapUrlForSave() {
@@ -3974,10 +4104,14 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   /// coordinates only when both are valid
   double? get _latitudeForSave =>
-      MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ? _latitude : null;
+      MapLinkUtils.hasValidCoordinates(_latitude, _longitude)
+      ? _latitude
+      : null;
 
   double? get _longitudeForSave =>
-      MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ? _longitude : null;
+      MapLinkUtils.hasValidCoordinates(_latitude, _longitude)
+      ? _longitude
+      : null;
 
   String _mapLocationSummary() {
     if (MapLinkUtils.hasValidCoordinates(_latitude, _longitude)) {
@@ -4100,8 +4234,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   Widget _buildMapLocationSection() {
     final isDark = _isDark;
     final borderColor = isDark ? Colors.grey[700]! : Colors.grey[300]!;
-    final hasCoords =
-        MapLinkUtils.hasValidCoordinates(_latitude, _longitude);
+    final hasCoords = MapLinkUtils.hasValidCoordinates(_latitude, _longitude);
     final linkCheck = MapLinkUtils.check(_mapUrlController.text);
     final hasLink = linkCheck.ok && linkCheck.uri != null;
 
@@ -4189,8 +4322,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               decoration: InputDecoration(
                 labelText: 'Google Maps / WhatsApp location link',
                 hintText: 'https://maps.app.goo.gl/...',
-                hintStyle:
-                    TextStyle(color: isDark ? Colors.white70 : Colors.grey),
+                hintStyle: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
                 prefixIcon: Icon(
                   Icons.link,
                   color: isDark ? Colors.white70 : Colors.grey,
@@ -4205,8 +4339,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 counterText: '',
                 errorText: _mapUrlError,
                 errorMaxLines: 3,
-                errorStyle:
-                    TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                errorStyle: TextStyle(
+                  color: isDark ? Colors.red[300] : Colors.red,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: borderColor),
@@ -4217,8 +4352,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: AppTheme.primary, width: 2),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
                 ),
                 errorBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -4228,8 +4365,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: Colors.red, width: 2),
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                 filled: true,
               ),
@@ -4244,16 +4383,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 decoration: BoxDecoration(
                   color: Colors.green.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border:
-                      Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: Colors.green.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.check_circle,
-                            size: 16, color: Colors.green),
+                        const Icon(
+                          Icons.check_circle,
+                          size: 16,
+                          color: Colors.green,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -4297,8 +4440,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                           icon: const Icon(Icons.delete_outline, size: 16),
                           label: const Text('Remove'),
                           style: TextButton.styleFrom(
-                            foregroundColor:
-                                isDark ? Colors.red[300] : Colors.red,
+                            foregroundColor: isDark
+                                ? Colors.red[300]
+                                : Colors.red,
                           ),
                         ),
                       ],
@@ -4342,7 +4486,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Widget _buildBusinessHoursCard() {
     final isDark = _isDark;
-    final showUserTime = !_isSameTimezone;
+    final showUserTime =
+        !_isSameTimezone && _openTimeLocal != null && _closeTimeLocal != null;
 
     return Card(
       color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
@@ -4367,8 +4512,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               runSpacing: 8,
               children: [
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
@@ -4376,8 +4523,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.public,
-                          size: 14, color: AppTheme.primary),
+                      const Icon(
+                        Icons.public,
+                        size: 14,
+                        color: AppTheme.primary,
+                      ),
                       const SizedBox(width: 6),
                       Text(
                         'Business: ${_getSalonTimezoneDisplay()}',
@@ -4390,10 +4540,12 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     ],
                   ),
                 ),
-                if (showUserTime)
+                if (!_isSameTimezone)
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
                     decoration: BoxDecoration(
                       color: Colors.teal.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(20),
@@ -4401,8 +4553,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.person_pin_circle,
-                            size: 14, color: Colors.teal),
+                        const Icon(
+                          Icons.person_pin_circle,
+                          size: 14,
+                          color: Colors.teal,
+                        ),
                         const SizedBox(width: 6),
                         Text(
                           'You: ${_getUserTimezoneDisplay()}',
@@ -4419,8 +4574,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Times below are shown in YOUR local timezone. They will be '
-              'converted to the business\'s timezone on save.',
+              'Times below are the BUSINESS\'s own time '
+              '(${_getSalonTimezoneDisplay()}).',
               style: TextStyle(
                 fontSize: 11,
                 color: isDark ? Colors.white60 : Colors.grey,
@@ -4452,6 +4607,27 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 ),
               ],
             ),
+
+            // ✅ NEW: open must be before close
+            if (!_hoursValid) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.error_outline, size: 14, color: Colors.red),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Close time must be after open time',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.red[300] : Colors.red,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(8),
@@ -4459,20 +4635,54 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 color: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.info_outline,
-                      size: 14, color: isDark ? Colors.white70 : Colors.grey),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Your local time: ${_openTimeLocal?.format(context) ?? '—'} - ${_closeTimeLocal?.format(context) ?? '—'} ($_userTimezone)',
-                      style: TextStyle(
-                        fontSize: 10,
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 14,
                         color: isDark ? Colors.white70 : Colors.grey,
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Business hours: ${_openTimeLocal?.format(context) ?? '—'} - ${_closeTimeLocal?.format(context) ?? '—'} ($_salonTimezone)',
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isDark ? Colors.white70 : Colors.grey,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
+                  // ✅ the same hours on the user's clock (reference only)
+                  if (showUserTime) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.phone_android,
+                          size: 12,
+                          color: isDark ? Colors.blue[300] : Colors.blue[700],
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Your time: ${_salonToUser(_openTimeLocal!).format(context)} - ${_salonToUser(_closeTimeLocal!).format(context)} ($_userTimezone)',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontStyle: FontStyle.italic,
+                              color: isDark
+                                  ? Colors.blue[300]
+                                  : Colors.blue[700],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -4520,38 +4730,47 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   ),
                 ),
                 const Spacer(),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.teal.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.auto_awesome,
+                if (_currencyLocked)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.lock,
                           size: 10,
-                          color:
-                              isDark ? Colors.teal[300] : Colors.teal[700]),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Auto',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color:
-                              isDark ? Colors.teal[300] : Colors.teal[700],
+                          color: isDark
+                              ? Colors.orange[300]
+                              : Colors.orange[800],
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 4),
+                        Text(
+                          'Locked',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? Colors.orange[300]
+                                : Colors.orange[800],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
               ],
             ),
             const SizedBox(height: 8),
             Text(
-              'Auto-suggested from your timezone ($_userTimezone). You can change it.',
+              _currencyLocked
+                  ? 'This business already has services, offers or bookings, so the currency can not be changed.'
+                  : 'All prices of this business use this currency. It can not be changed once services or bookings exist.',
               style: TextStyle(
                 fontSize: 12,
                 color: isDark ? Colors.white60 : Colors.grey,
@@ -4559,6 +4778,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
+              key: ValueKey('cur_$_salonCurrencyCode'),
               initialValue: _salonCurrencyCode,
               isExpanded: true,
               style: TextStyle(
@@ -4629,17 +4849,20 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                   ),
                 );
               }).toList(),
-              onChanged: (value) {
-                if (value != null) {
-                  final selected = _supportedCurrencies.firstWhere(
-                    (c) => c['code'] == value,
-                  );
-                  setState(() {
-                    _salonCurrencyCode = value;
-                    _salonCurrencySymbol = selected['symbol']!;
-                  });
-                }
-              },
+              // ✅ null = disabled while the currency is locked
+              onChanged: _currencyLocked
+                  ? null
+                  : (value) {
+                      if (value != null) {
+                        final selected = _supportedCurrencies.firstWhere(
+                          (c) => c['code'] == value,
+                        );
+                        setState(() {
+                          _salonCurrencyCode = value;
+                          _salonCurrencySymbol = selected['symbol']!;
+                        });
+                      }
+                    },
             ),
             const SizedBox(height: 12),
             Container(
@@ -4694,8 +4917,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border:
-            Border.all(color: isDark ? Colors.grey[700]! : Colors.grey[200]!),
+        border: Border.all(
+          color: isDark ? Colors.grey[700]! : Colors.grey[200]!,
+        ),
       ),
       child: Row(
         children: [
@@ -4712,17 +4936,21 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: TextStyle(
-                        fontSize: 12,
-                        color: isDark ? Colors.white60 : Colors.grey[600])),
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : Colors.grey[600],
+                  ),
+                ),
                 const SizedBox(height: 2),
                 Text(
                   value,
                   style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
               ],
             ),
@@ -4763,13 +4991,13 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           value: _composeFullAddress().isEmpty
               ? 'Not set'
               : _composeFullAddress(),
-          onEdit: () => _goToStep(1),
+          onEdit: () => _goToStep(0),
         ),
         _buildReviewTile(
           icon: Icons.pin_drop,
           title: 'Map Location',
           value: _mapLocationSummary(),
-          onEdit: () => _goToStep(1),
+          onEdit: () => _goToStep(0),
         ),
         _buildReviewTile(
           icon: Icons.phone,
@@ -4781,18 +5009,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
           icon: Icons.access_time,
           title: 'Business Hours & Currency',
           value:
-              '${_openTimeLocal?.format(context) ?? '—'} - ${_closeTimeLocal?.format(context) ?? '—'} ($_userTimezone) · $_salonCurrencyCode ($_salonCurrencySymbol)',
-          onEdit: () => _goToStep(2),
+              '${_openTimeLocal?.format(context) ?? '—'} - ${_closeTimeLocal?.format(context) ?? '—'} ($_salonTimezone) · $_salonCurrencyCode ($_salonCurrencySymbol)',
+          onEdit: () => _goToStep(1),
         ),
         _buildReviewTile(
           icon: Icons.public,
           title: 'Business Timezone',
           value: _getSalonTimezoneDisplay(),
-          onEdit: () => _goToStep(2),
+          onEdit: () => _goToStep(1),
         ),
         const SizedBox(height: 8),
         _buildInfoBanner(
-          'Tapping "Save Changes" will update the business with the details above. Business hours will be converted from your local timezone ($_userTimezone) to the business\'s timezone ($_salonTimezone).',
+          'Tapping "Save Changes" will update the business with the details above. Business hours are saved in the business\'s own timezone ($_salonTimezone).',
           Icons.info_outline,
           AppTheme.primary,
         ),
@@ -4815,14 +5043,17 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         _buildCoverSection(),
         Transform.translate(
           offset: const Offset(16, -40),
-          child:
-              Align(alignment: Alignment.topLeft, child: _buildLogoSeparate()),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: _buildLogoSeparate(),
+          ),
         ),
         const SizedBox(height: 16),
         Card(
           color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -4831,9 +5062,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Text(
                   'Basic Information',
                   style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _isDark ? Colors.white : Colors.black87),
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 _buildTextField(
@@ -4861,62 +5093,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         const SizedBox(height: 16),
         Card(
           color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Contact Information',
-                  style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _isDark ? Colors.white : Colors.black87),
-                ),
-                const SizedBox(height: 16),
-                // ✅ Country code picker + phone number
-                _buildPhoneField(),
-                const SizedBox(height: 12),
-                _buildTextField(
-                  controller: _emailController,
-                  label: 'Email Address',
-                  hint: 'Enter email address (e.g., business@example.com)',
-                  icon: Icons.email,
-                  keyboardType: TextInputType.emailAddress,
-                  isEmail: true,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Phone and email are optional but recommended',
-                  style: TextStyle(
-                      fontSize: 11,
-                      color: _isDark ? Colors.white70 : Colors.grey[500]),
-                ),
-              ],
-            ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-        ),
-      ],
-    );
-  }
-
-  // ============================================
-  // STEP 1: LOCATION  (address + map location)
-  // ============================================
-  Widget _buildStepLocation() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _buildStepHeader(
-          'Location',
-          'Where is your business? Customers use this to find you.',
-        ),
-        Card(
-          color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -4925,9 +5104,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Text(
                   'Location',
                   style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: _isDark ? Colors.white : Colors.black87),
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 _buildCountryField(),
@@ -4947,8 +5127,9 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
                 Text(
                   'Country and city help customers find your business with filters',
                   style: TextStyle(
-                      fontSize: 11,
-                      color: _isDark ? Colors.white70 : Colors.grey[500]),
+                    fontSize: 11,
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
+                  ),
                 ),
               ],
             ),
@@ -4957,6 +5138,49 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         const SizedBox(height: 16),
         // ✅ Map location (current location or a pasted map link)
         _buildMapLocationSection(),
+        const SizedBox(height: 16),
+        Card(
+          color: _isDark ? const Color(0xFF1E1E1E) : Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Contact Information',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: _isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // ✅ Country code picker + phone number
+                _buildPhoneField(),
+                const SizedBox(height: 12),
+                _buildTextField(
+                  controller: _emailController,
+                  label: 'Email Address',
+                  hint: 'Enter email address (e.g., business@example.com)',
+                  icon: Icons.email,
+                  keyboardType: TextInputType.emailAddress,
+                  isEmail: true,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Phone and email are optional but recommended',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: _isDark ? Colors.white70 : Colors.grey[500],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
@@ -4967,7 +5191,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       children: [
         _buildStepHeader(
           'Business Hours & Currency',
-          'Edit your working hours. Times are shown in YOUR local timezone; they will be converted to the business\'s timezone on save.',
+          'Edit your working hours. Times are the business\'s own time ($_salonTimezone).',
         ),
         _buildBusinessHoursCard(),
         const SizedBox(height: 16),
@@ -4981,10 +5205,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       case 0:
         return _buildStep0();
       case 1:
-        return _buildStepLocation();
-      case 2:
         return _buildStep1();
-      case 3:
+      case 2:
         return _buildReviewStep();
       default:
         return const SizedBox();
@@ -4997,7 +5219,6 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   static const List<Map<String, dynamic>> _stepMeta = [
     {'label': 'Basic', 'icon': Icons.store},
-    {'label': 'Location', 'icon': Icons.location_on},
     {'label': 'Hours', 'icon': Icons.access_time},
     {'label': 'Review', 'icon': Icons.check_circle},
   ];
@@ -5011,12 +5232,18 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
         scrollDirection: Axis.horizontal,
         physics: const BouncingScrollPhysics(),
         padding: EdgeInsets.symmetric(
-            horizontal: isMobile ? 12 : 20, vertical: isMobile ? 12 : 16),
+          horizontal: isMobile ? 12 : 20,
+          vertical: isMobile ? 12 : 16,
+        ),
         child: Row(
           children: [
             for (int i = 0; i < _stepMeta.length; i++) ...[
-              _buildStepCircle(i, _stepMeta[i]['label'] as String,
-                  _stepMeta[i]['icon'] as IconData, isMobile),
+              _buildStepCircle(
+                i,
+                _stepMeta[i]['label'] as String,
+                _stepMeta[i]['icon'] as IconData,
+                isMobile,
+              ),
               if (i != _stepMeta.length - 1)
                 Container(
                   width: isMobile ? 18 : 30,
@@ -5033,7 +5260,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
   }
 
   Widget _buildStepCircle(
-      int step, String label, IconData icon, bool isMobile) {
+    int step,
+    String label,
+    IconData icon,
+    bool isMobile,
+  ) {
     final isActive = _currentStep == step;
     final isCompleted = _furthestStep > step;
     final isDark = _isDark;
@@ -5054,8 +5285,8 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               color: isCompleted
                   ? AppTheme.primary
                   : (isActive
-                      ? AppTheme.primary.withValues(alpha: 0.1)
-                      : (isDark ? Colors.grey[800] : Colors.grey[200])),
+                        ? AppTheme.primary.withValues(alpha: 0.1)
+                        : (isDark ? Colors.grey[800] : Colors.grey[200])),
               border: Border.all(
                 color: isActive
                     ? AppTheme.primary
@@ -5066,9 +5297,11 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             child: Center(
               child: isCompleted
                   ? Icon(Icons.check, size: iconSize, color: Colors.white)
-                  : Icon(icon,
+                  : Icon(
+                      icon,
                       size: iconSize,
-                      color: isActive ? AppTheme.primary : Colors.grey[500]),
+                      color: isActive ? AppTheme.primary : Colors.grey[500],
+                    ),
             ),
           ),
           if (!isMobile) ...[
@@ -5095,7 +5328,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
 
   Widget _buildStepActions() {
     final isDark = _isDark;
-    final isLastStep = _currentStep == _totalSteps - 1;
+    final isLastStep = _currentStep == 2;
     final canProceed = _canProceedFromStep(_currentStep);
     final busy = _isSaving || _isUploadingLogo || _isUploadingCover;
 
@@ -5107,8 +5340,7 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
             if (_currentStep > 0) ...[
               Expanded(
                 child: OutlinedButton(
-                  onPressed:
-                      busy ? null : () => setState(() => _currentStep--),
+                  onPressed: busy ? null : () => setState(() => _currentStep--),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     side: BorderSide(
@@ -5262,9 +5494,10 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 SizedBox(
-                    width: 40,
-                    height: 40,
-                    child: CircularProgressIndicator()),
+                  width: 40,
+                  height: 40,
+                  child: CircularProgressIndicator(),
+                ),
                 SizedBox(height: 16),
                 Text('Loading business data...'),
               ],
@@ -5278,47 +5511,46 @@ class _EditSalonScreenState extends State<EditSalonScreen> {
       backgroundColor: isDark ? const Color(0xFF121212) : Colors.white,
       appBar: _isEditMode
           ? AppBar(
-        title: Text(
-          'Edit Business',
-          style:
-              const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: AppTheme.primary,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: isWeb,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-          tooltip: 'Back',
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.close, color: Colors.white),
-            tooltip: 'Cancel',
-            onPressed: _isSaving ? null : _cancelEditMode,
-          ),
-          IconButton(
-            icon: const Icon(Icons.save, color: Colors.white),
-            tooltip: 'Save',
-            onPressed: _isSaving ? null : _onSavePressed,
-          ),
-        ],
+              title: Text(
+                'Edit Business',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              centerTitle: isWeb,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                onPressed: () => Navigator.pop(context),
+                tooltip: 'Back',
+              ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  tooltip: 'Cancel',
+                  onPressed: _isSaving ? null : _cancelEditMode,
+                ),
+                IconButton(
+                  icon: const Icon(Icons.save, color: Colors.white),
+                  tooltip: 'Save',
+                  onPressed: _isSaving ? null : _onSavePressed,
+                ),
+              ],
             )
           : null,
       body: SafeArea(
         top: _isEditMode,
         child: Container(
           color: isDark ? const Color(0xFF121212) : Colors.grey[50],
-          // ✅ FIX: the scroll view now spans the FULL screen width, so the
-          // scrollbar sits at the far-right edge of the screen. The max-width
-          // centering (1000px on web) is applied INSIDE the scroll view, so
-          // the content layout looks exactly the same as before.
-          child: SingleChildScrollView(
-            child: Center(
-              child: ConstrainedBox(
-                constraints:
-                    BoxConstraints(maxWidth: isWeb ? 1000 : double.infinity),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: isWeb ? 1000 : double.infinity,
+              ),
+              child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [

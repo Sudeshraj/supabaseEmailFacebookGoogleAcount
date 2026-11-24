@@ -22,8 +22,16 @@ import 'package:geolocator/geolocator.dart';
 // Steps:
 //  0. Basic + Contact Info (+ logo/cover)
 //  1. Location (address + map location)
-//  2. Business Hours + Currency
+//  2. Business Hours + Currency (+ business timezone)
 //  3. Review & Create
+//
+// TIMEZONE MODEL
+//  - The business timezone belongs to the BUSINESS, not to the phone of the
+//    person who creates it. It follows the selected COUNTRY (countries with
+//    several timezones get a timezone selector on the hours step).
+//  - The opening hours are typed as the BUSINESS's own wall-clock time and
+//    saved as UTC converted with the business timezone (reference date).
+//  - The user's own timezone is only a display reference ("Your time: ...").
 //
 // PHONE NUMBER:
 //  - Country (dial) code is auto-detected from the salon timezone
@@ -80,9 +88,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       TimezoneService.countryDialList;
 
   Map<String, String> get _currentDialEntry => _supportedDialCodes.firstWhere(
-        (c) => c['iso'] == _phoneIso,
-        orElse: () => _supportedDialCodes.first,
-      );
+    (c) => c['iso'] == _phoneIso,
+    orElse: () => _supportedDialCodes.first,
+  );
 
   String get _currentDial => _currentDialEntry['dial']!;
   String get _currentDialFlag => _currentDialEntry['flag']!;
@@ -92,9 +100,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   String _countryIso = _kDefaultPhoneIso;
 
   Map<String, String> get _countryEntry => _supportedDialCodes.firstWhere(
-        (c) => c['iso'] == _countryIso,
-        orElse: () => _supportedDialCodes.first,
-      );
+    (c) => c['iso'] == _countryIso,
+    orElse: () => _supportedDialCodes.first,
+  );
 
   String get _countryName => _countryEntry['name']!;
   String get _countryFlag => _countryEntry['flag']!;
@@ -108,8 +116,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   bool _isUploadingCover = false;
 
   // ==================== TIMEZONE VARIABLES ====================
-  String _openTimeUtc = '';
-  String _closeTimeUtc = '';
+  // ✅ The hours are the BUSINESS's own wall-clock time (salon timezone)
   TimeOfDay _openTimeLocal = const TimeOfDay(hour: 9, minute: 0);
   TimeOfDay _closeTimeLocal = const TimeOfDay(hour: 18, minute: 0);
   String _userTimezone = '';
@@ -124,6 +131,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   // ==================== CURRENCY VARIABLES ====================
   String _salonCurrencyCode = 'LKR';
   String _salonCurrencySymbol = 'Rs.';
+  // once the owner picks a currency himself, a later country / timezone
+  // change must not overwrite it
+  bool _currencyManuallyChosen = false;
 
   static const List<Map<String, String>> _supportedCurrencies = [
     {'code': 'LKR', 'symbol': 'Rs.', 'name': 'Sri Lankan Rupee'},
@@ -288,6 +298,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
           // phone empty නම් phone code එකත් country එකත් එක්ක sync කරන්න
           if (_phoneController.text.trim().isEmpty) _phoneIso = iso;
         });
+        // ✅ the business timezone follows the country
+        _applyCountryTimezone(iso);
         // old province / district / city belong to the old country
         _onCountryChanged();
       },
@@ -476,11 +488,161 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
 
   /// Format TimeOfDay for display (e.g., "9:30 AM")
   String _formatTimeOfDay(TimeOfDay time) {
-    final hour =
-        time.hour == 0 ? 12 : (time.hour > 12 ? time.hour - 12 : time.hour);
+    final hour = time.hour == 0
+        ? 12
+        : (time.hour > 12 ? time.hour - 12 : time.hour);
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.hour >= 12 ? 'PM' : 'AM';
     return '$hour:$minute $period';
+  }
+
+  /// ✅ NEW: opening time must be before closing time.
+  /// A closing time of 12:00 AM means "open until midnight" (24:00).
+  /// (A business that is open past midnight is not supported.)
+  bool get _hoursValid {
+    final openMin = _openTimeLocal.hour * 60 + _openTimeLocal.minute;
+    final closeRaw = _closeTimeLocal.hour * 60 + _closeTimeLocal.minute;
+    final closeMin = closeRaw == 0 ? 1440 : closeRaw;
+    return closeMin > openMin;
+  }
+
+  /// ✅ NEW: the timezones the owner can choose for the selected country.
+  /// (If the current timezone does not belong to the country list it is added
+  /// so that it stays selectable.)
+  List<Map<String, String>> _timezoneOptions() {
+    final opts = List<Map<String, String>>.from(
+      TimezoneService.getTimezonesForCountryOrEmpty(_countryIso),
+    );
+    if (_salonTimezone.isNotEmpty &&
+        !opts.any((o) => o['timezone'] == _salonTimezone)) {
+      opts.insert(0, {
+        'name': TimezoneService.getTimezoneNameFor(_salonTimezone),
+        'timezone': _salonTimezone,
+        'offset': '',
+        'flag': TimezoneService.getTimezoneFlagFor(_salonTimezone),
+      });
+    }
+    return opts;
+  }
+
+  /// ✅ NEW: the business timezone follows the selected country.
+  void _applyCountryTimezone(String iso) {
+    final opts = TimezoneService.getTimezonesForCountryOrEmpty(iso);
+    if (opts.isEmpty) return; // unknown country: keep the current timezone
+    if (opts.any((o) => o['timezone'] == _salonTimezone)) return;
+    _applySalonTimezone(opts.first['timezone']!);
+  }
+
+  /// ✅ NEW: change the business timezone. The hours stay the same
+  /// wall-clock time; their UTC values and the (auto) currency follow.
+  void _applySalonTimezone(String tzName) {
+    setState(() {
+      _salonTimezone = tzName;
+      if (!_currencyManuallyChosen) _detectCurrencyFromTimezone();
+    });
+  }
+
+  /// ✅ NEW: timezone selector (only when the country has more than one
+  /// timezone, e.g. US, Australia, Canada)
+  Widget _buildTimezoneSelector() {
+    final opts = _timezoneOptions();
+    if (opts.length < 2) return const SizedBox.shrink();
+
+    final isDark = _isDark;
+    final current = opts.any((o) => o['timezone'] == _salonTimezone)
+        ? _salonTimezone
+        : opts.first['timezone'];
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Card(
+        color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Business Timezone',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Choose the timezone where the business is located. All '
+                'opening hours, schedules and bookings use it.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.white60 : Colors.grey[600],
+                ),
+              ),
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                key: ValueKey('tz_$_salonTimezone'),
+                initialValue: current,
+                isExpanded: true,
+                style: TextStyle(
+                  color: isDark ? Colors.white : Colors.black87,
+                  fontSize: 15,
+                ),
+                decoration: InputDecoration(
+                  prefixIcon: Icon(
+                    Icons.public,
+                    color: isDark ? Colors.white70 : Colors.grey,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                    ),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(
+                      color: isDark ? Colors.grey[700]! : Colors.grey[300]!,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(
+                      color: AppTheme.primary,
+                      width: 2,
+                    ),
+                  ),
+                  filled: true,
+                  fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                ),
+                items: opts.map((o) {
+                  final tzName = o['timezone']!;
+                  return DropdownMenuItem<String>(
+                    value: tzName,
+                    child: Text(
+                      '${o['flag']} ${o['name']} '
+                      '(${TimezoneService.getUtcOffsetFor(tzName)})',
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                  );
+                }).toList(),
+                onChanged: (v) {
+                  if (v != null && v != _salonTimezone) _applySalonTimezone(v);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   // ============================================================
@@ -756,7 +918,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         debugPrint('⚠️ User TZ empty → using default: $_kDefaultSalonTimezone');
       }
 
-      // ✅ New salon → user timezone becomes salon timezone
+      // ✅ Starting point only: the business is probably in the country of
+      // the person creating it. The country (step 2) decides the real
+      // business timezone, see _applyCountryTimezone().
       _salonTimezone = _userTimezone;
 
       // ✅ Currency auto-detect from salon timezone
@@ -793,7 +957,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   }
 
   // ============================================================
-  // ✅ CHECK TIMEZONE CHANGES (re-sync local times)
+  // ✅ CHECK TIMEZONE CHANGES (user's timezone: display reference only)
   // ============================================================
   Future<void> _checkTimezoneChanges() async {
     try {
@@ -805,28 +969,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
           currentTimezone.isNotEmpty &&
           _userTimezone != currentTimezone) {
         debugPrint(
-            '🔄 User timezone changed: $_userTimezone → $currentTimezone');
+          '🔄 User timezone changed: $_userTimezone → $currentTimezone',
+        );
 
         if (!mounted) return;
-        setState(() {
-          _userTimezone = currentTimezone;
-          // ✅ Salon timezone NOT changed — new salon keeps its TZ
-          // (so the phone country code also stays the same)
-
-          // ✅ FIX: Re-sync local TimeOfDay to new user TZ (for display)
-          if (_openTimeUtc.isNotEmpty) {
-            _openTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-              _openTimeUtc,
-              _userTimezone,
-            );
-          }
-          if (_closeTimeUtc.isNotEmpty) {
-            _closeTimeLocal = TimezoneService.utcToTimeOfDayWithTimezone(
-              _closeTimeUtc,
-              _userTimezone,
-            );
-          }
-        });
+        // ✅ FIX: only the reference changes. The hours are the BUSINESS's
+        // wall-clock time (business timezone), so they are NOT re-converted
+        // when the user's own timezone changes.
+        setState(() => _userTimezone = currentTimezone);
       }
     } catch (e) {
       debugPrint('❌ Error in _checkTimezoneChanges: $e');
@@ -844,14 +994,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     _closeTimeLocal = defaultCloseLocal;
 
     // ✅ Convert to UTC using SALON timezone
-    _openTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
-      defaultOpenLocal,
-      _salonTimezone,
-    );
-    _closeTimeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
-      defaultCloseLocal,
-      _salonTimezone,
-    );
 
     debugPrint('✅ Business hours initialized (salon TZ: $_salonTimezone)');
   }
@@ -908,7 +1050,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         // Location: city is required, the map link must be valid if given
         return _cityController.text.trim().isNotEmpty && _mapUrlError == null;
       case 2:
-        return true;
+        // ✅ Hours: open time must be before close time
+        return _hoursValid;
       default:
         return true;
     }
@@ -920,6 +1063,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         return 'Please select a business type and enter a business name (and a valid phone/email if provided)';
       case 1:
         return 'Please enter the city (and a valid map link if provided)';
+      case 2:
+        return 'Close time must be after open time';
       default:
         return '';
     }
@@ -1135,8 +1280,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
               Expanded(
                 child: TextFormField(
                   controller: _phoneController,
-                  style:
-                      TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
                   keyboardType: TextInputType.phone,
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s()]')),
@@ -1172,8 +1318,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
-                      borderSide:
-                          const BorderSide(color: AppTheme.primary, width: 2),
+                      borderSide: const BorderSide(
+                        color: AppTheme.primary,
+                        width: 2,
+                      ),
                     ),
                     errorBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -1228,9 +1376,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     return cleaned
         .split(' ')
         .map(
-          (w) => w.isEmpty
-              ? w
-              : w[0].toUpperCase() + w.substring(1).toLowerCase(),
+          (w) =>
+              w.isEmpty ? w : w[0].toUpperCase() + w.substring(1).toLowerCase(),
         )
         .join(' ');
   }
@@ -1248,7 +1395,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     return parts.join(', ');
   }
 
-  String? _nullIfEmpty(String value) => value.trim().isEmpty ? null : value.trim();
+  String? _nullIfEmpty(String value) =>
+      value.trim().isEmpty ? null : value.trim();
 
   /// Country selector (looks like a text field, opens the country picker)
   Widget _buildCountryField() {
@@ -1318,7 +1466,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
-                  'Auto-detected from business timezone — tap to change',
+                  // ✅ the business timezone follows the country
+                  'Business timezone: ${TimezoneService.getFullTimezoneDisplayFor(_salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone)} — follows the country you select',
                   style: TextStyle(
                     fontSize: 11,
                     color: isDark ? Colors.teal[300] : Colors.teal[700],
@@ -1465,7 +1614,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
             selected: selected,
             showCheckmark: false,
             selectedColor: AppTheme.primary,
-            backgroundColor: isDark ? const Color(0xFF2A2A2A) : Colors.grey[100],
+            backgroundColor: isDark
+                ? const Color(0xFF2A2A2A)
+                : Colors.grey[100],
             labelStyle: TextStyle(
               fontSize: 13,
               fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
@@ -1615,11 +1766,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         if (provId != null) {
           final hasDistrictLevel = labels.containsKey(2);
           if (hasDistrictLevel) {
-            dists = await _fetchLocations(
-              iso: iso,
-              level: 2,
-              parentId: provId,
-            );
+            dists = await _fetchLocations(iso: iso, level: 2, parentId: provId);
             distId = _findIdByName(dists, _districtController.text);
           }
           final cityParent = hasDistrictLevel ? distId : provId;
@@ -1721,11 +1868,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     });
 
     try {
-      final c = await _fetchLocations(
-        iso: _countryIso,
-        level: 3,
-        parentId: id,
-      );
+      final c = await _fetchLocations(iso: _countryIso, level: 3, parentId: id);
       if (!mounted || _districtId != id) return;
       setState(() => _cityOptions = c);
     } catch (e) {
@@ -1762,8 +1905,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         builder: (ctx, setSheetState) {
           final q = query.trim().toLowerCase();
           final list = options
-              .where((o) =>
-                  q.isEmpty || (o['name'] as String).toLowerCase().contains(q))
+              .where(
+                (o) =>
+                    q.isEmpty ||
+                    (o['name'] as String).toLowerCase().contains(q),
+              )
               .toList();
           final showOther = onOther != null && q.isEmpty;
 
@@ -2005,11 +2151,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
               : 'Select ${dLabel.toLowerCase()}',
           onTap: dMode == 'dropdown'
               ? () => _showLocationPicker(
-                    title: 'Select $dLabel',
-                    options: _districtOptions,
-                    currentName: _districtController.text,
-                    onSelected: _selectDistrict,
-                  )
+                  title: 'Select $dLabel',
+                  options: _districtOptions,
+                  currentName: _districtController.text,
+                  onSelected: _selectDistrict,
+                )
               : null,
         ),
       );
@@ -2039,15 +2185,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
               : 'Select ${cLabel.toLowerCase()}',
           onTap: cMode == 'dropdown'
               ? () => _showLocationPicker(
-                    title: 'Select $cLabel',
-                    options: _cityOptions,
-                    currentName: _cityController.text,
-                    onSelected: _selectCity,
-                    onOther: () => setState(() {
-                      _cityManual = true;
-                      _cityController.clear();
-                    }),
-                  )
+                  title: 'Select $cLabel',
+                  options: _cityOptions,
+                  currentName: _cityController.text,
+                  onSelected: _selectCity,
+                  onOther: () => setState(() {
+                    _cityManual = true;
+                    _cityController.clear();
+                  }),
+                )
               : null,
         ),
       );
@@ -2111,10 +2257,14 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
 
   /// coordinates only when both are valid
   double? get _latitudeForSave =>
-      MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ? _latitude : null;
+      MapLinkUtils.hasValidCoordinates(_latitude, _longitude)
+      ? _latitude
+      : null;
 
   double? get _longitudeForSave =>
-      MapLinkUtils.hasValidCoordinates(_latitude, _longitude) ? _longitude : null;
+      MapLinkUtils.hasValidCoordinates(_latitude, _longitude)
+      ? _longitude
+      : null;
 
   String _mapLocationSummary() {
     if (MapLinkUtils.hasValidCoordinates(_latitude, _longitude)) {
@@ -2237,8 +2387,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   Widget _buildMapLocationSection() {
     final isDark = _isDark;
     final borderColor = isDark ? Colors.grey[700]! : Colors.grey[300]!;
-    final hasCoords =
-        MapLinkUtils.hasValidCoordinates(_latitude, _longitude);
+    final hasCoords = MapLinkUtils.hasValidCoordinates(_latitude, _longitude);
     final linkCheck = MapLinkUtils.check(_mapUrlController.text);
     final hasLink = linkCheck.ok && linkCheck.uri != null;
 
@@ -2326,8 +2475,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
               decoration: InputDecoration(
                 labelText: 'Google Maps / WhatsApp location link',
                 hintText: 'https://maps.app.goo.gl/...',
-                hintStyle:
-                    TextStyle(color: isDark ? Colors.white70 : Colors.grey),
+                hintStyle: TextStyle(
+                  color: isDark ? Colors.white70 : Colors.grey,
+                ),
                 prefixIcon: Icon(
                   Icons.link,
                   color: isDark ? Colors.white70 : Colors.grey,
@@ -2342,8 +2492,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                 counterText: '',
                 errorText: _mapUrlError,
                 errorMaxLines: 3,
-                errorStyle:
-                    TextStyle(color: isDark ? Colors.red[300] : Colors.red),
+                errorStyle: TextStyle(
+                  color: isDark ? Colors.red[300] : Colors.red,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(color: borderColor),
@@ -2354,8 +2505,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide:
-                      const BorderSide(color: AppTheme.primary, width: 2),
+                  borderSide: const BorderSide(
+                    color: AppTheme.primary,
+                    width: 2,
+                  ),
                 ),
                 errorBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
@@ -2365,8 +2518,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                   borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: Colors.red, width: 2),
                 ),
-                contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 fillColor: isDark ? const Color(0xFF2A2A2A) : Colors.white,
                 filled: true,
               ),
@@ -2381,16 +2536,20 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                 decoration: BoxDecoration(
                   color: Colors.green.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border:
-                      Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: Colors.green.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.check_circle,
-                            size: 16, color: Colors.green),
+                        const Icon(
+                          Icons.check_circle,
+                          size: 16,
+                          color: Colors.green,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -2434,8 +2593,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                           icon: const Icon(Icons.delete_outline, size: 16),
                           label: const Text('Remove'),
                           style: TextButton.styleFrom(
-                            foregroundColor:
-                                isDark ? Colors.red[300] : Colors.red,
+                            foregroundColor: isDark
+                                ? Colors.red[300]
+                                : Colors.red,
                           ),
                         ),
                       ],
@@ -2523,13 +2683,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Icon(
-                        Icons.auto_awesome,
+                        _currencyManuallyChosen
+                            ? Icons.edit
+                            : Icons.auto_awesome,
                         size: 10,
                         color: isDark ? Colors.teal[300] : Colors.teal[700],
                       ),
                       const SizedBox(width: 4),
                       Text(
-                        'Auto',
+                        _currencyManuallyChosen ? 'Custom' : 'Auto',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
@@ -2543,7 +2705,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
             ),
             const SizedBox(height: 8),
             Text(
-              'Auto-detected from business timezone ($_salonTimezone)',
+              _currencyManuallyChosen
+                  ? 'You chose this currency. It stays even if the country changes.'
+                  : 'Auto-detected from business timezone ($_salonTimezone)',
               style: TextStyle(
                 fontSize: 12,
                 color: isDark ? Colors.white60 : Colors.grey,
@@ -2551,6 +2715,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<String>(
+              key: ValueKey('cur_$_salonCurrencyCode'),
               initialValue: _salonCurrencyCode,
               isExpanded: true,
               style: TextStyle(
@@ -2629,6 +2794,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                   setState(() {
                     _salonCurrencyCode = value;
                     _salonCurrencySymbol = selected['symbol']!;
+                    // ✅ a later country / timezone change must not
+                    // overwrite the owner's own choice
+                    _currencyManuallyChosen = true;
                   });
                 }
               },
@@ -2651,7 +2819,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'All prices will be in $_salonCurrencyCode ($_salonCurrencySymbol).',
+                      'All prices will be in $_salonCurrencyCode ($_salonCurrencySymbol). '
+                      'The currency can not be changed after services or bookings are added.',
                       style: TextStyle(
                         fontSize: 11,
                         color: isDark ? Colors.teal[300] : Colors.teal[700],
@@ -3201,7 +3370,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       final filePath = 'salons/$userId/$salonId/logo.jpg';
 
       if (_logoWebBytes != null) {
-        await supabase.storage.from('salon-images').uploadBinary(
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(
               filePath,
               _logoWebBytes!,
               fileOptions: const FileOptions(
@@ -3210,7 +3381,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
               ),
             );
       } else if (_logoFile != null) {
-        await supabase.storage.from('salon-images').upload(
+        await supabase.storage
+            .from('salon-images')
+            .upload(
               filePath,
               _logoFile!,
               fileOptions: const FileOptions(
@@ -3222,8 +3395,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         return null;
       }
 
-      final baseUrl =
-          supabase.storage.from('salon-images').getPublicUrl(filePath);
+      final baseUrl = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading logo: $e');
@@ -3246,7 +3420,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       final filePath = 'salons/$userId/$salonId/cover.jpg';
 
       if (_coverWebBytes != null) {
-        await supabase.storage.from('salon-images').uploadBinary(
+        await supabase.storage
+            .from('salon-images')
+            .uploadBinary(
               filePath,
               _coverWebBytes!,
               fileOptions: const FileOptions(
@@ -3255,7 +3431,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
               ),
             );
       } else if (_coverFile != null) {
-        await supabase.storage.from('salon-images').upload(
+        await supabase.storage
+            .from('salon-images')
+            .upload(
               filePath,
               _coverFile!,
               fileOptions: const FileOptions(
@@ -3267,8 +3445,9 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         return null;
       }
 
-      final baseUrl =
-          supabase.storage.from('salon-images').getPublicUrl(filePath);
+      final baseUrl = supabase.storage
+          .from('salon-images')
+          .getPublicUrl(filePath);
       return '$baseUrl?t=${DateTime.now().millisecondsSinceEpoch}';
     } catch (e) {
       debugPrint('❌ Error uploading cover: $e');
@@ -3284,7 +3463,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   // ============================================================
   Widget _buildBusinessHoursCard() {
     final isDark = _isDark;
-    final showUserTime = !_isSameTimezone &&
+    final showUserTime =
+        !_isSameTimezone &&
         _salonTimezone.isNotEmpty &&
         _userTimezone.isNotEmpty;
 
@@ -3323,11 +3503,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
-                    Icons.store,
-                    size: 14,
-                    color: AppTheme.primary,
-                  ),
+                  const Icon(Icons.store, size: 14, color: AppTheme.primary),
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(
@@ -3382,13 +3558,11 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Times are shown for business location',
+                            'Times below are the business\'s own time',
                             style: TextStyle(
                               fontSize: 10,
                               fontStyle: FontStyle.italic,
-                              color: isDark
-                                  ? Colors.white60
-                                  : Colors.grey[600],
+                              color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                           ),
                         ],
@@ -3410,11 +3584,6 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                     onTimeSelected: (time) {
                       setState(() {
                         _openTimeLocal = time;
-                        _openTimeUtc =
-                            TimezoneService.timeOfDayToUtcWithTimezone(
-                              time,
-                              _salonTimezone,
-                            );
                       });
                     },
                   ),
@@ -3428,17 +3597,32 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                     onTimeSelected: (time) {
                       setState(() {
                         _closeTimeLocal = time;
-                        _closeTimeUtc =
-                            TimezoneService.timeOfDayToUtcWithTimezone(
-                              time,
-                              _salonTimezone,
-                            );
                       });
                     },
                   ),
                 ),
               ],
             ),
+
+            // ✅ NEW: open must be before close
+            if (!_hoursValid) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.error_outline, size: 14, color: Colors.red),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Close time must be after open time',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: isDark ? Colors.red[300] : Colors.red,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
 
             const SizedBox(height: 12),
             Container(
@@ -3482,9 +3666,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
                         Icon(
                           Icons.phone_android,
                           size: 12,
-                          color: isDark
-                              ? Colors.blue[300]
-                              : Colors.blue[700],
+                          color: isDark ? Colors.blue[300] : Colors.blue[700],
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -3636,10 +3818,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
         ),
         _buildReviewTile(
           icon: Icons.public,
-          title: 'Timezone',
-          value: _salonTimezone.isEmpty
-              ? _kDefaultSalonTimezone
-              : _salonTimezone,
+          title: 'Business Timezone',
+          value: _getTimezoneDisplay(),
           onEdit: () => _goToStep(2),
         ),
         const SizedBox(height: 8),
@@ -3703,13 +3883,15 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
     final confirmed = await showCustomAlert(
       context: context,
       title: "Create Business?",
-      message: 'Do you want to create "${_nameController.text.trim()}"?\n\n'
+      message:
+          'Do you want to create "${_nameController.text.trim()}"?\n\n'
           '${_selectedBusinessTypeName != null ? 'Type: $_selectedBusinessTypeName\n' : ''}'
           'Location: ${_titleCase(_cityController.text)}, $_countryName\n'
           '${phoneE164 != null ? 'Phone: $phoneE164\n' : ''}'
+          'Hours: ${_formatTimeOfDay(_openTimeLocal)} - ${_formatTimeOfDay(_closeTimeLocal)}\n'
           'Currency: $_salonCurrencyCode ($_salonCurrencySymbol)\n'
           'Timezone: $_salonTimezone\n\n'
-          'This will save the business with everything you\'ve set up.',
+          'The timezone and currency can not be changed later, once the business has services or bookings.',
       isError: false,
       buttonText: "Create",
       buttonIcon: Icons.add_business,
@@ -3739,7 +3921,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       final prefs = await SharedPreferences.getInstance();
       final userTimezone =
           prefs.getString(TimezoneService.kUserTimezone) ??
-              TimezoneService.getCurrentTimezone();
+          TimezoneService.getCurrentTimezone();
 
       final extraData = {
         'created_from': _isWeb ? 'web' : 'mobile',
@@ -3748,8 +3930,20 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
       };
 
       // ✅ Fallback for salon timezone before insert
-      final salonTz =
-          _salonTimezone.isEmpty ? _kDefaultSalonTimezone : _salonTimezone;
+      final salonTz = _salonTimezone.isEmpty
+          ? _kDefaultSalonTimezone
+          : _salonTimezone;
+
+      // ✅ The hours are the business's own wall-clock time: always convert
+      // them to UTC with the business timezone right before saving.
+      final openUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+        _openTimeLocal,
+        salonTz,
+      );
+      final closeUtc = TimezoneService.timeOfDayToUtcWithTimezone(
+        _closeTimeLocal,
+        salonTz,
+      );
 
       // ✅ Phone is saved in E.164 format (+94771234567) or null
       final phoneE164 = _buildE164();
@@ -3779,8 +3973,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
             : _descriptionController.text.trim(),
         'logo_url': null,
         'cover_url': null,
-        'open_time': _openTimeUtc,
-        'close_time': _closeTimeUtc,
+        'open_time': openUtc,
+        'close_time': closeUtc,
         'timezone': salonTz,
         'currency_code': _salonCurrencyCode,
         'currency_symbol': _salonCurrencySymbol,
@@ -3870,10 +4064,10 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
   String _getPlatformName() => kIsWeb
       ? 'web'
       : Platform.isIOS
-          ? 'ios'
-          : Platform.isAndroid
-              ? 'android'
-              : 'mobile';
+      ? 'ios'
+      : Platform.isAndroid
+      ? 'android'
+      : 'mobile';
 
   void _showSnackBar(String msg, Color color) {
     if (!mounted) return;
@@ -4065,6 +4259,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
           'Business Hours & Currency',
           'Set your working hours; the currency is auto-detected but you can change it.',
         ),
+        // ✅ NEW: only for countries with more than one timezone
+        _buildTimezoneSelector(),
         _buildBusinessHoursCard(),
         const SizedBox(height: 16),
         _buildCurrencyCard(),
@@ -4159,8 +4355,8 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
               color: isCompleted
                   ? AppTheme.primary
                   : (isActive
-                      ? AppTheme.primary.withValues(alpha: 0.1)
-                      : (isDark ? Colors.grey[800] : Colors.grey[200])),
+                        ? AppTheme.primary.withValues(alpha: 0.1)
+                        : (isDark ? Colors.grey[800] : Colors.grey[200])),
               border: Border.all(
                 color: isActive
                     ? AppTheme.primary
@@ -4213,8 +4409,7 @@ class _CreateSalonScreenState extends State<CreateSalonScreen>
             if (_currentStep > 0) ...[
               Expanded(
                 child: OutlinedButton(
-                  onPressed:
-                      busy ? null : () => setState(() => _currentStep--),
+                  onPressed: busy ? null : () => setState(() => _currentStep--),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     side: BorderSide(
