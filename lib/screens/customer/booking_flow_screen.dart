@@ -60,6 +60,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   final Map<String, List<Map<String, dynamic>>> _availableOffersPerService = {};
   final Map<String, Map<String, dynamic>> _serviceOffers = {};
 
+  // Offer choice per service line (key = service_variant).
+  // One service line can use ONE offer. If several claimed offers are valid,
+  // the best one is applied by default; the customer can pick another one or
+  // remove the offer (keep it for a later booking).
+  final Map<String, int> _userOfferChoice = {};
+  final Set<String> _offerOptOut = {};
+
   // Step 2: Date
   DateTime? _selectedDate;
   Set<DateTime> _holidays = {};
@@ -114,6 +121,14 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   static const String _kDefaultCurrency = 'LKR'; // ✅ NEW
   String _userTimezone = '';
   String _selectedSalonTimezone = _kDefaultSalonTimezone;
+
+  /// How many days ahead a customer can book (calendar limit).
+  /// Must be >= the biggest "advance booking" offer the owner can create
+  /// (create offer screen: max 300 days).
+  static const int _kMaxBookingDays = 365;
+
+  /// "Try next day" never scans more than this many days after the picked date.
+  static const int _kNextDaySearchDays = 30;
   String _lastTimezone = '';
   bool _isTimezoneLoaded = false;
 
@@ -575,6 +590,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       setState(() {
         _availableSlots = [];
         _selectedSlot = null;
+        _scheduleReevaluateOffers();
         _showTravelTimeSelector = false;
         _selectedTravelTime = 0;
         _slotErrorMessage = null;
@@ -742,6 +758,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _selectedServices = [];
       _selectedBarber = null;
       _selectedSlot = null;
+      _scheduleReevaluateOffers();
       _selectedTravelTime = 0;
       _showTravelTimeSelector = false;
       _searchController.clear();
@@ -769,6 +786,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _appliedOffer = null;
       _availableOffersPerService.clear();
       _serviceOffers.clear();
+      _userOfferChoice.clear();
+      _offerOptOut.clear();
       _discountAmount = 0;
       _originalTotalPrice = 0;
       _finalTotalPrice = 0;
@@ -887,6 +906,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _selectedDate = null;
       _availableOffersPerService.clear();
       _serviceOffers.clear();
+      _userOfferChoice.clear();
+      _offerOptOut.clear();
     });
 
     // ✅ Load salon settings (timezone + currency + rate) BEFORE services
@@ -1151,6 +1172,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       setState(() {
         _selectedServices.removeAt(existingIndex);
         _serviceOffers.remove(key);
+        _userOfferChoice.remove(key);
+        _offerOptOut.remove(key);
         _recalculateTotals();
       });
       return;
@@ -1183,18 +1206,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         _availableOffersPerService[key] = offers;
       });
 
-      final claimedOffer = offers.firstWhere(
-        (o) => o['is_claimed'] == true,
-        orElse: () => <String, dynamic>{},
-      );
-
-      if (claimedOffer.isNotEmpty && claimedOffer['id'] != null) {
-        debugPrint(
-          '🎁 Auto-applying claimed offer: ${claimedOffer['title']} '
-          '(ID: ${claimedOffer['id']})',
-        );
-        _applyOfferToService(sid, vid, claimedOffer);
-      }
+      // Apply the claimed offer ONLY if it is already provably eligible
+      // (booking_time / no time window). Offers that depend on the time slot
+      // or the date stay "pending" (a hint is shown) and are applied by
+      // _reevaluateOffers() as soon as the slot / date makes them valid.
+      _reevaluateOffers();
     }
   }
 
@@ -1310,11 +1326,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         orElse: () => <String, dynamic>{},
       );
 
-      if (claimed.isNotEmpty && claimed['id'] != null) {
+      if (claimed.isNotEmpty &&
+          claimed['id'] != null &&
+          _offerEligibility(claimed) == true) {
         _applyOfferToService(sid, vid, claimed);
         debugPrint('   ✅ Auto-applied: ${claimed['title']} for service $sid');
       } else {
-        debugPrint('   ℹ️ No claimed offer for service $sid');
+        debugPrint('   ℹ️ No applicable claimed offer for service $sid yet');
       }
     }
   }
@@ -1375,7 +1393,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   DateTime? _firstSelectableDate() {
-    for (int i = 0; i <= 30; i++) {
+    for (int i = 0; i <= _kMaxBookingDays; i++) {
       final d = _addDays(_todayDate, i);
       if (_isDaySelectable(d)) return d;
     }
@@ -1383,10 +1401,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   }
 
   /// ✅ NEW: the next day AFTER [from] that can be booked
-  /// (skips holidays and non-working weekdays; max 30 days from today,
-  ///  the same limit as the calendar).
+  /// (skips holidays and non-working weekdays; max _kMaxBookingDays from
+  ///  today, the same limit as the calendar).
   DateTime? _nextSelectableAfter(DateTime from) {
-    final maxDate = _addDays(_todayDate, 30);
+    final maxDate = _addDays(_todayDate, _kMaxBookingDays);
     var d = _addDays(DateTime(from.year, from.month, from.day), 1);
     while (!d.isAfter(maxDate)) {
       if (_isDaySelectable(d)) return d;
@@ -1402,6 +1420,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     final first = _firstSelectableDate();
     setState(() {
       _selectedDate = first;
+      _scheduleReevaluateOffers();
       _isDateUnavailable = false;
       _unavailableReason = null;
       _calendarVersion++;
@@ -1751,6 +1770,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         _isLoadingSlots = true;
         _availableSlots = [];
         _selectedSlot = null;
+        _scheduleReevaluateOffers();
         _showTravelTimeSelector = false;
         _slotErrorMessage = null;
         _slotErrorType = null;
@@ -1917,6 +1937,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         _slotErrorType = null;
         _showTravelTimeSelector = false;
       });
+
+      // Slot is known now -> apply / remove time-window offers
+      _reevaluateOffers();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1939,6 +1962,404 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         setState(() => _isLoadingSlots = false);
       }
     }
+  }
+
+  // ==================== OFFER ELIGIBILITY ====================
+  // Offer times (valid_from_time / valid_to_time) are SALON-LOCAL wall-clock
+  // times ("17:00:00"), exactly as the owner typed them. The slot is converted
+  // to salon-local minutes and compared as minutes (never as strings).
+  // The database re-checks everything at booking confirm; this is the preview.
+
+  /// "17:00" / "17:00:00" / "5:00 PM" / "17:00:00+05:30" -> minutes since midnight
+  int? _hmToMin(String? s) {
+    if (s == null) return null;
+    final m = RegExp(
+      r'^\s*(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?\s*([AaPp][Mm])?',
+    ).firstMatch(s);
+    if (m == null) return null;
+    int h = int.parse(m.group(1)!);
+    final mm = int.parse(m.group(2)!);
+    final ap = m.group(3)?.toLowerCase();
+    if (ap == 'pm' && h < 12) h += 12;
+    if (ap == 'am' && h == 12) h = 0;
+    return h * 60 + mm;
+  }
+
+  DateTime? _offerDate(dynamic v) {
+    if (v == null) return null;
+    final d = DateTime.tryParse(v.toString());
+    return d == null ? null : DateTime(d.year, d.month, d.day);
+  }
+
+  /// Window check on salon-local minutes. from < to: normal window,
+  /// from > to: overnight window (22:00 - 02:00). Same rule as the DB.
+  bool _minInWindow(int m, int from, int to) {
+    if (from < to) return m >= from && m < to;
+    if (from > to) return m >= from || m < to;
+    return true;
+  }
+
+  /// Appointment DATE rule of an appointment_time offer.
+  /// true / false / null (no date picked yet). Other types: always true.
+  bool? _offerDateOk(Map<String, dynamic> offer) {
+    final type = offer['offer_trigger_type']?.toString() ?? 'appointment_time';
+    if (type != 'appointment_time') return true;
+    final from = _offerDate(offer['valid_from']);
+    final to = _offerDate(offer['valid_to']);
+    if (from == null || to == null) return true;
+    if (_selectedDate == null) return null;
+    final d = DateUtils.dateOnly(_selectedDate!);
+    return !d.isBefore(from) && !d.isAfter(to);
+  }
+
+  /// Appointment TIME rule of an appointment_time offer.
+  /// true / false / null (no slot picked yet).
+  bool? _offerTimeOk(Map<String, dynamic> offer) {
+    final from = _hmToMin(offer['valid_from_time']?.toString());
+    final to = _hmToMin(offer['valid_to_time']?.toString());
+    if (from == null || to == null) return true; // no hours window
+
+    final utcStart = _selectedSlot?['utc_start_time'] as String?;
+    if (utcStart == null || _selectedDate == null) return null;
+
+    final slotLocal = _hmToMin(
+      TimezoneService.utcToLocalTimeForDateWithTimezone(
+        utcStart,
+        _selectedDate!,
+        _selectedSalonTimezone,
+      ),
+    );
+    if (slotLocal == null) return null;
+    return _minInWindow(slotLocal, from, to);
+  }
+
+  /// true  = eligible
+  /// false = definitely NOT eligible
+  /// null  = cannot tell yet (needs the date or the time slot first)
+  ///
+  /// appointment_time : appointment DATE inside the offer dates AND
+  ///                    appointment TIME inside the hours window
+  /// booking_time     : always (the offer list only contains offers whose
+  ///                    booking dates include today)
+  /// advance_booking  : appointment >= min_advance_days from salon today
+  ///                    (any appointment date; the time of day does not matter)
+  bool? _offerEligibility(Map<String, dynamic> offer) {
+    final type = offer['offer_trigger_type']?.toString() ?? 'appointment_time';
+
+    switch (type) {
+      case 'booking_time':
+        return true;
+
+      case 'advance_booking':
+        if (_selectedDate == null) return null;
+        final minDays = (offer['min_advance_days'] as num?)?.toInt() ?? 30;
+        // salon "today" (salon timezone, never the phone's clock)
+        final today = _todayDate;
+        final days = DateUtils.dateOnly(
+          _selectedDate!,
+        ).difference(today).inDays;
+        return days >= minDays; // DB re-checks with salon_today()
+
+      case 'appointment_time':
+      default:
+        final dateOk = _offerDateOk(offer);
+        if (dateOk == false) return false;
+        final timeOk = _offerTimeOk(offer);
+        if (timeOk == false) return false;
+        if (dateOk == null || timeOk == null) return null;
+        return true;
+    }
+  }
+
+  /// Hint shown while a claimed offer is not applicable (yet).
+  String? _offerPendingHint(Map<String, dynamic> offer) {
+    final type = offer['offer_trigger_type']?.toString() ?? 'appointment_time';
+
+    String fmt(String? s) {
+      final m = _hmToMin(s);
+      if (m == null) return '';
+      final h = m ~/ 60;
+      final mm = m % 60;
+      final ap = h >= 12 ? 'PM' : 'AM';
+      final h12 = h % 12 == 0 ? 12 : h % 12;
+      return '$h12:${mm.toString().padLeft(2, '0')} $ap';
+    }
+
+    String fmtDate(dynamic v) {
+      final d = _offerDate(v);
+      return d == null ? '' : DateFormat('MMM dd').format(d);
+    }
+
+    final e = _offerEligibility(offer);
+    if (e == true) return null;
+
+    if (type == 'advance_booking') {
+      final d = (offer['min_advance_days'] as num?)?.toInt() ?? 30;
+      return e == null
+          ? 'Applies when you book $d+ days ahead'
+          : 'Offer needs a date $d+ days ahead';
+    }
+
+    if (type == 'appointment_time') {
+      final dFrom = fmtDate(offer['valid_from']);
+      final dTo = fmtDate(offer['valid_to']);
+      final tFrom = fmt(offer['valid_from_time']?.toString());
+      final tTo = fmt(offer['valid_to_time']?.toString());
+      final hasHours = tFrom.isNotEmpty && tTo.isNotEmpty;
+      final datesText = (dFrom.isNotEmpty && dTo.isNotEmpty)
+          ? (dFrom == dTo ? 'on $dFrom' : 'between $dFrom – $dTo')
+          : '';
+      final hoursText = hasHours ? '$tFrom – $tTo' : '';
+
+      if (e == false) {
+        if (_offerDateOk(offer) == false) {
+          return 'Offer valid only for appointments $datesText';
+        }
+        return 'Offer not valid for this time ($hoursText)';
+      }
+      // e == null : waiting for the date and / or the slot
+      final parts = <String>[
+        if (datesText.isNotEmpty) datesText,
+        if (hoursText.isNotEmpty) hoursText,
+      ];
+      return parts.isEmpty
+          ? null
+          : 'Applies to appointments ${parts.join(', ')}';
+    }
+    return null;
+  }
+
+  /// Every CLAIMED offer of this service line.
+  List<Map<String, dynamic>> _claimedOffersFor(int sid, int vid) {
+    final offers = _availableOffersPerService[_serviceKey(sid, vid)] ?? [];
+    return [
+      for (final o in offers)
+        if (o['is_claimed'] == true && o['id'] != null) o,
+    ];
+  }
+
+  /// Claimed offers that can be used RIGHT NOW for this service line
+  /// (date / time / advance rule ok + minimum spend ok), best discount first.
+  List<Map<String, dynamic>> _eligibleClaimedOffers(
+    int sid,
+    int vid,
+    double price,
+  ) {
+    final list = _claimedOffersFor(sid, vid).where((o) {
+      final minSpend = (o['minimum_spend'] as num?)?.toDouble() ?? 0;
+      if (price < minSpend) return false;
+      return _offerEligibility(o) == true;
+    }).toList();
+    list.sort(
+      (a, b) => _calculateOfferDiscount(
+        price,
+        b,
+      ).compareTo(_calculateOfferDiscount(price, a)),
+    );
+    return list;
+  }
+
+  /// Hint for a claimed offer that is waiting for the date / time slot.
+  String? _pendingHintFor(int sid, int vid) {
+    final claimed = _claimedOffersFor(sid, vid);
+    if (claimed.isEmpty) return null;
+    // something is usable already -> nothing is "pending"
+    if (claimed.any((o) => _offerEligibility(o) == true)) return null;
+    for (final o in claimed) {
+      final h = _offerPendingHint(o);
+      if (h != null) return h;
+    }
+    return null;
+  }
+
+  /// Single source of truth: decide the offer of every selected service line
+  /// from the CURRENT date + slot state.
+  ///   - customer removed the offer      -> no offer
+  ///   - customer picked an offer        -> that one, while it is still valid
+  ///   - otherwise                       -> the best valid claimed offer
+  /// Do NOT call it inside a setState callback - use
+  /// _scheduleReevaluateOffers() there.
+  void _reevaluateOffers() {
+    if (!mounted) return;
+    final lines = List<Map<String, dynamic>>.from(_selectedServices);
+
+    // eligible offers per service line (a line the customer opted out of has none)
+    final Map<String, List<Map<String, dynamic>>> eligibleByKey = {};
+    for (final s in lines) {
+      final sid = s['id'] as int?;
+      final vid = s['variant_id'] as int?;
+      if (sid == null || vid == null) continue;
+      final key = _serviceKey(sid, vid);
+      if (_offerOptOut.contains(key)) continue;
+      final price = (s['price'] as num?)?.toDouble() ?? 0;
+      eligibleByKey[key] = _eligibleClaimedOffers(sid, vid, price);
+    }
+
+    // ONE claimed offer is used for ONE service line only.
+    final Map<String, Map<String, dynamic>> chosenByKey = {};
+    final Set<int> taken = {};
+
+    // 1) the customer's own picks first
+    for (final s in lines) {
+      final sid = s['id'] as int?;
+      final vid = s['variant_id'] as int?;
+      if (sid == null || vid == null) continue;
+      final key = _serviceKey(sid, vid);
+      final pref = _userOfferChoice[key];
+      if (pref == null || taken.contains(pref)) continue;
+      for (final o in eligibleByKey[key] ?? const <Map<String, dynamic>>[]) {
+        if (o['id'] == pref) {
+          chosenByKey[key] = o;
+          taken.add(pref);
+          break;
+        }
+      }
+    }
+
+    // 2) the rest: biggest saving first (offer -> service line)
+    final candidates = <Map<String, dynamic>>[];
+    for (final s in lines) {
+      final sid = s['id'] as int?;
+      final vid = s['variant_id'] as int?;
+      if (sid == null || vid == null) continue;
+      final key = _serviceKey(sid, vid);
+      if (chosenByKey.containsKey(key)) continue;
+      final price = (s['price'] as num?)?.toDouble() ?? 0;
+      for (final o in eligibleByKey[key] ?? const <Map<String, dynamic>>[]) {
+        candidates.add({
+          'key': key,
+          'offer': o,
+          'saving': _calculateOfferDiscount(price, o),
+        });
+      }
+    }
+    candidates.sort(
+      (a, b) => (b['saving'] as double).compareTo(a['saving'] as double),
+    );
+    for (final c in candidates) {
+      final key = c['key'] as String;
+      final o = c['offer'] as Map<String, dynamic>;
+      final oid = o['id'] as int;
+      if (chosenByKey.containsKey(key) || taken.contains(oid)) continue;
+      chosenByKey[key] = o;
+      taken.add(oid);
+    }
+
+    // apply
+    for (final s in lines) {
+      final sid = s['id'] as int?;
+      final vid = s['variant_id'] as int?;
+      if (sid == null || vid == null) continue;
+      final chosen = chosenByKey[_serviceKey(sid, vid)];
+      if (chosen == null) {
+        if (s['offer_id'] != null) _applyOfferToService(sid, vid, null);
+      } else if (s['offer_id'] != chosen['id']) {
+        _applyOfferToService(sid, vid, chosen);
+      }
+    }
+  }
+
+  /// Bottom sheet: pick one of the valid claimed offers, or remove the offer.
+  Future<void> _showOfferPicker(int sid, int vid) async {
+    final key = _serviceKey(sid, vid);
+    final idx = _selectedServices.indexWhere(
+      (x) => x['id'] == sid && x['variant_id'] == vid,
+    );
+    if (idx < 0) return;
+    final price = (_selectedServices[idx]['price'] as num?)?.toDouble() ?? 0;
+    final eligible = _eligibleClaimedOffers(sid, vid, price);
+    if (eligible.isEmpty) return;
+
+    final currentId = _selectedServices[idx]['offer_id'];
+
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Choose an offer',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'One offer is used for one service. Picking it here moves it from another service.',
+                style: TextStyle(fontSize: 12.5, color: Colors.grey[600]),
+              ),
+              const SizedBox(height: 12),
+              for (final o in eligible)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    o['id'] == currentId
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: AppTheme.primary,
+                  ),
+                  title: Text(o['title']?.toString() ?? 'Offer'),
+                  subtitle: Text(
+                    'Save ${_formatPrice(_calculateOfferDiscount(price, o))}',
+                  ),
+                  onTap: () => Navigator.pop(ctx, o['id'] as int),
+                ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  currentId == null
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_off,
+                  color: AppTheme.primary,
+                ),
+                title: const Text("Don't use an offer"),
+                subtitle: const Text('Keep your offer for a later booking'),
+                onTap: () => Navigator.pop(ctx, -1),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (picked == null || !mounted) return;
+    setState(() {
+      if (picked == -1) {
+        _offerOptOut.add(key);
+        _userOfferChoice.remove(key);
+      } else {
+        _offerOptOut.remove(key);
+        // one offer = one service: it moves here from any other service
+        _userOfferChoice.removeWhere((k, v) => k != key && v == picked);
+        _userOfferChoice[key] = picked;
+      }
+    });
+    _reevaluateOffers();
+  }
+
+  /// Safe to call from inside setState: runs after the frame.
+  void _scheduleReevaluateOffers() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _reevaluateOffers());
+  }
+
+  /// How many selected services have a claimed offer that is still waiting
+  /// for the date / time slot.
+  int _pendingOfferCount() {
+    int n = 0;
+    for (final s in _selectedServices) {
+      final sid = s['id'] as int?;
+      final vid = s['variant_id'] as int?;
+      if (sid == null || vid == null || s['offer_id'] != null) continue;
+      if (_offerOptOut.contains(_serviceKey(sid, vid))) continue;
+      if (_pendingHintFor(sid, vid) != null) n++;
+    }
+    return n;
   }
 
   /// ✅ NEW: "Try next day" - the next bookable day (holidays and
@@ -1968,10 +2389,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _selectedTravelTime = 0;
       _availableSlots = [];
       _selectedSlot = null;
+      _scheduleReevaluateOffers();
     });
 
     try {
+      final searchLimit = _addDays(_selectedDate!, _kNextDaySearchDays);
       DateTime? candidate = _nextSelectableAfter(_selectedDate!);
+      if (candidate != null && candidate.isAfter(searchLimit)) candidate = null;
       Map<String, dynamic>? availability;
 
       while (candidate != null) {
@@ -1985,13 +2409,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           break;
         }
         candidate = _nextSelectableAfter(candidate);
+        if (candidate != null && candidate.isAfter(searchLimit)) {
+          candidate = null;
+        }
       }
 
       if (candidate == null || availability == null) {
         setState(() {
           _isLoadingSlots = false;
           _slotErrorMessage =
-              '${savedBarber['full_name'] ?? 'This barber'} has no more available days in the next 30 days.\n\nPlease try another barber.';
+              '${savedBarber['full_name'] ?? 'This barber'} has no more available days in the next $_kNextDaySearchDays days.\n\nPlease try another barber.';
           _slotErrorType = 'barber';
         });
         return;
@@ -2002,6 +2429,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
       setState(() {
         _selectedDate = nextDate;
+        _scheduleReevaluateOffers();
         _calendarVersion++;
         _isDateUnavailable = false;
         _unavailableReason = null;
@@ -2061,6 +2489,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _currentStep = 5;
       _availableSlots = [];
       _selectedSlot = null;
+      _scheduleReevaluateOffers();
       _showTravelTimeSelector = false;
       _slotErrorMessage = null;
       _slotErrorType = null;
@@ -2069,6 +2498,124 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
     _showInfoSnack(_slotRecoveryMessage(code));
     await _loadAvailableSlots();
+  }
+
+  // ==================== OFFER RE-CHECK AT CONFIRM ====================
+  // The offers were loaded when the services were picked. By the time the
+  // customer confirms, an offer may have expired (salon midnight), been used,
+  // or been switched off. Instead of letting the booking FAIL, the offers are
+  // re-loaded + re-checked first. If a discount has to go, the customer sees
+  // the new price and confirms again with ONE tap (the booking is never
+  // created with a price the customer has not seen).
+
+  /// Same RPC as _loadOffersForService, but returns null when the call FAILED
+  /// (a network error must not remove a discount).
+  Future<List<Map<String, dynamic>>?> _fetchOffersOrNull(
+    int serviceId,
+    double price,
+    int variantId,
+  ) async {
+    if (_selectedSalon == null) return null;
+    try {
+      final result = await supabase.rpc(
+        'get_offers_for_service',
+        params: {
+          'p_salon_id': _selectedSalon!['id'],
+          'p_service_id': serviceId,
+          'p_service_price': price,
+          'p_customer_id': supabase.auth.currentUser?.id,
+          'p_variant_id': variantId,
+        },
+      );
+      if (result == null) return <Map<String, dynamic>>[];
+      return List<Map<String, dynamic>>.from(result as List);
+    } catch (e) {
+      debugPrint('⚠️ offer re-check failed (service $serviceId): $e');
+      return null;
+    }
+  }
+
+  /// Re-loads the offers of every service that has an offer applied and
+  /// re-checks them. [forceRemove] = the server already said OFFER_INVALID:
+  /// every applied offer is removed even if the list still shows it.
+  /// Returns the titles of the offers that were removed.
+  Future<List<String>> _refreshOffersBeforeBooking({
+    bool forceRemove = false,
+  }) async {
+    final appliedBefore = <String, Map<String, dynamic>>{};
+    for (final s in _selectedServices) {
+      final sid = s['id'] as int?;
+      final vid = s['variant_id'] as int?;
+      final offer = s['offer'] as Map<String, dynamic>?;
+      if (sid == null || vid == null || offer == null) continue;
+      appliedBefore[_serviceKey(sid, vid)] = offer;
+    }
+    if (appliedBefore.isEmpty) return const [];
+
+    for (final s in List<Map<String, dynamic>>.from(_selectedServices)) {
+      final sid = s['id'] as int?;
+      final vid = s['variant_id'] as int?;
+      if (sid == null || vid == null || s['offer'] == null) continue;
+      final price = (s['price'] as num?)?.toDouble() ?? 0;
+
+      final fresh = await _fetchOffersOrNull(sid, price, vid);
+      if (!mounted) return const [];
+      if (fresh != null) {
+        _availableOffersPerService[_serviceKey(sid, vid)] = fresh;
+      }
+    }
+
+    if (forceRemove) {
+      for (final key in appliedBefore.keys) {
+        final id = appliedBefore[key]!['id'];
+        for (final o in (_availableOffersPerService[key] ?? const [])) {
+          if (o['id'] == id) o['is_claimed'] = false; // do not re-apply it
+        }
+      }
+    }
+
+    _reevaluateOffers();
+
+    final removed = <String>[];
+    for (final key in appliedBefore.keys) {
+      final stillApplied = _selectedServices.any(
+        (s) =>
+            _serviceKey(s['id'] as int, s['variant_id'] as int?) == key &&
+            s['offer_id'] != null,
+      );
+      if (!stillApplied) {
+        final title = appliedBefore[key]!['title']?.toString() ?? 'Offer';
+        if (!removed.contains(title)) removed.add(title);
+      }
+    }
+    return removed;
+  }
+
+  Future<void> _showOfferChangedDialog(
+    List<String> titles,
+    double oldTotal,
+    double newTotal,
+  ) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Offer no longer valid'),
+        content: Text(
+          '${titles.join(', ')} can no longer be applied to this booking.\n\n'
+          'Your total is now ${_formatPrice(newTotal)} '
+          '(was ${_formatPrice(oldTotal)}).\n\n'
+          'Your booking has NOT been made yet. Please check the new price and '
+          'tap Confirm again.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _confirmBooking() async {
@@ -2101,6 +2648,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     try {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login to continue');
+
+      // ✅ offers may have expired since they were applied: re-check first.
+      final oldTotal = _finalTotalPrice;
+      final removedOffers = await _refreshOffersBeforeBooking();
+      if (!mounted) return;
+      if (removedOffers.isNotEmpty) {
+        setState(() => _isBooking = false);
+        await _showOfferChangedDialog(
+          removedOffers,
+          oldTotal,
+          _finalTotalPrice,
+        );
+        return;
+      }
 
       final variantIds = <int>[];
       final offerIds = <int?>[];
@@ -2151,6 +2712,21 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           return;
         }
 
+        // ✅ an offer became invalid at the last second: remove the discount,
+        //    show the new price, the customer confirms again (no failure)
+        if (code == 'OFFER_INVALID') {
+          final oldTotalNow = _finalTotalPrice;
+          final removed = await _refreshOffersBeforeBooking(forceRemove: true);
+          if (!mounted) return;
+          setState(() => _isBooking = false);
+          await _showOfferChangedDialog(
+            removed.isNotEmpty ? removed : <String>['The offer'],
+            oldTotalNow,
+            _finalTotalPrice,
+          );
+          return;
+        }
+
         throw Exception(code.isNotEmpty ? '$msg ($code)' : msg);
       }
 
@@ -2160,8 +2736,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'N/A';
 
       // ✅ NEW: Extract confirmed amounts from response
-      final confirmedRate =
-          (result['exchange_rate_at_booking'] as num?)?.toDouble();
+      final confirmedRate = (result['exchange_rate_at_booking'] as num?)
+          ?.toDouble();
       final confirmedPrice =
           (result['price'] as num?)?.toDouble() ?? _getDisplayTotalPrice();
       final confirmedUserAmount =
@@ -2223,20 +2799,14 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         icon: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: _secondaryColor.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
-          child: Icon(
-            Icons.check_circle,
-            color: _secondaryColor,
-            size: 48,
-          ),
+          child: Icon(Icons.check_circle, color: _secondaryColor, size: 48),
         ),
         title: Text(
           '✅ Booking Confirmed!',
@@ -2299,8 +2869,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           'Amount',
                           style: TextStyle(
                             fontSize: 14,
-                            color:
-                                isDark ? Colors.white70 : Colors.grey[700],
+                            color: isDark ? Colors.white70 : Colors.grey[700],
                           ),
                         ),
                         Text(
@@ -2326,9 +2895,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             style: TextStyle(
                               fontSize: 13,
                               fontStyle: FontStyle.italic,
-                              color: isDark
-                                  ? Colors.white60
-                                  : Colors.grey[600],
+                              color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                           ),
                           Text(
@@ -2410,10 +2977,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ),
               child: const Text(
                 'Done',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -3444,6 +4008,18 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        if (_discountAmount <= 0 && _pendingOfferCount() > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              '🎁 Offer applies once you pick a valid date / time',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.orange.shade700,
+                              ),
+                            ),
+                          ),
                         if (_discountAmount > 0)
                           Padding(
                             padding: const EdgeInsets.only(top: 2),
@@ -3489,8 +4065,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           style: TextStyle(
                             fontSize: 10.5,
                             fontStyle: FontStyle.italic,
-                            color:
-                                isDark ? Colors.white60 : Colors.grey[600],
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                     ],
@@ -3979,8 +4554,27 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     if (isSelected && hasOffer) {
       offerChip = _buildInfoChip(
         Icons.card_giftcard,
-        '${selectedOffer['title'] ?? 'Offer'} applied • save ${_formatPrice(discount)}',
+        '${selectedOffer['title'] ?? 'Offer'} applied • save ${_formatPrice(discount)}'
+        '${_eligibleClaimedOffers(serviceId, variantId, price).length > 1 ? ' • tap to change' : ' • tap to remove'}',
         Colors.green.shade600,
+      );
+    } else if (isSelected &&
+        _offerOptOut.contains(key) &&
+        _eligibleClaimedOffers(serviceId, variantId, price).isNotEmpty) {
+      // the customer chose not to use the offer (keeps it for later)
+      offerChip = _buildInfoChip(
+        Icons.card_giftcard,
+        'Offer not used • tap to use',
+        Colors.grey.shade600,
+      );
+    } else if (isSelected &&
+        hasClaimed &&
+        _pendingHintFor(serviceId, variantId) != null) {
+      // claimed offer waiting for the date / time slot (or not valid for it)
+      offerChip = _buildInfoChip(
+        Icons.card_giftcard,
+        '🎁 ${_pendingHintFor(serviceId, variantId)}',
+        Colors.orange.shade700,
       );
     } else if (availableOffers.isNotEmpty) {
       offerChip = _buildInfoChip(
@@ -4099,7 +4693,22 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                 ),
                                 if (offerChip != null) ...[
                                   const SizedBox(height: 6),
-                                  offerChip,
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap:
+                                        (isSelected &&
+                                            _eligibleClaimedOffers(
+                                              serviceId,
+                                              variantId,
+                                              price,
+                                            ).isNotEmpty)
+                                        ? () => _showOfferPicker(
+                                            serviceId,
+                                            variantId,
+                                          )
+                                        : null,
+                                    child: offerChip,
+                                  ),
                                 ],
                               ],
                             ),
@@ -4560,6 +5169,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                       removed['variant_id'] as int?,
                     );
                     _serviceOffers.remove(key);
+                    _userOfferChoice.remove(key);
+                    _offerOptOut.remove(key);
                     _recalculateTotals();
                   });
                 },
@@ -4616,7 +5227,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   Widget _buildDateSelectionStep() {
     final isDark = context.isDarkMode;
     final today = _todayDate;
-    final maxDate = _addDays(today, 30);
+    final maxDate = _addDays(today, _kMaxBookingDays);
 
     final firstSelectable = _firstSelectableDate();
     final noDatesAvailable = _scheduleLoaded && firstSelectable == null;
@@ -4688,8 +5299,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontStyle: FontStyle.italic,
-                                color:
-                                    isDark ? Colors.white60 : Colors.grey[600],
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
                               ),
                             ),
                           ],
@@ -4792,7 +5404,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            'No dates available in the next 30 days.',
+                            'No dates available in the next $_kMaxBookingDays days.',
                             style: TextStyle(
                               color: isDark
                                   ? Colors.orange.shade300
@@ -4823,6 +5435,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         onDateChanged: (date) async {
                           setState(() {
                             _selectedDate = date;
+                            _scheduleReevaluateOffers();
                             _isDateUnavailable = false;
                             _unavailableReason = null;
                           });
@@ -5660,6 +6273,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                 _selectedTravelTime = 0;
                 _availableSlots = [];
                 _selectedSlot = null;
+                _scheduleReevaluateOffers();
                 _isLoadingSlots = true;
                 _slotErrorMessage = null;
                 _slotErrorType = null;
@@ -5820,11 +6434,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.store,
-                size: 14,
-                color: AppTheme.primary,
-              ),
+              const Icon(Icons.store, size: 14, color: AppTheme.primary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -5871,17 +6481,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               decoration: BoxDecoration(
                 color: Colors.orange.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.orange.withValues(alpha: 0.3),
-                ),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.person,
-                    size: 12,
-                    color: Colors.orange[700],
-                  ),
+                  Icon(Icons.person, size: 12, color: Colors.orange[700]),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
@@ -6018,6 +6622,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                         _selectedTravelTime = 0;
                         _availableSlots = [];
                         _selectedSlot = null;
+                        _scheduleReevaluateOffers();
                       });
                     },
                     icon: Icon(
@@ -6046,7 +6651,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               Padding(
                 padding: const EdgeInsets.only(top: 12),
                 child: Text(
-                  'No more bookable days in the next 30 days.',
+                  'No more bookable days.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,

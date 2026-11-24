@@ -12,21 +12,31 @@ import '../../extensions/context_extensions.dart';
 // ====================================================================
 // CREATE / EDIT OFFER SCREEN — step-by-step wizard
 //
+// ✅ FIXES APPLIED:
+//   1. DB salon timezone loaded (not device timezone)
+//   2. _salonToday uses DB salon timezone
+//   3. Offer Type: Appointment Time / Booking Time / Advance Booking
+//   4. Advance Booking: min_advance_days selector
+//   5. Time window only for appointment_time
+//   6. Type-specific validation
+//   7. Type summary in review step
+//   8. Edit mode loads offer type
+//
+// WHAT THE OFFER DATES MEAN (decided by the offer type):
+//   • Time Window (Happy Hour) → APPOINTMENT dates + hours (overnight allowed)
+//   • Book Now                 → BOOKING dates (appointment can be any day)
+//   • Advance Booking          → BOOKING dates + appointment X+ days ahead
+//
 // Selection rules:
 //   • Variant ☑           → ඒ variant එකට විතරයි (variant_id = X)
 //   • Service ☑ (full)    → හැම variant එකටම (variant_id = NULL)
 //   • Service ▣ (partial) → සමහර variants
-//
-// Disabled:
-//   • Services with no variants
-//   • Services with no priced variants
-//   • Individual variants with NULL/0 price
 // ====================================================================
 class CreateOfferScreen extends StatefulWidget {
   final int salonId;
   final String salonName;
   final String currencyCode;
-  // Salon timezone (for showing timezone info to owner)
+  // Salon timezone (optional - will be loaded from DB if not provided)
   final String? salonTimezone;
   final Map<String, dynamic>? editingOffer;
 
@@ -45,17 +55,9 @@ class CreateOfferScreen extends StatefulWidget {
 
 /// Selection state for service + variant-level offers.
 class _ServiceSelection {
-  /// Services where ALL priced variants are covered (variant_id = NULL in DB)
   final Set<int> allVariantServices = {};
-
-  /// Individual variant ids that are selected (variant_id = X)
   final Set<int> variantIds = {};
-
-  /// serviceId -> list of ALL variant ids (including NULL-priced, used only
-  /// for tri-state detection)
   final Map<int, List<int>> serviceVariantIds = {};
-
-  /// serviceId -> list of PRICED variant ids (used for toggle)
   final Map<int, List<int>> servicePricedVariantIds = {};
 
   bool isServiceFullySelected(int serviceId) =>
@@ -63,7 +65,6 @@ class _ServiceSelection {
 
   bool isVariantSelected(int variantId) => variantIds.contains(variantId);
 
-  /// Service has at least one priced variant selected but is NOT fully selected.
   bool isServicePartial(int serviceId) {
     if (allVariantServices.contains(serviceId)) return false;
     final vars = servicePricedVariantIds[serviceId] ?? const [];
@@ -86,7 +87,6 @@ class _ServiceSelection {
 
   void toggleVariant(int serviceId, int variantId, List<int> pricedVariants) {
     if (allVariantServices.contains(serviceId)) {
-      // Service was fully selected → switch to specific
       allVariantServices.remove(serviceId);
       for (final v in pricedVariants) {
         if (v != variantId) variantIds.add(v);
@@ -99,8 +99,6 @@ class _ServiceSelection {
         variantIds.add(variantId);
       }
 
-      // Every priced variant ticked one by one == the whole service is
-      // ticked, so the checkbox state and the saved rows stay consistent.
       if (pricedVariants.isNotEmpty &&
           pricedVariants.every(variantIds.contains)) {
         allVariantServices.add(serviceId);
@@ -120,10 +118,7 @@ class _ServiceSelection {
 }
 
 class _CreateOfferScreenState extends State<CreateOfferScreen> {
-  // Default salon timezone (DB default — NOT user timezone!)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
-
-  // Input limits (the server clips the description in the notification)
   static const int _kTitleMax = 80;
   static const int _kDescriptionMax = 300;
 
@@ -144,18 +139,23 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   late TextEditingController _discountValueController;
   late TextEditingController _pointsRequiredController;
   late TextEditingController _usageLimitController;
+  late TextEditingController _minAdvanceDaysController;
 
   // Form state
   String _discountType = 'percentage';
-  // Date-only values (set in initState from the SALON's today)
+  String _offerTriggerType = 'appointment_time'; // ✅ NEW
+
   DateTime _validFrom = DateTime.now();
   DateTime _validTo = DateTime.now().add(const Duration(days: 30));
   bool _sendNotification = true;
 
-  // Time range
+  // Time range (only for appointment_time)
   bool _hasTimeRestriction = false;
   TimeOfDay? _validFromTime;
   TimeOfDay? _validToTime;
+
+  // ✅ NEW: Min advance days (only for advance_booking)
+  int _minAdvanceDays = 30;
 
   // Selection
   final _ServiceSelection _selection = _ServiceSelection();
@@ -163,8 +163,12 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   List<Map<String, dynamic>> _serviceMenuTree = [];
   bool _isLoadingServices = false;
 
-  // variant metadata: variant_id -> {service_id, price}
+  // variant metadata
   final Map<int, Map<String, dynamic>> _variantMeta = {};
+
+  // ✅ NEW: DB salon timezone (loaded from DB)
+  String? _dbSalonTimezone;
+  bool _isLoadingTimezone = false;
 
   final List<Map<String, dynamic>> _menuIconSuggestions = [
     {'icon': Icons.content_cut, 'name': 'content_cut'},
@@ -180,10 +184,30 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   ];
 
   bool _isSaving = false;
-  // Set after a successful save so the offer can never be submitted twice.
   bool _saved = false;
 
   bool get _isEditing => widget.editingOffer != null;
+
+  /// true when EVERY service (with a price) is fully selected. Then the offer
+  /// is saved with NO offer_services rows = "all services", so services you
+  /// add later are included automatically.
+  bool get _selectionCoversAll {
+    if (_selection.variantIds.isNotEmpty) return false;
+    bool any = false;
+    for (final e in _selection.servicePricedVariantIds.entries) {
+      if (e.value.isEmpty) continue;
+      if (!_selection.allVariantServices.contains(e.key)) return false;
+      any = true;
+    }
+    return any;
+  }
+
+  bool get _isOvernightWindow {
+    if (_validFromTime == null || _validToTime == null) return false;
+    return _validToTime!.hour * 60 + _validToTime!.minute <
+        _validFromTime!.hour * 60 + _validFromTime!.minute;
+  }
+
   bool get _isDark => context.isDarkMode;
   bool get _isWeb => context.isWeb;
 
@@ -199,14 +223,17 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   bool get _currencyUsesDecimals =>
       _currencyService.getInfo(widget.currencyCode).decimals > 0;
 
-  // Effective salon timezone (fallback to salon default, NOT device)
+  // ============================================
+  // ✅ FIXED: Effective salon timezone — DB එකෙන් load කරන එකට priority
+  // ============================================
   String get _effectiveSalonTimezone {
-    final tz = widget.salonTimezone;
-    if (tz != null && tz.isNotEmpty) return tz;
-    return _kDefaultSalonTimezone;
+    final tz = _dbSalonTimezone ?? widget.salonTimezone;
+    return (tz != null && tz.isNotEmpty) ? tz : _kDefaultSalonTimezone;
   }
 
-  // Salon "today" — used for date defaults / picker bounds / validation
+  // ============================================
+  // ✅ FIXED: Salon "today" — DB timezone එකෙන්
+  // ============================================
   DateTime get _salonToday {
     final tz = _effectiveSalonTimezone;
     try {
@@ -219,12 +246,73 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     }
   }
 
-  // Check if salon timezone differs from user
   bool get _isDifferentTimezone {
     final salonTz = _effectiveSalonTimezone;
     final userTz = TimezoneService.getCurrentTimezone();
     return salonTz.isNotEmpty && userTz.isNotEmpty && salonTz != userTz;
   }
+
+  // ============================================
+  // ✅ OFFER TYPE LABELS
+  // ============================================
+  static const Map<String, String> _offerTypeLabels = {
+    'appointment_time': 'Time Window (Happy Hour)',
+    'booking_time': 'Book Now',
+    'advance_booking': 'Advance Booking',
+  };
+
+  static const Map<String, String> _offerTypeDescriptions = {
+    'appointment_time':
+        'Offer valid only if the appointment falls within the time window (e.g., 5-7 PM).',
+    'booking_time':
+        'Offer valid for bookings made now, regardless of the appointment date.',
+    'advance_booking':
+        'Offer valid if the appointment is X+ days after the booking day (booked during the offer period).',
+  };
+
+  static const Map<String, IconData> _offerTypeIcons = {
+    'appointment_time': Icons.access_time,
+    'booking_time': Icons.flash_on,
+    'advance_booking': Icons.calendar_month,
+  };
+
+  /// appointment_time: the offer dates are APPOINTMENT dates
+  /// (booking_time / advance_booking: the BOOKING period)
+  bool get _datesAreAppointmentDates => _offerTriggerType == 'appointment_time';
+
+  String get _validityCardTitle =>
+      _datesAreAppointmentDates ? 'Appointment Dates' : 'Booking Period';
+
+  String get _validityStepSubtitle => _datesAreAppointmentDates
+      ? 'Choose the appointment dates this offer applies to.'
+      : 'Choose when customers can book with this offer.';
+
+  String get _validityExplanation {
+    switch (_offerTriggerType) {
+      case 'appointment_time':
+        return 'Appointments on these dates (and inside the time window below) '
+            'get the offer. Customers can book earlier.';
+      case 'booking_time':
+        return 'Customers who book during these dates get the offer, '
+            'whatever the appointment date is.';
+      case 'advance_booking':
+        return 'Customers who book during these dates, with an appointment '
+            '$_minAdvanceDays+ days from the booking day (any appointment '
+            'date, any time of day), get the offer.';
+      default:
+        return '';
+    }
+  }
+
+  static const List<int> _advanceDaysOptions = [7, 14, 30, 60, 90, 180];
+
+  /// Customers can book up to 365 days ahead (booking flow calendar), so an
+  /// advance offer must leave a usable window: max 300 days.
+  static const int _kMaxAdvanceDays = 300;
+
+  // Time Window (Happy Hour) offers ALWAYS have a window. Default 5-7 PM.
+  static const TimeOfDay _kDefaultWindowStart = TimeOfDay(hour: 17, minute: 0);
+  static const TimeOfDay _kDefaultWindowEnd = TimeOfDay(hour: 19, minute: 0);
 
   @override
   void initState() {
@@ -235,6 +323,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     _discountValueController = TextEditingController();
     _pointsRequiredController = TextEditingController(text: '0');
     _usageLimitController = TextEditingController();
+    _minAdvanceDaysController = TextEditingController(text: '30');
 
     if (_isEditing) {
       final offer = widget.editingOffer!;
@@ -245,29 +334,52 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
           offer['points_required']?.toString() ?? '0';
       _usageLimitController.text = offer['usage_limit']?.toString() ?? '';
       _discountType = offer['discount_type'] ?? 'percentage';
+
+      // ✅ Load offer trigger type
+      _offerTriggerType =
+          offer['offer_trigger_type']?.toString() ?? 'appointment_time';
+      _minAdvanceDays = (offer['min_advance_days'] as num?)?.toInt() ?? 30;
+      _minAdvanceDaysController.text = _minAdvanceDays.toString();
+
       _validFrom = DateTime.parse(offer['valid_from']);
       _validTo = DateTime.parse(offer['valid_to']);
 
-      if (offer['valid_from_time'] != null && offer['valid_to_time'] != null) {
+      if (_offerTriggerType == 'appointment_time' &&
+          offer['valid_from_time'] != null &&
+          offer['valid_to_time'] != null) {
         final fromStr = offer['valid_from_time'].toString();
         final toStr = offer['valid_to_time'].toString();
         if (fromStr.isNotEmpty && toStr.isNotEmpty) {
           _hasTimeRestriction = true;
-          // Load times from DB (stored as salon-local, parse directly)
           _validFromTime = _parseTime(fromStr);
           _validToTime = _parseTime(toStr);
         }
       }
+
+      // Old Happy Hour offers saved without a window: show the default window
+      // so the owner must confirm / change it before saving.
+      if (_offerTriggerType == 'appointment_time' && !_hasTimeRestriction) {
+        _hasTimeRestriction = true;
+        _validFromTime = _kDefaultWindowStart;
+        _validToTime = _kDefaultWindowEnd;
+      }
     } else {
-      // New offer: start from the SALON's today (not the device date)
+      // New offer: will be set after timezone loads
+      // (default type is appointment_time -> the window is mandatory)
+      _hasTimeRestriction = true;
+      _validFromTime = _kDefaultWindowStart;
+      _validToTime = _kDefaultWindowEnd;
       final today = _salonToday;
       _validFrom = today;
       _validTo = today.add(const Duration(days: 30));
     }
 
-    // PostFrameCallback - context ready වුනාට පස්සේ load කරනවා
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _loadServiceMenuTree();
+    // ✅ Load timezone FIRST, then service menu
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _loadSalonTimezone();
+      if (!mounted) return;
+      await _loadServiceMenuTree();
     });
   }
 
@@ -278,7 +390,49 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     _discountValueController.dispose();
     _pointsRequiredController.dispose();
     _usageLimitController.dispose();
+    _minAdvanceDaysController.dispose();
     super.dispose();
+  }
+
+  // ============================================
+  // ✅ NEW: Load salon timezone from DB
+  // ============================================
+  Future<void> _loadSalonTimezone() async {
+    if (!mounted) return;
+    setState(() => _isLoadingTimezone = true);
+
+    try {
+      final r = await supabase
+          .from('salons')
+          .select('timezone')
+          .eq('id', widget.salonId)
+          .maybeSingle();
+
+      if (!mounted) return;
+
+      final tz = r?['timezone']?.toString();
+      if (tz == null || tz.isEmpty) {
+        setState(() => _isLoadingTimezone = false);
+        return;
+      }
+
+      setState(() {
+        _dbSalonTimezone = tz;
+        _isLoadingTimezone = false;
+
+        // ✅ For new offers: reset validFrom/validTo based on correct salon today
+        if (!_isEditing) {
+          final today = _salonToday;
+          _validFrom = today;
+          _validTo = today.add(const Duration(days: 30));
+        }
+      });
+
+      debugPrint('✅ DB Salon timezone loaded: $tz (salon today: $_salonToday)');
+    } catch (e) {
+      debugPrint('❌ Error loading salon timezone: $e');
+      if (mounted) setState(() => _isLoadingTimezone = false);
+    }
   }
 
   TimeOfDay _parseTime(String timeStr) {
@@ -299,17 +453,13 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
   // ============================================
   // TimeOfDay → salon-local time string
-  //
-  // Offers වල time restriction කියන්නේ "salon වේලාවට" අදාළ.
-  // Owner picks time එක salon location එකේ clock එකට අනුව.
-  // Save as-is (salon local time). No timezone conversion.
   // ============================================
   String _timeOfDayToSalonTimeString(TimeOfDay time) {
     return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}:00';
   }
 
   // ============================================
-  // LOAD SERVICE MENU (category → service → variants)
+  // LOAD SERVICE MENU
   // ============================================
   Future<void> _loadServiceMenuTree() async {
     if (!mounted) return;
@@ -468,7 +618,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         });
       }
 
-      // Build variant id maps BEFORE the first rebuild that needs them
       for (final s in flatServices) {
         final sid = s['id'] as int;
         final variants = variantsByService[sid] ?? <Map<String, dynamic>>[];
@@ -484,7 +633,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
             .toList();
       }
 
-      // Apply editing state (needs the maps above)
       if (_isEditing) {
         _applyEditingOffer();
       }
@@ -504,13 +652,9 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
   void _applyEditingOffer() {
     final offerServices = widget.editingOffer!['offer_services'] as List? ?? [];
-
     _selection.clear();
 
     if (offerServices.isEmpty) {
-      // An offer with no offer_services rows applies to ALL services, so
-      // show every service that can be selected as ticked. (Leaving the
-      // selection empty would force the owner to re-pick everything.)
       _selection.servicePricedVariantIds.forEach((sid, priced) {
         if (priced.isNotEmpty) _selection.allVariantServices.add(sid);
       });
@@ -521,7 +665,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       final sid = os['service_id'] as int?;
       final vid = os['variant_id'] as int?;
       if (sid == null) continue;
-
       if (vid == null) {
         _selection.allVariantServices.add(sid);
       } else {
@@ -562,7 +705,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   Future<void> _selectDateRange() async {
-    // Use SALON today (not device) for date picker bounds
     final salonToday = _salonToday;
 
     final validFromDay = DateTime(
@@ -572,8 +714,9 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     );
     final validToDay = DateTime(_validTo.year, _validTo.month, _validTo.day);
 
-    final firstDate =
-        validFromDay.isBefore(salonToday) ? validFromDay : salonToday;
+    final firstDate = validFromDay.isBefore(salonToday)
+        ? validFromDay
+        : salonToday;
     final farthest = salonToday.add(const Duration(days: 365));
     final lastDate = validToDay.isAfter(farthest) ? validToDay : farthest;
 
@@ -635,14 +778,25 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         if (!_isEditing && _validTo.isBefore(_salonToday)) {
           return 'End date cannot be in the past';
         }
-        if (_hasTimeRestriction) {
+
+        if (_offerTriggerType == 'appointment_time') {
           if (_validFromTime == null || _validToTime == null) {
             return 'Please select both start and end times';
           }
           final startMin = _validFromTime!.hour * 60 + _validFromTime!.minute;
           final endMin = _validToTime!.hour * 60 + _validToTime!.minute;
-          if (endMin <= startMin) {
-            return 'End time must be after start time';
+          if (endMin == startMin) {
+            return 'Start and end time cannot be the same';
+          }
+        }
+
+        if (_offerTriggerType == 'advance_booking') {
+          final days = int.tryParse(_minAdvanceDaysController.text);
+          if (days == null || days <= 0) {
+            return 'Please enter valid minimum advance days';
+          }
+          if (days > _kMaxAdvanceDays) {
+            return 'Advance days cannot be more than $_kMaxAdvanceDays';
           }
         }
         return null;
@@ -695,7 +849,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         content: Text(msg, style: const TextStyle(color: Colors.white)),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
+        duration: Duration(seconds: msg.length > 70 ? 5 : 2),
       ),
     );
   }
@@ -704,9 +858,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   // SAVE OFFER
   // ============================================
   Future<void> _saveOffer() async {
-    // _isSaving is set synchronously below (before the first await), so a
-    // second tap can never start a second save. _saved blocks re-submits
-    // after success.
     if (_isSaving || _saved) return;
 
     for (int step = 0; step <= 2; step++) {
@@ -718,20 +869,66 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       }
     }
 
+    // Editing an offer that customers already claimed: the changes apply to
+    // them too - ask the owner first.
+    if (_isEditing) {
+      int claimed = 0;
+      try {
+        final row = await supabase
+            .from('offers')
+            .select('used_count')
+            .eq('id', widget.editingOffer!['id'] as int)
+            .maybeSingle();
+        claimed = (row?['used_count'] as num?)?.toInt() ?? 0;
+      } catch (_) {}
+      // the usage limit can not be lower than what customers already used
+      final newLimit = int.tryParse(_usageLimitController.text.trim());
+      if (newLimit != null && newLimit < claimed) {
+        _showSnackBar(
+          'Usage limit cannot be lower than $claimed (already used).',
+          Colors.orange,
+        );
+        return;
+      }
+      if (claimed > 0) {
+        if (!mounted) return;
+        final go = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Offer already claimed'),
+            content: Text(
+              '$claimed customer${claimed == 1 ? '' : 's'} already claimed '
+              'this offer. Your changes (dates, hours, discount, services) '
+              'will apply to them too.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Update anyway'),
+              ),
+            ],
+          ),
+        );
+        if (go != true) return;
+      }
+    }
+
     setState(() => _isSaving = true);
 
     final shouldNotify = !_isEditing && _sendNotification;
-
-    int? createdOfferId; // set only when THIS call inserted a new offer
+    int? createdOfferId;
 
     try {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
 
-      // Convert time to salon-local time string (save as-is)
       String? validFromTimeStr;
       String? validToTimeStr;
-      if (_hasTimeRestriction &&
+      if (_offerTriggerType == 'appointment_time' &&
           _validFromTime != null &&
           _validToTime != null) {
         validFromTimeStr = _timeOfDayToSalonTimeString(_validFromTime!);
@@ -741,6 +938,10 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       final double discountValue = _discountType != 'free_service'
           ? double.parse(_discountValueController.text)
           : 0;
+
+      final int? minAdvanceDays = _offerTriggerType == 'advance_booking'
+          ? (int.tryParse(_minAdvanceDaysController.text) ?? 30)
+          : null;
 
       final Map<String, dynamic> offerData = {
         'salon_id': widget.salonId,
@@ -753,32 +954,44 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         'valid_to': _validTo.toIso8601String().split('T')[0],
         'valid_from_time': validFromTimeStr,
         'valid_to_time': validToTimeStr,
+        'offer_trigger_type': _offerTriggerType,
+        'min_advance_days': minAdvanceDays,
         'usage_limit': _usageLimitController.text.isNotEmpty
             ? int.parse(_usageLimitController.text)
             : null,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
-      // NOTE: 'is_active' is deliberately NOT part of the update. Editing
-      // an offer must not silently re-activate an offer the owner has
-      // deactivated. New offers start active (set on insert below).
 
-      // Build offer_services rows (service + variant level) BEFORE touching
-      // the database.
+      // Scope rows. Services / variants that are no longer active (or have
+      // no price any more) are dropped and the owner is told.
+      final coversAll = _selectionCoversAll;
+      final activeServiceIds = _selection.servicePricedVariantIds.keys.toSet();
+      int droppedCount = 0;
       final List<Map<String, dynamic>> serviceRows = [];
-      for (final sid in _selection.allVariantServices) {
-        serviceRows.add({'service_id': sid, 'variant_id': null});
+      if (!coversAll) {
+        for (final sid in _selection.allVariantServices) {
+          if (!activeServiceIds.contains(sid)) {
+            droppedCount++;
+            continue;
+          }
+          serviceRows.add({'service_id': sid, 'variant_id': null});
+        }
+        for (final vid in _selection.variantIds) {
+          final meta = _variantMeta[vid];
+          if (meta == null) {
+            droppedCount++;
+            continue;
+          }
+          serviceRows.add({
+            'service_id': meta['service_id'] as int,
+            'variant_id': vid,
+          });
+        }
+        if (serviceRows.isEmpty) {
+          throw Exception('Please select at least one service or variant');
+        }
       }
-      for (final vid in _selection.variantIds) {
-        final meta = _variantMeta[vid];
-        if (meta == null) continue;
-        serviceRows.add({
-          'service_id': meta['service_id'] as int,
-          'variant_id': vid,
-        });
-      }
-      if (serviceRows.isEmpty) {
-        throw Exception('Please select at least one service or variant');
-      }
+      // coversAll => NO rows = the offer applies to every service
 
       int offerId;
 
@@ -786,7 +999,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         offerId = widget.editingOffer!['id'] as int;
         await supabase.from('offers').update(offerData).eq('id', offerId);
 
-        // Old scope, kept so it can be restored if saving the new scope fails
         final oldScope = (widget.editingOffer!['offer_services'] as List? ?? [])
             .map<Map<String, dynamic>>(
               (os) => {
@@ -800,13 +1012,14 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         await supabase.from('offer_services').delete().eq('offer_id', offerId);
 
         try {
-          await supabase
-              .from('offer_services')
-              .insert(
-                serviceRows.map((r) => {...r, 'offer_id': offerId}).toList(),
-              );
+          if (serviceRows.isNotEmpty) {
+            await supabase
+                .from('offer_services')
+                .insert(
+                  serviceRows.map((r) => {...r, 'offer_id': offerId}).toList(),
+                );
+          }
         } catch (e) {
-          // Don't leave the offer with NO scope (= applies to everything)
           if (oldScope.isNotEmpty) {
             try {
               await supabase.from('offer_services').insert(oldScope);
@@ -833,14 +1046,14 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         createdOfferId = offerId;
 
         try {
-          await supabase
-              .from('offer_services')
-              .insert(
-                serviceRows.map((r) => {...r, 'offer_id': offerId}).toList(),
-              );
+          if (serviceRows.isNotEmpty) {
+            await supabase
+                .from('offer_services')
+                .insert(
+                  serviceRows.map((r) => {...r, 'offer_id': offerId}).toList(),
+                );
+          }
         } catch (e) {
-          // An offer without offer_services rows would apply to ALL
-          // services, so remove the half-created offer.
           try {
             await supabase.from('offers').delete().eq('id', offerId);
             createdOfferId = null;
@@ -851,11 +1064,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         }
       }
 
-      // Everything is saved. The DATABASE notifies the followers: ONE call
-      // (notify_offer_followers, Section 111.5) creates the in-app rows and
-      // sends the pushes for every follower. Nothing loops in the app, so it
-      // does not matter if the owner closes the app right after this.
       bool notifyFailed = false;
+      String notifyNote = ''; // what really happened with the notification
       if (shouldNotify) {
         try {
           final res = await supabase
@@ -866,11 +1076,28 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
             notifyFailed = true;
             debugPrint('⚠️ notify_offer_followers: ${res['message']}');
           } else if (res is Map) {
-            debugPrint('📤 Followers notified: ${res['notified'] ?? 0}');
+            final notified = (res['notified'] as num?)?.toInt() ?? 0;
+            final pushFailed = (res['push_failed'] as num?)?.toInt() ?? 0;
+            final reason = res['reason']?.toString();
+            debugPrint('📤 notify_offer_followers: $res');
+
+            if (notified == 0) {
+              notifyNote = reason == 'no_followers'
+                  ? ' No followers to notify yet.'
+                  : (reason == 'already_notified'
+                        ? ' Followers were already notified.'
+                        : '');
+            } else if (pushFailed > 0) {
+              notifyFailed = true;
+              notifyNote =
+                  ' $notified follower${notified == 1 ? '' : 's'} notified in the app, '
+                  'but $pushFailed push notification${pushFailed == 1 ? '' : 's'} could not be sent.';
+            } else {
+              notifyNote =
+                  ' $notified follower${notified == 1 ? '' : 's'} notified.';
+            }
           }
         } on TimeoutException {
-          // The request already reached the server, which keeps working on
-          // it. Not a failure.
           debugPrint('⏱ notify_offer_followers is still running on the server');
         } catch (e) {
           notifyFailed = true;
@@ -882,13 +1109,21 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
       if (!mounted) return;
 
+      final droppedNote = droppedCount > 0
+          ? ' ($droppedCount unavailable service/variant${droppedCount == 1 ? ' was' : 's were'} removed from the offer)'
+          : '';
+
       _showSnackBar(
-        _isEditing
-            ? '✏️ Offer updated successfully'
-            : (notifyFailed
-                  ? '✨ Offer created, but followers could not be notified'
-                  : '✨ Offer created successfully!'),
-        notifyFailed ? Colors.orange : context.successColor,
+        (_isEditing
+                ? '✏️ Offer updated successfully'
+                : (notifyFailed
+                      ? '✨ Offer created, but the notification had a problem.'
+                      : '✨ Offer created successfully!')) +
+            (_isEditing ? '' : notifyNote) +
+            droppedNote,
+        (notifyFailed || droppedCount > 0)
+            ? Colors.orange
+            : context.successColor,
       );
 
       Navigator.pop(context, true);
@@ -1199,7 +1434,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   // ============================================
-  // STEP 0 — Details
+  // STEP 0 — Details (with Offer Type)
   // ============================================
   Widget _buildStep0() {
     return Form(
@@ -1209,8 +1444,98 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         children: [
           _buildStepHeader(
             'Offer Details',
-            'Give your offer a name and choose the discount.',
+            'Give your offer a name, choose the type, and set the discount.',
           ),
+
+          // ✅ Offer Type Selection
+          _buildCard(
+            icon: Icons.category,
+            color: Colors.purple,
+            title: 'Offer Type',
+            children: [
+              ..._offerTypeLabels.entries.map((entry) {
+                final type = entry.key;
+                final isSelected = _offerTriggerType == type;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        _offerTriggerType = type;
+                        if (type == 'appointment_time') {
+                          _hasTimeRestriction = true;
+                          _validFromTime ??= _kDefaultWindowStart;
+                          _validToTime ??= _kDefaultWindowEnd;
+                        } else {
+                          _hasTimeRestriction = false;
+                          _validFromTime = null;
+                          _validToTime = null;
+                        }
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? AppTheme.primary.withValues(alpha: 0.1)
+                            : _fieldFill,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected ? AppTheme.primary : _borderColor,
+                          width: isSelected ? 2 : 1,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _offerTypeIcons[type],
+                            color: isSelected
+                                ? AppTheme.primary
+                                : _subTextColor,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  entry.value,
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    color: isSelected
+                                        ? AppTheme.primary
+                                        : _textColor,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  _offerTypeDescriptions[type] ?? '',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: _subTextColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (isSelected)
+                            Icon(
+                              Icons.check_circle,
+                              color: AppTheme.primary,
+                              size: 22,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ],
+          ),
+          const SizedBox(height: 16),
+
           _buildCard(
             icon: Icons.local_offer,
             color: AppTheme.primary,
@@ -1365,84 +1690,172 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildStepHeader(
-          'Validity Period',
-          'Choose when this offer is active.',
-        ),
+        _buildStepHeader('Validity Period', _validityStepSubtitle),
         _buildCard(
           icon: Icons.event,
           color: Colors.blue,
-          title: 'Offer Dates',
+          title: _validityCardTitle,
           children: [
             _buildDateRangeField(),
             if (days > 0)
               _buildInfoBanner(
-                'This offer will run for $days day${days == 1 ? '' : 's'}.',
+                '$_validityExplanation\n'
+                '(${_datesAreAppointmentDates ? 'Appointment dates' : 'Booking period'}: '
+                '$days day${days == 1 ? '' : 's'})',
                 Icons.info_outline,
                 Colors.blue,
               ),
           ],
         ),
         const SizedBox(height: 16),
-        _buildCard(
-          icon: Icons.access_time,
-          color: Colors.purple,
-          title: 'Time of Day',
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Restrict to specific hours',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          color: _textColor,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Offer valid only during selected hours (e.g., happy hour)',
-                        style: TextStyle(fontSize: 12, color: _subTextColor),
-                      ),
-                    ],
-                  ),
-                ),
-                Switch(
-                  value: _hasTimeRestriction,
-                  onChanged: (v) {
-                    setState(() {
-                      _hasTimeRestriction = v;
-                      if (v) {
-                        _validFromTime ??= const TimeOfDay(hour: 9, minute: 0);
-                        _validToTime ??= const TimeOfDay(hour: 18, minute: 0);
-                      } else {
-                        _validFromTime = null;
-                        _validToTime = null;
-                      }
-                    });
-                  },
-                  activeThumbColor: AppTheme.primary,
-                ),
-              ],
-            ),
-            if (_hasTimeRestriction) ...[
-              const SizedBox(height: 16),
-              _buildTimeRangePicker(),
-              // Timezone note (only if salon tz != user tz)
-              if (_isDifferentTimezone) ...[
-                const SizedBox(height: 8),
-                _buildInfoBanner(
-                  'Times are interpreted in the salon\'s local timezone (${TimezoneService.getTimezoneNameFor(_effectiveSalonTimezone)}).',
-                  Icons.public,
-                  Colors.blue,
-                ),
-              ],
-            ],
-          ],
+
+        if (_offerTriggerType == 'appointment_time') ...[
+          _buildTimeRestrictionCard(),
+        ] else if (_offerTriggerType == 'booking_time') ...[
+          _buildBookingTimeInfoCard(),
+        ] else if (_offerTriggerType == 'advance_booking') ...[
+          _buildAdvanceBookingCard(),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildTimeRestrictionCard() {
+    return _buildCard(
+      icon: Icons.access_time,
+      color: Colors.purple,
+      title: 'Time Window',
+      children: [
+        Text(
+          'Offer valid only if the appointment falls within these hours (e.g., happy hour)',
+          style: TextStyle(fontSize: 12, color: _subTextColor),
         ),
+        const SizedBox(height: 16),
+        _buildTimeRangePicker(),
+        if (_isOvernightWindow) ...[
+          const SizedBox(height: 8),
+          _buildInfoBanner(
+            'Overnight window: from ${_formatTime(_validFromTime!)} until '
+            '${_formatTime(_validToTime!)} the next morning.',
+            Icons.nightlight_round,
+            Colors.indigo,
+          ),
+        ],
+        if (_isDifferentTimezone) ...[
+          const SizedBox(height: 8),
+          _buildInfoBanner(
+            'Times are interpreted in the salon\'s local timezone (${TimezoneService.getTimezoneNameFor(_effectiveSalonTimezone)}).',
+            Icons.public,
+            Colors.blue,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildBookingTimeInfoCard() {
+    return _buildCard(
+      icon: Icons.flash_on,
+      color: Colors.orange,
+      title: 'Booking Time',
+      children: [
+        _buildInfoBanner(
+          'This offer is valid for bookings made now (during the validity period), regardless of the appointment date.',
+          Icons.info_outline,
+          Colors.orange,
+        ),
+        const SizedBox(height: 8),
+        _buildInfoBanner(
+          'Perfect for limited-time promotions like "Book today and get 20% off".',
+          Icons.lightbulb_outline,
+          Colors.blue,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAdvanceBookingCard() {
+    return _buildCard(
+      icon: Icons.calendar_month,
+      color: Colors.teal,
+      title: 'Advance Booking',
+      children: [
+        _buildInfoBanner(
+          'Offer valid only if the appointment is booked at least X days in advance.',
+          Icons.info_outline,
+          Colors.teal,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Minimum advance days *',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            color: _textColor,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _advanceDaysOptions.map((days) {
+            final isSelected = _minAdvanceDays == days;
+            return ChoiceChip(
+              label: Text('$days days'),
+              selected: isSelected,
+              onSelected: (sel) {
+                if (sel) {
+                  setState(() {
+                    _minAdvanceDays = days;
+                    _minAdvanceDaysController.text = days.toString();
+                  });
+                }
+              },
+              selectedColor: AppTheme.primary.withValues(alpha: 0.15),
+              backgroundColor: _cardBg,
+              side: BorderSide(
+                color: isSelected
+                    ? AppTheme.primary
+                    : (_isDark ? Colors.white12 : Colors.grey.shade300),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 12),
+        _buildTextField(
+          controller: _minAdvanceDaysController,
+          label: 'Custom advance days',
+          hint: 'e.g., 45',
+          icon: Icons.timer,
+          helperText:
+              'Appointment must be at least this many days ahead (max $_kMaxAdvanceDays)',
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          onChanged: (v) {
+            final n = int.tryParse(v);
+            if (n != null && n > 0 && n <= _kMaxAdvanceDays) {
+              setState(() => _minAdvanceDays = n);
+            }
+          },
+          validator: (v) {
+            if (v == null || v.isEmpty) {
+              return 'Please enter minimum advance days';
+            }
+            final n = int.tryParse(v);
+            if (n == null) return 'Invalid number';
+            if (n <= 0) return 'Must be greater than 0';
+            if (n > _kMaxAdvanceDays) return 'Max $_kMaxAdvanceDays days';
+            return null;
+          },
+        ),
+        if (_minAdvanceDays > 0) ...[
+          const SizedBox(height: 12),
+          _buildInfoBanner(
+            'Customers who book at least $_minAdvanceDays day${_minAdvanceDays == 1 ? '' : 's'} in advance will get this offer.',
+            Icons.check_circle_outline,
+            Colors.green,
+          ),
+        ],
       ],
     );
   }
@@ -1661,8 +2074,12 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     final serviceCount = _selection.allVariantServices.length;
     final variantCount = _selection.variantIds.length;
     final parts = <String>[];
-    if (serviceCount > 0) parts.add('$serviceCount service(s)');
-    if (variantCount > 0) parts.add('$variantCount variant(s)');
+    if (_selectionCoversAll) {
+      parts.add('All services (new services included)');
+    } else {
+      if (serviceCount > 0) parts.add('$serviceCount service(s)');
+      if (variantCount > 0) parts.add('$variantCount variant(s)');
+    }
 
     final hasSelectable = _serviceMenuTree.any((cat) {
       for (final s in (cat['services'] as List)) {
@@ -2003,6 +2420,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     if (serviceCount == 0 && variantCount == 0) {
       return 'No selection';
     }
+    if (_selectionCoversAll) return 'All services (new services included)';
 
     final List<String> labels = [];
 
@@ -2031,6 +2449,18 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
       return labels.join(', ');
     }
     return '${labels.take(3).join(', ')} +${labels.length - 3} more';
+  }
+
+  String get _offerTypeSummary {
+    final label = _offerTypeLabels[_offerTriggerType] ?? 'Unknown';
+    if (_offerTriggerType == 'appointment_time') {
+      final from = _validFromTime != null ? _formatTime(_validFromTime!) : '';
+      final to = _validToTime != null ? _formatTime(_validToTime!) : '';
+      return '$label\n$from - $to daily${_isOvernightWindow ? ' (overnight)' : ''}';
+    } else if (_offerTriggerType == 'advance_booking') {
+      return '$label\nAt least $_minAdvanceDays days ahead';
+    }
+    return label;
   }
 
   Widget _buildReviewTile({
@@ -2089,10 +2519,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
   Widget _buildReviewStep() {
     final df = DateFormat('MMM dd, yyyy');
-    final timeText =
-        _hasTimeRestriction && _validFromTime != null && _validToTime != null
-        ? '\n${_formatTime(_validFromTime!)} - ${_formatTime(_validToTime!)} daily'
-        : '';
 
     final points = int.tryParse(_pointsRequiredController.text) ?? 0;
     final limit = _usageLimitController.text.isEmpty
@@ -2105,6 +2531,12 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         _buildStepHeader(
           _isEditing ? 'Review & Update' : 'Review & Create',
           'Check everything below, then tap "${_isEditing ? 'Update Offer' : 'Create Offer'}" to finish.',
+        ),
+        _buildReviewTile(
+          icon: _offerTypeIcons[_offerTriggerType] ?? Icons.category,
+          title: 'Offer Type',
+          value: _offerTypeSummary,
+          onEdit: () => _goToStep(0),
         ),
         _buildReviewTile(
           icon: Icons.local_offer,
@@ -2122,8 +2554,10 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         ),
         _buildReviewTile(
           icon: Icons.event,
-          title: 'Validity',
-          value: '${df.format(_validFrom)} → ${df.format(_validTo)}$timeText',
+          title: _datesAreAppointmentDates
+              ? 'Appointment Dates'
+              : 'Booking Period',
+          value: '${df.format(_validFrom)} → ${df.format(_validTo)}',
           onEdit: () => _goToStep(1),
         ),
         _buildReviewTile(
@@ -2157,6 +2591,27 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   }
 
   Widget _buildStepContent() {
+    // ✅ Show loading while timezone is loading (initial)
+    if (_isLoadingTimezone && _currentStep == 0) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: AppTheme.primary),
+              const SizedBox(height: 16),
+              Text(
+                'Loading salon timezone...',
+                style: TextStyle(color: _subTextColor),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     switch (_currentStep) {
       case 0:
         return _buildStep0();
