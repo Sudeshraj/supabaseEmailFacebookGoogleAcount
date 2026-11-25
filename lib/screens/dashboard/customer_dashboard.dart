@@ -10,6 +10,7 @@ import 'package:flutter_application_1/services/permission_service.dart';
 import 'package:flutter_application_1/services/currency_service.dart';
 import 'package:flutter_application_1/services/currency_settings_service.dart'; // ✅ NEW
 import 'package:flutter_application_1/theme/app_theme.dart';
+import 'package:flutter_application_1/widgets/offer_rules_ui.dart';
 import 'package:flutter_application_1/widgets/permission_card.dart';
 import 'package:flutter_application_1/widgets/side_menu.dart';
 import 'package:go_router/go_router.dart';
@@ -1216,7 +1217,14 @@ Future<void> _viewNotifications() async {
         followedSalonIds.add(item['salon_id'] as int);
       }
 
-      final today = DateTime.now().toIso8601String().split('T')[0];
+      // loose lower bound only: the exact salon-timezone check is done per
+      // offer on the card (offerClaimBlock). Happy-hour offers must be listed
+      // before their appointment dates start, so there is NO valid_from filter.
+      final looseToday = DateTime.now()
+          .toUtc()
+          .subtract(const Duration(days: 1))
+          .toIso8601String()
+          .split('T')[0];
 
       final result = await supabase
           .from('offers')
@@ -1232,6 +1240,7 @@ Future<void> _viewNotifications() async {
             image_url,
             usage_limit,
             used_count,
+            $kOfferRuleColumns,
             salon_id,
             salons:salons!offers_salon_id_fkey (
               id,
@@ -1239,7 +1248,8 @@ Future<void> _viewNotifications() async {
               logo_url,
               address,
               currency_code,
-              currency_symbol
+              currency_symbol,
+              timezone
             ),
             offer_services (
               service_id,
@@ -1250,8 +1260,7 @@ Future<void> _viewNotifications() async {
           ''')
           .inFilter('salon_id', followedSalonIds)
           .eq('is_active', true)
-          .lte('valid_from', today)
-          .gte('valid_to', today)
+          .gte('valid_to', looseToday)
           .order('created_at', ascending: false)
           .limit(20);
 
@@ -1498,10 +1507,11 @@ Future<void> _loadUnreadCount() async {
         }
       }
 
-      if (!_isOfferActive(offer)) {
-        if (mounted) {
-          _showSnackBar('This offer has expired', Colors.red);
-        }
+      // expired / not started / fully used (salon timezone)
+      final salonTz = (offer['salons'] as Map?)?['timezone']?.toString();
+      final block = offerClaimBlock(offer, offerSalonToday(salonTz));
+      if (block != null) {
+        if (mounted) _showSnackBar(block.message, Colors.red);
         return;
       }
 
@@ -1744,65 +1754,6 @@ Future<void> _loadUnreadCount() async {
   // ============================================================
   // DATE HELPERS
   // ============================================================
-  DateTime _parseDateSafely(String dateStr) {
-    String processedStr = dateStr;
-    if (!dateStr.contains('T') && dateStr.length == 10) {
-      processedStr = '${dateStr}T00:00:00Z';
-    }
-    return DateTime.parse(processedStr).toUtc();
-  }
-
-  bool _isOfferActive(Map<String, dynamic> offer) {
-    try {
-      final validFromUtc = _parseDateSafely(offer['valid_from']);
-      final validToUtc = _parseDateSafely(offer['valid_to']);
-
-      final nowUtc = DateTime.now().toUtc();
-      final todayUtcMidnight = DateTime.utc(
-        nowUtc.year,
-        nowUtc.month,
-        nowUtc.day,
-      );
-      final validFromUtcMidnight = DateTime.utc(
-        validFromUtc.year,
-        validFromUtc.month,
-        validFromUtc.day,
-      );
-      final validToUtcMidnight = DateTime.utc(
-        validToUtc.year,
-        validToUtc.month,
-        validToUtc.day,
-      );
-
-      return !validFromUtcMidnight.isAfter(todayUtcMidnight) &&
-          !validToUtcMidnight.isBefore(todayUtcMidnight);
-    } catch (e) {
-      debugPrint('Error checking offer active: $e');
-      return false;
-    }
-  }
-
-  int _getDaysLeft(String validToUtc) {
-    try {
-      final utcDate = _parseDateSafely(validToUtc);
-      final nowUtc = DateTime.now().toUtc();
-      final todayUtcMidnight = DateTime.utc(
-        nowUtc.year,
-        nowUtc.month,
-        nowUtc.day,
-      );
-      final validToUtcMidnight = DateTime.utc(
-        utcDate.year,
-        utcDate.month,
-        utcDate.day,
-      );
-      return validToUtcMidnight.difference(todayUtcMidnight).inDays;
-    } catch (e) {
-      debugPrint('Error calculating days left: $e');
-      return -1;
-    }
-  }
-
   String _convertUtcToUserTime(String? utcTime, DateTime referenceDate) {
     if (utcTime == null || utcTime.isEmpty) return '--:--';
     try {
@@ -3001,8 +2952,14 @@ Future<void> _loadUnreadCount() async {
     final salonData = offer['salons'] as Map?;
     final salonName = (salonData?['name'] as String?) ?? 'Special Offer';
 
-    final daysLeft = _getDaysLeft(offer['valid_to']);
-    final isExpired = daysLeft <= 0;
+    final salonToday = offerSalonToday(salonData?['timezone']?.toString());
+    final daysLeft = offerDaysLeft(offer, salonToday) ?? 0;
+    final isExpired = daysLeft < 0; // the last valid day (0) is still valid
+    final claimBlock = offerClaimBlock(offer, salonToday);
+    final symbolFromSalon = salonData?['currency_symbol']?.toString();
+    final panelSymbol = (symbolFromSalon != null && symbolFromSalon.isNotEmpty)
+        ? symbolFromSalon
+        : _userCurrencySymbol;
     final points = (offer['points_required'] as num?)?.toInt() ?? 0;
     final description = (offer['description'] as String?) ?? '';
     final scopeSummary = offer['scope_summary']?.toString() ?? '';
@@ -3030,8 +2987,8 @@ Future<void> _loadUnreadCount() async {
     } else if (isClaiming) {
       buttonLabel = 'Applying...';
       buttonEnabled = false;
-    } else if (isExpired) {
-      buttonLabel = 'Expired';
+    } else if (claimBlock != null) {
+      buttonLabel = claimBlock.shortLabel;
       buttonEnabled = false;
     } else {
       buttonLabel = 'Apply Offer';
@@ -3215,6 +3172,12 @@ Future<void> _loadUnreadCount() async {
                 ),
               ),
             ],
+            const SizedBox(height: 8),
+            OfferRulesPanel(
+              offer: offer,
+              color: color,
+              currencySymbol: panelSymbol,
+            ),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -3268,7 +3231,9 @@ Future<void> _loadUnreadCount() async {
                       ),
                       const SizedBox(width: 2),
                       Text(
-                        isExpired ? 'Expired' : '$daysLeft days left',
+                        isExpired
+                            ? 'Expired'
+                            : (daysLeft == 0 ? 'Last day' : '$daysLeft days left'),
                         style: TextStyle(
                           fontSize: 12,
                           color: daysLeft <= 3 ? Colors.red : secondaryColor,
@@ -3889,7 +3854,7 @@ Future<void> _loadUnreadCount() async {
                           crossAxisCount: 2,
                           crossAxisSpacing: 16,
                           mainAxisSpacing: 16,
-                          mainAxisExtent: 320,
+                          mainAxisExtent: 400,
                         ),
                     itemBuilder: (context, index) =>
                         _buildFacebookStyleOfferPost(

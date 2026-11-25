@@ -8,6 +8,7 @@ import '../../services/timezone_service.dart';
 import '../../services/currency_service.dart';
 import '../../services/currency_settings_service.dart'; // ✅ NEW
 import '../../extensions/context_extensions.dart';
+import '../../widgets/offer_rules_ui.dart';
 
 class SalonProfileScreen extends StatefulWidget {
   final Map<String, dynamic> salon;
@@ -484,7 +485,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   Future<void> _loadSalonOffers() async {
     try {
       final user = supabase.auth.currentUser;
-      final today = DateTime.now().toIso8601String().split('T')[0];
+      // loose lower bound only (exact check = offerClaimBlock on the card);
+      // no valid_from filter: happy-hour offers are listed before they start
+      final looseToday = DateTime.now()
+          .toUtc()
+          .subtract(const Duration(days: 1))
+          .toIso8601String()
+          .split('T')[0];
 
       final offers = await supabase
           .from('offers')
@@ -500,6 +507,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             image_url,
             usage_limit,
             used_count,
+            $kOfferRuleColumns,
             offer_services (
               service_id,
               variant_id,
@@ -509,8 +517,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           ''')
           .eq('salon_id', widget.salon['id'])
           .eq('is_active', true)
-          .lte('valid_from', today)
-          .gte('valid_to', today)
+          .gte('valid_to', looseToday)
           .order('points_required', ascending: true);
 
       Map<int, String> claimStatus = {};
@@ -845,6 +852,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       }
       if (claimStatus == 'used') {
         _showSnackBar('You have already used this offer', Colors.red);
+        return;
+      }
+
+      // expired / not started / fully used (salon timezone)
+      final block = offerClaimBlock(
+        offer,
+        offerSalonToday(widget.salon['timezone']?.toString()),
+      );
+      if (block != null) {
+        _showSnackBar(block.message, Colors.red);
         return;
       }
 
@@ -1675,7 +1692,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   ),
                 )
               : SizedBox(
-                  height: 320,
+                  height: 410,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     itemCount: _offers.length > 3 ? 3 : _offers.length,
@@ -2073,8 +2090,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   // ============================================================
   Widget _buildOfferCard(Map<String, dynamic> offer, int index) {
     final color = _getOfferColor(index);
-    final validTo = DateTime.parse(offer['valid_to']);
-    final daysLeft = validTo.difference(DateTime.now()).inDays;
+    final salonToday = offerSalonToday(widget.salon['timezone']?.toString());
+    final daysLeft = offerDaysLeft(offer, salonToday) ?? 0;
+    final claimBlock = offerClaimBlock(offer, salonToday);
 
     final offerId = offer['id'] as int;
     final isClaiming = _claimingOfferIds.contains(offerId);
@@ -2096,6 +2114,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       buttonEnabled = false;
     } else if (isClaiming) {
       buttonLabel = 'Claiming...';
+      buttonEnabled = false;
+    } else if (claimBlock != null) {
+      buttonLabel = claimBlock.shortLabel;
       buttonEnabled = false;
     } else {
       buttonLabel = 'Claim Offer';
@@ -2236,6 +2257,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   ),
                 ],
 
+                const SizedBox(height: 8),
+                OfferRulesPanel(
+                  offer: offer,
+                  color: color,
+                  currencySymbol:
+                      widget.salon['currency_symbol']?.toString() ?? '',
+                ),
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -2318,9 +2346,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                             ),
                             const SizedBox(width: 2),
                             Text(
-                              daysLeft <= 0
+                              daysLeft < 0
                                   ? 'Expired'
-                                  : '$daysLeft days left',
+                                  : (daysLeft == 0
+                                      ? 'Last day'
+                                      : '$daysLeft days left'),
                               style: context.bodySmall.copyWith(
                                 color: daysLeft <= 3
                                     ? Colors.red

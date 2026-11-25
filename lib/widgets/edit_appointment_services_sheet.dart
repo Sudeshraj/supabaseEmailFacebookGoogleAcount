@@ -9,18 +9,25 @@ import '../../theme/app_theme.dart';
 /// `barber_update_appointment_services` RPC එක call වෙනවා.
 ///
 /// appointment map එකේ තියෙන්න ඕන keys:
-///   id, salon_id, offer_id, customer_name, services
+///   id, salon_id, customer_name, services
 ///   (appointment_services rows: `id` or `appointment_service_id`,
 ///   `variant_id`), extra_charge, extra_charge_note, symbol (optional)
 ///
-/// ✅ RULE (same as the salon profile menu):
+/// ✅ VARIANT RULE (same as the salon profile menu):
 ///   - the unit is the VARIANT, not the service
 ///   - a service can have many variants on one appointment
-///     (Haircut Male + Haircut Child ...)
 ///   - the SAME variant can be on an appointment only once
-///   - a variant that is already on the appointment is shown ticked and
-///     disabled ("Added"); if it is marked for removal it can be ticked again
-///     (replacement)
+///
+/// ✅ OFFER RULE (same as the booking flow / DB section 63):
+///   - the offers of the appointment are the ones already on its service
+///     lines (appointment_services.offer_id) - they were checked and counted
+///     when the customer booked, so dates / usage limit are not checked again
+///   - after every add / remove the offers are re-placed on the lines:
+///       * ONE offer = ONE service line (biggest discount wins)
+///       * one line carries ONE offer
+///       * per line: offer scope (service / variant) + minimum spend
+///   - an offer that no line can carry any more is given back to the customer
+///   - the preview here uses the same rule; the DB decides when saving
 ///
 /// Save සාර්ථක නම් `true` return කරනවා (screen එක refresh කරන්න).
 class EditAppointmentServicesSheet extends StatefulWidget {
@@ -51,9 +58,15 @@ class _EditAppointmentServicesSheetState
   // අලුතින් add කරපු (තාම save කරලා නෑ)
   final List<Map<String, dynamic>> _added = [];
 
-  // Appointment එකේ offer එක (active නම්)
-  Map<String, dynamic>? _offer;
-  Set<int> _offerServiceIds = {};
+  // Offers that are already on this appointment (see OFFER RULE above)
+  List<Map<String, dynamic>> _offers = [];
+  final Map<int, List<Map<String, dynamic>>> _offerScope = {};
+
+  // stored discount of every existing line (restored when nothing changed)
+  final Map<int, Map<String, dynamic>> _initial = {};
+
+  // offers that no line can carry after the current changes
+  List<int> _releasedOfferIds = [];
 
   final TextEditingController _extraCtrl = TextEditingController();
   final TextEditingController _noteCtrl = TextEditingController();
@@ -298,38 +311,82 @@ class _EditAppointmentServicesSheetState
         });
       }
 
-      // Offer
-      Map<String, dynamic>? offer;
-      Set<int> offerServiceIds = {};
-      final offerId = widget.appointment['offer_id'];
-      if (offerId != null) {
-        final today = DateTime.now().toIso8601String().substring(0, 10);
-        final o = await supabase
-            .from('offers')
-            .select('id, title, discount_type, discount_value')
-            .eq('id', offerId)
-            .eq('is_active', true)
-            .lte('valid_from', today)
-            .gte('valid_to', today)
-            .maybeSingle();
+      // ✅ Offers that are already on this appointment's service lines
+      final offerIds = <int>{};
+      final initial = <int, Map<String, dynamic>>{};
+      final apptId = widget.appointment['id'];
 
-        if (o != null) {
-          offer = o;
-          final rows = await supabase
-              .from('offer_services')
-              .select('service_id')
-              .eq('offer_id', offerId);
-          offerServiceIds = rows
-              .map<int>((r) => r['service_id'] as int)
-              .toSet();
+      if (apptId != null) {
+        try {
+          final lineRows = await supabase
+              .from('appointment_services')
+              .select('id, service_id, variant_id, offer_id, discount_amount, final_price')
+              .eq('appointment_id', apptId);
+
+          for (final row in lineRows) {
+            final lineId = _toInt(row['id'], fallback: -1);
+            final offerId = row['offer_id'] == null
+                ? null
+                : _toInt(row['offer_id'], fallback: -1);
+            final disc = _toDouble(row['discount_amount']);
+
+            for (final ex in _existing) {
+              if (ex['id'] == lineId) {
+                ex['service_id'] = row['service_id'];
+                ex['offer_id'] = offerId;
+                initial[lineId] = {
+                  'discount_amount': disc,
+                  'final_price': _toDouble(row['final_price']),
+                  'offer_id': offerId,
+                };
+              }
+            }
+            if (offerId != null && offerId > 0) offerIds.add(offerId);
+          }
+        } catch (e) {
+          debugPrint('⚠️ appointment lines failed: $e');
+        }
+      }
+
+      // old bookings may still have the single offer on the appointment
+      final legacy = widget.appointment['offer_id'];
+      if (legacy != null) {
+        final l = _toInt(legacy, fallback: -1);
+        if (l > 0) offerIds.add(l);
+      }
+
+      List<Map<String, dynamic>> offers = [];
+      final Map<int, List<Map<String, dynamic>>> scope = {};
+      if (offerIds.isNotEmpty) {
+        final rows = await supabase
+            .from('offers')
+            .select('id, title, discount_type, discount_value, minimum_spend')
+            .inFilter('id', offerIds.toList());
+        offers = rows.map<Map<String, dynamic>>(
+          (r) => Map<String, dynamic>.from(r),
+        ).toList();
+
+        final scopeRows = await supabase
+            .from('offer_services')
+            .select('offer_id, service_id, variant_id')
+            .inFilter('offer_id', offerIds.toList());
+        for (final r in scopeRows) {
+          scope
+              .putIfAbsent(_toInt(r['offer_id']), () => [])
+              .add(Map<String, dynamic>.from(r));
         }
       }
 
       if (!mounted) return;
       setState(() {
         _tree = tree;
-        _offer = offer;
-        _offerServiceIds = offerServiceIds;
+        _offers = offers;
+        _offerScope
+          ..clear()
+          ..addAll(scope);
+        _initial
+          ..clear()
+          ..addAll(initial);
         _isLoading = false;
       });
     } catch (e, st) {
@@ -344,19 +401,41 @@ class _EditAppointmentServicesSheetState
   }
 
   // ---------------------------------------------------------------
-  // DISCOUNT preview
+  // ✅ OFFER PREVIEW (same rule as DB section 63 / booking flow)
   // ---------------------------------------------------------------
-  bool _offerApplies(int serviceId) {
-    if (_offer == null) return false;
-    return _offerServiceIds.isEmpty || _offerServiceIds.contains(serviceId);
+  Map<String, dynamic>? _offerById(dynamic id) {
+    if (id == null) return null;
+    for (final o in _offers) {
+      if (o['id'] == id) return o;
+    }
+    return null;
   }
 
-  double _discountFor(int serviceId, double price) {
-    if (!_offerApplies(serviceId)) return 0;
-    final type = _offer!['discount_type']?.toString() ?? '';
-    final value = _toDouble(_offer!['discount_value']);
+  String _offerLabelOf(Map<String, dynamic> o) {
+    final type = o['discount_type']?.toString() ?? '';
+    final value = _toDouble(o['discount_value']);
+    final v = value.toStringAsFixed(value % 1 == 0 ? 0 : 1);
+    if (type == 'percentage') return '$v% OFF';
+    if (type == 'fixed') return '$_sym $v OFF';
+    return 'FREE';
+  }
 
-    switch (type) {
+  /// does the offer cover this service (+ variant)? (empty scope = all)
+  bool _inScope(Map<String, dynamic> o, int? serviceId, int? variantId) {
+    final rows = _offerScope[_toInt(o['id'])] ?? const [];
+    if (rows.isEmpty) return true;
+    for (final r in rows) {
+      if (r['service_id'] == serviceId &&
+          (r['variant_id'] == null || r['variant_id'] == variantId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  double _discountOf(Map<String, dynamic> o, double price) {
+    final value = _toDouble(o['discount_value']);
+    switch (o['discount_type']?.toString()) {
       case 'percentage':
         return (price * value / 100 * 100).round() / 100;
       case 'fixed':
@@ -368,15 +447,87 @@ class _EditAppointmentServicesSheetState
     }
   }
 
-  String _offerLabel() {
-    if (_offer == null) return '';
-    final type = _offer!['discount_type']?.toString() ?? '';
-    final value = _toDouble(_offer!['discount_value']);
-    final v = value.toStringAsFixed(value % 1 == 0 ? 0 : 1);
-    if (type == 'percentage') return '$v% OFF';
-    if (type == 'fixed') return '$_sym $v OFF';
-    return 'FREE';
+  bool _lineQualifies(Map<String, dynamic> o, Map<String, dynamic> line) {
+    final price = _toDouble(line['original_price']);
+    if (price < _toDouble(o['minimum_spend'])) return false;
+    final sid = line['service_id'] is int
+        ? line['service_id'] as int
+        : int.tryParse('${line['service_id']}');
+    final vid = line['variant_id'] is int ? line['variant_id'] as int : null;
+    return _inScope(o, sid, vid);
   }
+
+  /// Re-place the offers on the final set of lines:
+  /// ONE offer = ONE line, one line = ONE offer, biggest discount first.
+  /// Call inside setState after every add / remove.
+  void _recompute() {
+    final changed = _removeIds.isNotEmpty || _added.isNotEmpty;
+
+    if (!changed) {
+      // nothing changed: show exactly what is stored
+      for (final ex in _existing) {
+        final init = _initial[ex['id']];
+        if (init == null) continue;
+        ex['discount_amount'] = init['discount_amount'];
+        ex['final_price'] = init['final_price'];
+        ex['offer_id'] = init['offer_id'];
+      }
+      _releasedOfferIds = [];
+      return;
+    }
+
+    if (_offers.isEmpty) return;
+
+    final lines = <Map<String, dynamic>>[..._kept, ..._added];
+    for (final l in lines) {
+      l['discount_amount'] = 0.0;
+      l['final_price'] = _toDouble(l['original_price']);
+      l['offer_id'] = null;
+    }
+
+    final done = <int>{};
+    while (true) {
+      Map<String, dynamic>? bestLine;
+      Map<String, dynamic>? bestOffer;
+      double bestDisc = 0;
+
+      for (final o in _offers) {
+        final oid = _toInt(o['id']);
+        if (done.contains(oid)) continue;
+        for (final l in lines) {
+          if (l['offer_id'] != null) continue;
+          if (!_lineQualifies(o, l)) continue;
+          final d = _discountOf(o, _toDouble(l['original_price']));
+          if (d > bestDisc) {
+            bestDisc = d;
+            bestLine = l;
+            bestOffer = o;
+          }
+        }
+      }
+
+      if (bestLine == null || bestOffer == null) break;
+      bestLine['discount_amount'] = bestDisc;
+      bestLine['final_price'] = _toDouble(bestLine['original_price']) - bestDisc;
+      bestLine['offer_id'] = _toInt(bestOffer['id']);
+      done.add(_toInt(bestOffer['id']));
+    }
+
+    _releasedOfferIds = [
+      for (final o in _offers)
+        if (!done.contains(_toInt(o['id']))) _toInt(o['id']),
+    ];
+  }
+
+  /// offers that could carry this service (used for the small chip in the menu)
+  List<Map<String, dynamic>> _offersForService(int serviceId) => [
+    for (final o in _offers)
+      if (_inScope(o, serviceId, null) ||
+          (_offerScope[_toInt(o['id'])] ?? const []).any(
+            (r) => r['service_id'] == serviceId,
+          ))
+        o,
+  ];
 
   // ---------------------------------------------------------------
   // SEARCH (service name / category name)
@@ -442,13 +593,15 @@ class _EditAppointmentServicesSheetState
     }
 
     if (_isTicked(vid)) {
-      setState(() => _added.removeWhere((a) => a['variant_id'] == vid));
+      setState(() {
+        _added.removeWhere((a) => a['variant_id'] == vid);
+        _recompute();
+      });
       return;
     }
 
     final serviceId = service['id'] as int;
     final price = _toDouble(v['price']);
-    final discount = _discountFor(serviceId, price);
 
     setState(() {
       _added.add({
@@ -458,9 +611,12 @@ class _EditAppointmentServicesSheetState
         'label': v['label'],
         'duration': _toInt(v['duration'], fallback: 30),
         'original_price': price,
-        'discount_amount': discount,
-        'final_price': price - discount,
+        'discount_amount': 0.0,
+        'final_price': price,
+        'offer_id': null,
       });
+      // the offer may move to this line if it saves more
+      _recompute();
     });
   }
 
@@ -510,6 +666,7 @@ class _EditAppointmentServicesSheetState
         final newPrice = _toDouble(result['new_price']);
         final newEndTime = result['new_end_time']?.toString();
         final minutesChanged = _toInt(result['minutes_changed']);
+        final released = result['offers_released'];
 
         String msg = '✅ Updated.';
         if (result['new_price'] != null) {
@@ -522,6 +679,9 @@ class _EditAppointmentServicesSheetState
           msg += minutesChanged > 0
               ? ' Duration +$minutesChanged min (ends $shortTime).'
               : ' Duration $minutesChanged min (ends $shortTime).';
+        }
+        if (released is List && released.isNotEmpty) {
+          msg += ' Offer returned to the customer.';
         }
         _showSnack(msg, color: Colors.green.shade600);
         Navigator.pop(context, true);
@@ -636,6 +796,22 @@ class _EditAppointmentServicesSheetState
     );
   }
 
+  /// "🎁 Offer title (20% OFF)" under a line that carries an offer
+  Widget _lineOfferTag(Map<String, dynamic> line) {
+    final o = _offerById(line['offer_id']);
+    if (o == null || _toDouble(line['discount_amount']) <= 0) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: _infoChip(
+        Icons.local_offer,
+        '${o['title']} • ${_offerLabelOf(o)}',
+        Colors.green.shade600,
+      ),
+    );
+  }
+
   // ---------------------------------------------------------------
   // CURRENT SERVICES (already on the appointment)
   // ---------------------------------------------------------------
@@ -689,6 +865,7 @@ class _EditAppointmentServicesSheetState
                     ),
                   ],
                 ),
+                if (!removed) _lineOfferTag(s),
               ],
             ),
           ),
@@ -720,9 +897,15 @@ class _EditAppointmentServicesSheetState
                         );
                         return;
                       }
-                      setState(() => _removeIds.remove(id));
+                      setState(() {
+                        _removeIds.remove(id);
+                        _recompute();
+                      });
                     } else {
-                      setState(() => _removeIds.add(id));
+                      setState(() {
+                        _removeIds.add(id);
+                        _recompute();
+                      });
                     }
                   },
           ),
@@ -774,6 +957,7 @@ class _EditAppointmentServicesSheetState
                     ),
                   ],
                 ),
+                _lineOfferTag(a),
               ],
             ),
           ),
@@ -785,10 +969,110 @@ class _EditAppointmentServicesSheetState
           IconButton(
             visualDensity: VisualDensity.compact,
             icon: const Icon(Icons.close, size: 20, color: Colors.red),
-            onPressed: () => setState(() => _added.removeAt(index)),
+            onPressed: () => setState(() {
+              _added.removeAt(index);
+              _recompute();
+            }),
           ),
         ],
       ),
+    );
+  }
+
+  // ---------------------------------------------------------------
+  // OFFER BANNER
+  // ---------------------------------------------------------------
+  Widget _offerBanner() {
+    if (_offers.isEmpty) return const SizedBox.shrink();
+
+    final released = [
+      for (final id in _releasedOfferIds)
+        if (_offerById(id) != null) _offerById(id)!,
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(top: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.green.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final o in _offers)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 2),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.local_offer,
+                        size: 16,
+                        color: Colors.green.shade600,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '${o['title']} (${_offerLabelOf(o)})'
+                          '${_toDouble(o['minimum_spend']) > 0 ? ' • min. $_sym ${_toDouble(o['minimum_spend']).toStringAsFixed(0)} per service' : ''}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.green.shade600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 4),
+              Text(
+                'Each offer applies to ONE service only (the one with the '
+                'biggest discount), same as when the customer books.',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: Colors.green.shade700,
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (released.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: Colors.orange.shade800,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${released.map((o) => o['title']).join(', ')} will not '
+                    'apply to any service after this change (scope / minimum '
+                    'spend). The offer will be returned to the customer.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.orange.shade800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 
@@ -845,7 +1129,7 @@ class _EditAppointmentServicesSheetState
   Widget _serviceBlock(Map<String, dynamic> service, Color catColor) {
     final variants = (service['variants'] as List).cast<Map<String, dynamic>>();
     final sid = service['id'] as int;
-    final hasOffer = _offerApplies(sid);
+    final eligible = _offersForService(sid);
 
     return Padding(
       padding: const EdgeInsets.only(top: 8, bottom: 4),
@@ -870,7 +1154,8 @@ class _EditAppointmentServicesSheetState
                   ),
                 ),
               ),
-              if (hasOffer)
+              // the offer may apply here (final discount is shown after ticking)
+              if (eligible.isNotEmpty)
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 6,
@@ -881,7 +1166,7 @@ class _EditAppointmentServicesSheetState
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
-                    _offerLabel(),
+                    '🎁 ${_offerLabelOf(eligible.first)}',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
@@ -915,7 +1200,6 @@ class _EditAppointmentServicesSheetState
     final checked = onAppointment || ticked;
 
     final price = _toDouble(v['price']);
-    final discount = _discountFor(service['id'] as int, price);
     final duration = _toInt(v['duration']);
     final name = v['name'].toString();
     final gender = v['gender'].toString();
@@ -1030,7 +1314,8 @@ class _EditAppointmentServicesSheetState
                     ),
                   ),
                   const SizedBox(width: 8),
-                  _priceText(price, discount),
+                  // list price - the real discount shows after ticking
+                  _priceText(price, 0),
                 ],
               ),
             ),
@@ -1131,34 +1416,7 @@ class _EditAppointmentServicesSheetState
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            if (_offer != null)
-                              Container(
-                                margin: const EdgeInsets.only(top: 8),
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: Colors.green.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.local_offer,
-                                      size: 18,
-                                      color: Colors.green.shade600,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        'Offer: ${_offer!['title']} (${_offerLabel()}) - eligible services only',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.green.shade600,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                            _offerBanner(),
 
                             _sectionTitle('Current services'),
                             if (_existing.isEmpty)

@@ -7,6 +7,7 @@ import '../../services/timezone_service.dart';
 import '../../services/currency_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
+import 'package:flutter_application_1/widgets/offer_rules_ui.dart';
 
 class OwnerOffersScreen extends StatefulWidget {
   final String? salonId;
@@ -75,21 +76,6 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   // ✅ Currency symbol
   String get _salonCurrencySymbol =>
       _currencyService.getSymbol(_effectiveCurrencyCode);
-
-  // ✅ Salon "today" — fallback to salon default (NOT device)
-  DateTime get _salonToday {
-    final tz = _salonTimezone.isNotEmpty
-        ? _salonTimezone
-        : _kDefaultSalonTimezone;
-    try {
-      final now = TimezoneService.getNowInTimezone(tz);
-      return DateTime(now.year, now.month, now.day);
-    } catch (e) {
-      debugPrint('❌ Error getting salon today: $e');
-      final now = DateTime.now();
-      return DateTime(now.year, now.month, now.day);
-    }
-  }
 
   @override
   void initState() {
@@ -177,57 +163,41 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
     }
   }
 
-  // ✅ Active: is_active=true, valid_from <= today, valid_to > today
+  // Happy-hour offers: dates are APPOINTMENT dates, so customers can already
+  // claim/book before valid_from -> a future start does not make them inactive.
+  bool _startsInFuture(Map<String, dynamic> offer) {
+    if (offerTriggerOf(offer) == 'appointment_time') return false;
+    final from = offerDate(offer['valid_from']);
+    return from != null && from.isAfter(offerSalonToday(_salonTimezone));
+  }
+
+  // ✅ Active: is_active, not expired (valid_to day itself is still valid),
+  // and already started (except happy-hour offers)
   bool _isOfferActive(Map<String, dynamic> offer) {
-    try {
-      final nowLocal = _salonToday;
-      final validToLocal = _parseDateOnly(offer['valid_to'] as String);
-      final validFromLocal = _parseDateOnly(offer['valid_from'] as String);
-      return offer['is_active'] == true &&
-          validToLocal.isAfter(nowLocal) &&
-          !validFromLocal.isAfter(nowLocal);
-    } catch (e) {
+    if (offer['is_active'] != true) return false;
+    final to = offerDate(offer['valid_to']);
+    if (to == null || to.isBefore(offerSalonToday(_salonTimezone))) {
       return false;
     }
+    return !_startsInFuture(offer);
   }
 
   // ✅ Expired: is_active=true, valid_to < today
   bool _isOfferExpired(Map<String, dynamic> offer) {
-    try {
-      if (offer['is_active'] != true) return false;
-      final nowLocal = _salonToday;
-      final validToLocal = _parseDateOnly(offer['valid_to'] as String);
-      return validToLocal.isBefore(nowLocal);
-    } catch (e) {
-      return false;
-    }
+    if (offer['is_active'] != true) return false;
+    final to = offerDate(offer['valid_to']);
+    return to != null && to.isBefore(offerSalonToday(_salonTimezone));
   }
 
-  // ✅ FIX: Inactive includes is_active=false OR future-valid (not yet started)
+  // ✅ Inactive: is_active=false OR not started yet (non happy-hour types)
   bool _isOfferInactive(Map<String, dynamic> offer) {
     if (offer['is_active'] != true) return true;
-
-    // Also inactive if future-valid (not yet started)
-    try {
-      final nowLocal = _salonToday;
-      final validFromLocal = _parseDateOnly(offer['valid_from'] as String);
-      if (validFromLocal.isAfter(nowLocal)) return true;
-    } catch (e) {
-      // ignore
-    }
-
-    return false;
+    if (_isOfferExpired(offer)) return false;
+    return _startsInFuture(offer);
   }
 
-  int _getDaysLeft(Map<String, dynamic> offer) {
-    try {
-      final nowLocal = _salonToday;
-      final validToLocal = _parseDateOnly(offer['valid_to'] as String);
-      return validToLocal.difference(nowLocal).inDays;
-    } catch (e) {
-      return 0;
-    }
-  }
+  int _getDaysLeft(Map<String, dynamic> offer) =>
+      offerDaysLeft(offer, offerSalonToday(_salonTimezone)) ?? 0;
 
   void _onScroll() {
     if (!mounted) return;
@@ -428,6 +398,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
             valid_to,
             valid_from_time,
             valid_to_time,
+            offer_trigger_type,
+            min_advance_days,
+            minimum_spend,
             image_url,
             is_active,
             usage_limit,
@@ -785,13 +758,9 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
   }
 
   int _daysUntilStart(Map<String, dynamic> offer) {
-    try {
-      final nowLocal = _salonToday;
-      final validFromLocal = _parseDateOnly(offer['valid_from'] as String);
-      return validFromLocal.difference(nowLocal).inDays;
-    } catch (e) {
-      return 0;
-    }
+    final from = offerDate(offer['valid_from']);
+    if (from == null) return 0;
+    return from.difference(offerSalonToday(_salonTimezone)).inDays;
   }
 
   // ✅ Use pre-built scope_summary
@@ -1005,7 +974,7 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
                         maxCrossAxisExtent: 420,
                         crossAxisSpacing: 16,
                         mainAxisSpacing: 16,
-                        mainAxisExtent: 340,
+                        mainAxisExtent: 450,
                       ),
                       delegate: SliverChildBuilderDelegate(
                         (context, index) =>
@@ -1524,6 +1493,15 @@ class _OwnerOffersScreenState extends State<OwnerOffersScreen>
                     ),
                   ],
                 ],
+              ),
+
+              const SizedBox(height: 10),
+
+              // Type + rules (happy hour / book now / book ahead)
+              OfferRulesPanel(
+                offer: offer,
+                color: AppTheme.primary,
+                currencySymbol: _salonCurrencySymbol,
               ),
 
               const SizedBox(height: 10),

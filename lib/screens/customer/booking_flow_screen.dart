@@ -1321,20 +1321,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         }
       }
 
-      final claimed = offers.firstWhere(
-        (o) => o['is_claimed'] == true,
-        orElse: () => <String, dynamic>{},
-      );
-
-      if (claimed.isNotEmpty &&
-          claimed['id'] != null &&
-          _offerEligibility(claimed) == true) {
-        _applyOfferToService(sid, vid, claimed);
-        debugPrint('   ✅ Auto-applied: ${claimed['title']} for service $sid');
-      } else {
-        debugPrint('   ℹ️ No applicable claimed offer for service $sid yet');
-      }
     }
+
+    // one offer = one service line, best saving first (see _reevaluateOffers)
+    _reevaluateOffers();
   }
 
   // ==================== STEP 2: DATE ====================
@@ -1973,9 +1963,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   /// "17:00" / "17:00:00" / "5:00 PM" / "17:00:00+05:30" -> minutes since midnight
   int? _hmToMin(String? s) {
     if (s == null) return null;
-    final m = RegExp(
-      r'^\s*(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?\s*([AaPp][Mm])?',
-    ).firstMatch(s);
+    final m = RegExp(r'^\s*(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?\s*([AaPp][Mm])?')
+        .firstMatch(s);
     if (m == null) return null;
     int h = int.parse(m.group(1)!);
     final mm = int.parse(m.group(2)!);
@@ -2055,9 +2044,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         final minDays = (offer['min_advance_days'] as num?)?.toInt() ?? 30;
         // salon "today" (salon timezone, never the phone's clock)
         final today = _todayDate;
-        final days = DateUtils.dateOnly(
-          _selectedDate!,
-        ).difference(today).inDays;
+        final days = DateUtils.dateOnly(_selectedDate!).difference(today).inDays;
         return days >= minDays; // DB re-checks with salon_today()
 
       case 'appointment_time':
@@ -2151,10 +2138,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       return _offerEligibility(o) == true;
     }).toList();
     list.sort(
-      (a, b) => _calculateOfferDiscount(
-        price,
-        b,
-      ).compareTo(_calculateOfferDiscount(price, a)),
+      (a, b) => _calculateOfferDiscount(price, b)
+          .compareTo(_calculateOfferDiscount(price, a)),
     );
     return list;
   }
@@ -2409,9 +2394,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           break;
         }
         candidate = _nextSelectableAfter(candidate);
-        if (candidate != null && candidate.isAfter(searchLimit)) {
-          candidate = null;
-        }
+        if (candidate != null && candidate.isAfter(searchLimit)) candidate = null;
       }
 
       if (candidate == null || availability == null) {
@@ -2655,11 +2638,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       if (!mounted) return;
       if (removedOffers.isNotEmpty) {
         setState(() => _isBooking = false);
-        await _showOfferChangedDialog(
-          removedOffers,
-          oldTotal,
-          _finalTotalPrice,
-        );
+        await _showOfferChangedDialog(removedOffers, oldTotal, _finalTotalPrice);
         return;
       }
 
@@ -2736,8 +2715,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'N/A';
 
       // ✅ NEW: Extract confirmed amounts from response
-      final confirmedRate = (result['exchange_rate_at_booking'] as num?)
-          ?.toDouble();
+      final confirmedRate =
+          (result['exchange_rate_at_booking'] as num?)?.toDouble();
       final confirmedPrice =
           (result['price'] as num?)?.toDouble() ?? _getDisplayTotalPrice();
       final confirmedUserAmount =
@@ -2799,14 +2778,20 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
         icon: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: _secondaryColor.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
-          child: Icon(Icons.check_circle, color: _secondaryColor, size: 48),
+          child: Icon(
+            Icons.check_circle,
+            color: _secondaryColor,
+            size: 48,
+          ),
         ),
         title: Text(
           '✅ Booking Confirmed!',
@@ -2869,7 +2854,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           'Amount',
                           style: TextStyle(
                             fontSize: 14,
-                            color: isDark ? Colors.white70 : Colors.grey[700],
+                            color:
+                                isDark ? Colors.white70 : Colors.grey[700],
                           ),
                         ),
                         Text(
@@ -2895,7 +2881,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             style: TextStyle(
                               fontSize: 13,
                               fontStyle: FontStyle.italic,
-                              color: isDark ? Colors.white60 : Colors.grey[600],
+                              color: isDark
+                                  ? Colors.white60
+                                  : Colors.grey[600],
                             ),
                           ),
                           Text(
@@ -2977,7 +2965,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ),
               child: const Text(
                 'Done',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
             ),
           ),
@@ -4065,7 +4056,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           style: TextStyle(
                             fontSize: 10.5,
                             fontStyle: FontStyle.italic,
-                            color: isDark ? Colors.white60 : Colors.grey[600],
+                            color:
+                                isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                     ],
@@ -4695,17 +4687,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                   const SizedBox(height: 6),
                                   GestureDetector(
                                     behavior: HitTestBehavior.opaque,
-                                    onTap:
-                                        (isSelected &&
+                                    onTap: (isSelected &&
                                             _eligibleClaimedOffers(
                                               serviceId,
                                               variantId,
                                               price,
                                             ).isNotEmpty)
                                         ? () => _showOfferPicker(
-                                            serviceId,
-                                            variantId,
-                                          )
+                                              serviceId,
+                                              variantId,
+                                            )
                                         : null,
                                     child: offerChip,
                                   ),
@@ -5299,9 +5290,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontStyle: FontStyle.italic,
-                                color: isDark
-                                    ? Colors.white60
-                                    : Colors.grey[600],
+                                color:
+                                    isDark ? Colors.white60 : Colors.grey[600],
                               ),
                             ),
                           ],
@@ -6434,7 +6424,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.store, size: 14, color: AppTheme.primary),
+              const Icon(
+                Icons.store,
+                size: 14,
+                color: AppTheme.primary,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -6481,11 +6475,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               decoration: BoxDecoration(
                 color: Colors.orange.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.3),
+                ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.person, size: 12, color: Colors.orange[700]),
+                  Icon(
+                    Icons.person,
+                    size: 12,
+                    color: Colors.orange[700],
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(

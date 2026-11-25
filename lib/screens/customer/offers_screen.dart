@@ -6,6 +6,7 @@ import '../../extensions/context_extensions.dart';
 import '../../services/currency_service.dart';
 import '../../services/currency_settings_service.dart'; // ✅ NEW
 import '../../services/timezone_service.dart';
+import 'package:flutter_application_1/widgets/offer_rules_ui.dart';
 
 class OffersScreen extends StatefulWidget {
   const OffersScreen({super.key});
@@ -54,6 +55,76 @@ class _OffersScreenState extends State<OffersScreen> {
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  // columns for the offers list (shared by the main query and the claimed-but-paused query)
+  static const String _offerSelect = '''
+            id,
+            title,
+            description,
+            discount_type,
+            discount_value,
+            points_required,
+            valid_from,
+            valid_to,
+            image_url,
+            is_active,
+            usage_limit,
+            used_count,
+            $kOfferRuleColumns,
+            salon_id,
+            salons:salon_id (
+              id,
+              name,
+              logo_url,
+              address,
+              phone,
+              currency_code,
+              currency_symbol,
+              timezone
+            ),
+            offer_services (
+              service_id,
+              variant_id,
+              services:service_id (id, name),
+              service_variants:variant_id (id, salon_gender_id, salon_age_category_id)
+            )
+          ''';
+
+  Future<List<Map<String, dynamic>>> _loadPausedClaimedOffers(
+    String userId,
+    Set<int> alreadyLoaded,
+    String looseFrom,
+  ) async {
+    try {
+      final claims = await supabase
+          .from('customer_offers')
+          .select('offer_id')
+          .eq('customer_id', userId)
+          .eq('status', 'active');
+
+      final ids = <int>[
+        for (final c in claims)
+          if (!alreadyLoaded.contains(c['offer_id'] as int))
+            c['offer_id'] as int,
+      ];
+      if (ids.isEmpty) return [];
+
+      final rows = await supabase
+          .from('offers')
+          .select(_offerSelect)
+          .inFilter('id', ids)
+          .eq('is_active', false)
+          .gte('valid_to', looseFrom);
+
+      return [
+        for (final r in rows)
+          {...Map<String, dynamic>.from(r), '_paused': true},
+      ];
+    } catch (e) {
+      debugPrint('Error loading paused claimed offers: $e');
+      return [];
+    }
   }
 
   // ============================================
@@ -285,49 +356,37 @@ class _OffersScreenState extends State<OffersScreen> {
         followedSalonIds.add(item['salon_id'] as int);
       }
 
-      final todayUtc = DateTime.now().toUtc().toIso8601String().split('T')[0];
+      // Loose lower bound only (salon timezone can be a day behind/ahead);
+      // exact validity is decided per salon with offerClaimBlock().
+      final looseFrom = DateTime.now()
+          .toUtc()
+          .subtract(const Duration(days: 1))
+          .toIso8601String()
+          .split('T')[0];
 
       // ✅ Load offers + offer_services + salon currency/timezone
-      final result = await supabase
+      final mainResult = await supabase
           .from('offers')
-          .select('''
-            id,
-            title,
-            description,
-            discount_type,
-            discount_value,
-            points_required,
-            valid_from,
-            valid_to,
-            image_url,
-            is_active,
-            usage_limit,
-            used_count,
-            salon_id,
-            salons:salon_id (
-              id,
-              name,
-              logo_url,
-              address,
-              phone,
-              currency_code,
-              currency_symbol,
-              timezone
-            ),
-            offer_services (
-              service_id,
-              variant_id,
-              services:service_id (id, name),
-              service_variants:variant_id (id, salon_gender_id, salon_age_category_id)
-            )
-          ''')
+          .select(_offerSelect)
           .inFilter('salon_id', followedSalonIds)
           .eq('is_active', true)
-          .lte('valid_from', todayUtc)
-          .gte('valid_to', todayUtc)
+          .gte('valid_to', looseFrom)
           .order('created_at', ascending: false);
 
       if (!mounted) return;
+
+      // ✅ Claimed offers that the salon has paused (is_active = false):
+      // keep them visible as "Unavailable" instead of silently vanishing.
+      final pausedClaimed = await _loadPausedClaimedOffers(
+        user.id,
+        mainResult.map<int>((o) => o['id'] as int).toSet(),
+        looseFrom,
+      );
+      if (!mounted) return;
+      final result = <Map<String, dynamic>>[
+        ...mainResult.map((o) => Map<String, dynamic>.from(o)),
+        ...pausedClaimed,
+      ];
 
       if (result.isEmpty) {
         setState(() {
@@ -457,15 +516,16 @@ class _OffersScreenState extends State<OffersScreen> {
         }
 
         // ✅ Precompute days_left using SALON timezone
-        offer['_days_left'] = _getDaysLeft(
-          offer['valid_to'] as String,
-          salonTimezone: salonTz,
-        );
-        // ✅ Precompute is_active using SALON timezone
-        offer['_is_active'] = _isOfferActiveWithTimezone(
-          offer,
-          salonTimezone: salonTz,
-        );
+        final salonToday = offerSalonToday(salonTz);
+        offer['_days_left'] = offerDaysLeft(offer, salonToday) ?? -1;
+        // ✅ Claimable now? (expired / not started / fully used => block)
+        final block = offerClaimBlock(offer, salonToday);
+        final paused = offer['_paused'] == true;
+        offer['_claim_block_label'] =
+            paused ? 'Unavailable' : block?.shortLabel;
+        offer['_claim_block_msg'] =
+            paused ? 'This offer is paused by the salon' : block?.message;
+        offer['_is_active'] = block == null && !paused;
 
         return offer;
       }).toList();
@@ -489,83 +549,6 @@ class _OffersScreenState extends State<OffersScreen> {
   // ============================================
   // ✅ DATE HELPERS (SALON TIMEZONE)
   // ============================================
-
-  int _getDaysLeft(String validTo, {String? salonTimezone}) {
-    try {
-      final tz = salonTimezone ?? _kDefaultSalonTimezone;
-
-      // ✅ Get "now" in SALON timezone
-      DateTime salonNow;
-      try {
-        salonNow = TimezoneService.getNowInTimezone(tz);
-      } catch (e) {
-        salonNow = DateTime.now();
-      }
-
-      final todaySalonMidnight = DateTime(
-        salonNow.year,
-        salonNow.month,
-        salonNow.day,
-      );
-
-      final validToDate = DateTime.parse(validTo);
-      final validToMidnight = DateTime(
-        validToDate.year,
-        validToDate.month,
-        validToDate.day,
-      );
-
-      return validToMidnight.difference(todaySalonMidnight).inDays;
-    } catch (e) {
-      debugPrint('Error calculating days left: $e');
-      return -1;
-    }
-  }
-
-  bool _isOfferActiveWithTimezone(
-    Map<String, dynamic> offer, {
-    String? salonTimezone,
-  }) {
-    try {
-      final tz = salonTimezone ??
-          (offer['_salon_timezone'] as String?) ??
-          _kDefaultSalonTimezone;
-
-      final validFromUtc = DateTime.parse(offer['valid_from'] as String);
-      final validToUtc = DateTime.parse(offer['valid_to'] as String);
-
-      // ✅ Get "now" in SALON timezone
-      DateTime salonNow;
-      try {
-        salonNow = TimezoneService.getNowInTimezone(tz);
-      } catch (e) {
-        salonNow = DateTime.now();
-      }
-
-      final todaySalonMidnight = DateTime(
-        salonNow.year,
-        salonNow.month,
-        salonNow.day,
-      );
-
-      final fromSalonMidnight = DateTime(
-        validFromUtc.year,
-        validFromUtc.month,
-        validFromUtc.day,
-      );
-      final toSalonMidnight = DateTime(
-        validToUtc.year,
-        validToUtc.month,
-        validToUtc.day,
-      );
-
-      return !fromSalonMidnight.isAfter(todaySalonMidnight) &&
-          toSalonMidnight.isAfter(todaySalonMidnight);
-    } catch (e) {
-      debugPrint('Error checking offer active: $e');
-      return false;
-    }
-  }
 
   // ============================================
   // ✅ FILTERED AND SORTED OFFERS
@@ -754,7 +737,13 @@ class _OffersScreenState extends State<OffersScreen> {
 
       // ✅ Use precomputed active status
       if (offer['_is_active'] != true) {
-        if (mounted) _showSnackBar('This offer has expired', Colors.red);
+        if (mounted) {
+          _showSnackBar(
+            (offer['_claim_block_msg'] ?? 'This offer is not available')
+                .toString(),
+            Colors.red,
+          );
+        }
         return;
       }
 
@@ -1004,13 +993,8 @@ class _OffersScreenState extends State<OffersScreen> {
       // Refresh in background
       if (mounted) _loadOffers();
 
-      // Navigate to booking flow with offer
-      if (mounted) {
-        context.push(
-          '/customer/booking-flow',
-          extra: {'offer': offer},
-        );
-      }
+      // Navigate to booking flow with salon + preselected services
+      if (mounted) await _bookWithOffer(offer);
     } catch (e) {
       debugPrint('Error applying offer: $e');
       if (mounted) {
@@ -1020,6 +1004,142 @@ class _OffersScreenState extends State<OffersScreen> {
           Colors.red,
         );
       }
+    }
+  }
+
+  Future<Map<String, dynamic>> _buildBookingExtraWithOffer(
+    Map<String, dynamic> offer,
+  ) async {
+    Map<String, dynamic>? offerSalon;
+    List<Map<String, dynamic>> preselectedServices = [];
+
+    try {
+      final offerSalonId = offer['salon_id'] as int?;
+      final offerId = offer['id'] as int?;
+      if (offerId == null) return {};
+
+      debugPrint('🎁 Building extra for offer: ${offer['title']}');
+
+      if (offerSalonId != null) {
+        try {
+          final salonResp = await supabase
+              .from('salons')
+              .select(
+                'id, name, address, logo_url, open_time, close_time, phone, '
+                'currency_code, currency_symbol, timezone',
+              )
+              .eq('id', offerSalonId)
+              .maybeSingle();
+
+          if (salonResp != null) {
+            offerSalon = Map<String, dynamic>.from(salonResp);
+            offerSalon['id'] = offerSalonId;
+          }
+        } catch (e) {
+          debugPrint('⚠️ Failed to load offer salon: $e');
+        }
+      }
+
+      List<Map<String, dynamic>> offerServiceRows = [];
+      try {
+        final offerServicesResp = await supabase
+            .from('offer_services')
+            .select('service_id, variant_id')
+            .eq('offer_id', offerId);
+
+        for (var row in offerServicesResp) {
+          offerServiceRows.add({
+            'service_id': row['service_id'] as int?,
+            'variant_id': row['variant_id'] as int?,
+          });
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to load offer services: $e');
+      }
+
+      if (offerServiceRows.isNotEmpty) {
+        final variantRows = offerServiceRows
+            .where((r) => r['variant_id'] != null && r['service_id'] != null)
+            .toList();
+
+        if (variantRows.isNotEmpty) {
+          for (final row in variantRows) {
+            preselectedServices.add({
+              'service_id': row['service_id'],
+              'variant_id': row['variant_id'],
+            });
+          }
+          debugPrint(
+            '🎯 Preselected (variant-level): ${variantRows.length} services',
+          );
+        } else {
+          final serviceRows = offerServiceRows
+              .where((r) => r['service_id'] != null)
+              .toList();
+
+          for (final row in serviceRows) {
+            final sid = row['service_id'] as int;
+            try {
+              final variantsResp = await supabase
+                  .from('service_variants')
+                  .select('id')
+                  .eq('service_id', sid)
+                  .eq('is_active', true)
+                  .order('id', ascending: true)
+                  .limit(1);
+
+              if (variantsResp.isNotEmpty) {
+                preselectedServices.add({
+                  'service_id': sid,
+                  'variant_id': variantsResp.first['id'] as int,
+                });
+              }
+            } catch (e) {
+              debugPrint('⚠️ Failed to load variant for service $sid: $e');
+            }
+          }
+          debugPrint(
+            '🎯 Preselected (service-level → first variant): '
+            '${preselectedServices.length} services',
+          );
+        }
+      } else {
+        debugPrint(
+          '🎯 Offer applies to all services — user will pick at booking flow',
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error building booking extra: $e');
+    }
+
+    if (offerSalon != null) {
+      final salonWithExtras = Map<String, dynamic>.from(offerSalon);
+      if (preselectedServices.isNotEmpty) {
+        salonWithExtras['preselected_services'] = preselectedServices;
+      }
+      salonWithExtras['offer'] = offer;
+      salonWithExtras['skip_to_date'] = false;
+      return salonWithExtras;
+    }
+
+    return {
+      'offer': offer,
+      if (preselectedServices.isNotEmpty)
+        'preselected_services': preselectedServices,
+      'skip_to_date': false,
+    };
+  }
+
+  Future<void> _bookWithOffer(Map<String, dynamic> offer) async {
+    final extra = await _buildBookingExtraWithOffer(offer);
+    if (!mounted) return;
+    final result = await context.push(
+      '/customer/booking-flow',
+      extra: extra.isEmpty ? null : extra,
+    );
+    if (mounted) _loadOffers();
+    if (result == true && mounted) {
+      debugPrint('✅ Returned from booking flow');
     }
   }
 
@@ -1062,6 +1182,8 @@ class _OffersScreenState extends State<OffersScreen> {
     // ✅ Use precomputed values
     final daysLeft = offer['_days_left'] as int? ?? -1;
     final isActive = offer['_is_active'] as bool? ?? false;
+    final blockLabel = offer['_claim_block_label'] as String?;
+    final currencySymbol = salonData?['currency_symbol']?.toString() ?? '';
 
     final discountColor = _getDiscountColor(offer['discount_type']);
     final discountIcon = _getDiscountIcon(offer['discount_type']);
@@ -1089,6 +1211,12 @@ class _OffersScreenState extends State<OffersScreen> {
       statusColor = isDark ? Colors.green[300] : Colors.green;
     }
 
+    // paused by the salon (claimed): grey status
+    if (offer['_paused'] == true) {
+      statusText = 'Paused by salon';
+      statusColor = isDark ? Colors.grey[400] : Colors.grey[600];
+    }
+
     // Button label / state
     final String buttonLabel;
     final bool buttonEnabled;
@@ -1099,10 +1227,20 @@ class _OffersScreenState extends State<OffersScreen> {
       buttonLabel = 'Used';
       buttonEnabled = false;
     } else if (isClaimed) {
-      buttonLabel = 'Claimed';
-      buttonEnabled = false;
+      // claimed => go and book (discount is applied automatically),
+      // unless the offer is paused by the salon / fully used / expired
+      if (offer['_paused'] == true) {
+        buttonLabel = 'Unavailable';
+        buttonEnabled = false;
+      } else if (blockLabel == 'Fully used') {
+        buttonLabel = 'Fully used';
+        buttonEnabled = false;
+      } else {
+        buttonLabel = daysLeft < 0 ? 'Expired' : 'Book Now';
+        buttonEnabled = daysLeft >= 0;
+      }
     } else if (!isActive) {
-      buttonLabel = 'Expired';
+      buttonLabel = blockLabel ?? 'Expired';
       buttonEnabled = false;
     } else {
       buttonLabel = 'Apply Offer';
@@ -1377,6 +1515,12 @@ class _OffersScreenState extends State<OffersScreen> {
                   ),
                 ],
 
+                const SizedBox(height: 10),
+                OfferRulesPanel(
+                  offer: offer,
+                  color: discountColor,
+                  currencySymbol: currencySymbol,
+                ),
                 const SizedBox(height: 16),
 
                 if ((offer['points_required'] ?? 0) > 0)
@@ -1420,7 +1564,9 @@ class _OffersScreenState extends State<OffersScreen> {
                     Expanded(
                       child: ElevatedButton(
                         onPressed: buttonEnabled
-                            ? () => _applyOffer(offer)
+                            ? (isClaimed
+                                ? () => _bookWithOffer(offer)
+                                : () => _applyOffer(offer))
                             : null,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: discountColor,
@@ -1523,7 +1669,7 @@ class _OffersScreenState extends State<OffersScreen> {
                           maxCrossAxisExtent: 400,
                           crossAxisSpacing: 16,
                           mainAxisSpacing: 16,
-                          childAspectRatio: 0.75,
+                          childAspectRatio: 0.62,
                         ),
                         itemCount: filteredOffers.length,
                         itemBuilder: (context, index) => _buildOfferCard(

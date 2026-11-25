@@ -207,7 +207,6 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     return _validToTime!.hour * 60 + _validToTime!.minute <
         _validFromTime!.hour * 60 + _validFromTime!.minute;
   }
-
   bool get _isDark => context.isDarkMode;
   bool get _isWeb => context.isWeb;
 
@@ -314,19 +313,12 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
   static const TimeOfDay _kDefaultWindowStart = TimeOfDay(hour: 17, minute: 0);
   static const TimeOfDay _kDefaultWindowEnd = TimeOfDay(hour: 19, minute: 0);
 
-  @override
-  void initState() {
-    super.initState();
-
-    _titleController = TextEditingController();
-    _descriptionController = TextEditingController();
-    _discountValueController = TextEditingController();
-    _pointsRequiredController = TextEditingController(text: '0');
-    _usageLimitController = TextEditingController();
-    _minAdvanceDaysController = TextEditingController(text: '30');
-
-    if (_isEditing) {
-      final offer = widget.editingOffer!;
+  /// Fill the form from an offer row (edit mode). Called with the map the
+  /// caller passed, then again with the FULL row loaded from the DB, because
+  /// the list screen's map may not contain offer_trigger_type / the time
+  /// window / min_advance_days / minimum_spend.
+  void _fillFromOffer(Map<String, dynamic> offer) {
+    _hasTimeRestriction = false;
       _titleController.text = offer['title'] ?? '';
       _descriptionController.text = offer['description'] ?? '';
       _discountValueController.text = offer['discount_value']?.toString() ?? '';
@@ -337,7 +329,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
       // ✅ Load offer trigger type
       _offerTriggerType =
-          offer['offer_trigger_type']?.toString() ?? 'appointment_time';
+          offer['offer_trigger_type']?.toString() ?? 'booking_time';
       _minAdvanceDays = (offer['min_advance_days'] as num?)?.toInt() ?? 30;
       _minAdvanceDaysController.text = _minAdvanceDays.toString();
 
@@ -363,6 +355,44 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
         _validFromTime = _kDefaultWindowStart;
         _validToTime = _kDefaultWindowEnd;
       }
+  }
+
+  /// Edit mode: load the complete offers row (type, window, advance days...)
+  Future<void> _reloadEditingOffer() async {
+    try {
+      final row = await supabase
+          .from('offers')
+          .select()
+          .eq('id', widget.editingOffer!['id'] as int)
+          .maybeSingle();
+      if (row == null || !mounted) return;
+      // no setState here: the loader is already showing and the timezone
+      // load right after rebuilds the screen once (no extra refresh)
+      _fillFromOffer({
+        ...widget.editingOffer!,
+        ...Map<String, dynamic>.from(row),
+      });
+    } catch (e) {
+      debugPrint('Could not reload the offer: $e');
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    _titleController = TextEditingController();
+    _descriptionController = TextEditingController();
+    _discountValueController = TextEditingController();
+    _pointsRequiredController = TextEditingController(text: '0');
+    _usageLimitController = TextEditingController();
+    _minAdvanceDaysController = TextEditingController(text: '30');
+
+    // show the loader from the very first frame (no form -> loader -> form flash)
+    _isLoadingTimezone = true;
+
+    if (_isEditing) {
+      _fillFromOffer(widget.editingOffer!);
     } else {
       // New offer: will be set after timezone loads
       // (default type is appointment_time -> the window is mandatory)
@@ -376,6 +406,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
 
     // ✅ Load timezone FIRST, then service menu
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      if (_isEditing) await _reloadEditingOffer();
       if (!mounted) return;
       await _loadSalonTimezone();
       if (!mounted) return;
@@ -714,9 +746,8 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
     );
     final validToDay = DateTime(_validTo.year, _validTo.month, _validTo.day);
 
-    final firstDate = validFromDay.isBefore(salonToday)
-        ? validFromDay
-        : salonToday;
+    final firstDate =
+        validFromDay.isBefore(salonToday) ? validFromDay : salonToday;
     final farthest = salonToday.add(const Duration(days: 365));
     final lastDate = validToDay.isAfter(farthest) ? validToDay : farthest;
 
@@ -798,6 +829,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
           if (days > _kMaxAdvanceDays) {
             return 'Advance days cannot be more than $_kMaxAdvanceDays';
           }
+
         }
         return null;
       case 2:
@@ -1584,9 +1616,7 @@ class _CreateOfferScreenState extends State<CreateOfferScreen> {
                   label: _discountType == 'percentage'
                       ? 'Discount Value (%) *'
                       : 'Discount Amount ($_salonCurrencySymbol) *',
-                  hint: _discountType == 'percentage'
-                      ? 'e.g., 20'
-                      : 'e.g., 500',
+                  hint: _discountType == 'percentage' ? 'e.g., 20' : 'e.g., 500',
                   icon: _discountType == 'percentage'
                       ? Icons.percent
                       : Icons.payments,
