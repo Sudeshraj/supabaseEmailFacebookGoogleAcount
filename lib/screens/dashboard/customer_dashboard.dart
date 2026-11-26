@@ -1160,8 +1160,11 @@ Future<void> _viewNotifications() async {
         }
       });
 
-      FirebaseMessaging.instance.onTokenRefresh.listen((newToken) {
-        debugPrint('🔄 FCM Token refreshed: $newToken');
+      // FID flow: onRegistered replaces the deprecated onTokenRefresh.
+      // (Saving the id to Supabase is done by NotificationService - this
+      // listener only logs.)
+      FirebaseMessaging.instance.onRegistered.listen((String installationId) {
+        debugPrint('🔄 FCM registration refreshed (FID): $installationId');
       });
     } catch (e) {
       debugPrint('❌ Error setting up notification listeners: $e');

@@ -378,12 +378,17 @@ Future<void> main() async {
     }
 
     // ========== PHASE 4: NOTIFICATION SERVICE ==========
-    final notificationService = NotificationService();
-
-    await notificationService.initWithoutPermission();
-    debugPrint(
-      '🔔 Notification service initialized WITHOUT permission (Web + Mobile)',
-    );
+    // A notification problem must never stop the app from starting.
+    try {
+      final notificationService = NotificationService();
+      await notificationService.initWithoutPermission();
+      debugPrint(
+        '🔔 Notification service initialized WITHOUT permission (Web + Mobile)',
+      );
+    } catch (e, st) {
+      debugPrint('⚠️ Notification init failed (app continues): $e');
+      debugPrint('Stack: $st');
+    }
 
     // ========== PHASE 5: PLATFORM CONFIG ==========
     // ⚠️ MOVED: deep link setup (_setupPlatformSpecificConfig) is no

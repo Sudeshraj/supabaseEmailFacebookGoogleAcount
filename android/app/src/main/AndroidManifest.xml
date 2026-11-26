@@ -88,18 +88,24 @@
             android:value="Notifications for salon booking updates, offers, and reminders" />
 
         <!-- ================================================================ -->
+        <!-- 🔥 FCM: USE FIREBASE INSTALLATION ID (FID) INSTEAD OF FCM TOKEN  -->
+        <!-- ================================================================ -->
+        <!-- NEW: register() + onRegistered deliver a FID. This MUST match   -->
+        <!-- the Dart flag (_fidOnAndroid in notification_service.dart).     -->
+        <meta-data
+            android:name="firebase_messaging_installation_id_enabled"
+            android:value="true" />
+
+        <!-- ================================================================ -->
         <!-- 🔥 FIREBASE MESSAGING SERVICES (FIXED)                          -->
         <!-- ================================================================ -->
 
-        <!-- ✅ Main FCM Service for receiving messages -->
-        <service
-            android:name="com.google.firebase.messaging.FirebaseMessagingService"
-            android:exported="false"
-            android:foregroundServiceType="dataSync">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
+        <!-- ❌ REMOVED: manual declaration of the base                    -->
+        <!-- com.google.firebase.messaging.FirebaseMessagingService.        -->
+        <!-- The firebase_messaging Flutter plugin already declares its own -->
+        <!-- service (FlutterFirebaseMessagingService) in its manifest;     -->
+        <!-- declaring the base class here competes with it, so the FID     -->
+        <!-- (onRegistered) callback never reaches Dart.                    -->
 
         <!-- ✅ Required for FCM message forwarding (Android 12+) -->
         <service

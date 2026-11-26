@@ -2,7 +2,7 @@ name: flutter_application_1
 description: "Beautibooker - Salon Booking App"
 publish_to: 'none'
 
-version: 1.0.0+5
+version: 1.0.0+8
 
 environment:
   sdk: ^3.12.2
@@ -14,8 +14,8 @@ dependencies:
   # ================================================================
   # 🔥 FIREBASE
   # ================================================================
-  firebase_core: ^4.1.1 
-  firebase_messaging: ^16.1.1
+  firebase_core: ^5.2.0 
+  firebase_messaging: ^17.1.0
   
   # ================================================================
   # 🔥 NOTIFICATIONS

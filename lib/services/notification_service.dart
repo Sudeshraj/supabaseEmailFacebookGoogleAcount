@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter/material.dart';
@@ -19,6 +20,25 @@ class NotificationService {
 
   // Guards init() so listeners are never registered twice.
   bool _initialized = false;
+
+  // ===============================================================
+  // 🔥 REGISTRATION (firebase_messaging 17+)
+  // ===============================================================
+  //
+  // Uses register() + onRegistered on ALL platforms (Android, iOS, web).
+  // onRegistered delivers a Firebase Installation ID (FID), which is
+  // stored in user_fcm_tokens exactly where the FCM token used to be.
+  //
+  // Requirements (see setup steps):
+  //   - AndroidManifest.xml: firebase_messaging_installation_id_enabled=true
+  //   - ios/Runner/Info.plist: FirebaseMessagingInstallationIdEnabled=true
+  //   - 'send-notification' edge function sends with `fid:` for FIDs.
+
+  // Latest registration id (FID) delivered by onRegistered.
+  String? _currentRegistrationId;
+
+  // Single subscription to onRegistered.
+  StreamSubscription<String>? _registrationSub;
 
   // Supabase client
   SupabaseClient? _supabaseClient;
@@ -67,6 +87,10 @@ class NotificationService {
 
     debugPrint('🚀 Initializing NotificationService for $platformName');
 
+    // Subscribe BEFORE any register() call so the listener is already
+    // active when the registration event is emitted.
+    _listenForRegistrationChanges();
+
     if (isWeb) {
       await _initWebNotifications(requestPermission: requestPermission);
     } else {
@@ -78,17 +102,13 @@ class NotificationService {
       await _getTokenAndSave();
     } else {
       // Web - only fetch the token if the user ALREADY granted permission
-      // earlier (getToken() would otherwise trigger a prompt). If no user
+      // earlier (fetching would otherwise trigger a prompt). If no user
       // is logged in yet, the token is stored locally and synced after
       // sign-in via syncPendingToken().
       try {
         if (await hasPermission()) {
-          final token = await _firebaseMessaging.getToken(
-            vapidKey: _webVapidKey,
-          );
-          if (token != null) {
-            await _saveTokenToSupabase(token);
-          }
+          // onRegistered (subscribed in init) saves the FID.
+          await _registerDevice();
         } else {
           debugPrint('🌐 Web: permission not granted yet - skipping token');
         }
@@ -110,6 +130,40 @@ class NotificationService {
   Future<void> initWithoutPermission() async {
     await init(requestPermission: false);
     debugPrint('✅ Notification service initialized without permission');
+  }
+
+  // ===============================================================
+  // 🔥 REGISTRATION HELPERS (register() + onRegistered)
+  // ===============================================================
+
+  /// Subscribes once to onRegistered. Every new / refreshed id (FID) is
+  /// saved to Supabase. Must be called BEFORE register().
+  void _listenForRegistrationChanges() {
+    if (_registrationSub != null) return;
+
+    _registrationSub = _firebaseMessaging.onRegistered.listen(
+      (String id) {
+        if (id.isNotEmpty) {
+          _saveTokenToSupabase(id);
+        }
+      },
+      onError: (Object e) {
+        debugPrint('⚠️ Registration stream error: $e');
+      },
+    );
+  }
+
+  /// Calls register(). The id (FID) is delivered - and saved - by the
+  /// onRegistered listener, so this returns nothing.
+  /// On web this may show the permission prompt, so callers must check
+  /// hasPermission() first.
+  Future<void> _registerDevice() async {
+    try {
+      // vapidKey is only used on web (ignored on Android / iOS).
+      await _firebaseMessaging.register(vapidKey: _webVapidKey);
+    } catch (e) {
+      debugPrint('❌ Register device error: $e');
+    }
   }
 
   // ===============================================================
@@ -139,12 +193,9 @@ class NotificationService {
       // NOTE: message listeners are registered ONLY in
       // _setupMessageListeners() (called from init for every platform).
       // Registering them here too caused duplicate handling.
-
-      _firebaseMessaging.onTokenRefresh.listen((newToken) {
-        if (newToken.isNotEmpty) {
-          _saveTokenToSupabase(newToken);
-        }
-      });
+      //
+      // Token refresh / onRegistered is handled ONCE in
+      // _listenForRegistrationChanges() (called at the top of init).
     } catch (e) {
       debugPrint('❌ Web notification init error: $e');
     }
@@ -291,12 +342,8 @@ class NotificationService {
 
       if (granted) {
         debugPrint('✅ Web permission granted');
-        String? token = await _firebaseMessaging.getToken(
-          vapidKey: _webVapidKey,
-        );
-        if (token != null) {
-          await _saveTokenToSupabase(token);
-        }
+        // onRegistered (subscribed in init) saves the FID.
+        await _registerDevice();
       } else {
         debugPrint('❌ Web permission denied');
       }
@@ -380,35 +427,26 @@ class NotificationService {
   // 🔥 TOKEN MANAGEMENT - ONE ROW PER DEVICE (user_fcm_tokens)
   // ===============================================================
 
+  /// Returns this device's current registration id (the FID).
+  /// It is the last id delivered by onRegistered, so it is null until the
+  /// first registration event has arrived.
   Future<String?> getToken() async {
-    try {
-      if (isWeb) {
-        return await _firebaseMessaging.getToken(vapidKey: _webVapidKey);
-      } else {
-        return await _firebaseMessaging.getToken();
-      }
-    } catch (e) {
-      debugPrint('❌ Get token error: $e');
-      return null;
-    }
+    return _currentRegistrationId;
   }
 
   /// Fetch + save this device's token. Works for web AND mobile.
   /// Call it after sign-in (main.dart auth listener does this).
   Future<void> saveTokenManually() async {
     // Web: only fetch if permission was already granted, otherwise
-    // getToken() would trigger a permission prompt.
+    // fetching would trigger a permission prompt.
     if (isWeb && !await hasPermission()) {
       debugPrint('🌐 Web: permission not granted yet - skipping token save');
       return;
     }
 
-    final token = await getToken();
-    if (token != null) {
-      await _saveTokenToSupabase(token);
-    } else {
-      debugPrint('⚠️ No FCM token available');
-    }
+    // register() makes onRegistered emit the FID again (even if already
+    // registered); the listener saves it for the signed-in user.
+    await _registerDevice();
   }
 
   Future<void> _getTokenAndSave() async {
@@ -418,18 +456,15 @@ class NotificationService {
       return;
     }
 
-    String? token = await getToken();
-    if (token != null) {
-      await _saveTokenToSupabase(token);
-    }
-
-    _firebaseMessaging.onTokenRefresh.listen((newToken) {
-      _saveTokenToSupabase(newToken);
-    });
+    // onRegistered (subscribed in init) saves the FID, including later
+    // refreshes - no extra listener needed here.
+    await _registerDevice();
   }
 
   Future<void> _saveTokenToSupabase(String token) async {
     try {
+      _currentRegistrationId = token;
+
       if (!_isSupabaseReady()) {
         await _storeTokenLocally(token);
         return;

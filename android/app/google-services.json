@@ -20,7 +20,7 @@
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyBY5U3XRktxs1WAZmvXZsoOg02ghUUFfKI"
+          "current_key": "AIzaSyASbbezLis4-UZIrnmB_U_11hhtR1yqH1Y"
         }
       ],
       "services": {
@@ -34,7 +34,7 @@
               "client_id": "624521405165-jh9c2a5bja9h8imm04j10pih75b2ps7h.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.example.flutterApplication1"
+                "bundle_id": "com.beautibooker.app"
               }
             }
           ]
@@ -45,7 +45,7 @@
       "client_info": {
         "mobilesdk_app_id": "1:624521405165:android:1677551f7c46cfcd8262e4",
         "android_client_info": {
-          "package_name": "com.example.flutter_application_1"
+          "package_name": "com.beautibooker.app"
         }
       },
       "oauth_client": [
@@ -56,7 +56,7 @@
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyBY5U3XRktxs1WAZmvXZsoOg02ghUUFfKI"
+          "current_key": "AIzaSyASbbezLis4-UZIrnmB_U_11hhtR1yqH1Y"
         }
       ],
       "services": {
@@ -70,7 +70,7 @@
               "client_id": "624521405165-jh9c2a5bja9h8imm04j10pih75b2ps7h.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.example.flutterApplication1"
+                "bundle_id": "com.beautibooker.app"
               }
             }
           ]

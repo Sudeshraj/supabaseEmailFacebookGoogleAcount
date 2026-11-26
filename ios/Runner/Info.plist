@@ -45,7 +45,8 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
-
+    <key>FirebaseMessagingInstallationIdEnabled</key>
+    <true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
     <string>We need your location to show your company position on the map.</string>
 
@@ -138,7 +139,7 @@
     <key>BGTaskSchedulerPermittedIdentifiers</key>
     <array>
         <!-- mai.dart eke දී ඔයා දාපු Task ID එකම මෙතනට දෙන්න -->
-        <string>com.example.Beautibooker.supabaseDataSyncTask</string>
+        <string>com.beautibooker.app.supabaseDataSyncTask</string>
     </array>
 
 
