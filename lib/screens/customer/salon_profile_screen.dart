@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_application_1/screens/subscription/widgets/pro_gate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../services/timezone_service.dart';
 import '../../services/currency_service.dart';
-import '../../services/currency_settings_service.dart'; // ✅ NEW
+import '../../services/currency_settings_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../widgets/offer_rules_ui.dart';
 
@@ -35,17 +34,17 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
   // ==================== TIMEZONE VARIABLES ====================
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
-  static const String _kDefaultCurrency = 'LKR'; // ✅ NEW
+  static const String _kDefaultCurrency = 'LKR';
   String _salonTimezone = _kDefaultSalonTimezone;
   String _userTimezone = '';
 
-  // ✅ CURRENCY (salon + user + exchange rate)
+  // CURRENCY (salon + user + exchange rate)
   String _salonCurrencyCode = 'LKR';
-  String _userCurrencyCode = _kDefaultCurrency; // ✅ NEW
-  double? _exchangeRate; // ✅ NEW
+  String _userCurrencyCode = _kDefaultCurrency; 
+  double? _exchangeRate; 
   final CurrencyService _currencyService = CurrencyService.instance;
   final CurrencySettingsService _currencySettings =
-      CurrencySettingsService.instance; // ✅ NEW
+      CurrencySettingsService.instance; 
 
   bool _isTimezoneLoaded = false;
 
@@ -74,11 +73,12 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   ];
 
   // ============================================================
-  // ✅ SALON "NOW" — consistent timezone reference
+  // SALON "NOW" — consistent timezone reference
   // ============================================================
   DateTime get _salonNow {
-    final tz =
-        _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+    final tz = _salonTimezone.isNotEmpty
+        ? _salonTimezone
+        : _kDefaultSalonTimezone;
     try {
       return TimezoneService.getNowInTimezone(tz);
     } catch (e) {
@@ -87,13 +87,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  /// ✅ Check if user timezone differs from salon timezone
+  /// Check if user timezone differs from salon timezone
   bool get _isDifferentTimezone {
     if (_salonTimezone.isEmpty || _userTimezone.isEmpty) return false;
     return _salonTimezone != _userTimezone;
   }
 
-  /// ✅ Check if user currency differs from salon currency
+  /// Check if user currency differs from salon currency
   bool get _showApprox {
     return _exchangeRate != null &&
         _exchangeRate! > 0 &&
@@ -111,7 +111,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
   Future<void> _initialize() async {
     await _initializeTimezone();
-    await _loadSalonInfo(); // ✅ Load salon TZ + currency + user currency + rate
+    await _loadSalonInfo(); // Load salon TZ + currency + user currency + rate
     await Future.wait([
       _loadUserStatus(),
       _loadSalonDetails(),
@@ -129,19 +129,19 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       _userTimezone = _kDefaultSalonTimezone;
     }
 
-    debugPrint('✅ User timezone: $_userTimezone');
+    debugPrint('User timezone: $_userTimezone');
   }
 
-  /// ✅ Load salon timezone + currency + user currency + exchange rate
+  /// Load salon timezone + currency + user currency + exchange rate
   Future<void> _loadSalonInfo() async {
-    // ✅ Defaults BEFORE query
+    // Defaults BEFORE query
     _salonTimezone = _kDefaultSalonTimezone;
     _salonCurrencyCode = _kDefaultCurrency;
 
-    // ✅ Load user currency (from profiles)
+    // Load user currency (from profiles)
     try {
       _userCurrencyCode = await _currencySettings.getUserCurrency();
-      debugPrint('✅ User currency: $_userCurrencyCode');
+      debugPrint('User currency: $_userCurrencyCode');
     } catch (e) {
       debugPrint('⚠️ Failed to load user currency: $e');
       _userCurrencyCode = _kDefaultCurrency;
@@ -179,7 +179,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         }
       }
 
-      // ✅ Load exchange rate for this salon → user currency
+      // Load exchange rate for this salon → user currency
       await _loadExchangeRate();
 
       _convertSalonHoursToLocal();
@@ -190,13 +190,13 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       });
 
       debugPrint(
-        '✅ Salon: TZ=$_salonTimezone, Currency=$_salonCurrencyCode, '
+        'Salon: TZ=$_salonTimezone, Currency=$_salonCurrencyCode, '
         'User currency=$_userCurrencyCode, Rate=$_exchangeRate',
       );
     } catch (e) {
       debugPrint('❌ Error loading salon info: $e');
 
-      // ✅ Load rate anyway (with default currency)
+      // Load rate anyway (with default currency)
       await _loadExchangeRate();
 
       _convertSalonHoursToLocal();
@@ -208,7 +208,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     }
   }
 
-  /// ✅ NEW: Load exchange rate (salon → user)
+  /// NEW: Load exchange rate (salon → user)
   Future<void> _loadExchangeRate() async {
     if (!mounted) return;
 
@@ -235,7 +235,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       });
 
       debugPrint(
-        '✅ Exchange rate: 1 $_salonCurrencyCode = '
+        'Exchange rate: 1 $_salonCurrencyCode = '
         '${rate?.toStringAsFixed(6) ?? "?"} $_userCurrencyCode',
       );
     } catch (e) {
@@ -341,8 +341,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
   String _utcToSalonTimeString(String utcTime) {
     try {
-      final tz =
-          _salonTimezone.isNotEmpty ? _salonTimezone : _kDefaultSalonTimezone;
+      final tz = _salonTimezone.isNotEmpty
+          ? _salonTimezone
+          : _kDefaultSalonTimezone;
       return TimezoneService.utcToLocalTimeRecurringWithTimezone(utcTime, tz);
     } catch (e) {
       debugPrint('Error converting UTC to salon time: $e');
@@ -408,7 +409,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
   }
 
   // ============================================================
-  // ✅ CURRENCY HELPERS
+  // CURRENCY HELPERS
   // ============================================================
 
   String _formatPrice(dynamic price) {
@@ -418,7 +419,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
-  /// ✅ NEW: User currency format
+  /// NEW: User currency format
   String _formatUserPrice(dynamic price) {
     return _currencyService.format(
       price: price,
@@ -426,7 +427,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
     );
   }
 
-  String get _salonCurrencySymbol => _currencyService.getSymbol(_salonCurrencyCode);
+  String get _salonCurrencySymbol =>
+      _currencyService.getSymbol(_salonCurrencyCode);
 
   // ==================== DATA LOADING ====================
 
@@ -595,14 +597,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             final labelParts = <String>[];
             if (gender.isNotEmpty) labelParts.add(gender);
             if (age.isNotEmpty) labelParts.add(age);
-            final vLabel =
-                labelParts.isEmpty ? 'Standard' : labelParts.join(' ');
+            final vLabel = labelParts.isEmpty
+                ? 'Standard'
+                : labelParts.join(' ');
             scopeParts.add('$serviceName · $vLabel');
           }
         }
 
-        offer['scope_summary'] =
-            scopeParts.isEmpty ? 'All services' : scopeParts.join(', ');
+        offer['scope_summary'] = scopeParts.isEmpty
+            ? 'All services'
+            : scopeParts.join(', ');
         offer['claim_status'] = claimStatus[offer['id'] as int];
         return offer;
       }).toList();
@@ -793,10 +797,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         );
         return;
       }
-      if (!mounted) return;
 
-      // VIP booking is a Pro feature -> free customers go to the Pro screen
-      if (!await ensureCustomerPro(context, confirm: false)) return;
       if (!mounted) return;
 
       context.push('/customer/vip-booking', extra: widget.salon);
@@ -865,8 +866,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         return;
       }
 
-      final pointsRequired =
-          (offer['points_required'] as num?)?.toInt() ?? 0;
+      final pointsRequired = (offer['points_required'] as num?)?.toInt() ?? 0;
 
       if (pointsRequired > 0) {
         try {
@@ -962,8 +962,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           children: [
             Text(
               offer['description'] ?? '',
-              style: context.bodyMedium
-                  .copyWith(color: context.secondaryTextColor),
+              style: context.bodyMedium.copyWith(
+                color: context.secondaryTextColor,
+              ),
             ),
             const SizedBox(height: 12),
             Container(
@@ -986,16 +987,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   Text(
                     'Scope: ${offer['scope_summary']}',
                     textAlign: TextAlign.center,
-                    style: context.bodySmall
-                        .copyWith(color: context.secondaryTextColor),
+                    style: context.bodySmall.copyWith(
+                      color: context.secondaryTextColor,
+                    ),
                   ),
                   if (pointsRequired > 0) ...[
                     const SizedBox(height: 8),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.star,
-                            color: Colors.amber, size: 16),
+                        const Icon(Icons.star, color: Colors.amber, size: 16),
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(
@@ -1036,7 +1037,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               backgroundColor: context.primaryColor,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Claim Offer'),
+            child: const Text('Apply Offer'),
           ),
         ],
       ),
@@ -1089,8 +1090,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color:
-                    context.isDarkMode ? Colors.grey[700] : Colors.grey[300],
+                color: context.isDarkMode ? Colors.grey[700] : Colors.grey[300],
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -1222,8 +1222,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               child: Center(
                 child: Container(
                   width: contentWidth,
-                  constraints:
-                      BoxConstraints(maxHeight: constraints.maxHeight),
+                  constraints: BoxConstraints(maxHeight: constraints.maxHeight),
                   decoration: BoxDecoration(
                     color: context.backgroundColor,
                     boxShadow: [
@@ -1235,7 +1234,12 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     ],
                   ),
                   child: _buildContent(
-                      isWeb, isTablet, openTime, closeTime, isOpen),
+                    isWeb,
+                    isTablet,
+                    openTime,
+                    closeTime,
+                    isOpen,
+                  ),
                 ),
               ),
             );
@@ -1270,7 +1274,12 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _buildSalonInfoSection(
-                        isWeb, isTablet, openTime, closeTime, isOpen),
+                      isWeb,
+                      isTablet,
+                      openTime,
+                      closeTime,
+                      isOpen,
+                    ),
                     const SizedBox(height: 20),
                     _buildMenuTreeSection(isWeb),
                     const SizedBox(height: 32),
@@ -1333,8 +1342,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 color: Colors.black.withValues(alpha: 0.3),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.arrow_back,
-                  color: Colors.white, size: 22),
+              child: const Icon(
+                Icons.arrow_back,
+                color: Colors.white,
+                size: 22,
+              ),
             ),
             onPressed: () => Navigator.pop(context),
           ),
@@ -1351,8 +1363,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     color: Colors.black.withValues(alpha: 0.3),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.share,
-                      color: Colors.white, size: 22),
+                  child: const Icon(Icons.share, color: Colors.white, size: 22),
                 ),
                 onPressed: () {},
               ),
@@ -1520,8 +1531,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.people,
-                          size: 16, color: context.secondaryTextColor),
+                      Icon(
+                        Icons.people,
+                        size: 16,
+                        color: context.secondaryTextColor,
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         '$_followersCount followers',
@@ -1537,8 +1551,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
             if (widget.salon['address'] != null)
               Row(
                 children: [
-                  Icon(Icons.location_on,
-                      size: 16, color: context.secondaryTextColor),
+                  Icon(
+                    Icons.location_on,
+                    size: 16,
+                    color: context.secondaryTextColor,
+                  ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
@@ -1558,8 +1575,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.access_time,
-                        size: 16, color: context.secondaryTextColor),
+                    Icon(
+                      Icons.access_time,
+                      size: 16,
+                      color: context.secondaryTextColor,
+                    ),
                     const SizedBox(width: 6),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1586,7 +1606,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 4),
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: isOpen
                         ? Colors.green.withValues(alpha: 0.1)
@@ -1656,18 +1678,19 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           if (!_isLoadingOffers && _offers.isNotEmpty && !_isFollowing) ...[
             const SizedBox(height: 4),
             Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: Colors.orange.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
-                border:
-                    Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline,
-                      size: 16, color: Colors.orange),
+                  const Icon(
+                    Icons.info_outline,
+                    size: 16,
+                    color: Colors.orange,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
@@ -1687,8 +1710,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
               ? const Center(
                   child: Padding(
                     padding: EdgeInsets.all(32),
-                    child:
-                        CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                    child: CircularProgressIndicator(color: Color(0xFFFF6B8B)),
                   ),
                 )
               : SizedBox(
@@ -1776,12 +1798,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       leading: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: context.primaryColor
-                              .withValues(alpha: 0.1),
+                          color: context.primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(Icons.phone,
-                            color: context.primaryColor, size: 22),
+                        child: Icon(
+                          Icons.phone,
+                          color: context.primaryColor,
+                          size: 22,
+                        ),
                       ),
                       title: Text(
                         'Phone',
@@ -1796,8 +1820,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                           color: context.secondaryTextColor,
                         ),
                       ),
-                      trailing: Icon(Icons.chevron_right,
-                          size: 20, color: context.secondaryTextColor),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: context.secondaryTextColor,
+                      ),
                       onTap: _openWhatsApp,
                     ),
                   if (widget.salon['email'] != null &&
@@ -1806,12 +1833,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       leading: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: context.primaryColor
-                              .withValues(alpha: 0.1),
+                          color: context.primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(Icons.email,
-                            color: context.primaryColor, size: 22),
+                        child: Icon(
+                          Icons.email,
+                          color: context.primaryColor,
+                          size: 22,
+                        ),
                       ),
                       title: Text(
                         'Email',
@@ -1826,8 +1855,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                           color: context.secondaryTextColor,
                         ),
                       ),
-                      trailing: Icon(Icons.chevron_right,
-                          size: 20, color: context.secondaryTextColor),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: context.secondaryTextColor,
+                      ),
                       onTap: () {},
                     ),
                   if (widget.salon['address'] != null &&
@@ -1836,12 +1868,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                       leading: Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: context.primaryColor
-                              .withValues(alpha: 0.1),
+                          color: context.primaryColor.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Icon(Icons.location_on,
-                            color: context.primaryColor, size: 22),
+                        child: Icon(
+                          Icons.location_on,
+                          color: context.primaryColor,
+                          size: 22,
+                        ),
                       ),
                       title: Text(
                         'Address',
@@ -1856,8 +1890,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                           color: context.secondaryTextColor,
                         ),
                       ),
-                      trailing: Icon(Icons.chevron_right,
-                          size: 20, color: context.secondaryTextColor),
+                      trailing: Icon(
+                        Icons.chevron_right,
+                        size: 20,
+                        color: context.secondaryTextColor,
+                      ),
                       onTap: () {},
                     ),
                 ],
@@ -1898,8 +1935,7 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           ),
         ],
         image: hasLogo
-            ? DecorationImage(
-                image: NetworkImage(logoUrl), fit: BoxFit.cover)
+            ? DecorationImage(image: NetworkImage(logoUrl), fit: BoxFit.cover)
             : null,
       ),
       child: !hasLogo
@@ -1963,12 +1999,14 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       return ElevatedButton(
         onPressed: null,
         style: ElevatedButton.styleFrom(
-          backgroundColor:
-              context.isDarkMode ? Colors.grey[800] : Colors.grey[200],
+          backgroundColor: context.isDarkMode
+              ? Colors.grey[800]
+              : Colors.grey[200],
           foregroundColor: context.secondaryTextColor,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(30),
+          ),
           elevation: 0,
         ),
         child: Text(
@@ -1987,11 +2025,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
         backgroundColor: _isFollowing
             ? (context.isDarkMode ? Colors.grey[800] : Colors.grey[200])
             : context.primaryColor,
-        foregroundColor:
-            _isFollowing ? context.secondaryTextColor : Colors.white,
+        foregroundColor: _isFollowing
+            ? context.secondaryTextColor
+            : Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
         elevation: 0,
       ),
       child: Text(
@@ -2131,14 +2169,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: context.isDarkMode
-              ? [
-                  color.withValues(alpha: 0.15),
-                  const Color(0xFF1E1E1E),
-                ]
-              : [
-                  color.withValues(alpha: 0.1),
-                  Colors.white,
-                ],
+              ? [color.withValues(alpha: 0.15), const Color(0xFF1E1E1E)]
+              : [color.withValues(alpha: 0.1), Colors.white],
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withValues(alpha: 0.3)),
@@ -2194,7 +2226,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                           const SizedBox(height: 4),
                           Container(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 2),
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
                               color: color.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(12),
@@ -2216,8 +2250,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 Text(
                   offer['description'] ?? '',
                   style: context.bodySmall.copyWith(
-                    color:
-                        context.isDarkMode ? Colors.white60 : Colors.grey[600],
+                    color: context.isDarkMode
+                        ? Colors.white60
+                        : Colors.grey[600],
                   ),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -2227,18 +2262,16 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 4),
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
                     decoration: BoxDecoration(
                       color: color.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
                       children: [
-                        Icon(
-                          Icons.content_cut,
-                          size: 11,
-                          color: color,
-                        ),
+                        Icon(Icons.content_cut, size: 11, color: color),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
@@ -2270,7 +2303,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     if ((offer['points_required'] ?? 0) > 0)
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.amber.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(8),
@@ -2278,8 +2313,11 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.star,
-                                color: Colors.amber, size: 12),
+                            const Icon(
+                              Icons.star,
+                              color: Colors.amber,
+                              size: 12,
+                            ),
                             const SizedBox(width: 2),
                             Text(
                               '${offer['points_required']} pts',
@@ -2295,7 +2333,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     if (isUsed || isClaimed)
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: (isUsed ? Colors.grey : Colors.green)
                               .withValues(alpha: 0.15),
@@ -2323,13 +2363,15 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     else
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
                           color: daysLeft <= 3
                               ? Colors.red.withValues(alpha: 0.1)
                               : (context.isDarkMode
-                                  ? Colors.white10
-                                  : Colors.grey.withValues(alpha: 0.1)),
+                                    ? Colors.white10
+                                    : Colors.grey.withValues(alpha: 0.1)),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Row(
@@ -2341,22 +2383,22 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                               color: daysLeft <= 3
                                   ? Colors.red
                                   : (context.isDarkMode
-                                      ? Colors.white60
-                                      : Colors.grey[600]),
+                                        ? Colors.white60
+                                        : Colors.grey[600]),
                             ),
                             const SizedBox(width: 2),
                             Text(
                               daysLeft < 0
                                   ? 'Expired'
                                   : (daysLeft == 0
-                                      ? 'Last day'
-                                      : '$daysLeft days left'),
+                                        ? 'Last day'
+                                        : '$daysLeft days left'),
                               style: context.bodySmall.copyWith(
                                 color: daysLeft <= 3
                                     ? Colors.red
                                     : (context.isDarkMode
-                                        ? Colors.white60
-                                        : Colors.grey[600]),
+                                          ? Colors.white60
+                                          : Colors.grey[600]),
                               ),
                             ),
                           ],
@@ -2508,8 +2550,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   return const Padding(
                     padding: EdgeInsets.all(24),
                     child: Center(
-                      child:
-                          CircularProgressIndicator(color: Color(0xFFFF6B8B)),
+                      child: CircularProgressIndicator(
+                        color: Color(0xFFFF6B8B),
+                      ),
                     ),
                   );
                 }
@@ -2521,8 +2564,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                     child: Center(
                       child: Text(
                         'No services available yet',
-                        style: context.bodyMedium
-                            .copyWith(color: context.secondaryTextColor),
+                        style: context.bodyMedium.copyWith(
+                          color: context.secondaryTextColor,
+                        ),
                       ),
                     ),
                   );
@@ -2530,8 +2574,9 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children:
-                      tree.map((cat) => _buildMenuCategoryBlock(cat)).toList(),
+                  children: tree
+                      .map((cat) => _buildMenuCategoryBlock(cat))
+                      .toList(),
                 );
               },
             ),
@@ -2562,8 +2607,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _selectedBookingItems.isEmpty
                         ? (context.isDarkMode
-                            ? Colors.grey[800]
-                            : Colors.grey[300])
+                              ? Colors.grey[800]
+                              : Colors.grey[300])
                         : context.primaryColor,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
@@ -2590,8 +2635,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _selectedBookingItems.isEmpty
                         ? (context.isDarkMode
-                            ? Colors.grey[800]
-                            : Colors.grey[300])
+                              ? Colors.grey[800]
+                              : Colors.grey[300])
                         : Colors.amber.shade700,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
@@ -2673,8 +2718,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                   ),
                 ),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(10),
@@ -2830,8 +2877,10 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
                 onTap: () => _toggleMenuSelection(service, variant),
                 borderRadius: BorderRadius.circular(10),
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: isSelected
                         ? context.primaryColor.withValues(alpha: 0.08)
@@ -3023,8 +3072,8 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       if (!mounted) return;
 
       final salonWithExtras = Map<String, dynamic>.from(widget.salon);
-      salonWithExtras['preselected_services'] =
-          _selectedBookingItems.values.toList();
+      salonWithExtras['preselected_services'] = _selectedBookingItems.values
+          .toList();
       salonWithExtras['skip_to_date'] = true;
 
       context.push('/customer/booking-flow', extra: salonWithExtras);
@@ -3055,15 +3104,12 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
       }
 
       if (_selectedBookingItems.isEmpty) return;
-      if (!mounted) return;
 
-      // VIP booking is a Pro feature -> free customers go to the Pro screen
-      if (!await ensureCustomerPro(context, confirm: false)) return;
       if (!mounted) return;
 
       final salonWithExtras = Map<String, dynamic>.from(widget.salon);
-      salonWithExtras['preselected_services'] =
-          _selectedBookingItems.values.toList();
+      salonWithExtras['preselected_services'] = _selectedBookingItems.values
+          .toList();
       salonWithExtras['skip_to_date'] = true;
 
       context.push('/customer/vip-booking', extra: salonWithExtras);
@@ -3111,13 +3157,15 @@ class _SalonProfileScreenState extends State<SalonProfileScreen> {
 
       if (servicesResponse.isEmpty) return [];
 
-      final serviceIds =
-          servicesResponse.map<int>((s) => s['id'] as int).toList();
+      final serviceIds = servicesResponse
+          .map<int>((s) => s['id'] as int)
+          .toList();
 
       final variantsResponse = await supabase
           .from('service_variants')
           .select(
-              'id, service_id, price, duration, salon_gender_id, salon_age_category_id')
+            'id, service_id, price, duration, salon_gender_id, salon_age_category_id',
+          )
           .inFilter('service_id', serviceIds)
           .eq('is_active', true);
 

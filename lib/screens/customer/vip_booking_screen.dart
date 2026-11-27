@@ -10,6 +10,7 @@ import '../../services/currency_service.dart';
 import '../../services/currency_settings_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
+import 'package:flutter_application_1/screens/subscription/widgets/pro_gate.dart';
 
 // =====================================================================
 // VIP BOOKING FLOW
@@ -36,7 +37,8 @@ import '../../theme/app_theme.dart';
 //  - The VIP number shown at the time step is a PREVIEW from the DB function
 //    get_vip_preview_number(); the FINAL number is given when the booking is
 //    CONFIRMED (a VIP before you may be moved / cancelled meanwhile).
-//  - VIP booking needs a Pro membership (enforced by a database trigger).
+//  - VIP booking needs a Pro membership. The app asks only when Confirm is
+//    tapped (ensureCustomerPro); a database trigger enforces it.
 //
 // SAFETY NETS (the app keeps working if the database is not fully updated)
 //  - get_vip_start_options missing -> falls back to is_barber_free_for()
@@ -141,9 +143,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   double _discountAmount = 0;
   double _originalTotalPrice = 0;
   double _finalTotalPrice = 0;
-
-  // Pro membership (VIP booking is a Pro feature). null = not known yet.
-  bool? _isPro;
 
   // Timezone (salon + user)
   static const String _kDefaultSalonTimezone = 'Asia/Colombo';
@@ -629,23 +628,8 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       _isTimezoneLoaded = true;
     });
 
-    unawaited(_loadProStatus());
     await _loadAllSalons();
     await _initializeScreen();
-  }
-
-  /// VIP booking is a Pro feature (the real lock is in the database).
-  /// This only lets the screen warn the customer early.
-  Future<void> _loadProStatus() async {
-    try {
-      final result = await supabase.rpc('get_my_customer_pro');
-      if (!mounted) return;
-      if (result is Map && result['success'] == true) {
-        setState(() => _isPro = result['is_pro'] == true);
-      }
-    } catch (e) {
-      debugPrint('⚠️ [VIP] Could not check Pro status: $e');
-    }
   }
 
   Future<void> _checkTimezoneChange() async {
@@ -3082,6 +3066,13 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
       final user = supabase.auth.currentUser;
       if (user == null) throw Exception('Please login');
 
+      // VIP booking is a Pro feature: free customers can walk through every
+      // step, and are asked to upgrade only here.
+      // (_isBooking is already true, so a double tap can not open two dialogs;
+      //  the finally block resets it when we return.)
+      if (!await ensureCustomerPro(context, confirm: true)) return;
+      if (!mounted) return;
+
       // ✅ offers may have expired since they were applied: re-check first.
       final oldTotal = _finalTotalPrice;
       final removedOffers = await _refreshOffersBeforeBooking();
@@ -3191,7 +3182,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
         }
 
         if (errorMessage.contains('Pro membership')) {
-          if (mounted) setState(() => _isPro = false);
           throw Exception(
             'VIP booking needs a Pro membership. Upgrade to Pro to book VIP.',
           );
@@ -4357,9 +4347,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
   Widget _buildServiceSelectionStep() {
     final isDark = context.isDarkMode;
     final tree = _buildServiceTree();
-    // VIP booking needs Pro: do not let a non-Pro customer walk through the
-    // whole flow just to be refused at the end (the database still enforces it)
-    final bool proBlocked = _isPro == false;
 
     return Column(
       children: [
@@ -4504,7 +4491,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             ),
           ),
 
-        _buildProBanner(isDark),
         _buildLegacyOfferBanner(isDark),
 
         Expanded(
@@ -4542,7 +4528,7 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
 
         _buildBottomBar(
           isDark: isDark,
-          enabled: _selectedServices.isNotEmpty && !proBlocked,
+          enabled: _selectedServices.isNotEmpty,
           onPressed: () {
             setState(() {
               _currentStep = 2;
@@ -4553,17 +4539,15 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Text(
-                proBlocked
-                    ? 'Pro membership required'
-                    : (_selectedServices.isEmpty
-                          ? 'Select a Service'
-                          : 'Continue to Date'),
+                _selectedServices.isEmpty
+                    ? 'Select a Service'
+                    : 'Continue to Date',
                 style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              if (_selectedServices.isNotEmpty && !proBlocked) ...[
+              if (_selectedServices.isNotEmpty) ...[
                 const SizedBox(width: 8),
                 const Icon(Icons.arrow_forward, size: 18),
               ],
@@ -4571,43 +4555,6 @@ class _VIPBookingScreenState extends State<VIPBookingScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  /// VIP booking needs a Pro membership (the DB enforces it; this only warns).
-  Widget _buildProBanner(bool isDark) {
-    if (_isPro != false) return const SizedBox.shrink();
-
-    return Container(
-      margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.amber.shade900 : Colors.amber.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.amber.shade700 : Colors.amber.shade300,
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            Icons.workspace_premium,
-            color: isDark ? Colors.amber.shade300 : Colors.amber.shade800,
-            size: 22,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'VIP booking needs a Pro membership. Upgrade to Pro to book VIP.',
-              style: TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w500,
-                color: isDark ? Colors.amber.shade200 : Colors.amber.shade900,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 

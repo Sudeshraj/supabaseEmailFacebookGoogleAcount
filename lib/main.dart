@@ -63,7 +63,6 @@ import 'package:flutter_application_1/screens/subscription/screens/customer_pro_
 import 'package:flutter_application_1/screens/subscription/screens/payment_history_screen.dart';
 import 'package:flutter_application_1/screens/subscription/screens/payment_return_screen.dart';
 import 'package:flutter_application_1/screens/subscription/screens/plans_comparison_screen.dart';
-import 'package:flutter_application_1/screens/subscription/screens/subscription_screen.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 import 'package:flutter_application_1/extensions/context_extensions.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
@@ -1726,17 +1725,6 @@ GoRouter _createRouter() {
       // ============================================
       // subscription
       // ============================================
-      GoRoute(
-        path: '/subscription',
-        name: 'subscription',
-        builder: (context, state) {
-          final extra = state.extra as Map<String, dynamic>?;
-          return SubscriptionScreen(
-            salonId: extra?['salonId'] as int,
-            ownerId: extra?['ownerId'] as String,
-          );
-        },
-      ),
       GoRoute(
         path: '/subscription/plans',
         name: 'subscription_plans',

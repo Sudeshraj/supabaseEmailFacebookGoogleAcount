@@ -373,17 +373,8 @@ class _OwnerDashboardState extends State<OwnerDashboard>
 
       final canCreate = usage['can_create_more'] as bool? ?? true;
 
-      if (!canCreate) {
-        final currentSalons = usage['total_salons'] as int? ?? 0;
-        final maxSalons = usage['max_salons'] as int? ?? 1;
-        final planName = usage['plan_name'] as String? ?? 'bronze';
-
-        _showSalonLimitDialog(
-          currentSalons: currentSalons,
-          maxSalons: maxSalons,
-          planName: planName,
-        );
-      }
+      // salon limit reached: show the plan that allows more salons
+      if (!canCreate) _openPlans(reason: 'salons');
 
       return canCreate;
     } catch (e) {
@@ -399,114 +390,6 @@ class _OwnerDashboardState extends State<OwnerDashboard>
       }
       return false;
     }
-  }
-
-  void _showSalonLimitDialog({
-    required int currentSalons,
-    required int maxSalons,
-    required String planName,
-  }) {
-    final isDark = context.isDarkMode;
-    final planDisplay = planName.isNotEmpty
-        ? planName[0].toUpperCase() + planName.substring(1)
-        : 'Bronze';
-    final userId = supabase.auth.currentUser?.id;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        icon: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: Colors.amber.withValues(alpha: 0.15),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.workspace_premium,
-            size: 40,
-            color: Colors.amber,
-          ),
-        ),
-        title: Text(
-          'Salon Limit Reached',
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: isDark ? Colors.white : Colors.black87,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Your $planDisplay plan allows only $maxSalons '
-              'active salon${maxSalons > 1 ? "s" : ""}. '
-              'You currently have $currentSalons.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white70 : Colors.grey[700],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, color: Colors.blue, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Upgrade your plan to create more salons.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white70 : Colors.grey[800],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              if (_selectedSalonId == null || userId == null) return;
-              context.pushNamed(
-                'subscription_plans',
-                extra: {
-                  'salonId': int.parse(_selectedSalonId!),
-                  'ownerId': userId,
-                },
-              );
-            },
-            icon: const Icon(Icons.upgrade, size: 18),
-            label: const Text('View Plans'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.amber[700],
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   // ============================================================
@@ -658,16 +541,7 @@ Future<void> _loadNotificationCount() async {
               );
               return;
             }
-            final userId = supabase.auth.currentUser?.id;
-            if (userId == null) return;
-
-            context.pushNamed(
-              'subscription',
-              extra: {
-                'salonId': int.parse(_selectedSalonId!),
-                'ownerId': userId,
-              },
-            );
+            _openPlans();
           },
         );
       },
@@ -1398,108 +1272,20 @@ Future<void> _loadNotificationCount() async {
     );
   }
 
-  void _showUpgradeDialog({
-    required String featureName,
-    required String requiredPlan,
-  }) {
-    final isDark = context.isDarkMode;
+  /// Opens the subscription screen. With [reason] the plan that unlocks the
+  /// feature is highlighted there.
+  void _openPlans({String? reason, String? requiredPlan}) {
     final userId = supabase.auth.currentUser?.id;
+    final salonId = int.tryParse(_selectedSalonId ?? '');
+    if (userId == null || salonId == null) return;
 
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        icon: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.amber.withValues(alpha: 0.15),
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(
-            Icons.workspace_premium,
-            size: 36,
-            color: Colors.amber,
-          ),
-        ),
-        title: Text(
-          'Upgrade Required',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: isDark ? Colors.white : Colors.black87,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '$featureName is available in the $requiredPlan plan or higher.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 14,
-                color: isDark ? Colors.white70 : Colors.grey[700],
-              ),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(
-                    Icons.workspace_premium,
-                    color: Colors.amber,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Upgrade your plan to unlock this feature.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: isDark ? Colors.white70 : Colors.grey[800],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Not Now'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-              if (_selectedSalonId == null || userId == null) return;
-              context.pushNamed(
-                'subscription_plans',
-                extra: {
-                  'salonId': int.parse(_selectedSalonId!),
-                  'ownerId': userId,
-                },
-              );
-            },
-            icon: const Icon(Icons.upgrade, size: 18),
-            label: const Text('View Plans'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.amber[700],
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ],
-      ),
+    context.pushNamed(
+      'subscription_plans',
+      queryParameters: {
+        'reason': ?reason,
+        'required': ?requiredPlan,
+      },
+      extra: {'salonId': salonId, 'ownerId': userId},
     );
   }
 
@@ -1533,7 +1319,7 @@ Future<void> _loadNotificationCount() async {
 
     final sub = context.read<SubscriptionProvider>();
     if (!sub.canManageOffers) {
-      _showUpgradeDialog(featureName: 'Offers', requiredPlan: 'Silver');
+      _openPlans(reason: 'manage_offers', requiredPlan: 'Silver');
       return;
     }
 
@@ -1664,7 +1450,7 @@ Future<void> _loadNotificationCount() async {
 
     final sub = context.read<SubscriptionProvider>();
     if (!sub.canViewCustomers) {
-      _showUpgradeDialog(featureName: 'Customers', requiredPlan: 'Silver');
+      _openPlans(reason: 'customers_screen', requiredPlan: 'Silver');
       return;
     }
 
@@ -1684,7 +1470,7 @@ Future<void> _loadNotificationCount() async {
 
     final sub = context.read<SubscriptionProvider>();
     if (!sub.canViewRevenue) {
-      _showUpgradeDialog(featureName: 'Revenue', requiredPlan: 'Silver');
+      _openPlans(reason: 'revenue', requiredPlan: 'Silver');
       return;
     }
 
@@ -1721,7 +1507,7 @@ Future<void> _loadNotificationCount() async {
 
     final sub = context.read<SubscriptionProvider>();
     if (!sub.canViewReports) {
-      _showUpgradeDialog(featureName: 'Reports', requiredPlan: 'Platinum');
+      _openPlans(reason: 'reports', requiredPlan: 'Platinum');
       return;
     }
 
@@ -1741,7 +1527,7 @@ Future<void> _loadNotificationCount() async {
 
     final sub = context.read<SubscriptionProvider>();
     if (!sub.canViewAnalytics) {
-      _showUpgradeDialog(featureName: 'Analytics', requiredPlan: 'Platinum');
+      _openPlans(reason: 'analytics', requiredPlan: 'Platinum');
       return;
     }
 
@@ -1753,16 +1539,7 @@ Future<void> _loadNotificationCount() async {
       _showNoSalonSelectedDialog();
       return;
     }
-    final userId = supabase.auth.currentUser?.id;
-    if (userId == null) return;
-
-    context.pushNamed(
-      'subscription',
-      extra: {
-        'salonId': int.parse(_selectedSalonId!),
-        'ownerId': userId,
-      },
-    );
+    _openPlans();
   }
 
   /// ✅ Refreshes the unread count as soon as we come back
@@ -2813,7 +2590,7 @@ Future<void> _loadNotificationCount() async {
         const SizedBox(height: 8),
 
         // ✅ BOOK / VIP for a customer who comes in (reuses the customer screens)
-        //    Book: every plan. VIP: Silver+ (locked button -> upgrade dialog).
+        //    Book and VIP: every plan.
         if (_ownerSalons.isNotEmpty &&
             _selectedSalonId != null &&
             !_isSwitchingSalon) ...[
@@ -2822,9 +2599,9 @@ Future<void> _loadNotificationCount() async {
               salonId: int.parse(_selectedSalonId!),
               showBook: true,
               showVip: true,
-              vipLocked: sub.currentPlanRank < 2,
-              onVipLocked: () => _showUpgradeDialog(
-                featureName: 'VIP Booking',
+              vipLocked: false,
+              onVipLocked: () => _openPlans(
+                reason: 'vip_booking',
                 requiredPlan: 'Silver',
               ),
               onBooked: _refreshAllData,

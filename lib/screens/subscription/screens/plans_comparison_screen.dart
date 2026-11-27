@@ -4,9 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/screens/subscription/models/subscription_plan.dart';
 import 'package:flutter_application_1/screens/subscription/providers/subscription_provider.dart';
+import 'package:flutter_application_1/screens/subscription/screens/payment_history_screen.dart';
 import 'package:flutter_application_1/screens/subscription/services/play_billing_service.dart';
 import 'package:flutter_application_1/screens/subscription/services/payment_service.dart';
 import 'package:flutter_application_1/screens/subscription/services/subscription_service.dart';
+import 'package:flutter_application_1/screens/subscription/widgets/payment_issue_banner.dart';
 import 'package:go_router/go_router.dart';
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
 import 'package:provider/provider.dart';
@@ -16,8 +18,11 @@ import 'package:url_launcher/url_launcher.dart';
 import 'reduce_salons_screen.dart';
 
 // ============================================================
-// PLANS COMPARISON SCREEN
+// SUBSCRIPTION SCREEN (current plan + all plans in one place)
 // ------------------------------------------------------------
+//   • WEB: plans side by side (see _buildPlanList).
+//   • Opened with ?reason=...&required=... (locked feature): the plan that
+//     unlocks it is highlighted and scrolled into view.
 //   • ANDROID: paid plans are bought with Google Play Billing (required by
 //     the Google Play policy for digital features). The app never opens a
 //     PayHere payment on Android.
@@ -40,7 +45,8 @@ class PlansComparisonScreen extends StatefulWidget {
   State<PlansComparisonScreen> createState() => _PlansComparisonScreenState();
 }
 
-class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
+class _PlansComparisonScreenState extends State<PlansComparisonScreen>
+    with SingleTickerProviderStateMixin {
   final SubscriptionService _service = SubscriptionService();
   final PaymentService _payment = PaymentService(); // web only
 
@@ -53,6 +59,14 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   String? _reason;
   String? _requiredPlan;
 
+  // auto scroll to the highlighted plan (only once)
+  final GlobalKey _targetKey = GlobalKey();
+  bool _didScroll = false;
+
+  // pulse of the selected plan card (like the customer dashboard offer cards)
+  late final AnimationController _pulseCtrl;
+  late final Animation<double> _pulseAnim;
+
   // ---- Google Play (Android) ----
   Map<String, GooglePlayProductDetails> _playProducts = {};
   StreamSubscription<PlayPurchaseEvent>? _playSub;
@@ -64,19 +78,24 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   @override
   void initState() {
     super.initState();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    );
+    _pulseAnim = Tween<double>(
+      begin: 1.0,
+      end: 1.03,
+    ).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
     _loadPlans();
 
     if (_isAndroid) {
       _playSub = PlayBillingService.instance.events.listen(_onPlayEvent);
     }
 
-    // make sure the provider is looking at THIS salon
+    // always show a fresh current plan for THIS salon
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final provider = context.read<SubscriptionProvider>();
-      if (provider.currentSalonId != widget.salonId || !provider.isReady) {
-        provider.loadCapabilities(widget.salonId);
-      }
+      context.read<SubscriptionProvider>().loadCapabilities(widget.salonId);
     });
   }
 
@@ -84,6 +103,7 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
   void dispose() {
     _playSub?.cancel();
     _playTimeout?.cancel();
+    _pulseCtrl.dispose();
     super.dispose();
   }
 
@@ -141,6 +161,66 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
       (p) => p.name == provider.currentPlanName,
       orElse: () => _plans.first,
     );
+  }
+
+  // ============================================================
+  // AUTO SELECTED PLAN
+  // ============================================================
+
+  /// The cheapest plan that unlocks [_reason]. Features without a flag in
+  /// SubscriptionPlan (e.g. VIP booking) are matched by [_requiredPlan].
+  /// Returns null when there is nothing to upgrade to.
+  SubscriptionPlan? _findTargetPlan(SubscriptionProvider provider) {
+    if (_reason == null && _requiredPlan == null) return null;
+
+    final required = _requiredPlan?.toLowerCase();
+    final sorted = [..._plans]
+      ..sort((a, b) => a.planRank.compareTo(b.planRank));
+
+    bool unlocks(SubscriptionPlan p) {
+      switch (_reason) {
+        case 'manage_offers':
+          return p.canManageOffers;
+        case 'customers_screen':
+          return p.canViewCustomersScreen;
+        case 'revenue':
+          return p.canViewRevenue;
+        case 'reports':
+          return p.canViewReports;
+        case 'analytics':
+          return p.canViewAnalytics;
+        case 'export':
+          return p.canExportData;
+        case 'salons':
+          return p.planRank > provider.currentPlanRank &&
+              (p.maxSalons == -1 || p.maxSalons > provider.currentSalons);
+        default:
+          return p.name.toLowerCase() == required;
+      }
+    }
+
+    for (final plan in sorted) {
+      if (unlocks(plan)) {
+        return plan.planRank > provider.currentPlanRank ? plan : null;
+      }
+    }
+    return null;
+  }
+
+  void _scrollToTargetOnce() {
+    if (_didScroll) return;
+    _didScroll = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final targetContext = _targetKey.currentContext;
+      if (!mounted || targetContext == null) return;
+      Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 450),
+        curve: Curves.easeOut,
+        alignment: 0.05,
+      );
+    });
   }
 
   // ============================================================
@@ -702,18 +782,58 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         title: Text('$planName Active!'),
         content: Text(message),
         actions: [
+          // stay here: the current plan card above shows the new plan
           ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              if (Navigator.canPop(context)) {
-                Navigator.pop(context); // Back to subscription screen
-              }
-            },
+            onPressed: () => Navigator.pop(ctx),
             child: const Text('OK'),
           ),
         ],
       ),
     );
+  }
+
+  void _confirmCancel() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel Subscription?'),
+        content: const Text(
+          'Your plan will remain active until the end of the current billing period, '
+          'then it will automatically downgrade to Bronze (Free).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Keep Plan'),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _cancelSubscription();
+            },
+            child: const Text('Cancel', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _cancelSubscription() async {
+    if (!mounted) return;
+    setState(() => _processing = true);
+    try {
+      final result = await context
+          .read<SubscriptionProvider>()
+          .cancelSubscription(ownerId: widget.ownerId);
+      _showSnack(
+        result['message']?.toString() ?? 'Done',
+        isError: result['success'] != true,
+      );
+    } catch (e) {
+      _showSnack('Error: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _processing = false);
+    }
   }
 
   void _showSnack(String message, {bool isError = false}) {
@@ -732,11 +852,29 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<SubscriptionProvider>();
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Choose a Plan')),
+      appBar: AppBar(
+        title: const Text('Subscription'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: 'Payment history',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => PaymentHistoryScreen(ownerId: widget.ownerId),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       body: Stack(
         children: [
-          _buildBody(),
+          _buildBody(provider),
           if (_processing)
             Container(
               color: Colors.black26,
@@ -749,66 +887,454 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     );
   }
 
-  Widget _buildBody() {
-    if (_loading) {
+  Widget _buildBody(SubscriptionProvider provider) {
+    final isThisSalon = provider.currentSalonId == widget.salonId;
+    // never show another salon's plan (or "Bronze" before it is loaded)
+    final ready = provider.isReady && isThisSalon;
+
+    if (!ready && (provider.loading || !isThisSalon)) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_error != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline, size: 64, color: Colors.red),
-              const SizedBox(height: 16),
-              const Text('Failed to load plans'),
-              const SizedBox(height: 8),
-              Text(_error!, textAlign: TextAlign.center),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _loadPlans,
-                icon: const Icon(Icons.refresh),
-                label: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
+    if (!ready) {
+      return _buildErrorState(
+        provider.error ?? 'Could not load subscription details',
+        () => provider.loadCapabilities(widget.salonId),
       );
     }
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        if (_reason != null && _requiredPlan != null) ...[
-          _buildReasonBanner(),
-          const SizedBox(height: 16),
+    final target = _findTargetPlan(provider);
+    if (target != null) {
+      _scrollToTargetOnce();
+      if (!_pulseCtrl.isAnimating) _pulseCtrl.repeat(reverse: true);
+    } else if (_pulseCtrl.isAnimating) {
+      _pulseCtrl.stop();
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => provider.refresh(),
+      // not a ListView: the target card must be built to scroll to it
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        // wide browser windows: keep the content centred and readable
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1200),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (provider.paymentIssue != null)
+                  PaymentIssueBanner(issue: provider.paymentIssue!),
+                _buildCurrentPlanCard(provider),
+                const SizedBox(height: 24),
+                const Text(
+                  'Select your plan',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _isAndroid
+                      ? 'Plans are billed monthly through Google Play.'
+                      : 'Upgrade anytime. Downgrade takes effect immediately.',
+                  style: TextStyle(color: Colors.grey[600]),
+                ),
+                const SizedBox(height: 20),
+                // only this section waits for the plans list: the current plan
+                // card and Cancel / Manage above stay usable
+                if (_loading)
+                  const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (_error != null)
+                  _buildErrorState('Failed to load plans\n\n$_error', _loadPlans),
+                _buildPlanList(provider, target),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // PLAN LIST
+  // ============================================================
+
+  /// Web: all plans in one row (2 x 2 in a medium sized window).
+  /// Mobile app and narrow windows: one under the other.
+  Widget _buildPlanList(
+    SubscriptionProvider provider,
+    SubscriptionPlan? target,
+  ) {
+    if (_plans.isEmpty) return const SizedBox.shrink();
+
+    final plans = [..._plans]
+      ..sort((a, b) => a.planRank.compareTo(b.planRank));
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = !kIsWeb || width < 560
+            ? 1
+            : (width < 960 ? 2 : plans.length);
+
+        // ---- one under the other ----
+        if (columns == 1) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final plan in plans)
+                if (plan.id == target?.id)
+                  Column(
+                    key: _targetKey,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      if (_reason != null) ...[
+                        _buildReasonBanner(plan),
+                        const SizedBox(height: 12),
+                      ],
+                      // narrower by the pulse scale, so it never gets clipped
+                      FractionallySizedBox(
+                        widthFactor: 1 / 1.03,
+                        child: _pulse(
+                          _buildPlanCard(plan, provider, isTarget: true),
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  _buildPlanCard(plan, provider),
+            ],
+          );
+        }
+
+        // ---- side by side ----
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (var start = 0; start < plans.length; start += columns)
+              _buildPlanRow(
+                plans.skip(start).take(columns).toList(),
+                columns,
+                provider,
+                target,
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// One row of equally wide and equally tall plan cards.
+  Widget _buildPlanRow(
+    List<SubscriptionPlan> rowPlans,
+    int columns,
+    SubscriptionProvider provider,
+    SubscriptionPlan? target,
+  ) {
+    final hasTarget = rowPlans.any((p) => p.id == target?.id);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        key: hasTarget ? _targetKey : null,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (hasTarget && _reason != null) ...[
+            _buildReasonBanner(target!),
+            const SizedBox(height: 16),
+          ],
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (var i = 0; i < columns; i++) ...[
+                  if (i > 0) const SizedBox(width: 16),
+                  Expanded(
+                    child: i >= rowPlans.length
+                        ? const SizedBox.shrink()
+                        : rowPlans[i].id == target?.id
+                        ? _pulse(
+                            _buildPlanCard(
+                              rowPlans[i],
+                              provider,
+                              isTarget: true,
+                              inRow: true,
+                            ),
+                          )
+                        : _buildPlanCard(rowPlans[i], provider, inRow: true),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ],
-        const Text(
-          'Select your plan',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  Widget _pulse(Widget card) {
+    return ScaleTransition(
+      scale: _pulseAnim,
+      child: RepaintBoundary(child: card),
+    );
+  }
+
+  Widget _buildErrorState(String message, VoidCallback onRetry) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off, size: 56, color: Colors.grey),
+            const SizedBox(height: 12),
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+            ),
+          ],
         ),
-        const SizedBox(height: 4),
-        Text(
-          _isAndroid
-              ? 'Plans are billed monthly through Google Play.'
-              : 'Upgrade anytime. Downgrade takes effect immediately.',
-          style: TextStyle(color: Colors.grey[600]),
+      ),
+    );
+  }
+
+  // ============================================================
+  // PLAN STYLE (same icon and colours as the owner dashboard badge)
+  // ============================================================
+
+  static const IconData _planIcon = Icons.workspace_premium;
+
+  Color _planColor(int rank) {
+    return rank == 4
+        ? Colors.amber
+        : rank == 3
+        ? Colors.orange
+        : rank == 2
+        ? Colors.blueGrey
+        : Colors.brown;
+  }
+
+  /// Readable text / icon colour on top of a solid plan colour.
+  Color _onPlanColor(Color color) {
+    return ThemeData.estimateBrightnessForColor(color) == Brightness.dark
+        ? Colors.white
+        : Colors.black87;
+  }
+
+  /// Same look as the offer cards on the customer dashboard.
+  BoxDecoration _planDecoration(
+    Color color, {
+    required Color borderColor,
+    double borderWidth = 1,
+    bool glow = false,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final surface = isDark ? const Color(0xFF1E1E1E) : Colors.white;
+
+    return BoxDecoration(
+      // blended on the surface, so the shadow never shows through the card
+      gradient: LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Color.alphaBlend(
+            color.withValues(alpha: isDark || glow ? 0.18 : 0.1),
+            surface,
+          ),
+          surface,
+        ],
+      ),
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: borderColor, width: borderWidth),
+      boxShadow: [
+        BoxShadow(
+          color: glow
+              ? color.withValues(alpha: 0.35)
+              : Colors.black.withValues(alpha: 0.05),
+          blurRadius: glow ? 16 : 8,
+          offset: const Offset(0, 2),
         ),
-        const SizedBox(height: 20),
-        ..._plans.map((plan) => _buildPlanCard(plan)),
       ],
     );
+  }
+
+  Widget _planIconBox(Color color) {
+    return Container(
+      width: 50,
+      height: 50,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Icon(_planIcon, color: color, size: 28),
+    );
+  }
+
+  // ============================================================
+  // CURRENT PLAN CARD
+  // ============================================================
+
+  Widget _buildCurrentPlanCard(SubscriptionProvider provider) {
+    final expiresAt = provider.expiresAt;
+    final isPaid = provider.isPaidPlan;
+    final days = provider.daysRemaining;
+    final color = _planColor(provider.currentPlanRank);
+
+    return Container(
+      decoration: _planDecoration(
+        color,
+        borderColor: color.withValues(alpha: 0.3),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                _planIconBox(color),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '${provider.currentPlanDisplay} Plan',
+                    style: const TextStyle(
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            if (isPaid && expiresAt != null) ...[
+              Text(
+                provider.cancelAtPeriodEnd
+                    ? 'Ends on: ${_formatDate(expiresAt)}'
+                    : 'Renews / expires: ${_formatDate(expiresAt)}',
+                style: TextStyle(color: Colors.grey[700]),
+              ),
+              if (days != null)
+                Text(
+                  '$days day${days == 1 ? "" : "s"} left',
+                  style: TextStyle(
+                    color: days <= 3 ? Colors.red : Colors.grey[700],
+                    fontWeight: days <= 3 ? FontWeight.bold : FontWeight.normal,
+                  ),
+                ),
+              const SizedBox(height: 4),
+            ],
+            if (provider.cancelAtPeriodEnd)
+              Container(
+                margin: const EdgeInsets.only(top: 8, bottom: 4),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.orange, size: 18),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Cancelled. You keep your features until the date above, '
+                        'then the salon moves to Bronze (Free).',
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (provider.isPlaySource)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  provider.cancelAtPeriodEnd
+                      ? 'Billed through Google Play (will not renew)'
+                      : 'Billed through Google Play (renews automatically)',
+                  style: TextStyle(color: Colors.grey[700]),
+                ),
+              ),
+            Text(
+              'Salons: ${provider.currentSalons} / ${provider.maxSalons == -1 ? "∞" : provider.maxSalons}',
+              style: TextStyle(color: Colors.grey[700]),
+            ),
+
+            // Google Play subscriptions are cancelled in Google Play
+            if (provider.isPlaySource) ...[
+              const SizedBox(height: 12),
+              if (_isAndroid)
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _openPlaySubscriptions,
+                    icon: const Icon(Icons.manage_accounts),
+                    label: const Text('Manage in Google Play'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                )
+              else if (kIsWeb)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    'This subscription is billed through Google Play. Change or '
+                    'cancel it in the Android app (Google Play > Subscriptions).',
+                    style: TextStyle(fontSize: 12),
+                  ),
+                ),
+            ],
+
+            // PayHere (web) subscriptions: cancel here
+            if (isPaid &&
+                !provider.isPlaySource &&
+                !provider.cancelAtPeriodEnd) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _processing ? null : _confirmCancel,
+                  icon: const Icon(Icons.cancel, color: Colors.red),
+                  label: const Text(
+                    'Cancel Subscription',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: const BorderSide(color: Colors.red),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
 
   // ============================================================
   // REASON BANNER
   // ============================================================
 
-  Widget _buildReasonBanner() {
+  Widget _buildReasonBanner(SubscriptionPlan target) {
     final reason = _reason ?? '';
-    final required = _requiredPlan ?? '';
+    final required = target.displayName;
 
     return Container(
       padding: const EdgeInsets.all(14),
@@ -864,6 +1390,8 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         return 'Data export';
       case 'salons':
         return 'Creating more salons';
+      case 'vip_booking':
+        return 'VIP Booking';
       default:
         return 'This feature';
     }
@@ -883,8 +1411,14 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     return 'Rs. ${plan.price.toStringAsFixed(0)}';
   }
 
-  Widget _buildPlanCard(SubscriptionPlan plan) {
-    final provider = context.watch<SubscriptionProvider>();
+  /// [inRow]: the side by side (web) version. Everything is centred and the
+  /// button sits right under the price, so cards are easy to compare.
+  Widget _buildPlanCard(
+    SubscriptionPlan plan,
+    SubscriptionProvider provider, {
+    bool isTarget = false,
+    bool inRow = false,
+  }) {
     final isCurrent = plan.name == provider.currentPlanName;
     final isUpgrade = plan.planRank > provider.currentPlanRank;
     // PayHere renewals exist on the web only
@@ -896,90 +1430,128 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         (plan.playProductId == null ||
             !_playProducts.containsKey(plan.playProductId));
 
-    final borderColor = isCurrent
-        ? Colors.green
-        : plan.planRank == 4
-        ? Colors.amber
-        : Colors.grey[300]!;
+    final color = _planColor(plan.planRank);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final secondaryColor = isDark ? Colors.white60 : Colors.grey[600];
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: borderColor, width: isCurrent ? 2 : 1),
+    final borderColor = isTarget
+        ? color
+        : isCurrent
+        ? Colors.green.shade400
+        : color.withValues(alpha: 0.3);
+
+    final name = Text(
+      plan.displayName,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 20,
+        fontWeight: FontWeight.bold,
+        // a little darker, so amber is readable on white
+        color: isDark ? Colors.white : Color.lerp(color, Colors.black, 0.3),
+      ),
+    );
+
+    // SELECTED and CURRENT never show together (a selected plan is an upgrade)
+    final Widget? chip = isTarget
+        ? _statusChip(
+            'SELECTED',
+            color,
+            _onPlanColor(color),
+            icon: Icons.check_circle,
+          )
+        : isCurrent
+        ? _statusChip('CURRENT', Colors.green, Colors.white)
+        : null;
+
+    final price = Row(
+      mainAxisAlignment: inRow
+          ? MainAxisAlignment.center
+          : MainAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Flexible(
+          child: Text(
+            _priceText(plan),
+            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (plan.price > 0) ...[
+          const SizedBox(width: 4),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Text(
+              '/month',
+              style: TextStyle(color: secondaryColor, fontSize: 14),
+            ),
+          ),
+        ],
+      ],
+    );
+
+    final description = Text(
+      plan.description ?? '',
+      textAlign: inRow ? TextAlign.center : TextAlign.start,
+      style: TextStyle(fontSize: 13, color: secondaryColor),
+    );
+
+    final features = [
+      _featureRow('Appointment History', plan.canViewAppointmentHistory),
+      _featureRow('Offers Management', plan.canManageOffers),
+      _featureRow('Revenue Screen', plan.canViewRevenue),
+      _featureRow('Customers Screen', plan.canViewCustomersScreen),
+      _featureRow('Reports', plan.canViewReports),
+      _featureRow('Analytics', plan.canViewAnalytics),
+      _featureRow('Data Export (Excel/PDF)', plan.canExportData),
+    ];
+
+    final button = SizedBox(
+      width: double.infinity,
+      child: _buildActionButton(
+        plan: plan,
+        provider: provider,
+        isCurrent: isCurrent,
+        isUpgrade: isUpgrade,
+        canRenewThis: canRenewThis,
+        unavailable: unavailableOnAndroid,
+      ),
+    );
+
+    return Container(
+      // in a row the spacing comes from the row itself
+      margin: inRow ? EdgeInsets.zero : const EdgeInsets.only(bottom: 16),
+      decoration: _planDecoration(
+        color,
+        borderColor: borderColor,
+        borderWidth: isTarget ? 2.5 : (isCurrent ? 1.5 : 1),
+        glow: isTarget,
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: inRow
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _parseColor(plan.badgeColor).withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    plan.displayName,
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: _parseColor(plan.badgeColor),
-                    ),
-                  ),
-                ),
-                const Spacer(),
-                if (isCurrent)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.green,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      'CURRENT',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Flexible(
-                  child: Text(
-                    _priceText(plan),
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (plan.price > 0) ...[
-                  const SizedBox(width: 4),
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: Text(
-                      '/month',
-                      style: TextStyle(color: Colors.grey[600], fontSize: 14),
-                    ),
-                  ),
+            if (inRow) ...[
+              // same height with or without a chip, so the cards line up
+              SizedBox(height: 28, child: Center(child: chip)),
+              const SizedBox(height: 8),
+              _planIconBox(color),
+              const SizedBox(height: 10),
+              name,
+            ] else
+              Row(
+                children: [
+                  _planIconBox(color),
+                  const SizedBox(width: 12),
+                  Expanded(child: name),
+                  ?chip,
                 ],
-              ],
-            ),
+              ),
+            const SizedBox(height: 12),
+            price,
             const SizedBox(height: 4),
             Text(
               plan.maxSalons == -1
@@ -987,11 +1559,13 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
                   : '${plan.maxSalons} salon${plan.maxSalons > 1 ? "s" : ""}',
               style: TextStyle(
                 fontSize: 13,
-                color: Colors.grey[700],
+                color: secondaryColor,
                 fontWeight: FontWeight.w500,
               ),
             ),
-            if (isCurrent &&
+            // (side by side: the current plan card above already shows this)
+            if (!inRow &&
+                isCurrent &&
                 provider.isPaidPlan &&
                 provider.daysRemaining != null)
               Padding(
@@ -1000,51 +1574,79 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
                   '${provider.daysRemaining} day(s) left',
                   style: TextStyle(
                     fontSize: 12,
-                    color: canRenewThis ? Colors.orange[800] : Colors.grey[600],
+                    color: canRenewThis ? Colors.orange[800] : secondaryColor,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
-            if (plan.description != null) ...[
+            if (inRow) ...[
               const SizedBox(height: 8),
-              Text(
-                plan.description!,
-                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+              // room for three lines, so buttons and features line up
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 56),
+                child: description,
               ),
+              const SizedBox(height: 12),
+              button,
+              const SizedBox(height: 16),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              ...features,
+            ] else ...[
+              if (plan.description != null) ...[
+                const SizedBox(height: 8),
+                description,
+              ],
+              const SizedBox(height: 16),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              ...features,
+              const SizedBox(height: 16),
+              button,
             ],
-            const SizedBox(height: 16),
-            const Divider(height: 1),
-            const SizedBox(height: 12),
-            _featureRow('Appointment History', plan.canViewAppointmentHistory),
-            _featureRow('Offers Management', plan.canManageOffers),
-            _featureRow('Revenue Screen', plan.canViewRevenue),
-            _featureRow('Customers Screen', plan.canViewCustomersScreen),
-            _featureRow('Reports', plan.canViewReports),
-            _featureRow('Analytics', plan.canViewAnalytics),
-            _featureRow('Data Export (Excel/PDF)', plan.canExportData),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: _buildActionButton(
-                plan: plan,
-                provider: provider,
-                isCurrent: isCurrent,
-                isUpgrade: isUpgrade,
-                canRenewThis: canRenewThis,
-                unavailable: unavailableOnAndroid,
-              ),
-            ),
             if (_isAndroid && plan.price > 0)
               Padding(
                 padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   'Auto-renews monthly until cancelled. '
                   'Cancel any time in Google Play > Subscriptions.',
-                  style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+                  style: TextStyle(fontSize: 11, color: secondaryColor),
                 ),
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _statusChip(
+    String label,
+    Color background,
+    Color foreground, {
+    IconData? icon,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, color: foreground, size: 13),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            label,
+            style: TextStyle(
+              color: foreground,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1057,16 +1659,29 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
     required bool canRenewThis,
     required bool unavailable,
   }) {
+    final color = _planColor(plan.planRank);
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(10),
+    );
+
     // Current plan bought with Google Play -> manage it there
     if (isCurrent && _isAndroid && provider.isPlaySource && plan.price > 0) {
       return OutlinedButton(
         onPressed: _openPlaySubscriptions,
+        style: OutlinedButton.styleFrom(
+          side: BorderSide(color: color, width: 1.4),
+          shape: shape,
+        ),
         child: const Text('Manage in Google Play'),
       );
     }
 
     if (isCurrent && !canRenewThis) {
-      return OutlinedButton(onPressed: null, child: const Text('Current Plan'));
+      return OutlinedButton(
+        onPressed: null,
+        style: OutlinedButton.styleFrom(shape: shape),
+        child: const Text('Current Plan'),
+      );
     }
 
     final String label;
@@ -1085,22 +1700,22 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
           ? null
           : () => _handlePlanSelection(plan),
       style: ElevatedButton.styleFrom(
-        backgroundColor: (isUpgrade || canRenewThis)
-            ? Colors.amber[700]
-            : Colors.grey[700],
+        backgroundColor: color,
+        foregroundColor: _onPlanColor(color),
+        elevation: 0,
         padding: const EdgeInsets.symmetric(vertical: 14),
+        shape: shape,
       ),
       child: Text(
         unavailable ? 'Not available yet' : label,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
+        style: const TextStyle(fontWeight: FontWeight.bold),
       ),
     );
   }
 
   Widget _featureRow(String label, bool enabled) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
@@ -1116,7 +1731,9 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
               label,
               style: TextStyle(
                 fontSize: 13,
-                color: enabled ? Colors.black87 : Colors.grey[500],
+                color: enabled
+                    ? (isDark ? Colors.white : Colors.black87)
+                    : Colors.grey[500],
                 decoration: enabled ? null : TextDecoration.lineThrough,
               ),
             ),
@@ -1124,15 +1741,5 @@ class _PlansComparisonScreenState extends State<PlansComparisonScreen> {
         ],
       ),
     );
-  }
-
-  Color _parseColor(String? hex) {
-    if (hex == null) return Colors.grey;
-    try {
-      final cleaned = hex.replaceAll('#', '');
-      return Color(int.parse('FF$cleaned', radix: 16));
-    } catch (_) {
-      return Colors.grey;
-    }
   }
 }

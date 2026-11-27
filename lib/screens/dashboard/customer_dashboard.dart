@@ -3,7 +3,6 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_application_1/observers/route_observers.dart';
 import 'package:flutter_application_1/screens/subscription/providers/customer_pro_provider.dart';
-import 'package:flutter_application_1/screens/subscription/widgets/pro_gate.dart';
 import 'package:flutter_application_1/services/permission_manager.dart';
 import 'package:flutter_application_1/services/notification_service.dart';
 import 'package:flutter_application_1/services/permission_service.dart';
@@ -579,23 +578,19 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  Future<void> _createVipBooking() async {
-    if (!_hasPermission) {
-      final shouldShow = await _showPermissionCardContext(action: 'vip');
-      if (shouldShow) return;
-    }
-    if (!mounted) return;
-
-    // VIP booking is a Pro feature -> free customers go to the Pro screen
-    if (!await ensureCustomerPro(context, confirm: false)) return;
-    if (!mounted) return;
-
-    final result = await context.push('/customer/vip-booking');
-    if (result == true && mounted) {
-      debugPrint('✅ Returned from VIP booking — refreshing dashboard');
-      _loadDashboardData();
-    }
+Future<void> _createVipBooking() async {
+  if (!_hasPermission) {
+    final shouldShow = await _showPermissionCardContext(action: 'vip');
+    if (shouldShow) return;
   }
+  if (!mounted) return;
+
+  final result = await context.push('/customer/vip-booking');
+  if (result == true && mounted) {
+    debugPrint('✅ Returned from VIP booking — refreshing dashboard');
+    _loadDashboardData();
+  }
+}
 
   Future<void> _bookAppointmentWithOffer(Map<String, dynamic> offer) async {
     if (!_hasPermission) {
@@ -617,30 +612,26 @@ class _CustomerDashboardState extends State<CustomerDashboard>
     }
   }
 
-  Future<void> _createVipBookingWithOffer(Map<String, dynamic> offer) async {
-    if (!_hasPermission) {
-      final shouldShow = await _showPermissionCardContext(action: 'vip');
-      if (shouldShow) return;
-    }
-    if (!mounted) return;
-
-    // VIP booking is a Pro feature -> free customers go to the Pro screen
-    if (!await ensureCustomerPro(context, confirm: false)) return;
-    if (!mounted) return;
-
-    final extra = await _buildBookingExtraWithOffer(offer);
-    if (!mounted) return;
-
-    final result = await context.push(
-      '/customer/vip-booking',
-      extra: extra.isEmpty ? null : extra,
-    );
-
-    if (result == true && mounted) {
-      debugPrint('✅ Returned from VIP booking — refreshing dashboard');
-      _loadDashboardData();
-    }
+Future<void> _createVipBookingWithOffer(Map<String, dynamic> offer) async {
+  if (!_hasPermission) {
+    final shouldShow = await _showPermissionCardContext(action: 'vip');
+    if (shouldShow) return;
   }
+  if (!mounted) return;
+
+  final extra = await _buildBookingExtraWithOffer(offer);
+  if (!mounted) return;
+
+  final result = await context.push(
+    '/customer/vip-booking',
+    extra: extra.isEmpty ? null : extra,
+  );
+
+  if (result == true && mounted) {
+    debugPrint('✅ Returned from VIP booking — refreshing dashboard');
+    _loadDashboardData();
+  }
+}
 
   Future<void> _viewAllOffers() async {
     if (!_hasPermission) {
