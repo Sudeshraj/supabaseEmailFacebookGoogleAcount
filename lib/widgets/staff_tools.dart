@@ -6,9 +6,12 @@ import 'package:flutter_application_1/services/staff_access_provider.dart';
 import 'package:flutter_application_1/theme/app_theme.dart';
 
 /// "Book" + "VIP" buttons (walk-in / phone booking for a customer).
-/// Owner dashboard: showBook = true, showVip = true,
-///   vipLocked = (plan rank < 2), onVipLocked = existing _showUpgradeDialog.
-/// Employee dashboard: pass the real permissions, vipLocked = false.
+/// Opens the booking screens in "staff mode": salon fixed, book for a walk-in
+/// or account customer.
+/// The buttons open on every package. The database checks the package when the
+/// booking is confirmed:
+///   owner            : normal booking = every package, VIP = paid package
+///   cashier / admin  : paid package for both
 class StaffBookButtons extends StatelessWidget {
   final int salonId;
   final bool showBook;
@@ -31,8 +34,7 @@ class StaffBookButtons extends StatelessWidget {
     this.onBooked,
   });
 
-  /// Opens the EXISTING customer screens (same as the salon profile
-  /// buttons) with the salon preloaded, so the salon step is skipped.
+  /// Opens the booking screens with the salon preloaded and 'staff_mode' on.
   Future<void> _open(BuildContext context, {required bool vip}) async {
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
@@ -56,7 +58,7 @@ class StaffBookButtons extends StatelessWidget {
 
       await router.push<bool>(
         vip ? '/customer/vip-booking' : '/customer/booking-flow',
-        extra: Map<String, dynamic>.from(salon),
+        extra: <String, dynamic>{...salon, 'staff_mode': true},
       );
       onBooked?.call();
     } catch (e) {
@@ -79,8 +81,9 @@ class StaffBookButtons extends StatelessWidget {
                     ? onBookLocked
                     : () => _open(context, vip: false),
                 icon: Icon(
-                    bookLocked ? Icons.lock_outline : Icons.calendar_today,
-                    size: 18),
+                  bookLocked ? Icons.lock_outline : Icons.calendar_today,
+                  size: 18,
+                ),
                 label: const Text('Book'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: bookLocked
@@ -107,10 +110,7 @@ class StaffBookButtons extends StatelessWidget {
                   size: 18,
                   color: Colors.amber,
                 ),
-                label: const Text(
-                  'VIP',
-                  style: TextStyle(color: Colors.amber),
-                ),
+                label: const Text('VIP', style: TextStyle(color: Colors.amber)),
                 style: OutlinedButton.styleFrom(
                   side: const BorderSide(color: Colors.amber, width: 1.5),
                   padding: const EdgeInsets.symmetric(vertical: 14),
@@ -136,8 +136,11 @@ class _Tile {
 }
 
 /// Shared "locked" dialog: the employee cannot upgrade, the OWNER does.
-void showStaffUpgradeDialog(BuildContext context,
-    {required String feature, required String plan}) {
+void showStaffUpgradeDialog(
+  BuildContext context, {
+  required String feature,
+  required String plan,
+}) {
   showDialog<void>(
     context: context,
     builder: (ctx) => AlertDialog(
@@ -193,36 +196,99 @@ class _StaffToolsSectionState extends State<StaffToolsSection> {
     final id = a.salonId;
     final name = Uri.encodeComponent(a.salonName);
     final all = <_Tile>[
-      _Tile('all_appointments', Icons.event_note, 'Appointments',
-          Colors.blue, '/owner/appointments?salonId=$id'),
-      _Tile('view_customers', Icons.people, 'Customers', Colors.purple,
-          '/owner/customers?salonId=$id'),
-      _Tile('manage_services', Icons.build, 'Add Service', Colors.green,
-          '/owner/services/add?salonId=$id'),
-      _Tile('manage_services', Icons.list, 'Service List', Colors.cyan,
-          '/owner/services?salonId=$id&salonName=$name'),
-      _Tile('manage_barbers', Icons.person_add, 'Add Barber', Colors.purple,
-          '/owner/add-barber?salonId=$id'),
-      _Tile('manage_barbers', Icons.calendar_month, 'Schedule', Colors.teal,
-          '/owner/barber-schedule?salonId=$id'),
-      _Tile('manage_barbers', Icons.beach_access, 'Leaves', Colors.orange,
-          '/owner/barber-leaves?salonId=$id'),
-      _Tile('manage_barbers', Icons.list, 'Barber List', Colors.indigo,
-          '/owner/barbers?salonId=$id'),
-      _Tile('manage_holidays', Icons.wb_sunny, 'Salon Holidays', Colors.teal,
-          '/owner/salon/holidays?salonId=$id'),
-      _Tile('manage_offers', Icons.local_offer, 'Offers',
-          AppTheme.primary, '/owner/offers/$id'),
-      _Tile('view_revenue', Icons.attach_money, 'Revenue', Colors.orange,
-          '/owner/revenue?salonId=$id'),
-      _Tile('view_reports', Icons.bar_chart, 'Reports', Colors.deepOrange,
-          '/owner/reports?salonId=$id'),
-      _Tile('view_analytics', Icons.analytics, 'Analytics',
-          Colors.indigoAccent, '/owner/analytics?salonId=$id'),
+      _Tile(
+        'all_appointments',
+        Icons.event_note,
+        'Appointments',
+        Colors.blue,
+        '/owner/appointments?salonId=$id',
+      ),
+      _Tile(
+        'view_customers',
+        Icons.people,
+        'Customers',
+        Colors.purple,
+        '/owner/customers?salonId=$id',
+      ),
+      _Tile(
+        'manage_services',
+        Icons.build,
+        'Add Service',
+        Colors.green,
+        '/owner/services/add?salonId=$id',
+      ),
+      _Tile(
+        'manage_services',
+        Icons.list,
+        'Service List',
+        Colors.cyan,
+        '/owner/services?salonId=$id&salonName=$name',
+      ),
+      _Tile(
+        'manage_barbers',
+        Icons.person_add,
+        'Add Barber',
+        Colors.purple,
+        '/owner/add-barber?salonId=$id',
+      ),
+      _Tile(
+        'manage_barbers',
+        Icons.calendar_month,
+        'Schedule',
+        Colors.teal,
+        '/owner/barber-schedule?salonId=$id',
+      ),
+      _Tile(
+        'manage_barbers',
+        Icons.beach_access,
+        'Leaves',
+        Colors.orange,
+        '/owner/barber-leaves?salonId=$id',
+      ),
+      _Tile(
+        'manage_barbers',
+        Icons.list,
+        'Barber List',
+        Colors.indigo,
+        '/owner/barbers?salonId=$id',
+      ),
+      _Tile(
+        'manage_holidays',
+        Icons.wb_sunny,
+        'Salon Holidays',
+        Colors.teal,
+        '/owner/salon/holidays?salonId=$id',
+      ),
+      _Tile(
+        'manage_offers',
+        Icons.local_offer,
+        'Offers',
+        AppTheme.primary,
+        '/owner/offers/$id',
+      ),
+      _Tile(
+        'view_revenue',
+        Icons.attach_money,
+        'Revenue',
+        Colors.orange,
+        '/owner/revenue?salonId=$id',
+      ),
+      _Tile(
+        'view_reports',
+        Icons.bar_chart,
+        'Reports',
+        Colors.deepOrange,
+        '/owner/reports?salonId=$id',
+      ),
+      _Tile(
+        'view_analytics',
+        Icons.analytics,
+        'Analytics',
+        Colors.indigoAccent,
+        '/owner/analytics?salonId=$id',
+      ),
     ];
-    return all
-        .where((t) => a.can(t.perm) || a.isLocked(t.perm))
-        .toList();
+    return all.where((t) => a.can(t.perm) || a.isLocked(t.perm)).toList();
   }
 
   @override
@@ -259,7 +325,9 @@ class _StaffToolsSectionState extends State<StaffToolsSection> {
                 child: Text(
                   'Staff tools (${a.staffRole})',
                   style: const TextStyle(
-                      fontSize: 17, fontWeight: FontWeight.bold),
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -283,12 +351,7 @@ class _StaffToolsSectionState extends State<StaffToolsSection> {
             salonId: a.salonId,
             showBook: a.can('book') || a.isLocked('book'),
             showVip: a.can('vip_book') || a.isLocked('vip_book'),
-            bookLocked: a.isLocked('book'),
-            vipLocked: a.isLocked('vip_book'),
-            onBookLocked: () => showStaffUpgradeDialog(context,
-                feature: 'Book', plan: a.plan),
-            onVipLocked: () => showStaffUpgradeDialog(context,
-                feature: 'VIP booking', plan: a.plan),
+            // never locked here: the package is checked on Confirm
             onBooked: widget.onBooked,
           ),
           const SizedBox(height: 14),
@@ -302,41 +365,48 @@ class _StaffToolsSectionState extends State<StaffToolsSection> {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(14),
                     onTap: a.isLocked(t.perm)
-                        ? () => showStaffUpgradeDialog(context,
-                            feature: t.label, plan: a.plan)
+                        ? () => showStaffUpgradeDialog(
+                            context,
+                            feature: t.label,
+                            plan: a.plan,
+                          )
                         : () => context.push(t.route),
                     child: Opacity(
                       opacity: a.isLocked(t.perm) ? 0.55 : 1,
                       child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 14, horizontal: 6),
-                      decoration: BoxDecoration(
-                        color: t.color.withValues(alpha: 0.08),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                            color: t.color.withValues(alpha: 0.2)),
-                      ),
-                      child: Column(
-                        children: [
-                          Icon(
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 14,
+                          horizontal: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: t.color.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: t.color.withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(
                               a.isLocked(t.perm) ? Icons.lock_outline : t.icon,
                               color: t.color,
-                              size: 22),
-                          const SizedBox(height: 6),
-                          Text(
-                            t.label,
-                            textAlign: TextAlign.center,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: t.color,
+                              size: 22,
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: 6),
+                            Text(
+                              t.label,
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: t.color,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
                     ),
                   ),
                 ),

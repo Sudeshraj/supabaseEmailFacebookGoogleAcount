@@ -7,12 +7,21 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// (old SQL) does not send role_permissions yet.
 Set<String> _defaultRolePerms(String role) {
   const cashier = {
-    'all_appointments', 'manage_appointments', 'book', 'vip_book',
+    'all_appointments',
+    'manage_appointments',
+    'book',
+    'vip_book',
     'view_customers',
   };
   const admin = {
-    ...cashier, 'manage_services', 'manage_barbers', 'manage_offers',
-    'manage_holidays', 'view_revenue', 'view_reports', 'view_analytics',
+    ...cashier,
+    'manage_services',
+    'manage_barbers',
+    'manage_offers',
+    'manage_holidays',
+    'view_revenue',
+    'view_reports',
+    'view_analytics',
   };
   if (role == 'admin') return admin;
   if (role == 'cashier') return cashier;
@@ -43,6 +52,23 @@ class SalonAccess {
     required this.rolePermissions,
   });
 
+  /// Used when the server access list could not be read but salon_barbers
+  /// says I am cashier / admin: the section still shows (tiles locked, the
+  /// database still checks everything when something is saved).
+  factory SalonAccess.fallback({
+    required int salonId,
+    required String salonName,
+    required String staffRole,
+  }) => SalonAccess(
+    salonId: salonId,
+    salonName: salonName,
+    isOwner: false,
+    staffRole: staffRole,
+    plan: '',
+    permissions: const {},
+    rolePermissions: _defaultRolePerms(staffRole),
+  );
+
   bool can(String permission) => permissions.contains(permission);
 
   /// role has it, but the owner's current plan does not unlock it yet
@@ -68,13 +94,13 @@ class SalonAccess {
       if (!isOwnerRow) ..._defaultRolePerms(staffRole),
     };
     return SalonAccess(
-        salonId: (j['salon_id'] as num).toInt(),
-        salonName: (j['salon_name'] ?? 'Salon').toString(),
-        isOwner: j['access'] == 'owner',
-        staffRole: (j['staff_role'] ?? 'barber').toString(),
-        plan: (j['plan'] ?? 'bronze').toString(),
-        permissions: granted,
-        rolePermissions: role,
+      salonId: (j['salon_id'] as num).toInt(),
+      salonName: (j['salon_name'] ?? 'Salon').toString(),
+      isOwner: j['access'] == 'owner',
+      staffRole: (j['staff_role'] ?? 'barber').toString(),
+      plan: (j['plan'] ?? 'bronze').toString(),
+      permissions: granted,
+      rolePermissions: role,
     );
   }
 }
@@ -111,8 +137,12 @@ class StaffAccessProvider extends ChangeNotifier {
   List<SalonAccess> _salons = [];
   bool _loading = false;
   bool _loaded = false;
+  String? _error;
 
   List<SalonAccess> get salons => _salons;
+
+  /// why the last load() failed (null = it worked)
+  String? get error => _error;
   bool get loading => _loading;
   bool get loaded => _loaded;
 
@@ -138,11 +168,15 @@ class StaffAccessProvider extends ChangeNotifier {
           .map((e) => SalonAccess.fromJson(Map<String, dynamic>.from(e as Map)))
           .toList();
       for (final s in _salons) {
-        debugPrint('🔐 staff access: salon ${s.salonId} role=${s.staffRole} '
-            'plan=${s.plan} granted=${s.permissions} role=${s.rolePermissions}');
+        debugPrint(
+          '🔐 staff access: salon ${s.salonId} role=${s.staffRole} '
+          'plan=${s.plan} granted=${s.permissions} role=${s.rolePermissions}',
+        );
       }
       _loaded = true;
+      _error = null;
     } catch (e) {
+      _error = e.toString();
       debugPrint('❌ StaffAccessProvider.load: $e');
     } finally {
       _loading = false;
@@ -153,6 +187,7 @@ class StaffAccessProvider extends ChangeNotifier {
   void clear() {
     _salons = [];
     _loaded = false;
+    _error = null;
     notifyListeners();
   }
 }

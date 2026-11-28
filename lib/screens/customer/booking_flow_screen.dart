@@ -10,6 +10,7 @@ import '../../services/currency_service.dart';
 import '../../services/currency_settings_service.dart';
 import '../../extensions/context_extensions.dart';
 import '../../theme/app_theme.dart';
+import 'package:flutter_application_1/widgets/staff_booking.dart';
 
 // =====================================================================
 // BOOKING FLOW
@@ -27,6 +28,8 @@ import '../../theme/app_theme.dart';
 //    later when the booking is CONFIRMED (the preview only says VIP_PUSH).
 //  - The start time is validated again by the DB at confirm
 //    (SLOT_TAKEN / SLOT_PASSED / NO_SLOT) -> back to the time step.
+//  - STAFF MODE (owner / barber, extra 'staff_mode'): salon fixed, books for
+//    a walk-in or account customer (see staff_booking.dart).
 // =====================================================================
 class BookingFlowScreen extends StatefulWidget {
   final Map<String, dynamic>? initialSalon;
@@ -91,6 +94,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   bool _isSameAsCustomer = true;
   bool _isCheckingDuplicate = false;
   String? _duplicateError;
+
+  // Owner / barber booking for a customer (opened from StaffBookButtons):
+  // the salon is fixed, no "Myself", the database checks role and package.
+  StaffCustomer? _staffCustomer;
+  int _staffResetCount = 0;
+  bool get _staffMode => widget.initialSalon?['staff_mode'] == true;
+  int get _firstStep => _staffMode ? 1 : 0;
 
   // Step 5: Time Slot
   int _selectedTravelTime = 0;
@@ -270,6 +280,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   void initState() {
     super.initState();
     _extractPreselectedFromInitialSalon();
+    if (_staffMode) _currentStep = 1;
     _initialize();
   }
 
@@ -406,7 +417,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     double price, {
     int? variantId,
   }) async {
-    if (_selectedSalon == null) return [];
+    // staff bookings: no offers yet (these would be the staff member's own)
+    if (_selectedSalon == null || _staffMode) return [];
 
     try {
       final user = supabase.auth.currentUser;
@@ -564,7 +576,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _isTimezoneLoaded = true;
     });
 
-    await _loadAllSalons();
+    if (!_staffMode) await _loadAllSalons();
     await _initializeScreen();
   }
 
@@ -752,7 +764,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
 
   void _resetBooking() {
     setState(() {
-      _currentStep = 0;
+      _currentStep = _firstStep;
+      _staffCustomer = null;
+      _staffResetCount++;
       _selectedSalon = null;
       _selectedDate = null;
       _selectedServices = [];
@@ -797,6 +811,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       _exchangeRate = null;
       // Keep _userCurrencyCode as-is (user preference)
     });
+    // staff: the salon stays the same, load it again
+    if (_staffMode) _initializeScreen();
   }
 
   // ==================== STEP 0: SALON ====================
@@ -1320,7 +1336,6 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           });
         }
       }
-
     }
 
     // one offer = one service line, best saving first (see _reevaluateOffers)
@@ -1667,6 +1682,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   // ==================== STEP 4: PERSON ====================
 
   Future<void> _checkDuplicateBooking() async {
+    if (_staffMode) return; // the database checks staff bookings
     if (_selectedDate == null) return;
     final user = supabase.auth.currentUser;
     if (user == null) return;
@@ -1697,12 +1713,13 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     }
   }
 
-  bool _canProceedToTimeSlot() =>
-      !_isCheckingDuplicate &&
-      _duplicateError == null &&
-      (_isSameAsCustomer ||
-          (_selectedChildName != null &&
-              _selectedChildName!.trim().isNotEmpty));
+  bool _canProceedToTimeSlot() => _staffMode
+      ? _staffCustomer != null
+      : !_isCheckingDuplicate &&
+            _duplicateError == null &&
+            (_isSameAsCustomer ||
+                (_selectedChildName != null &&
+                    _selectedChildName!.trim().isNotEmpty));
 
   Future<bool> _validateAndProceed() async {
     await _checkDuplicateBooking();
@@ -1963,8 +1980,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
   /// "17:00" / "17:00:00" / "5:00 PM" / "17:00:00+05:30" -> minutes since midnight
   int? _hmToMin(String? s) {
     if (s == null) return null;
-    final m = RegExp(r'^\s*(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?\s*([AaPp][Mm])?')
-        .firstMatch(s);
+    final m = RegExp(
+      r'^\s*(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?\s*([AaPp][Mm])?',
+    ).firstMatch(s);
     if (m == null) return null;
     int h = int.parse(m.group(1)!);
     final mm = int.parse(m.group(2)!);
@@ -2044,7 +2062,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         final minDays = (offer['min_advance_days'] as num?)?.toInt() ?? 30;
         // salon "today" (salon timezone, never the phone's clock)
         final today = _todayDate;
-        final days = DateUtils.dateOnly(_selectedDate!).difference(today).inDays;
+        final days = DateUtils.dateOnly(
+          _selectedDate!,
+        ).difference(today).inDays;
         return days >= minDays; // DB re-checks with salon_today()
 
       case 'appointment_time':
@@ -2138,8 +2158,10 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       return _offerEligibility(o) == true;
     }).toList();
     list.sort(
-      (a, b) => _calculateOfferDiscount(price, b)
-          .compareTo(_calculateOfferDiscount(price, a)),
+      (a, b) => _calculateOfferDiscount(
+        price,
+        b,
+      ).compareTo(_calculateOfferDiscount(price, a)),
     );
     return list;
   }
@@ -2394,7 +2416,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           break;
         }
         candidate = _nextSelectableAfter(candidate);
-        if (candidate != null && candidate.isAfter(searchLimit)) candidate = null;
+        if (candidate != null && candidate.isAfter(searchLimit)) {
+          candidate = null;
+        }
       }
 
       if (candidate == null || availability == null) {
@@ -2626,6 +2650,12 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       return;
     }
 
+    if (_staffMode && _staffCustomer == null) {
+      _showErrorSnack('Please select the customer');
+      setState(() => _currentStep = 4);
+      return;
+    }
+
     setState(() => _isBooking = true);
 
     try {
@@ -2638,7 +2668,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       if (!mounted) return;
       if (removedOffers.isNotEmpty) {
         setState(() => _isBooking = false);
-        await _showOfferChangedDialog(removedOffers, oldTotal, _finalTotalPrice);
+        await _showOfferChangedDialog(
+          removedOffers,
+          oldTotal,
+          _finalTotalPrice,
+        );
         return;
       }
 
@@ -2659,31 +2693,51 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         throw Exception('Some services have invalid variants.');
       }
 
-      final result = await supabase.rpc(
-        'create_new_appointment_advanced',
-        params: {
-          'p_customer_id': user.id,
-          'p_salon_id': _selectedSalon!['id'],
-          'p_barber_id': _selectedBarber!['id'],
-          'p_variant_ids': variantIds,
-          'p_offer_ids': offerIds,
-          'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
-          // the server re-validates this start time and computes the end
-          'p_utc_start_time': _selectedSlot!['utc_start_time'],
-          'p_utc_end_time': _selectedSlot!['utc_end_time'],
-          'p_child_name': _getChildNameForBooking(),
-          'p_travel_time_minutes': _selectedSlot!['travel_time_used'] ?? 0,
-          'p_notes': null,
-          'p_is_vip': false,
-          'p_vip_booking_id': null,
-        },
-      );
+      final bookingParams = <String, dynamic>{
+        'p_customer_id': user.id,
+        'p_salon_id': _selectedSalon!['id'],
+        'p_barber_id': _selectedBarber!['id'],
+        'p_variant_ids': variantIds,
+        'p_offer_ids': offerIds,
+        'p_appointment_date': DateFormat('yyyy-MM-dd').format(_selectedDate!),
+        // the server re-validates this start time and computes the end
+        'p_utc_start_time': _selectedSlot!['utc_start_time'],
+        'p_utc_end_time': _selectedSlot!['utc_end_time'],
+        'p_child_name': _getChildNameForBooking(),
+        'p_travel_time_minutes': _selectedSlot!['travel_time_used'] ?? 0,
+        'p_notes': null,
+        'p_is_vip': false,
+        'p_vip_booking_id': null,
+      };
+
+      // staff bookings use their own database function
+      final dynamic result = _staffMode
+          ? await createStaffBooking(
+              vip: false,
+              customer: _staffCustomer!,
+              params: bookingParams,
+            )
+          : await supabase.rpc(
+              'create_new_appointment_advanced',
+              params: bookingParams,
+            );
 
       if (!mounted) return;
 
       if (result == null || result['success'] != true) {
         final msg = result?['message']?.toString() ?? 'Booking failed';
         final code = result?['error_code']?.toString() ?? '';
+
+        if (_staffMode && code == 'PLAN_REQUIRED') {
+          setState(() => _isBooking = false);
+          await handleStaffPlanRequired(
+            context,
+            result: Map<String, dynamic>.from(result as Map),
+            salonId: _selectedSalon!['id'] as int,
+            vip: false,
+          );
+          return;
+        }
 
         // ✅ the picked time is no longer free: back to the time step
         if (_slotRecoveryCodes.contains(code)) {
@@ -2715,8 +2769,8 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           'N/A';
 
       // ✅ NEW: Extract confirmed amounts from response
-      final confirmedRate =
-          (result['exchange_rate_at_booking'] as num?)?.toDouble();
+      final confirmedRate = (result['exchange_rate_at_booking'] as num?)
+          ?.toDouble();
       final confirmedPrice =
           (result['price'] as num?)?.toDouble() ?? _getDisplayTotalPrice();
       final confirmedUserAmount =
@@ -2778,20 +2832,14 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         icon: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: _secondaryColor.withValues(alpha: 0.15),
             shape: BoxShape.circle,
           ),
-          child: Icon(
-            Icons.check_circle,
-            color: _secondaryColor,
-            size: 48,
-          ),
+          child: Icon(Icons.check_circle, color: _secondaryColor, size: 48),
         ),
         title: Text(
           '✅ Booking Confirmed!',
@@ -2854,8 +2902,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           'Amount',
                           style: TextStyle(
                             fontSize: 14,
-                            color:
-                                isDark ? Colors.white70 : Colors.grey[700],
+                            color: isDark ? Colors.white70 : Colors.grey[700],
                           ),
                         ),
                         Text(
@@ -2881,9 +2928,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                             style: TextStyle(
                               fontSize: 13,
                               fontStyle: FontStyle.italic,
-                              color: isDark
-                                  ? Colors.white60
-                                  : Colors.grey[600],
+                              color: isDark ? Colors.white60 : Colors.grey[600],
                             ),
                           ),
                           Text(
@@ -2965,10 +3010,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               ),
               child: const Text(
                 'Done',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
               ),
             ),
           ),
@@ -3193,16 +3235,16 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             width: 48,
             height: buttonHeight,
             child: OutlinedButton(
-              onPressed: backEnabled
-                  ? () => setState(() {
-                      if (_currentStep > 0) _currentStep--;
-                    })
+              onPressed: backEnabled && _currentStep > _firstStep
+                  ? () => setState(() => _currentStep--)
                   : null,
               style: OutlinedButton.styleFrom(
                 padding: EdgeInsets.zero,
                 foregroundColor: AppTheme.primary,
                 side: BorderSide(
-                  color: backEnabled ? AppTheme.primary : Colors.grey,
+                  color: backEnabled && _currentStep > _firstStep
+                      ? AppTheme.primary
+                      : Colors.grey,
                   width: 1.5,
                 ),
                 shape: RoundedRectangleBorder(
@@ -3305,7 +3347,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
           onPressed: () {
-            if (_currentStep > 0) {
+            if (_currentStep > _firstStep) {
               setState(() => _currentStep--);
             } else {
               Navigator.pop(context);
@@ -3313,7 +3355,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
           },
         ),
         actions: [
-          if (_currentStep > 0)
+          if (_currentStep > _firstStep)
             TextButton(
               onPressed: _resetBooking,
               child: Text(
@@ -3430,7 +3472,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
     ];
 
     final children = <Widget>[];
-    for (int i = 0; i < 7; i++) {
+    for (int i = _firstStep; i < 7; i++) {
       children.add(
         _buildStepIndicatorResponsive(
           i,
@@ -3551,7 +3593,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             child: IndexedStack(
               index: _currentStep,
               children: [
-                _buildSalonSearchStep(),
+                _staffMode ? const SizedBox.shrink() : _buildSalonSearchStep(),
                 _buildServiceSelectionStep(),
                 _buildDateSelectionStep(),
                 _buildBarberSelectionStep(),
@@ -4056,8 +4098,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                           style: TextStyle(
                             fontSize: 10.5,
                             fontStyle: FontStyle.italic,
-                            color:
-                                isDark ? Colors.white60 : Colors.grey[600],
+                            color: isDark ? Colors.white60 : Colors.grey[600],
                           ),
                         ),
                     ],
@@ -4687,16 +4728,17 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                                   const SizedBox(height: 6),
                                   GestureDetector(
                                     behavior: HitTestBehavior.opaque,
-                                    onTap: (isSelected &&
+                                    onTap:
+                                        (isSelected &&
                                             _eligibleClaimedOffers(
                                               serviceId,
                                               variantId,
                                               price,
                                             ).isNotEmpty)
                                         ? () => _showOfferPicker(
-                                              serviceId,
-                                              variantId,
-                                            )
+                                            serviceId,
+                                            variantId,
+                                          )
                                         : null,
                                     child: offerChip,
                                   ),
@@ -5290,8 +5332,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontStyle: FontStyle.italic,
-                                color:
-                                    isDark ? Colors.white60 : Colors.grey[600],
+                                color: isDark
+                                    ? Colors.white60
+                                    : Colors.grey[600],
                               ),
                             ),
                           ],
@@ -6036,187 +6079,202 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+                if (_staffMode)
+                  StaffCustomerPicker(
+                    key: ValueKey(_staffResetCount),
+                    salonId: _selectedSalon?['id'] as int?,
+                    onChanged: (c) => setState(() => _staffCustomer = c),
+                  )
+                else
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(12, 6, 12, 14),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E1E1E) : Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Center(
+                          child: Padding(
+                            padding: const EdgeInsets.only(top: 10, bottom: 10),
+                            child: Column(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: AppTheme.primary.withValues(
+                                      alpha: 0.12,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    Icons.badge,
+                                    size: 22,
+                                    color: AppTheme.primary,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Who is this booking for?',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark
+                                        ? Colors.white
+                                        : Colors.black87,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'Choose one option',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark
+                                        ? Colors.white60
+                                        : Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        Row(
+                          children: [
+                            Icon(
+                              Icons.person_pin_circle_outlined,
+                              size: 18,
+                              color: AppTheme.primary,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Booking for',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: isDark ? Colors.white : Colors.black87,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              border: Border(
+                                left: BorderSide(
+                                  color: AppTheme.primary.withValues(
+                                    alpha: 0.4,
+                                  ),
+                                  width: 2,
+                                ),
+                              ),
+                            ),
+                            child: Column(
+                              children: [
+                                _buildPersonOption(
+                                  isSelected: _isSameAsCustomer,
+                                  icon: Icons.person,
+                                  title: 'Myself',
+                                  subtitle: customerName,
+                                  onTap: () {
+                                    setState(() {
+                                      _isSameAsCustomer = true;
+                                      _selectedChildName = null;
+                                      _childNameController.clear();
+                                      _duplicateError = null;
+                                    });
+                                    _checkDuplicateBooking();
+                                  },
+                                ),
+                                _buildPersonOption(
+                                  isSelected: !_isSameAsCustomer,
+                                  icon: Icons.group,
+                                  title: 'Someone else',
+                                  subtitle: 'Family member, friend or child',
+                                  onTap: () => setState(() {
+                                    _isSameAsCustomer = false;
+                                    _duplicateError = null;
+                                  }),
+                                ),
+                                if (!_isSameAsCustomer)
+                                  Padding(
+                                    padding: const EdgeInsets.only(
+                                      left: 20,
+                                      top: 8,
+                                    ),
+                                    child: TextField(
+                                      controller: _childNameController,
+                                      autofocus: true,
+                                      textCapitalization:
+                                          TextCapitalization.words,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
+                                      ),
+                                      decoration: InputDecoration(
+                                        isDense: true,
+                                        hintText: "Enter the person's name",
+                                        hintStyle: TextStyle(
+                                          fontSize: 13,
+                                          color: isDark
+                                              ? Colors.white70
+                                              : Colors.grey[400],
+                                        ),
+                                        prefixIcon: Icon(
+                                          Icons.edit_outlined,
+                                          color: AppTheme.primary,
+                                          size: 18,
+                                        ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                        ),
+                                        focusedBorder: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                          borderSide: BorderSide(
+                                            color: AppTheme.primary,
+                                            width: 1.5,
+                                          ),
+                                        ),
+                                        filled: true,
+                                        fillColor: isDark
+                                            ? const Color(0xFF2A2A2A)
+                                            : Colors.grey[50],
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 12,
+                                              vertical: 12,
+                                            ),
+                                      ),
+                                      onChanged: (v) {
+                                        setState(() {
+                                          _selectedChildName = v.trim();
+                                          _duplicateError = null;
+                                        });
+                                        _checkDuplicateBooking();
+                                      },
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 10, bottom: 10),
-                          child: Column(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: AppTheme.primary.withValues(
-                                    alpha: 0.12,
-                                  ),
-                                ),
-                                child: Icon(
-                                  Icons.badge,
-                                  size: 22,
-                                  color: AppTheme.primary,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Who is this booking for?',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 17,
-                                  fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.white : Colors.black87,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Choose one option',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: isDark
-                                      ? Colors.white60
-                                      : Colors.grey[600],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.person_pin_circle_outlined,
-                            size: 18,
-                            color: AppTheme.primary,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Booking for',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: isDark ? Colors.white : Colors.black87,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            border: Border(
-                              left: BorderSide(
-                                color: AppTheme.primary.withValues(alpha: 0.4),
-                                width: 2,
-                              ),
-                            ),
-                          ),
-                          child: Column(
-                            children: [
-                              _buildPersonOption(
-                                isSelected: _isSameAsCustomer,
-                                icon: Icons.person,
-                                title: 'Myself',
-                                subtitle: customerName,
-                                onTap: () {
-                                  setState(() {
-                                    _isSameAsCustomer = true;
-                                    _selectedChildName = null;
-                                    _childNameController.clear();
-                                    _duplicateError = null;
-                                  });
-                                  _checkDuplicateBooking();
-                                },
-                              ),
-                              _buildPersonOption(
-                                isSelected: !_isSameAsCustomer,
-                                icon: Icons.group,
-                                title: 'Someone else',
-                                subtitle: 'Family member, friend or child',
-                                onTap: () => setState(() {
-                                  _isSameAsCustomer = false;
-                                  _duplicateError = null;
-                                }),
-                              ),
-                              if (!_isSameAsCustomer)
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    left: 20,
-                                    top: 8,
-                                  ),
-                                  child: TextField(
-                                    controller: _childNameController,
-                                    autofocus: true,
-                                    textCapitalization:
-                                        TextCapitalization.words,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: isDark
-                                          ? Colors.white
-                                          : Colors.black87,
-                                    ),
-                                    decoration: InputDecoration(
-                                      isDense: true,
-                                      hintText: "Enter the person's name",
-                                      hintStyle: TextStyle(
-                                        fontSize: 13,
-                                        color: isDark
-                                            ? Colors.white70
-                                            : Colors.grey[400],
-                                      ),
-                                      prefixIcon: Icon(
-                                        Icons.edit_outlined,
-                                        color: AppTheme.primary,
-                                        size: 18,
-                                      ),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      focusedBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(10),
-                                        borderSide: BorderSide(
-                                          color: AppTheme.primary,
-                                          width: 1.5,
-                                        ),
-                                      ),
-                                      filled: true,
-                                      fillColor: isDark
-                                          ? const Color(0xFF2A2A2A)
-                                          : Colors.grey[50],
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(
-                                            horizontal: 12,
-                                            vertical: 12,
-                                          ),
-                                    ),
-                                    onChanged: (v) {
-                                      setState(() {
-                                        _selectedChildName = v.trim();
-                                        _duplicateError = null;
-                                      });
-                                      _checkDuplicateBooking();
-                                    },
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
                 if (_duplicateError != null)
                   Container(
                     margin: const EdgeInsets.only(top: 12),
@@ -6424,11 +6482,7 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.store,
-                size: 14,
-                color: AppTheme.primary,
-              ),
+              const Icon(Icons.store, size: 14, color: AppTheme.primary),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
@@ -6475,17 +6529,11 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
               decoration: BoxDecoration(
                 color: Colors.orange.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: Colors.orange.withValues(alpha: 0.3),
-                ),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
               ),
               child: Row(
                 children: [
-                  Icon(
-                    Icons.person,
-                    size: 12,
-                    color: Colors.orange[700],
-                  ),
+                  Icon(Icons.person, size: 12, color: Colors.orange[700]),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
@@ -7076,7 +7124,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
         user?.userMetadata?['full_name']?.toString() ??
         user?.email?.split('@').first ??
         'Customer';
-    final displayName = _isSameAsCustomer
+    final displayName = _staffMode
+        ? (_staffCustomer?.name ?? '')
+        : _isSameAsCustomer
         ? customerName
         : _getChildNameForBooking();
 
@@ -7148,7 +7198,9 @@ class _BookingFlowScreenState extends State<BookingFlowScreen> {
                   Icons.badge,
                   'Booking For',
                   displayName,
-                  _isSameAsCustomer ? 'Self' : 'Family/Friend',
+                  _staffMode
+                      ? (_staffCustomer?.description ?? '')
+                      : (_isSameAsCustomer ? 'Self' : 'Family/Friend'),
                 ),
                 const SizedBox(height: 12),
                 _buildConfirmationTile(

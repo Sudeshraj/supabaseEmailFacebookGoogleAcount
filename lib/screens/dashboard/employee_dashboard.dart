@@ -196,7 +196,9 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
     if (state == AppLifecycleState.resumed && _isActive) {
-      debugPrint('🔄 Employee dashboard resumed - refreshing notification count');
+      debugPrint(
+        '🔄 Employee dashboard resumed - refreshing notification count',
+      );
       _loadNotificationCount();
     }
   }
@@ -226,26 +228,26 @@ class _EmployeeDashboardState extends State<EmployeeDashboard>
     super.dispose();
   }
 
-@override
-void didPopNext() {
-  debugPrint('🔄 Returning to EmployeeDashboard - Auto refresh');
-  if (!mounted || !_isActive) return;
+  @override
+  void didPopNext() {
+    debugPrint('🔄 Returning to EmployeeDashboard - Auto refresh');
+    if (!mounted || !_isActive) return;
 
-  // Notification count එක side menu එකේ වගේම refresh
-  _loadNotificationCount();
+    // Notification count එක side menu එකේ වගේම refresh
+    _loadNotificationCount();
 
-  if (_isReloading) return;
-  _isReloading = true;
-  () async {
-    try {
-      await _loadAssignedSalons();
-      await _loadStaffAccess();
-      await _loadData(showLoading: false);
-    } finally {
-      _isReloading = false;
-    }
-  }();
-}
+    if (_isReloading) return;
+    _isReloading = true;
+    () async {
+      try {
+        await _loadAssignedSalons();
+        await _loadStaffAccess();
+        await _loadData(showLoading: false);
+      } finally {
+        _isReloading = false;
+      }
+    }();
+  }
 
   // ==================== STAFF ACCESS (cashier / admin) ====================
 
@@ -264,13 +266,16 @@ void didPopNext() {
 
   /// Staff tools card (Book / VIP + owner-screen tiles, locked or open by
   /// the owner's package). Renders nothing for a plain barber.
+  /// A cashier / admin whose access did not arrive gets the fallback below.
   Widget _buildStaffTools({double topMargin = 8}) {
     return Consumer<StaffAccessProvider>(
       builder: (context, staff, _) {
         final salons = staff.staffSalons
             .where((s) => s.salonId.toString() == _selectedSalonId)
             .toList();
-        if (salons.isEmpty) return const SizedBox.shrink();
+        if (salons.isEmpty) {
+          return _buildStaffToolsFallback(staff, topMargin);
+        }
         return StaffToolsSection(
           key: ValueKey('staff_tools_${salons.first.salonId}'),
           salons: salons,
@@ -278,6 +283,86 @@ void didPopNext() {
           onBooked: () => _loadData(showLoading: false),
         );
       },
+    );
+  }
+
+  /// salon_barbers says I am cashier / admin but the server access list has
+  /// nothing for this salon: still show the staff section (tiles locked,
+  /// Book / VIP open) and say why above it, with a retry.
+  Widget _buildStaffToolsFallback(StaffAccessProvider staff, double topMargin) {
+    var role = 'barber';
+    for (final s in _assignedSalons) {
+      if (s['id'] == _selectedSalonId) {
+        role = s['staff_role']?.toString() ?? 'barber';
+      }
+    }
+    final salonId = int.tryParse(_selectedSalonId ?? '');
+    // plain barber: default dashboard only
+    if (salonId == null || (role != 'cashier' && role != 'admin')) {
+      return const SizedBox.shrink();
+    }
+    // first load still running
+    if (!staff.loaded && staff.error == null) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(
+          child: CircularProgressIndicator(color: AppTheme.primary),
+        ),
+      );
+    }
+
+    final received = staff.salons
+        .map(
+          (s) => '${s.salonId}:${s.isOwner ? 'owner' : 'staff'}/${s.staffRole}',
+        )
+        .join(', ');
+    final reason =
+        staff.error ??
+        'No staff access received for salon $salonId. '
+            'Received: [${received.isEmpty ? 'nothing' : received}]';
+
+    return Column(
+      children: [
+        Container(
+          width: double.infinity,
+          margin: EdgeInsets.fromLTRB(16, topMargin, 16, 8),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'The salon package could not be checked',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              SelectableText(reason, style: const TextStyle(fontSize: 12)),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: _loadStaffAccess,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
+              ),
+            ],
+          ),
+        ),
+        StaffToolsSection(
+          key: ValueKey('staff_tools_fallback_$salonId'),
+          salons: [
+            SalonAccess.fallback(
+              salonId: salonId,
+              salonName: _selectedSalonName,
+              staffRole: role,
+            ),
+          ],
+          topMargin: 0,
+          onBooked: () => _loadData(showLoading: false),
+        ),
+      ],
     );
   }
 
@@ -297,10 +382,10 @@ void didPopNext() {
         final Color badgeColor = plan == 'platinum'
             ? Colors.amber
             : plan == 'gold'
-                ? Colors.orange
-                : plan == 'silver'
-                    ? Colors.blueGrey
-                    : Colors.brown;
+            ? Colors.orange
+            : plan == 'silver'
+            ? Colors.blueGrey
+            : Colors.brown;
         final planName = plan.isEmpty
             ? 'Bronze'
             : plan[0].toUpperCase() + plan.substring(1);
@@ -590,23 +675,23 @@ void didPopNext() {
 
   // ==================== LOAD NOTIFICATION COUNT ====================
 
-Future<void> _loadNotificationCount() async {
-  if (_employeeId.isEmpty) return;
+  Future<void> _loadNotificationCount() async {
+    if (_employeeId.isEmpty) return;
 
-  try {
-    // ✅ Side menu එකේ වගේම — no guard, no cache
-    final count = await _notificationService.getUnreadCountWithRole(
-      userId: _employeeId,
-      role: 'barber',
-    );
+    try {
+      // ✅ Side menu එකේ වගේම — no guard, no cache
+      final count = await _notificationService.getUnreadCountWithRole(
+        userId: _employeeId,
+        role: 'barber',
+      );
 
-    if (!mounted) return;
-    setState(() => _unreadNotificationCount = count);
-    debugPrint('✅ Unread notifications (barber): $count');
-  } catch (e) {
-    debugPrint('❌ Error loading notification count: $e');
+      if (!mounted) return;
+      setState(() => _unreadNotificationCount = count);
+      debugPrint('✅ Unread notifications (barber): $count');
+    } catch (e) {
+      debugPrint('❌ Error loading notification count: $e');
+    }
   }
-}
 
   /// ✅ Same layout as the customer dashboard (48x48 tap target,
   /// badge anchored at right:8 / top:8) so it looks right on mobile AND web.
@@ -886,6 +971,7 @@ Future<void> _loadNotificationCount() async {
             salon_id,
             status,
             takes_appointments,
+            staff_role,
             salons!salon_id (
               id,
               name,
@@ -925,6 +1011,8 @@ Future<void> _loadNotificationCount() async {
             'barber_salon_id': item['id'],
             // false = desk-only (cashier / admin who takes no appointments)
             'takes_appointments': item['takes_appointments'] != false,
+            // barber | cashier | admin
+            'staff_role': item['staff_role']?.toString() ?? 'barber',
           };
           salons.add(salon);
         }
@@ -1144,6 +1232,7 @@ Future<void> _loadNotificationCount() async {
             id,
             booking_number,
             customer_id,
+            child_name,
             appointment_date,
             start_time,
             end_time,
@@ -1268,7 +1357,9 @@ Future<void> _loadNotificationCount() async {
         allAppointments.add({
           'id': apt['id'],
           'booking_number': apt['booking_number'],
-          'customer_name': customer?['full_name'] ?? 'Unknown Customer',
+          // walk-in bookings have no account: the typed name is in child_name
+          'customer_name':
+              customer?['full_name'] ?? apt['child_name'] ?? 'Unknown Customer',
           'customer_phone': customer?['phone'] ?? '',
           'service_name': serviceName,
           'salon_name': salon?['name'] ?? 'Unknown Salon',
@@ -1868,7 +1959,10 @@ Future<void> _loadNotificationCount() async {
     // ✅ Single salon: just show name (no chip, no dropdown)
     if (!hasMultipleSalons) {
       return Padding(
-        padding: EdgeInsets.symmetric(horizontal: 16, vertical: compact ? 4 : 8),
+        padding: EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: compact ? 4 : 8,
+        ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.min,
@@ -1908,10 +2002,7 @@ Future<void> _loadNotificationCount() async {
           child: GestureDetector(
             onTap: _showSalonSelectorDialog,
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 8,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
                 color: isDark
                     ? AppTheme.primary.withValues(alpha: 0.15)
@@ -1924,11 +2015,7 @@ Future<void> _loadNotificationCount() async {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
-                    Icons.store,
-                    size: 16,
-                    color: AppTheme.primary,
-                  ),
+                  const Icon(Icons.store, size: 16, color: AppTheme.primary),
                   const SizedBox(width: 6),
                   Flexible(
                     child: Text(
@@ -2355,6 +2442,7 @@ Future<void> _loadNotificationCount() async {
                     await _checkEmployeeStatus();
                     if (_isActive) {
                       await _loadAssignedSalons();
+                      await _loadStaffAccess();
                       await _loadData();
                       _setupNotificationListeners();
                     }
@@ -2486,211 +2574,211 @@ Future<void> _loadNotificationCount() async {
           _buildStaffTools(topMargin: 0),
           const SizedBox(height: 12),
         ] else ...[
-        if (_showPermissionCard && !_hasPermission)
-          PermissionCard(
-            onEnable: _enableNotifications,
-            onNotNow: _handleNotNow,
-            title: _permissionManager.getPermissionCardTitle(),
-            message: _permissionManager.getPermissionCardMessage(),
-          ),
+          if (_showPermissionCard && !_hasPermission)
+            PermissionCard(
+              onEnable: _enableNotifications,
+              onNotNow: _handleNotNow,
+              title: _permissionManager.getPermissionCardTitle(),
+              message: _permissionManager.getPermissionCardMessage(),
+            ),
 
-        const SizedBox(height: 8),
+          const SizedBox(height: 8),
 
-        _buildRatingCard(),
-        const SizedBox(height: 16),
+          _buildRatingCard(),
+          const SizedBox(height: 16),
 
-        _buildStatsSection(),
-        const SizedBox(height: 16),
+          _buildStatsSection(),
+          const SizedBox(height: 16),
 
-        const SectionHeader(title: 'Quick Actions', actionText: ''),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.schedule_outlined,
-                  label: 'My Schedule',
-                  color: Colors.blue,
-                  onTap: _viewMySchedule,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.calendar_month_outlined,
-                  label: 'My Appointments',
-                  color: Colors.purple,
-                  onTap: _viewMyAppointments,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildQuickAction(
-                  icon: Icons.star_outline,
-                  label: 'My Reviews',
-                  color: Colors.amber,
-                  onTap: _viewMyReviews,
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  "Today's Schedule",
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                ),
-              ),
-              const SizedBox(width: 8),
-              GestureDetector(
-                onTap: _viewUpcomingAppointments,
-                child: Text(
-                  'View All',
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w500,
+          const SectionHeader(title: 'Quick Actions', actionText: ''),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildQuickAction(
+                    icon: Icons.schedule_outlined,
+                    label: 'My Schedule',
+                    color: Colors.blue,
+                    onTap: _viewMySchedule,
                   ),
                 ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: todayList.isEmpty
-              ? Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(32),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isDark ? Colors.white12 : Colors.grey[200]!,
-                    ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildQuickAction(
+                    icon: Icons.calendar_month_outlined,
+                    label: 'My Appointments',
+                    color: Colors.purple,
+                    onTap: _viewMyAppointments,
                   ),
-                  child: Center(
-                    child: Text(
-                      'No appointments today',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: isDark ? Colors.white60 : Colors.grey,
-                      ),
-                    ),
-                  ),
-                )
-              : Column(
-                  children: todayList.map((apt) {
-                    Color statusColor;
-                    switch (apt['status']) {
-                      case 'completed':
-                        statusColor = Colors.green;
-                        break;
-                      case 'confirmed':
-                        statusColor = Colors.blue;
-                        break;
-                      case 'cancelled':
-                        statusColor = Colors.red;
-                        break;
-                      case 'no_show':
-                        statusColor = Colors.red;
-                        break;
-                      default:
-                        statusColor = Colors.orange;
-                    }
-                    return BookingTile(
-                      customerName: apt['customer_name'],
-                      serviceName: apt['service_name'],
-                      time: apt['start_time'],
-                      status: apt['status'],
-                      statusColor: statusColor,
-                      barberName: 'You',
-                      formattedPrice: _formatPrice(apt['price']),
-                      salonName: apt['salon_name'],
-                      isVip: apt['is_vip'] ?? false,
-                      queueNumber: apt['queue_number'],
-                      queueToken: apt['queue_token'],
-                      showActions: apt['status'] != 'completed',
-                      onTap: () => _viewBookingDetails(apt['customer_name']),
-                    );
-                  }).toList(),
                 ),
-        ),
-        const SizedBox(height: 16),
-
-        // ✅ STAFF TOOLS (cashier / admin who ALSO takes appointments):
-        //    placed right after Today's Schedule. Plain barbers see nothing.
-        _buildStaffTools(),
-
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.all(16),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isDark ? Colors.white12 : Colors.grey[200]!,
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _buildQuickAction(
+                    icon: Icons.star_outline,
+                    label: 'My Reviews',
+                    color: Colors.amber,
+                    onTap: _viewMyReviews,
+                  ),
+                ),
+              ],
             ),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "Today's Performance",
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black87,
+          const SizedBox(height: 16),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    "Today's Schedule",
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _buildPerformanceItem(
-                      label: 'Completed',
-                      value: '$_completedToday',
-                      icon: Icons.check_circle,
-                      color: Colors.green,
+                const SizedBox(width: 8),
+                GestureDetector(
+                  onTap: _viewUpcomingAppointments,
+                  child: Text(
+                    'View All',
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
-                  Expanded(
-                    child: _buildPerformanceItem(
-                      label: 'No-show',
-                      value: '$_noShowToday',
-                      icon: Icons.cancel,
-                      color: Colors.red,
-                    ),
-                  ),
-                  Expanded(
-                    child: _buildPerformanceItem(
-                      label: 'On Time',
-                      value: '$_onTimePercentage%',
-                      icon: Icons.timer,
-                      color: Colors.blue,
-                    ),
-                  ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 20),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: todayList.isEmpty
+                ? Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(32),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isDark ? Colors.white12 : Colors.grey[200]!,
+                      ),
+                    ),
+                    child: Center(
+                      child: Text(
+                        'No appointments today',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: isDark ? Colors.white60 : Colors.grey,
+                        ),
+                      ),
+                    ),
+                  )
+                : Column(
+                    children: todayList.map((apt) {
+                      Color statusColor;
+                      switch (apt['status']) {
+                        case 'completed':
+                          statusColor = Colors.green;
+                          break;
+                        case 'confirmed':
+                          statusColor = Colors.blue;
+                          break;
+                        case 'cancelled':
+                          statusColor = Colors.red;
+                          break;
+                        case 'no_show':
+                          statusColor = Colors.red;
+                          break;
+                        default:
+                          statusColor = Colors.orange;
+                      }
+                      return BookingTile(
+                        customerName: apt['customer_name'],
+                        serviceName: apt['service_name'],
+                        time: apt['start_time'],
+                        status: apt['status'],
+                        statusColor: statusColor,
+                        barberName: 'You',
+                        formattedPrice: _formatPrice(apt['price']),
+                        salonName: apt['salon_name'],
+                        isVip: apt['is_vip'] ?? false,
+                        queueNumber: apt['queue_number'],
+                        queueToken: apt['queue_token'],
+                        showActions: apt['status'] != 'completed',
+                        onTap: () => _viewBookingDetails(apt['customer_name']),
+                      );
+                    }).toList(),
+                  ),
+          ),
+          const SizedBox(height: 16),
+
+          // ✅ STAFF TOOLS (cashier / admin who ALSO takes appointments):
+          //    placed right after Today's Schedule. Plain barbers see nothing.
+          _buildStaffTools(),
+
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E1E1E) : Colors.grey[50],
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark ? Colors.white12 : Colors.grey[200]!,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Today's Performance",
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _buildPerformanceItem(
+                        label: 'Completed',
+                        value: '$_completedToday',
+                        icon: Icons.check_circle,
+                        color: Colors.green,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildPerformanceItem(
+                        label: 'No-show',
+                        value: '$_noShowToday',
+                        icon: Icons.cancel,
+                        color: Colors.red,
+                      ),
+                    ),
+                    Expanded(
+                      child: _buildPerformanceItem(
+                        label: 'On Time',
+                        value: '$_onTimePercentage%',
+                        icon: Icons.timer,
+                        color: Colors.blue,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 20),
         ], // end of barber (takes appointments) content
       ],
     );
